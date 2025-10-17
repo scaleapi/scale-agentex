@@ -1,0 +1,138 @@
+/* Milkdown editor wrapper */
+.wrapper :global(.milkdown) {
+    background: none !important;
+}
+
+.wrapper :global(.milkdown h1) {
+    @apply mt-8 text-3xl md:text-4xl font-extrabold leading-snug mb-6 text-gray-900 dark:text-white !important;
+    font-family: 'Inter', sans-serif !important;
+}
+
+.wrapper :global(.milkdown h2) {
+    @apply mt-6 text-2xl md:text-3xl font-bold leading-snug mb-5 text-gray-800 dark:text-gray-100 !important;
+    font-family: 'Inter', sans-serif !important;
+}
+
+.wrapper :global(.milkdown h3) {
+    @apply mt-5 text-xl md:text-2xl font-semibold leading-normal mb-4 text-gray-700 dark:text-gray-200 !important;
+    font-family: 'Inter', sans-serif !important;
+}
+
+.wrapper :global(.milkdown h4) {
+    @apply mt-4 text-lg md:text-xl font-medium leading-normal mb-3 text-gray-600 dark:text-gray-300 !important;
+    font-family: 'Inter', sans-serif !important;
+}
+
+.wrapper :global(.milkdown h5) {
+    @apply mt-3 text-base md:text-lg font-medium leading-relaxed mb-2 text-gray-500 dark:text-gray-400 !important;
+    font-family: 'Inter', sans-serif !important;
+}
+
+.wrapper :global(.milkdown h6) {
+    @apply mt-2 text-sm md:text-base font-medium leading-relaxed mb-1 text-gray-400 dark:text-gray-500 !important;
+    font-family: 'Inter', sans-serif !important;
+}
+
+.wrapper :global(.milkdown .toolbar) {
+    @apply flex flex-wrap gap-1 p-1 border-b border-border;
+    background-color: white;
+}
+
+.wrapper :global(.milkdown .editor) {
+    @apply outline-none;
+}
+
+.wrapper :global(.milkdown .ProseMirror) {
+    padding: 0px !important;
+    background-color: none !important;
+    @apply outline-none;
+}
+
+.wrapper :global(.milkdown .ProseMirror p) {
+    @apply my-1;
+}
+
+.wrapper :global(.milkdown .ProseMirror h1) {
+    @apply text-3xl font-bold my-3;
+}
+
+.wrapper :global(.milkdown .ProseMirror h2) {
+    @apply text-2xl font-bold my-2;
+}
+
+.wrapper :global(.milkdown .ProseMirror h3) {
+    @apply text-xl font-bold my-2;
+}
+
+.wrapper :global(.milkdown .ProseMirror h4) {
+    @apply text-lg font-bold my-2;
+}
+
+.wrapper :global(.milkdown .ProseMirror h5) {
+    @apply text-base font-bold my-2;
+}
+
+.wrapper :global(.milkdown .ProseMirror h6) {
+    @apply text-sm font-bold my-2;
+}
+
+.wrapper :global(.milkdown .ProseMirror blockquote) {
+    @apply border-l-4 border-muted pl-4 italic my-2;
+}
+
+.wrapper :global(.milkdown .ProseMirror code) {
+    @apply bg-muted px-1 py-0.5 rounded text-sm font-mono;
+}
+
+.wrapper :global(.milkdown .ProseMirror pre) {
+    @apply bg-muted p-4 rounded-md my-2 overflow-x-auto;
+}
+
+.wrapper :global(.milkdown .ProseMirror pre code) {
+    @apply bg-transparent p-0;
+}
+
+.wrapper :global(.milkdown .ProseMirror ul) {
+    @apply list-disc pl-4 my-1;
+}
+
+.wrapper :global(.milkdown .ProseMirror ol) {
+    @apply list-decimal pl-4 my-1;
+}
+
+.wrapper :global(.milkdown .ProseMirror li) {
+    @apply my-0.5;
+}
+
+.wrapper :global(.milkdown .ProseMirror a) {
+    @apply text-primary underline;
+}
+
+.wrapper :global(.milkdown .ProseMirror img) {
+    @apply max-w-full h-auto my-2;
+}
+
+.wrapper :global(.milkdown .ProseMirror table) {
+    @apply border-collapse w-full my-2;
+}
+
+.wrapper :global(.milkdown .ProseMirror th),
+.wrapper :global(.milkdown .ProseMirror td) {
+    @apply border border-border p-2;
+}
+
+.wrapper :global(.milkdown .ProseMirror th) {
+    @apply bg-muted;
+}
+
+.wrapper :global(.milkdown .toolbar button) {
+    @apply p-1 rounded hover:bg-muted;
+}
+
+.wrapper :global(.milkdown .toolbar button.active) {
+    @apply bg-muted;
+}
+
+.wrapper :global(.milkdown-block-handle) {
+    display: none !important;
+}

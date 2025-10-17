@@ -1,0 +1,20 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "loading-orb",
+  "type": "registry:block",
+  "title": "Loading Orb",
+  "description": "Animated orb loading indicator.",
+  "files": [
+    {
+      "path": "registry/agentex/loading-orb/components/loading-orb.tsx",
+      "content": "import { cva } from \"class-variance-authority\";\n\ntype Props = {\n  size?:\n    | \"xs\"\n    | \"sm\"\n    | \"md\"\n    | \"lg\"\n    | \"xl\"\n    | \"2xl\"\n    | \"3xl\"\n    | \"4xl\"\n    | \"5xl\"\n    | \"6xl\"\n    | \"7xl\"\n    | \"8xl\"\n    | \"9xl\";\n};\n\nconst loadingOrbStyles = cva(\"\", {\n  variants: {\n    size: {\n      xs: \"size-4\",\n      sm: \"size-5\",\n      md: \"size-6\",\n      lg: \"size-7\",\n      xl: \"size-8\",\n      \"2xl\": \"size-9\",\n      \"3xl\": \"size-10\",\n      \"4xl\": \"size-11\",\n      \"5xl\": \"size-12\",\n      \"6xl\": \"size-15\",\n      \"7xl\": \"size-18\",\n      \"8xl\": \"size-24\",\n      \"9xl\": \"size-32\",\n    },\n  },\n  defaultVariants: {\n    size: \"md\",\n  },\n});\n\n/**\n * Download these assets and put them in your own /public/assets directory on your website\n * to use this component.\n *\n * - loading-orb.webm from http://localhost:3000/assets/loading-orb.webm\n * - loading-orb.mp4 from http://localhost:3000/assets/loading-orb.mp4\n */\nexport function LoadingOrb({ size }: Props) {\n  return (\n    <video\n      autoPlay\n      loop\n      muted\n      playsInline\n      preload=\"auto\"\n      aria-label=\"Loading animation\"\n      className={loadingOrbStyles({ size })}\n    >\n      <source src=\"/assets/loading-orb.mp4\" type=\"video/mp4; codecs=hvc1\" />\n      <source src=\"/assets/loading-orb.webm\" type=\"video/webm; codecs=vp9\" />\n    </video>\n  );\n}\n",
+      "type": "registry:component"
+    },
+    {
+      "path": "registry/agentex/loading-orb/files/loading-orb-placeholder.txt",
+      "content": "Download these assets and put them in your own /public/assets directory on your website\n\n - loading-orb.webm from http://localhost:3000/assets/loading-orb.webm\n - loading-orb.mp4 from http://localhost:3000/assets/loading-orb.mp4\n\nYou can delete this file.\n",
+      "type": "registry:file",
+      "target": "public/assets/loading-orb-placeholder.txt"
+    }
+  ]
+}

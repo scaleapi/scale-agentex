@@ -1,0 +1,5 @@
+# Makefile
+
+# Command to run everything in development using docker compose
+dev:
+	docker compose up --build

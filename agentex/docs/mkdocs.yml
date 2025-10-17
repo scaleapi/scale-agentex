@@ -1,0 +1,126 @@
+site_name: Agentex SDK Documentation
+site_description: Documentation for the Agentex Python SDK
+site_url: https://agentex.scale.com
+docs_dir: docs
+site_dir: site
+theme:
+  logo: images/logo.png
+  favicon: images/favicon.ico
+  name: material
+  copyright: ''
+  features:
+    - navigation.sections
+    - navigation.path
+    - navigation.top
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+  palette:
+    primary: custom
+extra_css:
+  - stylesheets/extra.css
+extra_javascript:
+  - optionalConfig.js
+  - https://cdn.jsdelivr.net/npm/mermaid@11.5.0/dist/mermaid.min.js
+  - extra-loader.js
+markdown_extensions:
+  - admonition
+  - codehilite
+  - toc:
+      permalink: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.details
+  - pymdownx.tabbed
+  - pymdownx.emoji
+  - pymdownx.tasklist
+  - md_in_html
+  - def_list
+  - pymdownx.tasklist:
+      custom_checkbox: true
+nav:
+  - Introduction: index.md
+  - Getting Started:
+      - Choosing Your Approach: developing_agentex_agents.md
+      - Architecture Overview: concepts/architecture.md
+  - Development Guides:
+      - Tutorials: tutorials.md
+      - Temporal Guide: temporal-guide.md
+      - OpenAI Agents SDK + Temporal: guides/openai_temporal_integration.md
+      - Migration: concepts/migration_guide.md
+      - Jupyter Notebooks: local_development/notebooks.md
+  - Agent Client Protocol:
+      - Overview: acp/overview.md
+      - Sync ACP: acp/sync.md
+      - Agentic ACP:
+          - Overview: acp/agentic/overview.md
+          - Base Implementation: acp/agentic/base.md
+          - Temporal Implementation: acp/agentic/temporal.md
+      - Best Practices: acp/best-practices.md
+  - Core Concepts:
+      - Agents: concepts/agents.md
+      - Tasks: concepts/task.md
+      - Messages: concepts/task_message.md
+      - Events: concepts/events.md
+      - State: concepts/state.md
+      - Streaming: concepts/streaming.md
+  - Critical Concepts:
+      - Overview: concepts/callouts/overview.md
+      - Delta Accumulation: concepts/callouts/streaming.md
+      - Race Conditions: concepts/callouts/race_conditions.md
+      - Message Handling: concepts/callouts/message_handling.md
+      - Events vs Messages: concepts/callouts/events_vs_messages.md
+      - State Scoping: concepts/callouts/state_management.md
+  - Advanced Concepts:
+      - State Machines: concepts/state_machines.md
+      - Agent Task Tracker: concepts/agent_task_tracker.md
+      - Webhooks: concepts/webhooks.md
+  - Design Patterns:
+      - Overview: design_patterns/overview.md
+      - Multi-Activity Tools: design_patterns/multi_activity_tools.md
+      - Human-in-the-Loop: design_patterns/human_in_the_loop.md
+  - Deployment:
+      - Overview: deployment/overview.md
+      - Commands Reference: deployment/commands.md
+      - Manifest Configuration: manifest_setup.md
+  - API Reference:
+      - Overview: api/overview.md
+      - Agent Development Kit: api/adk.md
+      - Types: api/types.md
+plugins:
+  - search
+  - macros
+  - mkdocstrings:
+      handlers:
+        python:
+          extensions:
+            - griffe_pydantic:
+                schema: true
+          options:
+            heading_level: 4
+            show_root_heading: false
+            show_root_toc_entry: false
+            annotations_path: brief
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            show_source: false
+            show_root_full_path: false
+            show_category_heading: false
+            show_if_no_docstring: false
+            show_labels: true
+            docstring_style: google
+            docstring_section_style: table
+            merge_init_into_class: true
+            filters:
+              - '!^__.*__$'
+              - '!^_.*'
+extra:
+  hostname: https://dev.agentex.scale.com
+  # hostname: http://localhost:5003  # Use this for local development
+  generator: false

@@ -1,0 +1,85 @@
+# Chainguard FIPS-compliant Dockerfile for agentex
+FROM cgr.dev/scale.com/python-fips:3.12-dev AS base
+
+# Install uv package manager
+COPY --from=ghcr.io/astral-sh/uv:0.6.9 /uv /uvx /bin/
+
+# Install system dependencies
+# Note: Chainguard images use Wolfi packages
+USER root
+RUN apk update && apk add --no-cache \
+    curl \
+    postgresql-client \
+    build-base \
+    libpq \
+    gcc \
+    busybox
+
+WORKDIR /app
+
+# Copy dependency management files
+COPY agentex/pyproject.toml agentex/README.md ./
+
+# Install core dependencies directly to system Python (wherever it is in Chainguard)
+RUN uv pip install --system -e .
+
+# Development stage (for docker-compose)
+FROM base AS dev
+
+# Install dev dependencies to system Python
+RUN uv pip install --system --group dev .
+
+COPY agentex/src/ ./src/
+EXPOSE 5003
+ENV PYTHONPATH=/app
+CMD ["ddtrace-run", "uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "5003", "--reload"]
+
+# Docs builder stage
+FROM base AS docs-builder
+
+# Install docs dependencies
+RUN uv sync --group docs
+
+COPY agentex/docs/ docs/
+COPY agentex/src/ src/
+RUN cd docs && uv run mkdocs build
+
+# Production stage (use -dev variant for shell access to run commands)
+FROM cgr.dev/scale.com/python-fips:3.12-dev AS production
+ARG INCLUDE_DOCS=false
+
+# Install uv in production image
+COPY --from=ghcr.io/astral-sh/uv:0.6.9 /uv /uvx /bin/
+
+# Install runtime dependencies only
+USER root
+RUN apk update && apk add --no-cache \
+    postgresql-client \
+    libpq \
+    busybox
+
+WORKDIR /app
+
+# Copy Python packages from base stage (Chainguard installs to /usr/lib/python3.12)
+COPY --from=base /usr/lib/python3.12 /usr/lib/python3.12
+COPY --from=base /usr/bin /usr/bin
+
+# Copy application files
+COPY agentex/pyproject.toml agentex/README.md ./
+COPY agentex/src/ src/
+COPY agentex/database/ database/
+COPY agentex/logging_config.conf logging_config.conf
+
+# Conditionally copy docs from builder stage
+COPY --from=docs-builder /app/docs/site /app/docs/site
+
+# Create non-root user for runtime
+RUN addgroup -g 1001 -S appuser && \
+    adduser -u 1001 -S appuser -G appuser && \
+    chown -R appuser:appuser /app
+
+USER appuser
+
+EXPOSE 5003
+ENV PYTHONPATH=/app
+CMD ["ddtrace-run", "uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "5003"]

@@ -1,0 +1,21 @@
+[project]
+name = "agentex-auth"
+version = "0.1.0"
+description = "Agentex Authentication Service"
+authors = [{ name = "Anish Agrawal", email = "anish.agrawal@scale.com" }]
+requires-python = ">=3.12,<3.13"
+readme = "README.md"
+dependencies = [
+    "fastapi>=0.115.14",
+    "httpx>=0.27.2",
+    "pydantic>=2.11.7",
+    "uvicorn[standard]>=0.31.1",
+    "ddtrace>=3.13.0",  # Datadog APM tracing (optional runtime usage)
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.2",
+    "rust-just>=1.41.0",
+    "pre-commit>=4.2.0",
+]

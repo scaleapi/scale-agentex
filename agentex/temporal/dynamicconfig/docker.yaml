@@ -1,0 +1,178 @@
+og:
+    stdout: true
+    level: info
+
+persistence:
+    numHistoryShards: 3
+    defaultStore: default
+    visibilityStore: visibility
+    datastores:
+        default:
+          sql:
+            user: ""
+            password: ""
+            pluginName: "sqlite"
+            databaseName: "default"
+            connectAddr: "localhost"
+            connectProtocol: "tcp"
+            connectAttributes:
+              mode: "memory"
+              cache: "private"
+            maxConns: 1
+            maxIdleConns: 1
+            maxConnLifetime: "1h"
+            tls:
+              enabled: false
+              caFile: ""
+              certFile: ""
+              keyFile: ""
+              enableHostVerification: false
+              serverName: ""
+
+        visibility:
+          sql:
+            user: ""
+            password: ""
+            pluginName: "sqlite"
+            databaseName: "default"
+            connectAddr: "localhost"
+            connectProtocol: "tcp"
+            connectAttributes:
+              mode: "memory"
+              cache: "private"
+            maxConns: 1
+            maxIdleConns: 1
+            maxConnLifetime: "1h"
+            tls:
+              enabled: false
+              caFile: ""
+              certFile: ""
+              keyFile: ""
+              enableHostVerification: false
+              serverName: ""
+
+global:
+    membership:
+        maxJoinDuration: 30s
+        broadcastAddress: ""
+    pprof:
+        port: 0
+    tls:
+        refreshInterval: 0s
+        expirationChecks:
+            warningWindow: 0s
+            errorWindow: 0s
+            checkInterval: 0s
+        internode:
+            # This server section configures the TLS certificate that internal temporal
+            # cluster nodes (history or matching) present to other clients within the Temporal Cluster.
+            server:
+                requireClientAuth: false
+
+                certFile: 
+                keyFile: 
+
+                certData: 
+                keyData: 
+
+            # This client section is used to configure the TLS clients within
+            # the Temporal Cluster that connect to an Internode (history or matching)
+            client:
+                serverName: 
+                disableHostVerification: false
+        frontend:
+            # This server section configures the TLS certificate that the Frontend
+            # server presents to all clients (specifically the Worker role within
+            # the Temporal Cluster and all External SDKs connecting to the Cluster)
+            server:
+                requireClientAuth: false
+                certFile: 
+                keyFile: 
+
+                certData: 
+                keyData: 
+
+            # This client section is used to configure the TLS clients within
+            # the Temporal Cluster (specifically the Worker role) that connect to the Frontend service
+            client:
+                serverName: 
+                disableHostVerification: false
+    authorization:
+        jwtKeyProvider:
+            keySourceURIs:
+            refreshInterval: 1m
+        permissionsClaimName: permissions
+        authorizer: 
+        claimMapper: 
+services:
+    frontend:
+        rpc:
+            grpcPort: 7233
+            membershipPort: 6933
+            bindOnIP: 192.168.112.2
+
+    matching:
+        rpc:
+            grpcPort: 7235
+            membershipPort: 6935
+            bindOnIP: 192.168.112.2
+
+    history:
+        rpc:
+            grpcPort: 7234
+            membershipPort: 6934
+            bindOnIP: 192.168.112.2
+
+    worker:
+        rpc:
+            grpcPort: 7239
+            membershipPort: 6939
+            bindOnIP: 192.168.112.2
+
+clusterMetadata:
+    enableGlobalNamespace: false
+    failoverVersionIncrement: 10
+    masterClusterName: "active"
+    currentClusterName: "active"
+    clusterInformation:
+        active:
+            enabled: true
+            initialFailoverVersion: 1
+            rpcName: "frontend"
+            rpcAddress: 127.0.0.1:7233
+
+dcRedirectionPolicy:
+    policy: "noop"
+    toDC: ""
+
+archival:
+  history:
+    state: "enabled"
+    enableRead: true
+    provider:
+      filestore:
+        fileMode: "0666"
+        dirMode: "0766"
+  visibility:
+    state: "enabled"
+    enableRead: true
+    provider:
+      filestore:
+        fileMode: "0666"
+        dirMode: "0766"
+
+namespaceDefaults:
+  archival:
+    history:
+      state: "disabled"
+      URI: "file:///tmp/temporal_archival/development"
+    visibility:
+      state: "disabled"
+      URI: "file:///tmp/temporal_vis_archival/development"
+
+publicClient:
+    hostPort: "192.168.112.2:7233"
+
+dynamicConfigClient:
+    filepath: "config/dynamicconfig/development-sql.yaml"
+    pollInterval: "60s

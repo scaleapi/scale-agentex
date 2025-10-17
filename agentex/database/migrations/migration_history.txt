@@ -1,0 +1,15 @@
+739800d3e1ce -> 09368a02d6cc (head), deployment history
+dbac39ab82c3 -> 739800d3e1ce, registration metadata
+87454c35c13e -> dbac39ab82c3, add_task_metadata
+17c57fe68d04 -> 87454c35c13e, add_task_params
+09916d346af6 -> 17c57fe68d04, slack api key type
+a3a5873491af -> 09916d346af6, github api keys
+356ff27e3095 -> a3a5873491af, update api keys
+b17f16df0fbb -> 356ff27e3095, agent api keys
+bc9b04a3f508 -> b17f16df0fbb, many_breaking_changes
+7736391266fa -> bc9b04a3f508, create_task_agent_join_table
+e7bab805840b -> 7736391266fa, add_acp_type_to_agents
+588bf9d4ab7a -> e7bab805840b, add_task_name
+5b1c4391600d -> 588bf9d4ab7a, optional workflow params
+1718c7749b91 -> 5b1c4391600d, acp_url
+<base> -> 1718c7749b91, init
