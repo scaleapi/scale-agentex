@@ -103,7 +103,12 @@ class SpanUseCase:
         """
         return await self.span_repo.get(id=span_id)
 
-    async def list(self, trace_id: str | None = None) -> list[SpanEntity]:
+    async def list(
+        self,
+        limit: int,
+        page_number: int,
+        trace_id: str | None = None,
+    ) -> list[SpanEntity]:
         """
         List all spans for a given trace ID
         """
@@ -114,8 +119,9 @@ class SpanUseCase:
             filters = {"trace_id": trace_id}
         else:
             filters = None
-        spans = await self.span_repo.list(filters=filters)
-        return spans
+        return await self.span_repo.list(
+            filters=filters, limit=limit, page_number=page_number
+        )
 
 
 DSpanUseCase = Annotated[SpanUseCase, Depends(SpanUseCase)]

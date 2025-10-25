@@ -60,6 +60,23 @@ class TestMessagesAPIIntegration:
 
         return await message_repo.create(message)
 
+    @pytest_asyncio.fixture
+    async def test_pagination_messages(self, isolated_repositories, test_task):
+        """Create a test message using the repository"""
+        message_repo = isolated_repositories["task_message_repository"]
+        messages = []
+        for i in range(60):
+            message = TaskMessageEntity(
+                id=orm_id(),
+                task_id=test_task.id,
+                content=TextContentEntity(
+                    type="text", author="user", content=f"Test message content {i}"
+                ),
+                streaming_status="DONE",
+            )
+            messages.append(await message_repo.create(message))
+        return messages
+
     async def test_create_message_success_and_retrieve(
         self, isolated_client, test_task
     ):
@@ -234,3 +251,41 @@ class TestMessagesAPIIntegration:
         assert response.status_code == 404
         resp_json = response.json()
         assert "Item with id" in resp_json["message"]
+
+    async def test_list_messages_pagination(
+        self, isolated_client, test_pagination_messages, test_task
+    ):
+        """Test GET /messages/ endpoint with pagination."""
+        # Given - A message record exists
+        # (created by test_pagination_messages fixture)
+
+        # When - List all messages with pagination
+        response = await isolated_client.get(
+            "/messages", params={"task_id": test_task.id}
+        )
+        assert response.status_code == 200
+        response_data = response.json()
+        # Default limit if none specified
+        assert len(response_data) == 50
+
+        page_number = 1
+        paginated_messages = []
+        while True:
+            response = await isolated_client.get(
+                "/messages",
+                params={
+                    "limit": 7,
+                    "page_number": page_number,
+                    "task_id": test_task.id,
+                },
+            )
+            assert response.status_code == 200
+            messages_data = response.json()
+            paginated_messages.extend(messages_data)
+            if len(messages_data) < 1:
+                break
+            page_number += 1
+        assert len(paginated_messages) == len(test_pagination_messages)
+        assert {(d["id"], d["content"]["content"]) for d in paginated_messages} == {
+            (d.id, d.content.content) for d in test_pagination_messages
+        }

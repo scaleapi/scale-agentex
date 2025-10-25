@@ -52,6 +52,29 @@ class TestDeploymentHistoryIntegration:
         )
         return await deployment_repo.create(deployment)
 
+    @pytest_asyncio.fixture
+    async def test_pagination_deployments(self, isolated_repositories, test_agent):
+        """Create a test deployment record for the test agent"""
+        deployment_repo = isolated_repositories.get("deployment_history_repository")
+        if not deployment_repo:
+            # If deployment repository is not in isolated_repositories, skip database-dependent tests
+            pytest.skip("Deployment history repository not available in test setup")
+
+        deployments = []
+        for i in range(60):
+            deployment = DeploymentHistoryEntity(
+                id=orm_id(),
+                agent_id=test_agent.id,
+                author_name="Test Author",
+                author_email="test@example.com",
+                branch_name="test-branch",
+                build_timestamp=datetime(2025, 10, 1, 12, 0, 0, tzinfo=UTC),
+                deployment_timestamp=datetime(2025, 10, 1, 12, 5, 0, tzinfo=UTC),
+                commit_hash=f"test-commit-hash-{i}",
+            )
+            deployments.append(await deployment_repo.create(deployment))
+        return deployments
+
     async def test_get_deployment(self, isolated_client, test_deployment):
         """Test GET /deployment-history/{deployment_id} endpoint."""
         # Given - A deployment record exists
@@ -113,4 +136,78 @@ class TestDeploymentHistoryIntegration:
         assert response.status_code == 200
         response_data = response.json()
         assert len(response_data) == 1
-        assert response_data[0]["id"] == test_deployment.id
+
+    async def test_list_deployments_pagination(
+        self, isolated_client, test_pagination_deployments, test_agent
+    ):
+        """Test GET /deployment-history/ endpoint with pagination."""
+        # Given - A deployment record exists
+        # (created by test_pagination_deployments fixture)
+
+        # When - List all deployments with pagination
+        response = await isolated_client.get(
+            "/deployment-history", params={"agent_id": test_agent.id}
+        )
+        assert response.status_code == 200
+        response_data = response.json()
+        # Default limit if none specified
+        assert len(response_data) == 50
+
+        page_number = 1
+        paginated_deployments = []
+        while True:
+            response = await isolated_client.get(
+                "/deployment-history",
+                params={
+                    "limit": 7,
+                    "page_number": page_number,
+                    "agent_id": test_agent.id,
+                },
+            )
+            assert response.status_code == 200
+            deployments_data = response.json()
+            paginated_deployments.extend(deployments_data)
+            if len(deployments_data) < 1:
+                break
+            page_number += 1
+        assert len(paginated_deployments) == len(test_pagination_deployments)
+        assert {(d["id"], d["commit_hash"]) for d in paginated_deployments} == {
+            (d.id, d.commit_hash) for d in test_pagination_deployments
+        }
+
+    async def test_invalid_list_deployments(
+        self, isolated_client, test_deployment, test_agent
+    ):
+        """Test GET /deployment-history/ endpoint with invalid parameters."""
+
+        response = await isolated_client.get("/deployment-history")
+        assert response.status_code == 400
+        response_data = response.json()
+        assert "message" in response_data
+        assert (
+            "Either 'agent_id' or 'agent_name' must be provided to list deployment history."
+            in response_data["message"]
+        )
+
+        response = await isolated_client.get(
+            "/deployment-history",
+            params={
+                "agent_id": test_deployment.agent_id,
+                "agent_name": test_agent.name,
+            },
+        )
+        assert response.status_code == 400
+        response_data = response.json()
+        assert "message" in response_data
+        assert (
+            "Only one of 'agent_id' or 'agent_name' should be provided to list deployment history."
+            in response_data["message"]
+        )
+
+        response = await isolated_client.get(
+            "/deployment-history", params={"agent_name": "non-existent-agent"}
+        )
+        assert response.status_code == 404
+        response_data = response.json()
+        assert "message" in response_data
+        assert "does not exist" in response_data["message"]

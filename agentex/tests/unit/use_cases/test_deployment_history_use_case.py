@@ -125,7 +125,9 @@ class TestDeploymentHistoryUseCase:
         )
 
         # When - List all deployments
-        all_deployments = await deployment_history_use_case.list_deployments()
+        all_deployments = await deployment_history_use_case.list_deployments(
+            limit=100, page_number=1
+        )
 
         # Then - Should return both deployments
         assert len(all_deployments) >= 2
@@ -135,7 +137,7 @@ class TestDeploymentHistoryUseCase:
 
         # When - Filter by agent ID
         agent_deployments = await deployment_history_use_case.list_deployments(
-            agent_id=sample_agent.id
+            agent_id=sample_agent.id, limit=100, page_number=1
         )
 
         # Then - Should return deployments for that agent
@@ -145,7 +147,7 @@ class TestDeploymentHistoryUseCase:
 
         # When - Filter by commit hash
         commit_deployments = await deployment_history_use_case.list_deployments(
-            commit_hash="commit1"
+            commit_hash="commit1", limit=100, page_number=1
         )
 
         # Then - Should return the matching deployment
@@ -154,7 +156,7 @@ class TestDeploymentHistoryUseCase:
 
         # When - Filter by author email
         jane_deployments = await deployment_history_use_case.list_deployments(
-            author_email="jane.smith@example.com"
+            author_email="jane.smith@example.com", limit=100, page_number=1
         )
 
         # Then - Should find Jane's deployment
@@ -260,13 +262,13 @@ class TestDeploymentHistoryUseCase:
         # And - Should be able to retrieve deployments by commit hash
         # Note: get_by_commit_hash might return any one of them since commit hash is not unique
         commit_deployments = await deployment_history_use_case.list_deployments(
-            commit_hash="shared-commit-123"
+            commit_hash="shared-commit-123", limit=100, page_number=1
         )
         assert len(commit_deployments) == 2
 
         # And - Should be able to filter by agent to get specific deployments
         agent1_deployments = await deployment_history_use_case.list_deployments(
-            agent_id=agent1.id
+            agent_id=agent1.id, limit=100, page_number=1
         )
         agent1_with_commit = [
             d for d in agent1_deployments if d.commit_hash == same_commit_hash
@@ -275,7 +277,7 @@ class TestDeploymentHistoryUseCase:
         assert agent1_with_commit[0].id == deployment1.id
 
         agent2_deployments = await deployment_history_use_case.list_deployments(
-            agent_id=agent2.id
+            agent_id=agent2.id, limit=100, page_number=1
         )
         agent2_with_commit = [
             d for d in agent2_deployments if d.commit_hash == same_commit_hash

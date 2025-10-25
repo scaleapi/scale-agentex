@@ -1,16 +1,10 @@
-import json
-from typing import Any
-
 from src.domain.entities.task_message_updates import DeltaType, TaskMessageDeltaEntity
 from src.domain.entities.task_messages import (
     DataContentEntity,
     MessageAuthor,
-    MessageStyle,
     ReasoningContentEntity,
     TaskMessageContentEntity,
-    TaskMessageContentType,
     TextContentEntity,
-    TextFormat,
     ToolRequestContentEntity,
     ToolResponseContentEntity,
 )
@@ -18,21 +12,6 @@ from src.domain.entities.task_messages import (
 
 class TaskMessageMixin:
     """Mixin for task message handling"""
-
-    def parse_task_message(self, result: dict[str, Any]) -> TaskMessageContentEntity:
-        """Parse a result dict into a TaskMessage"""
-
-        message_type = result.get("content_type")
-        if message_type == TaskMessageContentType.TEXT:
-            return TextContentEntity.model_validate(result)
-        elif message_type == TaskMessageContentType.DATA:
-            return DataContentEntity.model_validate(result)
-        elif message_type == TaskMessageContentType.TOOL_REQUEST:
-            return ToolRequestContentEntity.model_validate(result)
-        elif message_type == TaskMessageContentType.TOOL_RESPONSE:
-            return ToolResponseContentEntity.model_validate(result)
-        else:
-            raise ValueError(f"Unknown message type: {message_type}")
 
     @staticmethod
     def create_initial_content_from_delta(
@@ -77,24 +56,3 @@ class TaskMessageMixin:
             )
         else:
             raise ValueError(f"Unknown delta type: {delta.type}")
-
-    def convert_aggregated_task_message_to_content(
-        self,
-        aggregated_content_str: str,
-        content_type: TaskMessageContentType,
-    ) -> TaskMessageContentEntity:
-        if content_type == TaskMessageContentType.TEXT:
-            return TextContentEntity(
-                author=MessageAuthor.AGENT,
-                content=aggregated_content_str,
-                style=MessageStyle.STATIC,
-                format=TextFormat.PLAIN,
-            )
-        else:
-            try:
-                result = json.loads(aggregated_content_str)
-            except json.JSONDecodeError as e:
-                raise ValueError(
-                    f"Failed to load aggregated content as JSON: {aggregated_content_str}"
-                ) from e
-            return self.parse_task_message(result)

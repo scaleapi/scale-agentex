@@ -8,10 +8,13 @@ from src.api.schemas.task_messages import TextContent
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
 from src.domain.entities.events import EventEntity
 from src.domain.entities.task_messages import (
+    DataContentEntity,
     MessageAuthor,
     MessageStyle,
     TextContentEntity,
     TextFormat,
+    ToolRequestContentEntity,
+    ToolResponseContentEntity,
 )
 from src.domain.entities.tasks import TaskEntity, TaskStatus
 from src.domain.repositories.agent_api_key_repository import AgentAPIKeyRepository
@@ -220,6 +223,182 @@ class TestAgentACPService:
         assert payload["method"] == "message/send"
         assert payload["params"]["stream"] is False
 
+    async def test_send_message_success_data(
+        self,
+        agent_acp_service,
+        mock_http_gateway,
+        agent_repository,
+        sample_agent,
+        sample_task,
+        sample_text_content,
+    ):
+        """Test successful message sending via JSON-RPC"""
+        # Given - Create agent first
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        # Mock successful response with text content
+        from src.domain.entities.agents_rpc import AgentRPCMethod
+
+        response_content = {
+            "message": "Response from ACP server",
+            "key": "value",
+            "key2": 1.0,
+        }
+        expected_request_id = f"{AgentRPCMethod.MESSAGE_SEND}-{sample_task.id}"
+        mock_response = {
+            "jsonrpc": "2.0",
+            "result": {
+                "type": "data",
+                "author": "agent",
+                "style": "static",
+                "format": "plain",
+                "data": response_content,
+                "attachments": None,
+            },
+            "id": expected_request_id,
+        }
+        mock_http_gateway.async_call.return_value = mock_response
+
+        # When
+        result = await agent_acp_service.send_message(
+            agent=sample_agent,
+            task=sample_task,
+            content=sample_text_content,
+            acp_url="http://test-acp.example.com",
+        )
+
+        # Then
+        assert isinstance(result, DataContentEntity)
+        assert result.data == response_content
+        assert result.author == MessageAuthor.AGENT
+
+        # Verify HTTP call
+        mock_http_gateway.async_call.assert_called_once()
+        call_args = mock_http_gateway.async_call.call_args
+        payload = call_args[1]["payload"]
+        assert payload["method"] == "message/send"
+        assert payload["params"]["stream"] is False
+
+    async def test_send_message_success_tool_request(
+        self,
+        agent_acp_service,
+        mock_http_gateway,
+        agent_repository,
+        sample_agent,
+        sample_task,
+        sample_text_content,
+    ):
+        """Test successful message sending via JSON-RPC"""
+        # Given - Create agent first
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        # Mock successful response with text content
+        from src.domain.entities.agents_rpc import AgentRPCMethod
+
+        expected_request_id = f"{AgentRPCMethod.MESSAGE_SEND}-{sample_task.id}"
+        mock_response = {
+            "jsonrpc": "2.0",
+            "result": {
+                "type": "tool_request",
+                "author": "agent",
+                "style": "static",
+                "format": "plain",
+                "tool_call_id": "123",
+                "name": "get_weather",
+                "arguments": {
+                    "location": "San Francisco, CA",
+                    "units": "celsius",
+                },
+                "attachments": None,
+            },
+            "id": expected_request_id,
+        }
+        mock_http_gateway.async_call.return_value = mock_response
+
+        # When
+        result = await agent_acp_service.send_message(
+            agent=sample_agent,
+            task=sample_task,
+            content=sample_text_content,
+            acp_url="http://test-acp.example.com",
+        )
+
+        # Then
+        assert isinstance(result, ToolRequestContentEntity)
+        assert result.tool_call_id == "123"
+        assert result.name == "get_weather"
+        assert result.arguments == {
+            "location": "San Francisco, CA",
+            "units": "celsius",
+        }
+        assert result.author == MessageAuthor.AGENT
+
+        # Verify HTTP call
+        mock_http_gateway.async_call.assert_called_once()
+        call_args = mock_http_gateway.async_call.call_args
+        payload = call_args[1]["payload"]
+        assert payload["method"] == "message/send"
+        assert payload["params"]["stream"] is False
+
+    async def test_send_message_success_tool_response(
+        self,
+        agent_acp_service,
+        mock_http_gateway,
+        agent_repository,
+        sample_agent,
+        sample_task,
+        sample_text_content,
+    ):
+        """Test successful message sending via JSON-RPC"""
+        # Given - Create agent first
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        # Mock successful response with text content
+        from src.domain.entities.agents_rpc import AgentRPCMethod
+
+        response_content = {
+            "temperature": 22.5,
+            "description": "Sunny with a chance of clouds",
+        }
+        expected_request_id = f"{AgentRPCMethod.MESSAGE_SEND}-{sample_task.id}"
+        mock_response = {
+            "jsonrpc": "2.0",
+            "result": {
+                "type": "tool_response",
+                "author": "agent",
+                "style": "static",
+                "format": "plain",
+                "tool_call_id": "123",
+                "name": "get_weather",
+                "content": response_content,
+                "attachments": None,
+            },
+            "id": expected_request_id,
+        }
+        mock_http_gateway.async_call.return_value = mock_response
+
+        # When
+        result = await agent_acp_service.send_message(
+            agent=sample_agent,
+            task=sample_task,
+            content=sample_text_content,
+            acp_url="http://test-acp.example.com",
+        )
+
+        # Then
+        assert isinstance(result, ToolResponseContentEntity)
+        assert result.tool_call_id == "123"
+        assert result.name == "get_weather"
+        assert result.content == response_content
+        assert result.author == MessageAuthor.AGENT
+
+        # Verify HTTP call
+        mock_http_gateway.async_call.assert_called_once()
+        call_args = mock_http_gateway.async_call.call_args
+        payload = call_args[1]["payload"]
+        assert payload["method"] == "message/send"
+        assert payload["params"]["stream"] is False
+
     async def test_cancel_task_success(
         self,
         agent_acp_service,
@@ -298,6 +477,125 @@ class TestAgentACPService:
 
         # Verify call
         mock_http_gateway.async_call.assert_called_once()
+
+    async def test_send_event_with_request_headers(
+        self,
+        agent_acp_service,
+        mock_http_gateway,
+        agent_repository,
+        sample_agent,
+        sample_task,
+        sample_event,
+    ):
+        """Test event sending with request headers forwarding"""
+        # Given - Create agent first
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        # Mock get_headers to return auth headers
+        from unittest.mock import AsyncMock, patch
+
+        from src.domain.entities.agents_rpc import AgentRPCMethod
+
+        with patch.object(
+            agent_acp_service,
+            "get_headers",
+            new=AsyncMock(return_value={"x-agent-api-key": "test-api-key"}),
+        ):
+            expected_request_id = f"{AgentRPCMethod.EVENT_SEND}-{sample_task.id}"
+            mock_response = {
+                "jsonrpc": "2.0",
+                "result": {"status": "event_sent", "event_id": sample_event.id},
+                "id": expected_request_id,
+            }
+            mock_http_gateway.async_call.return_value = mock_response
+
+            # Request headers to forward - mix of allowed and blocked headers
+            request_headers = {
+                "x-user-id": "user-123",  # Allowed: x-* prefix
+                "x-trace-id": "trace-456",  # Allowed: x-* prefix
+                "user-agent": "test-client",  # Blocked: no x-* prefix
+                "authorization": "Bearer test-token",  # Blocked: sensitive header
+            }
+
+            # When
+            result = await agent_acp_service.send_event(
+                agent=sample_agent,
+                event=sample_event,
+                task=sample_task,
+                acp_url="http://test-acp.example.com",
+                request_headers=request_headers,
+            )
+
+            # Then
+            assert result["status"] == "event_sent"
+            assert result["event_id"] == sample_event.id
+
+            # Verify call was made - headers sent via HTTP headers, not in params body
+            mock_http_gateway.async_call.assert_called_once()
+            call_args = mock_http_gateway.async_call.call_args
+            payload = call_args[1]["payload"]
+
+            # Headers should NOT be in params body (sent via HTTP headers instead)
+            assert "params" in payload
+            assert payload["params"]["request"] is None
+
+            # Verify filtered headers were sent via HTTP headers (parameter name is default_headers)
+            http_headers = call_args[1]["default_headers"]
+            assert "x-user-id" in http_headers
+            assert http_headers["x-user-id"] == "user-123"
+            assert "x-trace-id" in http_headers
+            assert http_headers["x-trace-id"] == "trace-456"
+            # Verify auth header is present (overlayed after filtered headers)
+            assert "x-agent-api-key" in http_headers
+            assert http_headers["x-agent-api-key"] == "test-api-key"
+            # Verify blocked headers are NOT in HTTP headers
+            assert "user-agent" not in http_headers  # Blocked: no x-* prefix
+            assert "authorization" not in http_headers  # Blocked: sensitive
+
+    async def test_send_event_without_request_headers(
+        self,
+        agent_acp_service,
+        mock_http_gateway,
+        agent_repository,
+        sample_agent,
+        sample_task,
+        sample_event,
+    ):
+        """Test event sending without request headers (backwards compatibility)"""
+        # Given - Create agent first
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        # Mock successful response
+        from src.domain.entities.agents_rpc import AgentRPCMethod
+
+        expected_request_id = f"{AgentRPCMethod.EVENT_SEND}-{sample_task.id}"
+        mock_response = {
+            "jsonrpc": "2.0",
+            "result": {"status": "event_sent", "event_id": sample_event.id},
+            "id": expected_request_id,
+        }
+        mock_http_gateway.async_call.return_value = mock_response
+
+        # When - Call without request_headers parameter
+        result = await agent_acp_service.send_event(
+            agent=sample_agent,
+            event=sample_event,
+            task=sample_task,
+            acp_url="http://test-acp.example.com",
+        )
+
+        # Then
+        assert result["status"] == "event_sent"
+        assert result["event_id"] == sample_event.id
+
+        # Verify call was made and request field is None when headers not provided
+        mock_http_gateway.async_call.assert_called_once()
+        call_args = mock_http_gateway.async_call.call_args
+        payload = call_args[1]["payload"]
+        assert "params" in payload
+        # Request field should be None or not included when headers not provided
+        if "request" in payload["params"]:
+            assert payload["params"]["request"] is None
 
     async def test_jsonrpc_error_handling(
         self,

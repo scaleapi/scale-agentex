@@ -13,7 +13,7 @@ from src.api.schemas.authorization_types import (
 from src.api.schemas.principal_context import AgentexAuthPrincipalContext
 from src.config.dependencies import DEnvironmentVariable
 from src.config.environment_variables import EnvVarKeys
-from src.utils.http_request_handler import post_with_error_handling
+from src.utils.http_request_handler import HttpRequestHandler
 
 
 class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext]):
@@ -34,7 +34,7 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
             "resource": resource.model_dump(),
             "operation": operation,
         }
-        await post_with_error_handling(
+        await HttpRequestHandler.post_with_error_handling(
             self.agentex_auth_url, "/v1/authz/grant", json=payload
         )
 
@@ -49,7 +49,7 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
             "resource": resource.model_dump(),
             "operation": operation,
         }
-        await post_with_error_handling(
+        await HttpRequestHandler.post_with_error_handling(
             self.agentex_auth_url, "/v1/authz/revoke", json=payload
         )
 
@@ -64,7 +64,7 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
             "resource": resource.model_dump(),
             "operation": operation,
         }
-        await post_with_error_handling(
+        await HttpRequestHandler.post_with_error_handling(
             self.agentex_auth_url, "/v1/authz/check", json=payload
         )
         return True  # request was successful
@@ -80,7 +80,7 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
             "filter_resource": filter_resource,
             "filter_operation": filter_operation,
         }
-        response = await post_with_error_handling(
+        response = await HttpRequestHandler.post_with_error_handling(
             self.agentex_auth_url, "/v1/authz/search", json=payload
         )
         return response["items"]

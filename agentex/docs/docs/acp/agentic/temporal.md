@@ -322,5 +322,5 @@ if __name__ == "__main__":
 
 - **Getting started?** Learn about [Base Agentic ACP](base.md) first
 - **Need to migrate?** Check the [Migration Guide](../../concepts/migration_guide.md)
-- **New to Agentex?** Follow the [Quick Start Guide on GitHub](https://github.com/scaleapi/agentex#quick-start)
-- **Ready to build?** Check out [Temporal Tutorials on GitHub](https://github.com/scaleapi/agentex-python/tree/main/examples/tutorials/10_agentic/100_temporal)
+- **New to Agentex?** Follow the [Quick Start Guide on GitHub](https://github.com/scaleapi/scale-agentex#quick-start)
+- **Ready to build?** Check out [Temporal Tutorials on GitHub](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic/100_temporal)

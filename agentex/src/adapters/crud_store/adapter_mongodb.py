@@ -19,6 +19,8 @@ logger = make_logger(__name__)
 
 T = TypeVar("T")
 
+DEFAULT_PAGE_LIMIT = 50
+
 
 def retry_write_operation(max_retries: int = 3, base_delay: float = 0.1):
     """
@@ -189,22 +191,6 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
             return self.model_class.from_dict(data)
         else:
             return self.model_class(**data)
-
-    def _build_query(
-        self, id: str | None = None, name: str | None = None
-    ) -> dict[str, Any]:
-        """
-        Build a query based on provided id or name.
-        If both are provided, id takes precedence.
-
-        For id queries, this maps to MongoDB's _id field.
-        """
-        if id is not None:
-            # Always use _id field when querying by id
-            return {"_id": self._convert_id(id)}
-        elif name is not None:
-            return {"name": name}
-        return {}
 
     @retry_write_operation()
     async def create(self, item: T) -> T:
@@ -519,15 +505,29 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
                 message=f"Failed to batch delete items from MongoDB: {e}", detail=str(e)
             ) from e
 
-    async def list(self, filters: dict[str, Any] | None = None) -> list[T]:
+    async def list(
+        self,
+        filters: dict[str, Any] | None = None,
+        limit: int | None = None,
+        page_number: int | None = None,
+    ) -> list[T]:
         """
         List all documents in the collection.
         Maps _id to .id for each returned item.
         """
+        limit = limit or DEFAULT_PAGE_LIMIT
+        if page_number is not None and page_number < 1:
+            raise ClientError("Page number must be greater than 0")
+        page_number = page_number or 1
+        skip = (page_number - 1) * limit
+        if filters:
+            cursor = self.collection.find(filters)
+        else:
+            cursor = self.collection.find()
+        cursor = cursor.skip(skip).limit(limit)
+        # Consistent sorting so that pagination works correctly
+        cursor = cursor.sort([("_id", 1)])
         try:
-            cursor = (
-                self.collection.find(filters) if filters else self.collection.find()
-            )
             return [self._deserialize(doc) for doc in cursor]
         except Exception as e:
             raise ServiceError(
@@ -539,6 +539,7 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
         field_name: str,
         field_value: Any,
         limit: int | None = None,
+        page_number: int | None = None,
         sort_by: dict[str, int] | None = None,
     ) -> builtins.list[T]:
         """
@@ -568,13 +569,21 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
             # Create a cursor
             cursor = self.collection.find({mongo_field_name: mongo_field_value})
 
-            # Apply sorting if specified
-            if sort_by:
-                cursor = cursor.sort(list(sort_by.items()))
+            # Apply sorting
+            sort_by_items = list(sort_by.items()) if sort_by else []
+            # Use ID for tiebreaking
+            sort_by_items.append(("_id", 1))
+            cursor = cursor.sort(sort_by_items)
 
             # Apply limit if specified
-            if limit is not None and limit > 0:
-                cursor = cursor.limit(limit)
+            limit = limit or DEFAULT_PAGE_LIMIT
+            cursor = cursor.limit(limit)
+
+            # Apply page number if specified
+            if page_number is not None and page_number < 1:
+                raise ClientError("Page number must be greater than 0")
+            if page_number is not None:
+                cursor = cursor.skip((page_number - 1) * limit)
 
             return [self._deserialize(doc) for doc in cursor]
         except Exception as e:

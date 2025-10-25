@@ -73,6 +73,6 @@ To respond to client requests, agent developers only need to implement a fixed s
 
 ## Next Steps
 
-- **New to Agentex?** Follow the [Quick Start Guide on GitHub](https://github.com/scaleapi/agentex#quick-start)
-- **Ready to build?** Check out [Tutorials on GitHub](https://github.com/scaleapi/agentex-python/tree/main/examples/tutorials)
+- **New to Agentex?** Follow the [Quick Start Guide on GitHub](https://github.com/scaleapi/scale-agentex#quick-start)
+- **Ready to build?** Check out [Tutorials on GitHub](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials)
 - **Understand the protocol:** Read about [Agent Client Protocol (ACP)](../acp/overview.md)

@@ -113,10 +113,11 @@ async def update_message(
 async def list_messages(
     task_id: DAuthorizedQuery(AgentexResourceType.task, AuthorizedOperationType.read),
     message_use_case: DMessageUseCase,
-    limit: int | None = None,
+    limit: int = 50,
+    page_number: int = 1,
 ) -> list[TaskMessage]:
     task_message_entities = await message_use_case.list_messages(
-        task_id=task_id, limit=limit
+        task_id=task_id, limit=limit, page_number=page_number
     )
 
     return [

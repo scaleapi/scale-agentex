@@ -84,6 +84,6 @@ agentex agents run --manifest manifest.yaml
 
 ### Further Reading
 
-- Check out the [Agentex Python SDK repository](https://github.com/scaleapi/agentex-python) for examples and tutorials
+- Check out the [Agentex Python SDK repository](https://github.com/scaleapi/scale-agentex-python) for examples and tutorials
 - Read the documentation at [dev.agentex.scale.com/docs](https://dev.agentex.scale.com/docs)
 

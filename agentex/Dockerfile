@@ -56,6 +56,7 @@ COPY --from=docs-builder /app/docs/site /app/docs/site
 COPY agentex/src/ src/
 COPY agentex/database/ database/
 COPY agentex/logging_config.conf logging_config.conf
+COPY LICENSE /app/LICENSE
 
 EXPOSE 5003
 ENV PYTHONPATH=/app

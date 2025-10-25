@@ -109,5 +109,5 @@ The `@acp.on_message_send` handler receives:
 
 - **Need more complexity?** Learn about [Agentic ACP](agentic/overview.md)
 - **Ready to upgrade?** See the [Migration Guide](../concepts/migration_guide.md)
-- **New to Agentex?** Follow the [Quick Start Guide on GitHub](https://github.com/scaleapi/agentex#quick-start)
-- **Ready to build?** Check out [Sync ACP Tutorials on GitHub](https://github.com/scaleapi/agentex-python/tree/main/examples/tutorials/00_sync)
+- **New to Agentex?** Follow the [Quick Start Guide on GitHub](https://github.com/scaleapi/scale-agentex#quick-start)
+- **Ready to build?** Check out [Sync ACP Tutorials on GitHub](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/00_sync)

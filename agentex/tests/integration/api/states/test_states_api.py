@@ -78,18 +78,21 @@ class TestStatesAPIIntegration:
         return await task_repo.create(agent_id=test_agent.id, task=task)
 
     @pytest_asyncio.fixture
-    async def test_state(self, isolated_repositories, test_agent, test_task):
-        """Create a test state directly via repository"""
-        state_repo = isolated_repositories["state_repository"]
-        state = StateEntity(
-            id=orm_id(),
-            task_id=test_task.id,
-            agent_id=test_agent.id,
-            state={"test": "test", "key": "value"},
-            created_at=None,
-            updated_at=None,
-        )
-        return await state_repo.create(state)
+    async def test_pagination_states(
+        self, isolated_repositories, test_task, test_agent
+    ):
+        """Create a test state using the repository"""
+        state_repo = isolated_repositories["task_state_repository"]
+        states = []
+        for i in range(60):
+            state = StateEntity(
+                id=orm_id(),
+                task_id=test_task.id,
+                agent_id=test_agent.id,
+                state={"test": "test", "key": f"value-{i}"},
+            )
+            states.append(await state_repo.create(state))
+        return states
 
     async def test_listing_states(
         self, isolated_client, test_task, test_agent, test_task_2, test_agent_2
@@ -253,3 +256,39 @@ class TestStatesAPIIntegration:
         # Then - Should return 404
         assert response.status_code == 404
         assert "does not exist" in response.json()["message"]
+
+    async def test_list_states_pagination(
+        self, isolated_client, test_pagination_states, test_task, test_agent
+    ):
+        """Test listing states with pagination"""
+        # When - List states with pagination
+        response = await isolated_client.get(
+            "/states", params={"task_id": test_task.id, "agent_id": test_agent.id}
+        )
+        assert response.status_code == 200
+        response_json = response.json()
+        # Default limit if none specified
+        assert len(response_json) == 50
+
+        page_number = 1
+        paginated_states = []
+        while True:
+            response = await isolated_client.get(
+                "/states",
+                params={
+                    "limit": 7,
+                    "page_number": page_number,
+                    "task_id": test_task.id,
+                    "agent_id": test_agent.id,
+                },
+            )
+            assert response.status_code == 200
+            states_data = response.json()
+            paginated_states.extend(states_data)
+            if len(states_data) < 1:
+                break
+            page_number += 1
+        assert len(paginated_states) == len(test_pagination_states)
+        assert {(d["id"], d["state"]["key"]) for d in paginated_states} == {
+            (d.id, d.state["key"]) for d in test_pagination_states
+        }

@@ -8,3 +8,12 @@ repos:
         args: [--fix]
       # Run the formatter.
       - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: agentex-sgp-app-lint-fix
+        name: Agentex SGP App Linting
+        entry: bash -c 'cd agentex-sgp-app && npx eslint --fix --no-warn-ignored --max-warnings=0 $(echo "$@" | sed "s|agentex-sgp-app/||g")' --
+        language: system
+        files: ^agentex-sgp-app/.*\.(ts|tsx|js|jsx)$
+        pass_filenames: true

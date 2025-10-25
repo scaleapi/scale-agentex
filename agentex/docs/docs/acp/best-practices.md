@@ -28,6 +28,6 @@ Guidelines for building robust, maintainable, and secure agents with ACP.
 
 ## Next Steps
 
-- **New to ACP?** Follow the [Quick Start Guide on GitHub](https://github.com/scaleapi/agentex#quick-start)
-- **Ready to build?** Check out [Tutorials on GitHub](https://github.com/scaleapi/agentex-python/tree/main/examples/tutorials)
+- **New to ACP?** Follow the [Quick Start Guide on GitHub](https://github.com/scaleapi/scale-agentex#quick-start)
+- **Ready to build?** Check out [Tutorials on GitHub](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials)
 - **Need help choosing?** Read [Developing Agentex Agents](../developing_agentex_agents.md)

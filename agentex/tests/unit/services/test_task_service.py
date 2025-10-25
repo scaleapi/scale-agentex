@@ -508,7 +508,7 @@ class TestAgentTaskService:
             created_tasks.append(task)
 
         # When
-        result = await task_service.list_tasks()
+        result = await task_service.list_tasks(limit=100, page_number=1)
 
         # Then
         assert len(result) >= 3  # At least the tasks we created
@@ -674,6 +674,53 @@ class TestAgentTaskService:
             event=result,  # Use the actual created event
             task=created_task,
             acp_url=acp_url,
+            request_headers=None,
+        )
+
+    async def test_create_event_and_forward_to_acp_with_headers(
+        self,
+        task_service,
+        mock_acp_client,
+        event_repository,
+        agent_repository,
+        sample_agent,
+        sample_message_content,
+    ):
+        """Test event creation and ACP forwarding with request headers"""
+        # Given - Create real agent and task first
+        await create_or_get_agent(agent_repository, sample_agent)
+        created_task = await task_service.create_task(
+            agent=sample_agent, task_name="task-for-event-with-headers"
+        )
+        acp_url = "http://test-acp.example.com"
+        request_headers = {
+            "user-agent": "integration-test",
+            "x-custom-header": "custom-value",
+        }
+
+        # When
+        result = await task_service.create_event_and_forward_to_acp(
+            agent=sample_agent,
+            task=created_task,
+            acp_url=acp_url,
+            content=sample_message_content,
+            request_headers=request_headers,
+        )
+
+        # Then
+        assert result is not None
+        assert result.id is not None
+        assert result.task_id == created_task.id
+        assert result.agent_id == sample_agent.id
+        assert result.content is not None
+
+        # Verify ACP client was called with request_headers
+        mock_acp_client.send_event.assert_called_once_with(
+            agent=sample_agent,
+            event=result,
+            task=created_task,
+            acp_url=acp_url,
+            request_headers=request_headers,
         )
 
     async def test_create_task_with_task_metadata(

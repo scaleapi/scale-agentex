@@ -22,6 +22,7 @@
         "editor.defaultFormatter": "esbenp.prettier-vscode",
         "editor.formatOnSave": true,
         "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit",
             "source.fixAll.eslint": "explicit"
         }
     },
@@ -29,6 +30,7 @@
         "editor.defaultFormatter": "esbenp.prettier-vscode",
         "editor.formatOnSave": true,
         "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit",
             "source.fixAll.eslint": "explicit"
         }
     },
@@ -52,10 +54,14 @@
         "typescript",
         "typescriptreact"
     ],
-    "eslint.workingDirectories": ["agentex-web"],
+    "eslint.useFlatConfig": true,
+    "eslint.workingDirectories": [
+        {
+            "pattern": "agentex-sgp-app"
+        }
+    ],
     "prettier.documentSelectors": ["**/*.{ts,tsx,js,jsx}"],
     "prettier.requireConfig": true,
-    "typescript.preferences.organizeImportsOnSave": false,
     "[json]": {
         "editor.formatOnSave": true,
         "editor.defaultFormatter": "esbenp.prettier-vscode"

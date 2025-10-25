@@ -22,6 +22,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import Select
 
 from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
 from src.adapters.crud_store.port import CRUDRepository
@@ -35,6 +36,7 @@ logger = make_logger(__name__)
 
 DUPLICATE_KEY_VAL_ERR = "duplicate key value"
 CHECK_CONSTRAINT_ERR = "violates check constraint"
+DEFAULT_LIST_LIMIT = 50
 
 
 @asynccontextmanager
@@ -390,12 +392,16 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T]):
         filters: dict[str, Any] | None = None,
         order_by: str | None = None,
         order_direction: Literal["asc", "desc"] | None = None,
+        query: Select | None = None,
+        limit: int | None = None,
+        page_number: int | None = None,
     ) -> list[T]:
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
         ):
-            query = select(self.orm)
+            if query is None:
+                query = select(self.orm)
 
             order_by_clauses = self.create_order_by_clauses(
                 order_by=order_by,
@@ -414,6 +420,16 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T]):
                 )
                 if filter_conditions:
                     query = query.where(*filter_conditions)
+
+            # Apply provided or default limit
+            limit = limit or DEFAULT_LIST_LIMIT
+            query = query.limit(limit)
+
+            # Apply page number if provided
+            if page_number is not None and page_number < 1:
+                raise ClientError("Page number must be greater than 0")
+            if page_number is not None:
+                query = query.offset((page_number - 1) * limit)
 
             # Execute the query
             result = await session.execute(query)

@@ -105,7 +105,7 @@ class MessagesUseCase:
         return await self.task_message_service.get_message(message_id=message_id)
 
     async def list_messages(
-        self, task_id: str, limit: int | None = None
+        self, task_id: str, limit: int, page_number: int
     ) -> list[TaskMessageEntity]:
         """
         Get all messages for a task.
@@ -118,7 +118,7 @@ class MessagesUseCase:
             List of TaskMessageEntity objects for the task
         """
         return await self.task_message_service.get_messages(
-            task_id=task_id, limit=limit
+            task_id=task_id, limit=limit, page_number=page_number
         )
 
 

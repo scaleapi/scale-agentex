@@ -210,7 +210,7 @@ async def on_task_event_send(self, params: SendEventParams) -> None:
 - [Event History](https://docs.temporal.io/concepts/event-history) - How replay works
 
 ### **Phase 3: AgentEx Integration** (1 hour)
-- **[Browse All Temporal Tutorials on GitHub](https://github.com/scaleapi/agentex-python/tree/main/examples/tutorials/10_agentic/010_temporal)** - Complete, runnable examples:
+- **[Browse All Temporal Tutorials on GitHub](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic/010_temporal)** - Complete, runnable examples:
   - `000_hello_acp/` - Basic workflow structure
   - `010_agent_chat/` - LLM integration with tools
   - `020_state_machine/` - Complex state management
@@ -388,7 +388,7 @@ async def process_data(self, params: SendEventParams) -> None:
 
 ## Ready to Build?
 
-**Next Step**: [Build Your First Temporal Agent on GitHub](https://github.com/scaleapi/agentex-python/tree/main/examples/tutorials/10_agentic/010_temporal/000_hello_acp)
+**Next Step**: [Build Your First Temporal Agent on GitHub](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic/010_temporal/000_hello_acp)
 
 **Need Help?**: Join [Temporal Community Slack](https://temporal.io/slack) - 15,000+ developers building with Temporal
 

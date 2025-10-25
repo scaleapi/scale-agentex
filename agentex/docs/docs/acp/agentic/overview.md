@@ -167,5 +167,5 @@ Production-ready with durable execution and automatic fault tolerance.
 - **Getting started?** Learn about [Base Agentic ACP](base.md) first
 - **Ready for production?** Explore [Temporal Agentic ACP](temporal.md)
 - **Need to upgrade?** Check the [Migration Guide](../../concepts/migration_guide.md)
-- **New to Agentex?** Follow the [Quick Start Guide on GitHub](https://github.com/scaleapi/agentex#quick-start)
-- **Ready to build?** Check out [Agentic Tutorials on GitHub](https://github.com/scaleapi/agentex-python/tree/main/examples/tutorials/10_agentic)
+- **New to Agentex?** Follow the [Quick Start Guide on GitHub](https://github.com/scaleapi/scale-agentex#quick-start)
+- **Ready to build?** Check out [Agentic Tutorials on GitHub](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic)

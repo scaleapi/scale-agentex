@@ -17,9 +17,14 @@ class SpanRepository(PostgresCRUDRepository[SpanORM, SpanEntity]):
         super().__init__(async_read_write_session_maker, SpanORM, SpanEntity)
 
     def list(
-        self, filters: dict[str, Any] | None = None, order_by: str | None = None
+        self,
+        filters: dict[str, Any] | None = None,
+        limit: int | None = None,
+        page_number: int | None = None,
     ) -> list[SpanEntity]:
-        return super().list(filters, order_by="start_time")
+        return super().list(
+            filters, order_by="start_time", limit=limit, page_number=page_number
+        )
 
 
 DSpanRepository = Annotated[SpanRepository, Depends(SpanRepository)]

@@ -43,6 +43,21 @@ class TestTasksAPIIntegration:
         return await task_repo.create(agent_id=test_agent.id, task=task)
 
     @pytest_asyncio.fixture
+    async def test_pagination_tasks(self, isolated_repositories, test_agent):
+        """Create a test task using the repository"""
+        task_repo = isolated_repositories["task_repository"]
+        tasks = []
+        for i in range(60):
+            task = TaskEntity(
+                id=orm_id(),
+                name=f"test-task-{i}",
+                status=TaskStatus.RUNNING,
+                status_reason="Test task created for integration testing",
+            )
+            tasks.append(await task_repo.create(agent_id=test_agent.id, task=task))
+        return tasks
+
+    @pytest_asyncio.fixture
     async def test_task_with_params(self, isolated_repositories, test_agent):
         """Create a test task with params directly via repository"""
         task_repo = isolated_repositories["task_repository"]
@@ -64,6 +79,49 @@ class TestTasksAPIIntegration:
         )
 
         return await task_repo.create(agent_id=test_agent.id, task=task)
+
+    async def test_delete_task_success(
+        self, isolated_client, test_task, test_task_with_params
+    ):
+        """Test that delete task endpoint returns success"""
+        # When - Delete the test task
+        response = await isolated_client.delete(f"/tasks/{test_task.id}")
+        assert response.status_code == 200
+        deleted_task = response.json()
+        assert deleted_task["id"] == test_task.id
+        assert deleted_task["message"] == f"Task {test_task.id} deleted successfully"
+
+        # Then - Should not return the deleted task
+        response = await isolated_client.get(f"/tasks/{test_task.id}")
+        assert response.status_code == 404
+        error_data = response.json()
+        assert error_data["message"] == f"Task {test_task.id} not found"
+
+        # And - Delete the test task with params by name
+        response = await isolated_client.delete(
+            f"/tasks/name/{test_task_with_params.name}"
+        )
+        assert response.status_code == 200
+        deleted_task = response.json()
+        assert deleted_task["id"] == test_task_with_params.id
+        assert (
+            deleted_task["message"]
+            == f"Task '{test_task_with_params.name}' deleted successfully"
+        )
+
+        # Then - Should not return the deleted task
+        response = await isolated_client.get(
+            f"/tasks/name/{test_task_with_params.name}"
+        )
+        assert response.status_code == 404
+        error_data = response.json()
+        assert error_data["message"] == f"Task {test_task_with_params.name} not found"
+
+        # And - Listing tasks should not return the deleted task
+        response = await isolated_client.get("/tasks")
+        assert response.status_code == 200
+        tasks = response.json()
+        assert len(tasks) == 0
 
     async def test_list_tasks_returns_valid_structure_and_schema(
         self, isolated_client, test_task
@@ -992,3 +1050,41 @@ class TestTasksAPIIntegration:
         assert "task_metadata" in task_data_by_name
         assert task_data_by_name["task_metadata"] is None
         assert task_data_by_name["name"] == created_task.name
+
+    async def test_list_tasks_pagination(
+        self, isolated_client, test_pagination_tasks, test_agent
+    ):
+        """Test GET /tasks/ endpoint with pagination."""
+        # Given - A task record exists
+        # (created by test_pagination_tasks fixture)
+
+        # When - List all tasks with pagination
+        response = await isolated_client.get(
+            "/tasks", params={"agent_id": test_agent.id}
+        )
+        assert response.status_code == 200
+        response_data = response.json()
+        # Default limit if none specified
+        assert len(response_data) == 50
+
+        page_number = 1
+        paginated_tasks = []
+        while True:
+            response = await isolated_client.get(
+                "/tasks",
+                params={
+                    "limit": 7,
+                    "page_number": page_number,
+                    "agent_id": test_agent.id,
+                },
+            )
+            assert response.status_code == 200
+            tasks_data = response.json()
+            paginated_tasks.extend(tasks_data)
+            if len(tasks_data) < 1:
+                break
+            page_number += 1
+        assert len(paginated_tasks) == len(test_pagination_tasks)
+        assert {(d["id"], d["name"]) for d in paginated_tasks} == {
+            (d.id, d.name) for d in test_pagination_tasks
+        }

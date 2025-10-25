@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import Depends
 
@@ -33,6 +33,8 @@ class DeploymentHistoryUseCase:
 
     async def list_deployments(
         self,
+        limit: int,
+        page_number: int,
         **filters,
     ) -> list[DeploymentHistoryEntity]:
         """
@@ -51,7 +53,9 @@ class DeploymentHistoryUseCase:
             List of deployment history entities
         """
         # Use the basic list method from the repository
-        return await self.deployment_history_repository.list(filters)
+        return await self.deployment_history_repository.list(
+            filters=filters, limit=limit, page_number=page_number
+        )
 
     async def get_last_deployment_for_agent(
         self,

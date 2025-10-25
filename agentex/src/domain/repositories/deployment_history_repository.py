@@ -9,6 +9,9 @@ from src.config.dependencies import DDatabaseAsyncReadWriteSessionMaker
 from src.domain.entities.agents import AgentEntity
 from src.domain.entities.deployment_history import DeploymentHistoryEntity
 from src.utils.ids import orm_id
+from src.utils.logging import make_logger
+
+logger = make_logger(__name__)
 
 
 class DeploymentHistoryRepository(
@@ -26,7 +29,12 @@ class DeploymentHistoryRepository(
             DeploymentHistoryEntity,
         )
 
-    async def list(self, filters: dict | None = None) -> list[DeploymentHistoryEntity]:
+    async def list(
+        self,
+        filters: dict | None = None,
+        limit: int | None = None,
+        page_number: int | None = None,
+    ) -> list[DeploymentHistoryEntity]:
         """
         List deployment history with optional filtering.
 
@@ -34,22 +42,14 @@ class DeploymentHistoryRepository(
             filters: Dictionary of filters to apply. Currently supports:
                     - agent_id: Filter agents by agent ID using the join table
         """
-        if not filters or "agent_id" not in filters:
-            return await super().list(filters)
-
-        # Build query with join to agents table
-        query = (
-            select(DeploymentHistoryORM)
-            .join(AgentORM, AgentORM.id == DeploymentHistoryORM.agent_id)
-            .where(DeploymentHistoryORM.agent_id == filters["agent_id"])
+        query = select(DeploymentHistoryORM)
+        if filters and "agent_id" in filters:
+            query = query.join(
+                AgentORM, AgentORM.id == DeploymentHistoryORM.agent_id
+            ).where(AgentORM.id == filters["agent_id"])
+        return await super().list(
+            filters=filters, query=query, limit=limit, page_number=page_number
         )
-        async with self.start_async_db_session(allow_writes=True) as session:
-            result = await session.execute(query)
-            deployments = result.scalars().all()
-            return [
-                DeploymentHistoryEntity.model_validate(deployment)
-                for deployment in deployments
-            ]
 
     async def get_last_deployment_for_agent(
         self,
@@ -80,22 +80,50 @@ class DeploymentHistoryRepository(
                 else None
             )
 
-    async def create_from_agent(self, agent: AgentEntity) -> DeploymentHistoryEntity:
+    async def create_from_agent(
+        self, agent: AgentEntity
+    ) -> DeploymentHistoryEntity | None:
         """
         Create a new deployment history record from an agent.
+
+        Returns:
+            DeploymentHistoryEntity: The created deployment history record, or None if skipped.
+
+        Skips and returns None in the following cases:
+            - The agent has no registration metadata.
+            - The registration metadata does not contain a commit hash.
+            - The registration metadata does not contain a branch name.
+            - The last deployment for the agent has the same commit hash as the current one.
         """
         registration_metadata = agent.registration_metadata
         if not registration_metadata:
-            raise ValueError("Registration metadata is required")
+            logger.info(
+                f"No registration metadata found for agent {agent.id}, skipping deployment history update"
+            )
+            return
 
-        commit_hash = registration_metadata.get("agent_commit")
+        commit_hash = agent.registration_metadata.get("agent_commit")
         if not commit_hash:
-            raise ValueError("Commit hash is required")
+            logger.info(
+                f"No commit hash found for agent {agent.id}, skipping deployment history update"
+            )
+            return
 
         branch_name = registration_metadata.get("branch_name")
         if not branch_name:
-            raise ValueError("Branch name is required")
+            logger.info(
+                f"No branch name found for agent {agent.id}, skipping deployment history update"
+            )
+            return
 
+        last_deployment = await self.get_last_deployment_for_agent(agent_id=agent.id)
+        if last_deployment and last_deployment.commit_hash == commit_hash:
+            logger.info(
+                f"Last deployment for agent {agent.id} is the same as the current deployment, skipping update"
+            )
+            return
+
+        logger.info(f"Creating new deployment history entry for agent {agent.id}")
         return await self.create(
             DeploymentHistoryEntity(
                 id=orm_id(),

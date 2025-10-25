@@ -30,18 +30,30 @@ class StatesUseCase:
         return await self.task_state_repository.get(id=id)
 
     async def list(
-        self, task_id: str | None = None, agent_id: str | None = None
+        self,
+        limit: int,
+        page_number: int,
+        task_id: str | None = None,
+        agent_id: str | None = None,
     ) -> list[StateEntity]:
         if task_id and agent_id:
             return await self.task_state_repository.list(
-                filters={"task_id": task_id, "agent_id": agent_id}
+                filters={"task_id": task_id, "agent_id": agent_id},
+                limit=limit,
+                page_number=page_number,
             )
         elif task_id:
-            return await self.task_state_repository.list(filters={"task_id": task_id})
+            return await self.task_state_repository.list(
+                filters={"task_id": task_id}, limit=limit, page_number=page_number
+            )
         elif agent_id:
-            return await self.task_state_repository.list(filters={"agent_id": agent_id})
+            return await self.task_state_repository.list(
+                filters={"agent_id": agent_id}, limit=limit, page_number=page_number
+            )
         else:
-            return await self.task_state_repository.list()
+            return await self.task_state_repository.list(
+                limit=limit, page_number=page_number
+            )
 
     async def update(self, id: str, task_id: str, state: dict[str, Any]) -> StateEntity:
         task_state = await self.task_state_repository.get(id=id)

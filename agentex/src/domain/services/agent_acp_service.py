@@ -48,6 +48,64 @@ USE_STREAMING_ADVISORY_LOCK = os.environ.get(
     "USE_STREAMING_ADVISORY_LOCK", "false"
 ) in ["true", "1", "yes"]
 
+# Hop-by-hop headers that should not be forwarded to downstream services
+# https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers
+HOP_BY_HOP_HEADERS = frozenset(
+    {
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+        "content-length",
+        "content-encoding",
+        "host",
+    }
+)
+
+# Sensitive headers that should never be forwarded from client requests
+# to prevent credential spoofing or leaking
+BLOCKED_HEADERS = frozenset(
+    {
+        "authorization",
+        "cookie",
+        "x-agent-api-key",
+    }
+)
+
+
+def filter_request_headers(headers: dict[str, str] | None) -> dict[str, str]:
+    """
+    Filter request headers to only include safe custom headers.
+
+    Security filtering rules:
+    1. Allow only x-* prefixed headers (allowlist approach)
+    2. Block hop-by-hop headers (connection, keep-alive, etc.)
+    3. Block sensitive headers (authorization, cookie, x-agent-api-key)
+
+    Args:
+        headers: Raw request headers from client
+
+    Returns:
+        Filtered headers safe to forward to downstream agents
+    """
+    if not headers:
+        return {}
+
+    # Note: HOP_BY_HOP_HEADERS check is defensive programming - while it currently
+    # contains no x-* headers, this ensures future-proof filtering if custom hop-by-hop
+    # headers are added (e.g., x-custom-connection-option)
+    return {
+        k: v
+        for k, v in headers.items()
+        if k.lower().startswith("x-")
+        and k.lower() not in HOP_BY_HOP_HEADERS
+        and k.lower() not in BLOCKED_HEADERS
+    }
+
 
 class AgentACPService(TaskMessageMixin):
     """
@@ -255,9 +313,7 @@ class AgentACPService(TaskMessageMixin):
         )
         headers = await self.get_headers(agent)
         lock_key = hash((agent.id, task.id))
-        async with self._agent_repository.acquire_advisory_lock(
-            lock_key, blocking=False
-        ) as acquired:
+        async with self._agent_repository.acquire_advisory_lock(lock_key) as acquired:
             if not acquired:
                 raise ValueError(
                     f"Agent {agent.id} already processing message send for task {task.id}"
@@ -294,7 +350,7 @@ class AgentACPService(TaskMessageMixin):
             # WARNING: This holds a DB connection for 10+ seconds per stream!
             # With limited DB pool size, this can cause bottlenecks at high concurrency
             async with self._agent_repository.acquire_advisory_lock(
-                lock_key, blocking=False
+                lock_key
             ) as acquired:
                 if not acquired:
                     raise ValueError(
@@ -333,15 +389,34 @@ class AgentACPService(TaskMessageMixin):
         )
 
     async def send_event(
-        self, agent: AgentEntity, event: EventEntity, task: TaskEntity, acp_url: str
+        self,
+        agent: AgentEntity,
+        event: EventEntity,
+        task: TaskEntity,
+        acp_url: str,
+        request_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Send an event to a running task"""
+
+        # Filter request headers for security (only safe x-* headers)
+        filtered_headers = filter_request_headers(request_headers)
+
+        # Don't include headers in params body - let SDK extract from HTTP headers
+        # This ensures single source of truth and avoids duplication
         params = SendEventParams(
             agent=agent,
             task=task,
             event=event,
+            request=None,
         )
-        headers = await self.get_headers(agent)
+
+        # Build HTTP headers: start with filtered request headers, then overlay auth headers
+        # Auth headers are added last to ensure they cannot be overwritten
+        # SDK will extract these headers and populate params.request at agent side
+        headers = filtered_headers.copy()
+        auth_headers = await self.get_headers(agent)
+        headers.update(auth_headers)
+
         return await self._call_jsonrpc(
             url=acp_url,
             method=AgentRPCMethod.EVENT_SEND,

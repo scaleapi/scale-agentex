@@ -22,7 +22,7 @@ from src.domain.entities.agent_api_keys import (
     AgentAPIKeyEntity,
     AgentAPIKeyType,
 )
-from src.domain.entities.agents import AgentEntity
+from src.domain.entities.agents import AgentEntity, AgentStatus
 from src.domain.repositories.agent_api_key_repository import (
     DAgentAPIKeyRepository,
 )
@@ -55,9 +55,12 @@ class AgentAPIKeysUseCase:
 
     async def get_agent(
         self, agent_id: str | None = None, agent_name: str | None = None
-    ) -> AgentEntity:
+    ) -> AgentEntity | None:
         try:
-            return await self.agent_repo.get(id=agent_id, name=agent_name)
+            agent = await self.agent_repo.get(id=agent_id, name=agent_name)
+            if agent.status == AgentStatus.DELETED:
+                return None
+            return agent
         except ItemDoesNotExist:
             logger.error(
                 f"Agent with ID {agent_id} and name {agent_name} does not exist."
@@ -134,8 +137,12 @@ class AgentAPIKeysUseCase:
             agent_name=agent_name, key_name=key_name, api_key_type=api_key_type
         )
 
-    async def list(self, agent_id: str) -> list[AgentAPIKeyEntity]:
-        return await self.agent_api_key_repo.list({"agent_id": agent_id})
+    async def list(
+        self, agent_id: str, limit: int, page_number: int
+    ) -> list[AgentAPIKeyEntity]:
+        return await self.agent_api_key_repo.list(
+            limit=limit, page_number=page_number, filters={"agent_id": agent_id}
+        )
 
     async def forward_agent_request(
         self,
@@ -243,11 +250,7 @@ class AgentAPIKeysUseCase:
         Returns None if valid, otherwise JSONResponse with error.
         """
         agent_api_key = request.headers.get("X-Agent-API-Key")
-        if not agent_api_key:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Missing X-Agent-API-Key header."},
-            )
+        assert agent_api_key, "Missing X-Agent-API-Key header."
 
         api_key_entity = await self.agent_api_key_repo.get_external_by_agent_id_and_key(
             agent_id=agent_id, api_key=agent_api_key
@@ -268,11 +271,7 @@ class AgentAPIKeysUseCase:
         Returns None if valid, otherwise JSONResponse with error.
         """
         signature_header = request.headers.get("x-hub-signature-256")
-        if not signature_header:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Missing x-hub-signature-256 header."},
-            )
+        assert signature_header, "Missing x-hub-signature-256 header."
 
         if not payload_body:
             error_msg = "Empty payload in GitHub webhook."
@@ -341,11 +340,7 @@ class AgentAPIKeysUseCase:
         Returns None if valid, otherwise JSONResponse with error.
         """
         signature_header = request.headers.get("x-slack-signature")
-        if not signature_header:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Missing x-slack-signature header."},
-            )
+        assert signature_header, "Missing x-slack-signature header."
 
         request_timestamp_raw = request.headers.get("X-Slack-Request-Timestamp")
         if not request_timestamp_raw:
@@ -375,24 +370,8 @@ class AgentAPIKeysUseCase:
                 content={"detail": error_msg},
             )
 
-        if not payload_body:
-            error_msg = "Empty payload in Slack webhook."
-            logger.warning(error_msg)
-            return JSONResponse(
-                status_code=400,
-                content={"detail": error_msg},
-            )
-        payload_json = None
-        try:
-            payload_json = json.loads(payload_body.decode("utf-8"))
-        except json.JSONDecodeError:
-            error_msg = "Failed to parse Slack webhook payload as JSON."
-            logger.warning(error_msg)
-            return JSONResponse(
-                status_code=400,
-                content={"detail": error_msg},
-            )
-
+        # We already checked that the payload is not empty and parseable when looking for the challenge, so we can decode it
+        payload_json = json.loads(payload_body.decode("utf-8"))
         if not payload_json.get("api_app_id"):
             # Currently only supporting Slack webhooks with API app ID
             error_msg = "Slack webhook payload missing API app ID."

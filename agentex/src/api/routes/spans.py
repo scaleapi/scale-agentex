@@ -80,10 +80,14 @@ async def get_span(
 async def list_spans(
     span_use_case: DSpanUseCase,
     trace_id: str | None = None,
+    limit: int = 50,
+    page_number: int = 1,
 ) -> list[Span]:
     """
     List all spans for a given trace ID
     """
     logger.info(f"Listing spans for trace ID: {trace_id}")
-    spans = await span_use_case.list(trace_id=trace_id)
-    return spans
+    spans = await span_use_case.list(
+        trace_id=trace_id, limit=limit, page_number=page_number
+    )
+    return [Span.model_validate(span) for span in spans]

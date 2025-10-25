@@ -23,7 +23,12 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
             async_read_write_session_maker, AgentAPIKeyORM, AgentAPIKeyEntity
         )
 
-    async def list(self, filters: dict | None = None) -> list[AgentAPIKeyEntity]:
+    async def list(
+        self,
+        filters: dict | None = None,
+        limit: int | None = None,
+        page_number: int | None = None,
+    ) -> list[AgentAPIKeyEntity]:
         """
         List agent api_keys with optional filtering.
 
@@ -31,20 +36,14 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
             filters: Dictionary of filters to apply. Currently supports:
                     - agent_id: Filter agents by agent ID using the join table
         """
-        if not filters or "agent_id" not in filters:
-            return await super().list(filters)
-
-        async with self.start_async_db_session(allow_writes=True) as session:
-            # Build query with join to agents table
-            query = (
-                select(AgentAPIKeyORM)
-                .join(AgentORM, AgentORM.id == AgentAPIKeyORM.agent_id)
-                .where(AgentORM.id == filters["agent_id"])
+        query = select(AgentAPIKeyORM)
+        if filters and "agent_id" in filters:
+            query = query.join(AgentORM, AgentORM.id == AgentAPIKeyORM.agent_id).where(
+                AgentORM.id == filters["agent_id"]
             )
-
-            result = await session.execute(query)
-            agents = result.scalars().all()
-            return [AgentAPIKeyEntity.model_validate(agent) for agent in agents]
+        return await super().list(
+            filters=filters, query=query, limit=limit, page_number=page_number
+        )
 
     async def get_internal_api_key_by_agent_id(
         self, agent_id: str
@@ -71,32 +70,6 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
                     AgentAPIKeyORM.created_at.desc()
                 )  # Get the most recent internal key
                 .limit(1)  # Limit to one result
-            )
-
-            result = await session.execute(query)
-            agents = result.scalars().all()
-            return AgentAPIKeyEntity.model_validate(agents[0]) if agents else None
-
-    async def get_internal_api_key_by_value(
-        self, api_key: str
-    ) -> AgentAPIKeyEntity | None:
-        """
-        Get the internal API key by its value.
-
-        Args:
-            api_key: The API key value.
-
-        Returns:
-            An AgentAPIKeyEntity if found, otherwise None.
-        """
-        async with self.start_async_db_session(allow_writes=True) as session:
-            query = (
-                select(AgentAPIKeyORM)
-                .where(
-                    AgentAPIKeyORM.api_key == api_key,
-                    AgentAPIKeyORM.api_key_type == AgentAPIKeyType.INTERNAL,
-                )
-                .limit(1)
             )
 
             result = await session.execute(query)

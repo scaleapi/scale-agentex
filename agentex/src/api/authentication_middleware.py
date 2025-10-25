@@ -45,6 +45,9 @@ class AgentexAuthMiddleware(BaseHTTPMiddleware):
             environment=resolve_environment_variable_dependency(EnvVarKeys.ENVIRONMENT),
         )
 
+    def is_enabled(self) -> bool:
+        return self._enabled
+
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
         request.state.principal_context = None
         request.state.agent_identity = None
@@ -128,7 +131,7 @@ class AgentexAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Handle auth gateway authentication (if enabled)
-        if self._enabled:
+        if self.is_enabled():
             # Get headers for caching
             headers_dict = get_request_headers_to_forward(request)
 

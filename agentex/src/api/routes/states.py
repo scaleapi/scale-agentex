@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 
 from src.api.schemas.authorization_types import (
     AgentexResourceType,
@@ -45,9 +45,8 @@ async def get_state(
     state_id: DAuthorizedId(TaskChildResourceType.state, AuthorizedOperationType.read),
     states_use_case: DStatesUseCase,
 ) -> State:
+    # Will raise an exception if the state does not exist
     state_entity = await states_use_case.get(id=state_id)
-    if not state_entity:
-        raise HTTPException(404, "State not found")
     return State.model_validate(state_entity)
 
 
@@ -61,8 +60,12 @@ async def filter_states(
     states_use_case: DStatesUseCase,
     task_id: str | None = Query(None, description="Task ID"),
     agent_id: str | None = Query(None, description="Agent ID"),
+    limit: int = Query(50, description="Limit", ge=1),
+    page_number: int = Query(1, description="Page number", ge=1),
 ) -> list[State]:
-    state_entities = await states_use_case.list(task_id=task_id, agent_id=agent_id)
+    state_entities = await states_use_case.list(
+        task_id=task_id, agent_id=agent_id, limit=limit, page_number=page_number
+    )
     logger.info(f"Listing states: {state_entities}")
     return [State.model_validate(state_entity) for state_entity in state_entities]
 
@@ -96,8 +99,7 @@ async def delete_task_state(
     ),
     states_use_case: DStatesUseCase,
 ) -> State:
+    # Will raise an exception if the state does not exist
     state_entity = await states_use_case.get(id=state_id)
-    if not state_entity:
-        raise HTTPException(404, "State not found")
     await states_use_case.delete(id=state_id)
     return State.model_validate(state_entity)

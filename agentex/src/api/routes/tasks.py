@@ -66,11 +66,17 @@ async def list_tasks(
     authorized_ids: DAuthorizedResourceIds(AgentexResourceType.task),
     agent_id: str | None = None,
     agent_name: str | None = None,
+    limit: int = 50,
+    page_number: int = 1,
 ):
     """List all tasks."""
 
     task_entities = await task_use_case.list_tasks(
-        id=authorized_ids, agent_id=agent_id, agent_name=agent_name
+        id=authorized_ids,
+        agent_id=agent_id,
+        agent_name=agent_name,
+        limit=limit,
+        page_number=page_number,
     )
     return [Task.model_validate(task_entity) for task_entity in task_entities]
 

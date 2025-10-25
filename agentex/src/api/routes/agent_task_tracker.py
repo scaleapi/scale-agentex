@@ -50,12 +50,14 @@ async def filter_agent_task_tracker(
     agent_task_tracker_use_case: DAgentTaskTrackerUseCase,
     agent_id: str | None = Query(None, description="Agent ID"),
     task_id: str | None = Query(None, description="Task ID"),
+    limit: int = Query(50, description="Limit", ge=1),
+    page_number: int = Query(1, description="Page number", ge=1),
 ) -> list[AgentTaskTracker]:
     """
     Filter agent task tracker by query parameters.
     """
     agent_task_tracker_entities = await agent_task_tracker_use_case.list(
-        agent_id=agent_id, task_id=task_id
+        agent_id=agent_id, task_id=task_id, limit=limit, page_number=page_number
     )
     return [
         AgentTaskTracker.model_validate(entity)

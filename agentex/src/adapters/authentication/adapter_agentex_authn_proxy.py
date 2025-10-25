@@ -2,7 +2,7 @@ from src.adapters.authentication.port import AuthenticationGateway
 from src.api.schemas.principal_context import AgentexAuthPrincipalContext
 from src.config.dependencies import DEnvironmentVariable
 from src.config.environment_variables import Environment, EnvVarKeys
-from src.utils.http_request_handler import post_with_error_handling
+from src.utils.http_request_handler import HttpRequestHandler
 
 
 class AgentexAuthenticationProxy(AuthenticationGateway[AgentexAuthPrincipalContext]):
@@ -17,6 +17,6 @@ class AgentexAuthenticationProxy(AuthenticationGateway[AgentexAuthPrincipalConte
     async def verify_headers(
         self, headers: dict[str, str]
     ) -> AgentexAuthPrincipalContext:
-        return await post_with_error_handling(
+        return await HttpRequestHandler.post_with_error_handling(
             self.agentex_auth_url, "/v1/authn", headers=headers
         )

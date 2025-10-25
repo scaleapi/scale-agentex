@@ -90,11 +90,11 @@ async def test_agent_repository_crud_operations(postgres_url, isolated_test_sche
             # Test 4: Update the agent
             updated_data = retrieved_agent.model_copy()
             updated_data.description = "Updated test agent description"
-            updated_data.status = AgentStatus.BUILDING
+            updated_data.status = AgentStatus.FAILED
 
             updated_agent = await test_repository.update(updated_data)
             assert updated_agent.description == "Updated test agent description"
-            assert updated_agent.status == AgentStatus.BUILDING
+            assert updated_agent.status == AgentStatus.FAILED
             print("✅ UPDATE operation successful")
 
             # Test 5: List agents
@@ -108,7 +108,7 @@ async def test_agent_repository_crud_operations(postgres_url, isolated_test_sche
                 id=str(uuid4()),
                 name="test-agent-2",
                 description="Second test agent",
-                status=AgentStatus.PENDING,
+                status=AgentStatus.READY,
                 acp_type=ACPType.SYNC,
             )
 
@@ -122,7 +122,24 @@ async def test_agent_repository_crud_operations(postgres_url, isolated_test_sche
             assert "test-agent-2" in agent_names
             print("✅ LIST multiple agents successful")
 
-            # Test 8: Delete an agent
+            # Test 8: List multiple agents with pagination
+            page_number = 1
+            paged_agents = []
+            while True:
+                agent_list_with_page = await test_repository.list(
+                    limit=1, page_number=page_number
+                )
+                paged_agents.extend(agent_list_with_page)
+                if len(agent_list_with_page) < 1:
+                    break
+                assert len(agent_list_with_page) == 1
+                page_number += 1
+            assert len(paged_agents) == 2
+            assert paged_agents[0].id == created_agent.id
+            assert paged_agents[1].id == created_agent_2.id
+            print("✅ LIST multiple agents with pagination successful")
+
+            # Test 9: Delete an agent
             await test_repository.delete(id=created_agent_2.id)
 
             # Verify deletion

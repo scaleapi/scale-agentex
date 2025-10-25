@@ -15,7 +15,7 @@ Today, most AI applications are limited to Level 3 (L3) and below, relying on sy
 
 **Ready to build your first agent?**
 
-**[→ Quick Start Guide on GitHub](https://github.com/scaleapi/agentex#quick-start)** (5 minutes)
+**[→ Quick Start Guide on GitHub](https://github.com/scaleapi/scale-agentex#quick-start)** (5 minutes)
 
 The README will guide you through:
 
@@ -34,7 +34,7 @@ Read [Developing Agentex Agents](developing_agentex_agents.md) to understand the
 
 ### 2. Learn by Example
 
-**[Browse Tutorials on GitHub](https://github.com/scaleapi/agentex-python/tree/main/examples/tutorials)** - Complete, runnable examples:
+**[Browse Tutorials on GitHub](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials)** - Complete, runnable examples:
 
 - **Sync ACP** - Simple request/response agents
 - **Agentic ACP** - Stateful workflows and complex agents

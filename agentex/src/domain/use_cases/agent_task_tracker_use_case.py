@@ -23,21 +23,33 @@ class AgentTaskTrackerUseCase:
         return await self._tracker_repository.get(id=tracker_id)
 
     async def list(
-        self, agent_id: str | None = None, task_id: str | None = None
+        self,
+        limit: int,
+        page_number: int,
+        agent_id: str | None = None,
+        task_id: str | None = None,
     ) -> list[AgentTaskTrackerEntity]:
         """
         List agent task trackers.
         """
         if agent_id and task_id:
             return await self._tracker_repository.list(
-                filters={"agent_id": agent_id, "task_id": task_id}
+                filters={"agent_id": agent_id, "task_id": task_id},
+                limit=limit,
+                page_number=page_number,
             )
         elif agent_id:
-            return await self._tracker_repository.list(filters={"agent_id": agent_id})
+            return await self._tracker_repository.list(
+                filters={"agent_id": agent_id}, limit=limit, page_number=page_number
+            )
         elif task_id:
-            return await self._tracker_repository.list(filters={"task_id": task_id})
+            return await self._tracker_repository.list(
+                filters={"task_id": task_id}, limit=limit, page_number=page_number
+            )
         else:
-            return await self._tracker_repository.list()
+            return await self._tracker_repository.list(
+                limit=limit, page_number=page_number
+            )
 
     async def update_agent_task_tracker(
         self,

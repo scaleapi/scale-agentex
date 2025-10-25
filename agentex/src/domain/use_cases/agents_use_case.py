@@ -107,32 +107,6 @@ class AgentsUseCase:
         return agent
 
     async def maybe_update_agent_deployment_history(self, agent: AgentEntity) -> None:
-        logger.info(f"Maybe updating deployment history for agent {agent.id}")
-        if not agent.registration_metadata:
-            logger.info(
-                f"No registration metadata found for agent {agent.id}, skipping deployment history update"
-            )
-            return
-
-        commit_hash = agent.registration_metadata.get("agent_commit")
-        if not commit_hash:
-            logger.info(
-                f"No commit hash found for agent {agent.id}, skipping deployment history update"
-            )
-            return
-
-        last_deployment = (
-            await self.deployment_history_repo.get_last_deployment_for_agent(
-                agent_id=agent.id
-            )
-        )
-        if last_deployment and last_deployment.commit_hash == commit_hash:
-            logger.info(
-                f"Last deployment for agent {agent.id} is the same as the current deployment, skipping update"
-            )
-            return
-
-        logger.info(f"Creating new deployment history entry for agent {agent.id}")
         try:
             await self.deployment_history_repo.create_from_agent(agent)
         except Exception as e:
@@ -142,7 +116,13 @@ class AgentsUseCase:
             return
 
     async def get(self, id: str | None = None, name: str | None = None) -> AgentEntity:
-        return await self.agent_repo.get(id=id, name=name)
+        agent = await self.agent_repo.get(id=id, name=name)
+        if agent.status == AgentStatus.DELETED:
+            if id:
+                raise ItemDoesNotExist(f"Agent {id} not found")
+            else:
+                raise ItemDoesNotExist(f"Agent {name} not found")
+        return agent
 
     async def update(self, agent: AgentEntity) -> AgentEntity:
         return await self.agent_repo.update(item=agent)
@@ -150,13 +130,30 @@ class AgentsUseCase:
     async def delete(
         self, id: str | None = None, name: str | None = None
     ) -> AgentEntity:
-        return await self.agent_repo.delete(id=id, name=name)
+        agent = await self.agent_repo.get(id=id, name=name)
+        if agent.status == AgentStatus.DELETED:
+            if id:
+                raise ItemDoesNotExist(f"Agent {id} not found")
+            else:
+                raise ItemDoesNotExist(f"Agent {name} not found")
+        agent.status = AgentStatus.DELETED
+        agent.status_reason = "Agent deleted successfully"
+        await self.agent_repo.update(agent)
+        return agent
 
-    async def list(self, task_id: str | None = None, **filters) -> list[AgentEntity]:
+    async def list(
+        self,
+        limit: int,
+        page_number: int,
+        task_id: str | None = None,
+        **filters,
+    ) -> list[AgentEntity]:
         if task_id is not None:
             filters["task_id"] = task_id
 
-        return await self.agent_repo.list(filters or None)
+        return await self.agent_repo.list(
+            filters=filters, limit=limit, page_number=page_number
+        )
 
 
 DAgentsUseCase = Annotated[AgentsUseCase, Depends(AgentsUseCase)]

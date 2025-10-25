@@ -43,7 +43,7 @@ class TaskMessageService:
         return await self.repository.get(id=message_id)
 
     async def get_messages(
-        self, task_id: str, limit: int | None = None
+        self, task_id: str, limit: int, page_number: int
     ) -> list[TaskMessageEntity]:
         """
         Get all messages for a specific task.
@@ -58,7 +58,11 @@ class TaskMessageService:
         # Sort by created_at in ascending order (oldest first)
         # This is typically what we want for conversation history
         return await self.repository.find_by_field(
-            "task_id", task_id, limit=limit, sort_by={"created_at": 1}
+            "task_id",
+            task_id,
+            limit=limit,
+            page_number=page_number,
+            sort_by={"created_at": 1},
         )
 
     async def append_message(

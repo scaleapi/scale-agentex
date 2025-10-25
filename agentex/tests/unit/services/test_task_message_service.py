@@ -129,7 +129,9 @@ class TestTaskMessageService:
             created_messages.append(message)
 
         # When
-        result = await task_message_service.get_messages(sample_task_id)
+        result = await task_message_service.get_messages(
+            sample_task_id, limit=100, page_number=1
+        )
 
         # Then
         assert len(result) == 3
@@ -153,7 +155,9 @@ class TestTaskMessageService:
             )
 
         # When
-        result = await task_message_service.get_messages(sample_task_id, limit=2)
+        result = await task_message_service.get_messages(
+            sample_task_id, limit=2, page_number=1
+        )
 
         # Then
         assert len(result) == 2

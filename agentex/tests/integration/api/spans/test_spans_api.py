@@ -3,12 +3,32 @@ Integration tests for span endpoints following FastAPI async testing best practi
 Tests the full HTTP request → FastAPI → response cycle with API-first validation.
 """
 
+from datetime import UTC, datetime
+
 import pytest
+import pytest_asyncio
+from src.domain.entities.spans import SpanEntity
+from src.utils.ids import orm_id
 
 
 @pytest.mark.asyncio
 class TestSpansAPIIntegration:
     """Integration tests for span endpoints using API-first validation"""
+
+    @pytest_asyncio.fixture
+    async def test_pagination_spans(self, isolated_repositories):
+        """Create a test task for message creation"""
+        span_repo = isolated_repositories["span_repository"]
+        spans = []
+        for i in range(60):
+            span = SpanEntity(
+                id=orm_id(),
+                trace_id=orm_id(),
+                name=f"test-span-{i}",
+                start_time=datetime.now(UTC),
+            )
+            spans.append(await span_repo.create(span))
+        return spans
 
     async def test_create_and_retrieve_span_consistency(self, isolated_client):
         """Test span creation and validate POST → GET consistency (API-first)"""
@@ -61,7 +81,15 @@ class TestSpansAPIIntegration:
         span_id = create_response.json()["id"]
 
         # When - Update the span
-        update_data = {"name": "updated-name", "output": {"status": "completed"}}
+        update_data = {
+            "name": "updated-name",
+            "parent_id": "parent-id",
+            "start_time": "2024-01-01T10:10:00Z",
+            "end_time": "2024-01-01T10:10:05Z",
+            "input": {"key": "value"},
+            "output": {"status": "completed"},
+            "data": {"test": True},
+        }
         patch_response = await isolated_client.patch(
             f"/spans/{span_id}", json=update_data
         )
@@ -77,7 +105,31 @@ class TestSpansAPIIntegration:
         # Validate changes were applied
         assert updated_span["name"] == "updated-name"
         assert updated_span["output"]["status"] == "completed"
+        assert updated_span["parent_id"] == "parent-id"
+        assert updated_span["start_time"] == "2024-01-01T10:10:00Z"
+        assert updated_span["end_time"] == "2024-01-01T10:10:05Z"
+        assert updated_span["input"] == {"key": "value"}
+        assert updated_span["data"] == {"test": True}
         assert updated_span["trace_id"] == initial_data["trace_id"]  # Unchanged
+
+        # We can also update trace ID and add values into metadata
+        patch_response = await isolated_client.patch(
+            f"/spans/{span_id}",
+            json={
+                "trace_id": "updated-trace-789",
+                "data": {"version": "2.0.0"},
+            },
+        )
+        assert patch_response.status_code == 200
+        updated_span = patch_response.json()
+        assert updated_span["name"] == "updated-name"
+        assert updated_span["output"]["status"] == "completed"
+        assert updated_span["parent_id"] == "parent-id"
+        assert updated_span["start_time"] == "2024-01-01T10:10:00Z"
+        assert updated_span["end_time"] == "2024-01-01T10:10:05Z"
+        assert updated_span["input"] == {"key": "value"}
+        assert updated_span["trace_id"] == "updated-trace-789"
+        assert updated_span["data"] == {"test": True, "version": "2.0.0"}
 
     async def test_list_spans_with_filtering(self, isolated_client):
         """Test list spans endpoint with trace_id filtering"""
@@ -101,6 +153,14 @@ class TestSpansAPIIntegration:
         assert create1.status_code == 200
         assert create2.status_code == 200
 
+        all_spans = await isolated_client.get("/spans")
+        assert all_spans.status_code == 200
+        all_spans_data = all_spans.json()
+        assert isinstance(all_spans_data, list)
+        assert len(all_spans_data) == 2
+        assert all_spans_data[0]["trace_id"] == trace_id_1
+        assert all_spans_data[1]["trace_id"] == trace_id_2
+
         # When - List spans filtered by trace_id
         list_response = await isolated_client.get(f"/spans?trace_id={trace_id_1}")
 
@@ -117,8 +177,34 @@ class TestSpansAPIIntegration:
         """Test getting a non-existent span returns 404"""
         # When - Get a non-existent span
         response = await isolated_client.get("/spans/non-existent-id")
-        print("--------------------------------ASDF ASDF")
-        print(response.status_code, response.json())
-
         # Then - Should return 404
         assert response.status_code == 404
+
+    async def test_list_spans_pagination(self, isolated_client, test_pagination_spans):
+        """Test GET /spans/ endpoint with pagination."""
+        # Given - A span record exists
+        # (created by test_pagination_spans fixture)
+
+        # When - List all spans with pagination
+        response = await isolated_client.get("/spans")
+        assert response.status_code == 200
+        response_data = response.json()
+        # Default limit if none specified
+        assert len(response_data) == 50
+
+        page_number = 1
+        paginated_spans = []
+        while True:
+            response = await isolated_client.get(
+                "/spans", params={"limit": 7, "page_number": page_number}
+            )
+            assert response.status_code == 200
+            spans_data = response.json()
+            paginated_spans.extend(spans_data)
+            if len(spans_data) < 1:
+                break
+            page_number += 1
+        assert len(paginated_spans) == len(test_pagination_spans)
+        assert {(d["id"], d["name"]) for d in paginated_spans} == {
+            (d.id, d.name) for d in test_pagination_spans
+        }

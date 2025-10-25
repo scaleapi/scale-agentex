@@ -3,7 +3,9 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from src.adapters.authorization.adapter_agentex_authz_proxy import DAgentexAuthorization
+from src.adapters.authorization.adapter_agentex_authz_proxy import (
+    DAgentexAuthorization,
+)
 from src.api.authentication_cache import get_auth_cache
 from src.api.authentication_middleware import DAuthorizationEnabled
 from src.api.schemas.authorization_types import (
@@ -32,7 +34,10 @@ class AuthorizationService:
     def _bypass(self) -> bool:
         if self.agent_identity:
             return True
-        return not self.enabled
+        return not self.is_enabled()
+
+    def is_enabled(self) -> bool:
+        return self.enabled
 
     async def grant(
         self, resource: AgentexResource, *, commit: bool = True, principal_context=...
