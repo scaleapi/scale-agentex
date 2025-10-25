@@ -6,25 +6,35 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "next lint --max-warnings=0",
     "lint:fix": "next lint --fix",
+    "lint:all": "eslint . --ext .ts,.tsx,.js,.jsx --max-warnings=0",
+    "lint:all:fix": "eslint . --ext .ts,.tsx,.js,.jsx --fix",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "fix": "npm run format && npm run lint:fix"
+    "fix": "npm run format && npm run lint:all:fix"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.19.0",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.38.6",
     "@hookform/resolvers": "^5.2.1",
     "@mobily/ts-belt": "^3.13.1",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-dialog": "^1.1.14",
     "@radix-ui/react-label": "^2.1.7",
     "@radix-ui/react-select": "^2.2.6",
+    "@radix-ui/react-separator": "^1.1.7",
     "@radix-ui/react-slot": "^1.2.3",
+    "@radix-ui/react-switch": "^1.2.6",
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@radix-ui/react-use-controllable-state": "^1.2.2",
     "@tailwindcss/postcss": "^4",
+    "@tanstack/react-query": "^5.90.3",
+    "@uiw/react-codemirror": "^4.25.2",
     "agentex": "^0.1.0-alpha.6",
     "ai": "^5.0.72",
     "class-variance-authority": "^0.7.1",
@@ -53,6 +63,7 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
@@ -61,6 +72,7 @@
     "eslint-config-next": "15.4.5",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.2.1",
-    "prettier": "^3.4.2"
+    "prettier": "^3.4.2",
+    "prettier-plugin-tailwindcss": "^0.7.1"
   }
 }

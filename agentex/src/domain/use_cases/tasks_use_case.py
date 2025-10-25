@@ -2,7 +2,8 @@ from typing import Annotated, Any
 
 from fastapi import Depends
 
-from src.domain.entities.tasks import TaskEntity
+from src.adapters.crud_store.exceptions import ItemDoesNotExist
+from src.domain.entities.tasks import TaskEntity, TaskStatus
 from src.domain.exceptions import ClientError
 from src.domain.services.task_service import DAgentTaskService
 from src.utils.logging import make_logger
@@ -28,16 +29,32 @@ class TasksUseCase:
         if not id and not name:
             raise ClientError("Either id or name must be provided")
 
-        return await self.task_service.get_task(id=id, name=name)
+        task = await self.task_service.get_task(id=id, name=name)
+        if task.status == TaskStatus.DELETED:
+            if id:
+                raise ItemDoesNotExist(f"Task {id} not found")
+            else:
+                raise ItemDoesNotExist(f"Task {name} not found")
+        return task
 
     async def update_task(self, task: TaskEntity) -> TaskEntity:
         """Update task record in repository"""
+        if task.status == TaskStatus.DELETED:
+            raise ItemDoesNotExist(f"Task {task.id} not found")
         return await self.task_service.update_task(task=task)
 
     async def delete_task(self, id: str | None = None, name: str | None = None) -> None:
         """Delete task record from repository"""
         # TODO: Should we notify ACP server about deletion?
-        await self.task_service.delete_task(id=id, name=name)
+        task = await self.task_service.get_task(id=id, name=name)
+        if task.status == TaskStatus.DELETED:
+            if id:
+                raise ItemDoesNotExist(f"Task {id} not found")
+            else:
+                raise ItemDoesNotExist(f"Task {name} not found")
+        task.status = TaskStatus.DELETED
+        task.status_reason = "Task deleted successfully"
+        await self.task_service.update_task(task=task)
 
     async def list_tasks(
         self,
@@ -64,6 +81,11 @@ class TasksUseCase:
 
         # todo: make this a transaction?
         task_entity = await self.task_service.get_task(id=id, name=name)
+        if task_entity.status == TaskStatus.DELETED:
+            if id:
+                raise ItemDoesNotExist(f"Task {id} not found")
+            else:
+                raise ItemDoesNotExist(f"Task {name} not found")
 
         # if no mutations are provided, don't do anything
         if task_metadata is None:

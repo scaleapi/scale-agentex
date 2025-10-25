@@ -90,11 +90,11 @@ async def test_agent_repository_crud_operations(postgres_url, isolated_test_sche
             # Test 4: Update the agent
             updated_data = retrieved_agent.model_copy()
             updated_data.description = "Updated test agent description"
-            updated_data.status = AgentStatus.BUILDING
+            updated_data.status = AgentStatus.FAILED
 
             updated_agent = await test_repository.update(updated_data)
             assert updated_agent.description == "Updated test agent description"
-            assert updated_agent.status == AgentStatus.BUILDING
+            assert updated_agent.status == AgentStatus.FAILED
             print("✅ UPDATE operation successful")
 
             # Test 5: List agents
@@ -108,7 +108,7 @@ async def test_agent_repository_crud_operations(postgres_url, isolated_test_sche
                 id=str(uuid4()),
                 name="test-agent-2",
                 description="Second test agent",
-                status=AgentStatus.PENDING,
+                status=AgentStatus.READY,
                 acp_type=ACPType.SYNC,
             )
 

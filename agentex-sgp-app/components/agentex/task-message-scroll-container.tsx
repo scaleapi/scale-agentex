@@ -1,6 +1,7 @@
-import { cn } from '@/lib/utils';
 import type { ReactNode } from 'react';
 import { forwardRef } from 'react';
+
+import { cn } from '@/lib/utils';
 
 type TaskMessageScrollContainerProps = {
   isLastPair: boolean;
@@ -16,10 +17,7 @@ const TaskMessageScrollContainer = forwardRef<
   return (
     <div
       ref={ref}
-      className={cn(
-        'flex flex-col gap-4 max-w-[800px] w-full px-4 pt-4',
-        className
-      )}
+      className={cn('flex w-full flex-col gap-4 px-4 pt-4', className)}
       style={
         isLastPair && containerHeight > 0
           ? {

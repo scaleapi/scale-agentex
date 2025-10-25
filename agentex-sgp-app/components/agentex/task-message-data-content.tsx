@@ -1,9 +1,11 @@
-import { CodeBlock } from '@/components/ai-elements/code-block';
-import { CopyButton } from '@/components/agentex/copy-button';
-import type { DataContent } from 'agentex/resources';
-import { cn } from '@/lib/utils';
-import { cva } from 'class-variance-authority';
 import { useMemo } from 'react';
+
+import { cva } from 'class-variance-authority';
+
+import { CodeBlock } from '@/components/ai-elements/code-block';
+import { cn } from '@/lib/utils';
+
+import type { DataContent } from 'agentex/resources';
 
 const variants = cva('', {
   variants: {
@@ -29,9 +31,7 @@ function TaskMessageDataContentComponent({
   );
   return (
     <div className={cn(variants({ author: content.author }))}>
-      <CodeBlock key={key} language="json" code={dataString}>
-        <CopyButton content={dataString} />
-      </CodeBlock>
+      <CodeBlock key={key} language="json" code={dataString} />
     </div>
   );
 }

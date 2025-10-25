@@ -1,4 +1,5 @@
-739800d3e1ce -> 09368a02d6cc (head), deployment history
+09368a02d6cc -> d7addd4229e8 (head), soft delete status
+739800d3e1ce -> 09368a02d6cc, deployment history
 dbac39ab82c3 -> 739800d3e1ce, registration metadata
 87454c35c13e -> dbac39ab82c3, add_task_metadata
 17c57fe68d04 -> 87454c35c13e, add_task_params

@@ -65,6 +65,49 @@ class TestTasksAPIIntegration:
 
         return await task_repo.create(agent_id=test_agent.id, task=task)
 
+    async def test_delete_task_success(
+        self, isolated_client, test_task, test_task_with_params
+    ):
+        """Test that delete task endpoint returns success"""
+        # When - Delete the test task
+        response = await isolated_client.delete(f"/tasks/{test_task.id}")
+        assert response.status_code == 200
+        deleted_task = response.json()
+        assert deleted_task["id"] == test_task.id
+        assert deleted_task["message"] == f"Task {test_task.id} deleted successfully"
+
+        # Then - Should not return the deleted task
+        response = await isolated_client.get(f"/tasks/{test_task.id}")
+        assert response.status_code == 404
+        error_data = response.json()
+        assert error_data["message"] == f"Task {test_task.id} not found"
+
+        # And - Delete the test task with params by name
+        response = await isolated_client.delete(
+            f"/tasks/name/{test_task_with_params.name}"
+        )
+        assert response.status_code == 200
+        deleted_task = response.json()
+        assert deleted_task["id"] == test_task_with_params.id
+        assert (
+            deleted_task["message"]
+            == f"Task '{test_task_with_params.name}' deleted successfully"
+        )
+
+        # Then - Should not return the deleted task
+        response = await isolated_client.get(
+            f"/tasks/name/{test_task_with_params.name}"
+        )
+        assert response.status_code == 404
+        error_data = response.json()
+        assert error_data["message"] == f"Task {test_task_with_params.name} not found"
+
+        # And - Listing tasks should not return the deleted task
+        response = await isolated_client.get("/tasks")
+        assert response.status_code == 200
+        tasks = response.json()
+        assert len(tasks) == 0
+
     async def test_list_tasks_returns_valid_structure_and_schema(
         self, isolated_client, test_task
     ):

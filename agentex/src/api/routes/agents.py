@@ -235,6 +235,7 @@ async def forward_request_to_agent(
 async def handle_agent_rpc_by_id(
     agent_id: DAuthorizedId(AgentexResourceType.agent, AuthorizedOperationType.execute),  # type: ignore
     request: AgentRPCRequest,
+    fastapi_request: Request,
     agents_acp_use_case: DAgentsACPUseCase,
     authorization_service: DAuthorizationService,
     task_service: DAgentTaskService,
@@ -244,10 +245,15 @@ async def handle_agent_rpc_by_id(
     await _authorize_rpc_request(
         agent_rpc_request_entity, authorization_service, task_service
     )
+
+    # Extract headers from FastAPI request
+    headers = dict(fastapi_request.headers)
+
     return await _handle_agent_rpc(
         request=agent_rpc_request_entity,
         agents_acp_use_case=agents_acp_use_case,
         agent_id=agent_id,
+        request_headers=headers,
     )
 
 
@@ -262,6 +268,7 @@ async def handle_agent_rpc_by_name(
         AgentexResourceType.agent, AuthorizedOperationType.execute
     ),
     request: AgentRPCRequest,
+    fastapi_request: Request,
     agents_acp_use_case: DAgentsACPUseCase,
     authorization_service: DAuthorizationService,
     task_service: DAgentTaskService,
@@ -271,10 +278,15 @@ async def handle_agent_rpc_by_name(
     await _authorize_rpc_request(
         agent_rpc_request_entity, authorization_service, task_service
     )
+
+    # Extract headers from FastAPI request
+    headers = dict(fastapi_request.headers)
+
     return await _handle_agent_rpc(
         request=agent_rpc_request_entity,
         agents_acp_use_case=agents_acp_use_case,
         agent_name=agent_name,
+        request_headers=headers,
     )
 
 
@@ -376,6 +388,7 @@ async def _handle_agent_rpc(
     agents_acp_use_case: DAgentsACPUseCase,
     agent_id: str | None = None,
     agent_name: str | None = None,
+    request_headers: dict[str, str] | None = None,
 ) -> AgentRPCResponse | StreamingResponse:
     """Handle JSON-RPC requests for an agent by its unique ID or name."""
 
@@ -391,11 +404,11 @@ async def _handle_agent_rpc(
 
     if is_streaming_request:
         return await _handle_streaming_rpc(
-            request, agents_acp_use_case, agent_id, agent_name
+            request, agents_acp_use_case, agent_id, agent_name, request_headers
         )
     else:
         return await _handle_sync_rpc(
-            request, agents_acp_use_case, agent_id, agent_name
+            request, agents_acp_use_case, agent_id, agent_name, request_headers
         )
 
 
@@ -404,6 +417,7 @@ async def _handle_sync_rpc(
     agents_acp_use_case: DAgentsACPUseCase,
     agent_id: str | None = None,
     agent_name: str | None = None,
+    request_headers: dict[str, str] | None = None,
 ) -> AgentRPCResponse:
     """Handle synchronous JSON-RPC requests."""
     try:
@@ -412,6 +426,7 @@ async def _handle_sync_rpc(
             agent_name=agent_name,
             method=request.method,
             params=request.params,
+            request_headers=request_headers,
         )
 
         if isinstance(result_entity, AsyncIterator):
@@ -459,6 +474,7 @@ async def _handle_streaming_rpc(
     agents_acp_use_case: DAgentsACPUseCase,
     agent_id: str | None = None,
     agent_name: str | None = None,
+    request_headers: dict[str, str] | None = None,
 ) -> StreamingResponse:
     """Handle streaming JSON-RPC requests."""
 
@@ -470,6 +486,7 @@ async def _handle_streaming_rpc(
                 agent_name=agent_name,
                 method=request.method,
                 params=request.params,
+                request_headers=request_headers,
             )
 
             if not isinstance(result_entity_async_iterator, AsyncIterator):

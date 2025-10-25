@@ -16,6 +16,7 @@ class TaskStatus(str, Enum):
     RUNNING = "RUNNING"
     TERMINATED = "TERMINATED"
     TIMED_OUT = "TIMED_OUT"
+    DELETED = "DELETED"
 
 
 class TaskEntity(BaseModel):

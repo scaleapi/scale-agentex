@@ -1,7 +1,11 @@
-import { cn } from '@/lib/utils';
+'use client';
+
 import { forwardRef } from 'react';
+
 import { ArrowRight } from 'lucide-react';
-import { useAppConfig } from '@/hooks/use-app-config';
+
+import { useAgentexClient } from '@/components/providers';
+import { cn } from '@/lib/utils';
 
 interface InvestigateTracesButtonProps {
   className?: string;
@@ -13,8 +17,12 @@ export const InvestigateTracesButton = forwardRef<
   HTMLAnchorElement,
   InvestigateTracesButtonProps
 >(({ className, disabled = false, taskId, ...props }, ref) => {
-  const { sgpAppURL } = useAppConfig();
+  const { sgpAppURL } = useAgentexClient();
   const sgpTracesURL = `${sgpAppURL}/beta/monitor?trace_id=${taskId}&tt-trace-id=${taskId}`;
+
+  if (!sgpAppURL) {
+    return null;
+  }
 
   return (
     <a
@@ -23,8 +31,8 @@ export const InvestigateTracesButton = forwardRef<
       target="_blank"
       rel="noopener noreferrer"
       className={cn(
-        'flex items-center gap-2 text-black dark:text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors text-sm focus:outline-none focus:ring-2 focus:ring-white focus:ring-opacity-20 rounded',
-        disabled && 'cursor-not-allowed opacity-50 pointer-events-none',
+        'focus:ring-opacity-20 flex items-center gap-2 rounded text-sm text-black transition-colors hover:text-gray-600 focus:ring-2 focus:ring-white focus:outline-none dark:text-gray-400 dark:hover:text-white',
+        disabled && 'pointer-events-none cursor-not-allowed opacity-50',
         className
       )}
       {...props}

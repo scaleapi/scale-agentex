@@ -1,20 +1,25 @@
 'use client';
 
-import { Button } from '@/components/ui/button';
-import { Copy, Check } from 'lucide-react';
+import { useCallback, useRef, useState } from 'react';
+
+import { Check, Copy } from 'lucide-react';
+import { toast } from 'react-toastify';
+
+import { IconButton } from '@/components/agentex/icon-button';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { useState, useCallback, useRef } from 'react';
+import { cn } from '@/lib/utils';
 
-interface CopyButtonProps {
+export interface CopyButtonProps {
   tooltip?: string;
   onClick?: () => void;
   content?: string;
   className?: string;
+  timeout?: number;
 }
 
 export function CopyButton({
@@ -22,6 +27,7 @@ export function CopyButton({
   onClick,
   content,
   className,
+  timeout = 4000,
 }: CopyButtonProps) {
   const [isCopying, setIsCopying] = useState(false);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -38,10 +44,10 @@ export function CopyButton({
           setIsCopying(true);
           timeoutRef.current = setTimeout(() => {
             setIsCopying(false);
-          }, 4000);
+          }, timeout);
         },
-        (err) => {
-          console.error('Failed to copy content:', err);
+        err => {
+          toast.error('Failed to copy content:', err);
         }
       );
     } else if (onClick) {
@@ -49,19 +55,22 @@ export function CopyButton({
       setIsCopying(true);
       timeoutRef.current = setTimeout(() => {
         setIsCopying(false);
-      }, 4000);
+      }, timeout);
     }
-  }, [content, onClick]);
+  }, [content, onClick, timeout]);
 
   const buttonContent = (
-    <Button
+    <IconButton
+      icon={isCopying ? Check : Copy}
       variant="ghost"
-      size="icon"
+      iconSize="sm"
       onClick={handleCopy}
-      className={`h-6 w-6 hover:bg-muted hover:text-muted-foreground transition-colors ${className || ''}`}
-    >
-      {isCopying ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-    </Button>
+      className={cn(
+        'hover:bg-muted hover:text-muted-foreground size-6 transition-colors',
+        className
+      )}
+      aria-label={isCopying ? 'Copied' : 'Copy'}
+    />
   );
 
   if (isCopying || !tooltip) {

@@ -1,19 +1,21 @@
-import { TaskMessageTextContentComponent } from '@/components/agentex/task-message-text-content';
-import { TaskMessageDataContentComponent } from '@/components/agentex/task-message-data-content';
-import { TaskMessageReasoningContentComponent } from '@/components/agentex/task-message-reasoning-content';
-import {
-  MemoizedTaskMessageToolPairComponent,
-  TaskMessageToolPairComponent,
-} from '@/components/agentex/task-message-tool-pair';
-import { TaskMessageScrollContainer } from '@/components/agentex/task-message-scroll-container';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
+
+import { AnimatePresence } from 'framer-motion';
+
 import { AnimatedMessageWrapper } from '@/components/agentex/animated-message-wrapper';
+import { TaskMessageDataContentComponent } from '@/components/agentex/task-message-data-content';
+import { TaskMessageReasoning } from '@/components/agentex/task-message-reasoning-content';
+import { TaskMessageScrollContainer } from '@/components/agentex/task-message-scroll-container';
+import { TaskMessageTextContentComponent } from '@/components/agentex/task-message-text-content';
+import { MemoizedTaskMessageToolPairComponent } from '@/components/agentex/task-message-tool-pair';
+import { useAgentexClient } from '@/components/providers';
+import { useTaskMessages } from '@/hooks/use-task-messages';
+
 import type {
   TaskMessage,
   ToolRequestContent,
   ToolResponseContent,
 } from 'agentex/resources';
-import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence } from 'framer-motion';
 
 type TaskMessageComponentProps = {
   message: TaskMessage;
@@ -32,12 +34,8 @@ function TaskMessageComponent({ message, key }: TaskMessageComponentProps) {
     );
   }
   if (message.content.type === 'reasoning') {
-    return (
-      <TaskMessageReasoningContentComponent
-        content={message.content}
-        isStreaming={message.streaming_status === 'IN_PROGRESS'}
-      />
-    );
+    // TODO: Fix check for streaming status to get accurate isStreaming status
+    return <TaskMessageReasoning message={message} />;
   }
 
   message.content.type satisfies 'tool_request' | 'tool_response' | undefined;
@@ -48,63 +46,9 @@ function TaskMessageComponent({ message, key }: TaskMessageComponentProps) {
 const MemoizedTaskMessageComponent = memo(TaskMessageComponent);
 
 type TaskMessagesComponentProps = {
-  messages: TaskMessage[];
+  taskId: string;
+  autoScrollEnabled?: boolean;
 };
-
-function TaskMessagesComponent({ messages }: TaskMessagesComponentProps) {
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const toolCallIdToResponseMap = new Map(
-    messages
-      .filter(
-        (m): m is TaskMessage & { content: ToolResponseContent } =>
-          m.content.type === 'tool_response'
-      )
-      .map((m) => [m.content.tool_call_id, m])
-  );
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  return (
-    <div className="flex flex-col gap-4">
-      {messages.map((m) => {
-        const { content } = m;
-        switch (content.type) {
-          case 'text':
-          case 'data':
-          case 'reasoning':
-            return (
-              <TaskMessageComponent
-                key={m.id || `msg-${Math.random()}`}
-                message={m}
-              />
-            );
-          case 'tool_request':
-            return (
-              <TaskMessageToolPairComponent
-                key={m.id || `tool-${Math.random()}`}
-                toolRequestMessage={{
-                  ...m,
-                  content,
-                }}
-                toolResponseMessage={toolCallIdToResponseMap.get(
-                  content.tool_call_id
-                )}
-              />
-            );
-          case 'tool_response':
-            return null;
-          default:
-            content.type satisfies undefined;
-            return null;
-        }
-      })}
-      <div ref={messagesEndRef} />
-    </div>
-  );
-}
-
 // Type for a message pair (user message + agent response(s))
 type MessagePair = {
   id: string;
@@ -113,11 +57,20 @@ type MessagePair = {
 };
 
 function MemoizedTaskMessagesComponentImpl({
-  messages,
+  taskId,
+  autoScrollEnabled = true,
 }: TaskMessagesComponentProps) {
   const lastPairRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerHeight, setContainerHeight] = useState<number>(0);
+
+  const { agentexClient } = useAgentexClient();
+
+  // Use query hook to get messages from cache if taskId is provided
+  const { data: queryData } = useTaskMessages({ agentexClient, taskId });
+
+  // Prefer query data if available, otherwise use prop messages
+  const messages = useMemo(() => queryData?.messages ?? [], [queryData]);
   const previousMessageCountRef = useRef(messages.length);
 
   const toolCallIdToResponseMap = useMemo<
@@ -130,7 +83,7 @@ function MemoizedTaskMessagesComponentImpl({
             (m): m is TaskMessage & { content: ToolResponseContent } =>
               m.content.type === 'tool_response'
           )
-          .map((m) => [m.content.tool_call_id, m])
+          .map(m => [m.content.tool_call_id, m])
       ),
     [messages]
   );
@@ -183,14 +136,19 @@ function MemoizedTaskMessagesComponentImpl({
     return pairs;
   }, [messages]);
 
-  // Measure the grandparent container height (the scrollable area)
+  // Measure the scrollable container height
   useEffect(() => {
     const measureHeight = () => {
       if (containerRef.current) {
-        // Get the grandparent (scrollable container)
-        const grandparent = containerRef.current.parentElement;
-        if (grandparent) {
-          setContainerHeight(grandparent.clientHeight);
+        // Walk up the DOM tree to find the scrollable container (has overflow-y-auto)
+        let element = containerRef.current.parentElement;
+        while (element) {
+          const overflowY = window.getComputedStyle(element).overflowY;
+          if (overflowY === 'auto' || overflowY === 'scroll') {
+            setContainerHeight(element.clientHeight);
+            return;
+          }
+          element = element.parentElement;
         }
       }
     };
@@ -203,8 +161,10 @@ function MemoizedTaskMessagesComponentImpl({
     return () => window.removeEventListener('resize', measureHeight);
   }, [messages]);
 
-  // Scroll to top when new message arrives
+  // Scroll to top when new message arrives (only if auto-scroll enabled)
   useEffect(() => {
+    if (!autoScrollEnabled) return;
+
     const previousCount = previousMessageCountRef.current;
     const currentCount = messages.length;
 
@@ -218,7 +178,7 @@ function MemoizedTaskMessagesComponentImpl({
     }
 
     previousMessageCountRef.current = currentCount;
-  }, [messages.length]);
+  }, [messages.length, autoScrollEnabled]);
 
   // Helper function to render a message
   const renderMessage = (message: TaskMessage) => {
@@ -247,7 +207,10 @@ function MemoizedTaskMessagesComponentImpl({
   };
 
   return (
-    <div ref={containerRef} className="flex flex-col w-full items-center">
+    <div
+      ref={containerRef}
+      className="flex w-full flex-1 flex-col items-center"
+    >
       <AnimatePresence initial={false}>
         {messagePairs.map((pair, index) => {
           const isLastPair = index === messagePairs.length - 1;
@@ -265,7 +228,7 @@ function MemoizedTaskMessagesComponentImpl({
               >
                 {renderMessage(pair.userMessage)}
               </AnimatedMessageWrapper>
-              {pair.agentMessages.map((agentMessage) => (
+              {pair.agentMessages.map(agentMessage => (
                 <React.Fragment key={agentMessage.id}>
                   {renderMessage(agentMessage)}
                 </React.Fragment>
@@ -280,4 +243,4 @@ function MemoizedTaskMessagesComponentImpl({
 
 const MemoizedTaskMessagesComponent = memo(MemoizedTaskMessagesComponentImpl);
 
-export { MemoizedTaskMessagesComponent, TaskMessagesComponent };
+export { MemoizedTaskMessagesComponent, TaskMessageComponent };

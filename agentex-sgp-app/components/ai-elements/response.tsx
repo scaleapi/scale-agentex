@@ -1,6 +1,7 @@
 'use client';
 
 import { type ComponentProps, memo } from 'react';
+
 import { Streamdown } from 'streamdown';
 
 type ResponseProps = ComponentProps<typeof Streamdown>;
@@ -11,7 +12,7 @@ const components = {
     ...props
   }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
     <a
-      className="wrap-anywhere font-medium underline text-primary-foreground"
+      className="text-primary-foreground font-medium wrap-anywhere underline"
       {...props}
     >
       {children}

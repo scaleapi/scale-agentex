@@ -62,7 +62,7 @@ Complex synchronization mechanism in `lib/pending-message.ts`:
 ### Component Organization
 
 - `components/agentex/*` — Domain-specific reusable components
-- `components/ui/*` — Generic UI components (shadcn/ui based)
+- `components/ui/*` — Generic UI components (shadcn/ui based) - only used by shadcn, do not add components to this directory unless they are shadcn
 - `entrypoints/*/` — Mode-specific page components and views
 - Follow pattern: **components should be presentational, controllers handle side effects**
 

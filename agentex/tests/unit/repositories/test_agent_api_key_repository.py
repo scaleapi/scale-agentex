@@ -105,6 +105,14 @@ async def test_agent_api_key_repository_crud_operations(
     assert any(s.id == agent_api_key_id for s in all_api_keys)
     print("✅ LIST operation successful")
 
+    # Test LIST by agent ID
+    all_api_keys_by_agent_id = await agent_api_key_repo.list(
+        filters={"agent_id": agent_id}
+    )
+    assert len(all_api_keys_by_agent_id) >= 1
+    assert any(s.id == agent_api_key_id for s in all_api_keys_by_agent_id)
+    print("✅ LIST by agent ID operation successful")
+
     # Create a second api_key to test multiple items
     agent_api_key_id_2 = orm_id()
     agent_api_key_2 = AgentAPIKeyEntity(

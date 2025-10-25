@@ -8,11 +8,10 @@ from src.utils.model_utils import BaseModel
 
 
 class AgentStatus(str, Enum):
-    PENDING = "Pending"
-    BUILDING = "Building"
     READY = "Ready"
     FAILED = "Failed"
     UNKNOWN = "Unknown"
+    DELETED = "Deleted"
 
 
 class ACPType(str, Enum):

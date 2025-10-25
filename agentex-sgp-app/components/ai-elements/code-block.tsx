@@ -1,15 +1,16 @@
 'use client';
 
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
-import { CheckIcon, CopyIcon } from 'lucide-react';
-import type { ComponentProps, HTMLAttributes, ReactNode } from 'react';
-import { createContext, useContext, useState } from 'react';
+import type { HTMLAttributes } from 'react';
+import { createContext } from 'react';
+
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import {
   oneDark,
   oneLight,
 } from 'react-syntax-highlighter/dist/esm/styles/prism';
+
+import { CopyButton } from '@/components/agentex/copy-button';
+import { cn } from '@/lib/utils';
 
 type CodeBlockContextType = {
   code: string;
@@ -23,21 +24,21 @@ export type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
   code: string;
   language: string;
   showLineNumbers?: boolean;
-  children?: ReactNode;
+  showCopyButton?: boolean;
 };
 
 export const CodeBlock = ({
   code,
   language,
   showLineNumbers = false,
+  showCopyButton = true,
   className,
-  children,
   ...props
 }: CodeBlockProps) => (
   <CodeBlockContext.Provider value={{ code }}>
     <div
       className={cn(
-        'relative w-full overflow-hidden rounded-md border bg-background text-foreground',
+        'bg-background text-foreground relative max-h-[200px] w-full overflow-y-auto rounded-md border',
         className
       )}
       {...props}
@@ -47,6 +48,7 @@ export const CodeBlock = ({
           className="overflow-hidden dark:hidden"
           codeTagProps={{
             className: 'font-mono text-sm',
+            style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
           }}
           customStyle={{
             margin: 0,
@@ -70,6 +72,7 @@ export const CodeBlock = ({
           className="hidden overflow-hidden dark:block"
           codeTagProps={{
             className: 'font-mono text-sm',
+            style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
           }}
           customStyle={{
             margin: 0,
@@ -89,60 +92,12 @@ export const CodeBlock = ({
         >
           {code}
         </SyntaxHighlighter>
-        {children && (
+        {showCopyButton && (
           <div className="absolute top-2 right-2 flex items-center gap-2">
-            {children}
+            <CopyButton content={code} />
           </div>
         )}
       </div>
     </div>
   </CodeBlockContext.Provider>
 );
-
-export type CodeBlockCopyButtonProps = ComponentProps<typeof Button> & {
-  onCopy?: () => void;
-  onError?: (error: Error) => void;
-  timeout?: number;
-};
-
-export const CodeBlockCopyButton = ({
-  onCopy,
-  onError,
-  timeout = 2000,
-  children,
-  className,
-  ...props
-}: CodeBlockCopyButtonProps) => {
-  const [isCopied, setIsCopied] = useState(false);
-  const { code } = useContext(CodeBlockContext);
-
-  const copyToClipboard = async () => {
-    if (typeof window === 'undefined' || !navigator.clipboard.writeText) {
-      onError?.(new Error('Clipboard API not available'));
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(code);
-      setIsCopied(true);
-      onCopy?.();
-      setTimeout(() => setIsCopied(false), timeout);
-    } catch (error) {
-      onError?.(error as Error);
-    }
-  };
-
-  const Icon = isCopied ? CheckIcon : CopyIcon;
-
-  return (
-    <Button
-      className={cn('shrink-0', className)}
-      onClick={copyToClipboard}
-      size="icon"
-      variant="ghost"
-      {...props}
-    >
-      {children ?? <Icon size={14} />}
-    </Button>
-  );
-};

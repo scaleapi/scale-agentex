@@ -1,11 +1,11 @@
-import { useAppConfig } from '@/hooks/use-app-config';
+import { useAgentexClient } from '@/components/providers';
 
 export function useBackToSgpHref({
   sgpAccountID,
 }: {
   sgpAccountID: string | null;
 }): string | null {
-  const { sgpAppURL } = useAppConfig();
+  const { sgpAppURL } = useAgentexClient();
 
   try {
     if (!sgpAccountID) {

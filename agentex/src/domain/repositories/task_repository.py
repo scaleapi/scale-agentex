@@ -10,7 +10,7 @@ from src.adapters.crud_store.adapter_postgres import (
 )
 from src.adapters.orm import AgentORM, AgentTaskTrackerORM, TaskAgentORM, TaskORM
 from src.config.dependencies import DDatabaseAsyncReadWriteSessionMaker
-from src.domain.entities.tasks import TaskEntity
+from src.domain.entities.tasks import TaskEntity, TaskStatus
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
@@ -42,42 +42,22 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity]):
             - agent_name (str | None): Filter tasks by agent name
         """
 
-        if agent_id is None and agent_name is None:
-            # no joins required
-            return await self.list(
-                filters=task_filters, order_by=order_by, order_direction=order_direction
-            )
-
-        async with self.start_async_db_session(allow_writes=True) as session:
-            # Build query with join to task_agents table
-            query = select(TaskORM).join(
-                TaskAgentORM, TaskORM.id == TaskAgentORM.task_id
-            )
-            if agent_name is not None:
+        query = select(TaskORM)
+        if agent_id or agent_name:
+            query = query.join(TaskAgentORM, TaskORM.id == TaskAgentORM.task_id)
+            if agent_name:
                 query = query.join(
                     AgentORM, TaskAgentORM.agent_id == AgentORM.id
                 ).where(AgentORM.name == agent_name)
-
-            if agent_id is not None:
+            if agent_id:
                 query = query.where(TaskAgentORM.agent_id == agent_id)
-
-            task_where_clauses = (
-                self.create_where_clauses_from_filters(filters=task_filters)
-                if task_filters is not None
-                else []
-            )
-            if task_where_clauses:
-                query = query.where(*task_where_clauses)
-
-            order_by_clauses = self.create_order_by_clauses(
-                order_by=order_by, order_direction=order_direction
-            )
-            if order_by_clauses:
-                query = query.order_by(*order_by_clauses)
-
-            result = await session.execute(query)
-            tasks = result.scalars().all()
-            return [TaskEntity.model_validate(task) for task in tasks]
+        query = query.where(TaskORM.status != TaskStatus.DELETED)
+        return await self.list(
+            filters=task_filters,
+            order_by=order_by,
+            order_direction=order_direction,
+            query=query,
+        )
 
     async def create(self, agent_id: str, task: TaskEntity) -> TaskEntity:
         """Create task and establish agent relationships"""

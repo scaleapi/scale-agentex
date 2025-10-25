@@ -77,32 +77,6 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
             agents = result.scalars().all()
             return AgentAPIKeyEntity.model_validate(agents[0]) if agents else None
 
-    async def get_internal_api_key_by_value(
-        self, api_key: str
-    ) -> AgentAPIKeyEntity | None:
-        """
-        Get the internal API key by its value.
-
-        Args:
-            api_key: The API key value.
-
-        Returns:
-            An AgentAPIKeyEntity if found, otherwise None.
-        """
-        async with self.start_async_db_session(allow_writes=True) as session:
-            query = (
-                select(AgentAPIKeyORM)
-                .where(
-                    AgentAPIKeyORM.api_key == api_key,
-                    AgentAPIKeyORM.api_key_type == AgentAPIKeyType.INTERNAL,
-                )
-                .limit(1)
-            )
-
-            result = await session.execute(query)
-            agents = result.scalars().all()
-            return AgentAPIKeyEntity.model_validate(agents[0]) if agents else None
-
     async def get_by_agent_id_and_name(
         self, agent_id: str, name: str, api_key_type: AgentAPIKeyType
     ) -> AgentAPIKeyEntity | None:

@@ -1,7 +1,9 @@
-import { cn } from '@/lib/utils';
-import { Response } from '@/components/ai-elements/response';
-import type { TextContent } from 'agentex/resources';
 import { cva } from 'class-variance-authority';
+
+import { Response } from '@/components/ai-elements/response';
+import { cn } from '@/lib/utils';
+
+import type { TextContent } from 'agentex/resources';
 
 const variants = cva('', {
   variants: {

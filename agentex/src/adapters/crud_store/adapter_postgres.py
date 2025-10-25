@@ -22,6 +22,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import Select
 
 from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
 from src.adapters.crud_store.port import CRUDRepository
@@ -390,12 +391,14 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T]):
         filters: dict[str, Any] | None = None,
         order_by: str | None = None,
         order_direction: Literal["asc", "desc"] | None = None,
+        query: Select | None = None,
     ) -> list[T]:
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
         ):
-            query = select(self.orm)
+            if query is None:
+                query = select(self.orm)
 
             order_by_clauses = self.create_order_by_clauses(
                 order_by=order_by,

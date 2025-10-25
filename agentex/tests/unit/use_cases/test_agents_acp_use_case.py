@@ -834,6 +834,42 @@ class TestAgentsACPUseCase:
             "First" in agent_content or "Second" in agent_content
         ), f"Expected content from multiple indexes, got '{agent_content}'"
 
+    async def test_handle_task_create_error(
+        self,
+        agents_acp_use_case,
+        mock_http_gateway,
+        agent_repository,
+        sample_agent,
+        sample_text_content,
+    ):
+        """Test error handling in task creation"""
+        # Given - Create agent first
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        # Mock HTTP error - create a function that raises when called
+        def create_mock_stream_error(*args, **kwargs):
+            raise Exception("ACP server connection failed")
+
+        mock_http_gateway.async_call.side_effect = create_mock_stream_error
+
+        # Create task creation request
+        import uuid
+
+        from src.api.schemas.agents_rpc import CreateTaskRequest
+
+        unique_task_name = f"test-task-{uuid.uuid4().hex[:8]}"
+        create_request = CreateTaskRequest(
+            name=unique_task_name,
+            params={"param1": "value1"},
+        )
+        with pytest.raises(Exception) as exc_info:
+            await agents_acp_use_case._handle_task_create(
+                agent=sample_agent,
+                params=create_request,
+            )
+
+        assert "ACP server connection failed" in str(exc_info.value)
+
     async def test_handle_task_create_success(
         self, agents_acp_use_case, mock_http_gateway, agent_repository, sample_agent
     ):
@@ -1573,6 +1609,147 @@ class TestAgentsACPUseCase:
         assert (
             created_event.content == sample_text_content
         ), "Expected event content to match input"
+
+    async def test_handle_event_send_with_request_headers(
+        self,
+        agents_acp_use_case,
+        mock_http_gateway,
+        agent_repository,
+        task_service,
+        event_repository,
+        sample_agent,
+        sample_text_content,
+    ):
+        """Test event sending with request headers forwarding"""
+        # Given - Create agent and task first
+        await create_or_get_agent(agent_repository, sample_agent)
+        created_task = await task_service.create_task(
+            agent=sample_agent, task_name="event-headers-task"
+        )
+
+        # Mock successful event response and verify headers are forwarded via HTTP
+        async def mock_async_call(*args, **kwargs):
+            payload = kwargs.get("payload", {})
+            request_id = payload.get("id", "")
+            # HTTP headers are passed as default_headers parameter
+            headers = kwargs.get("default_headers", {})
+
+            # Headers should NOT be in params body (sent via HTTP instead)
+            assert "params" in payload
+            assert payload["params"]["request"] is None
+
+            # Verify filtered headers are in HTTP headers (only x-* headers)
+            assert "x-trace-id" in headers
+            assert headers["x-trace-id"] == "trace-789"
+            assert "x-user-id" in headers
+            assert headers["x-user-id"] == "user-123"
+            # Blocked headers should NOT be present
+            assert (
+                "content-type" not in headers
+                or not headers.get("content-type") == "application/json"
+            )
+
+            return {
+                "jsonrpc": "2.0",
+                "result": {"status": "event_sent", "event_id": "event-789"},
+                "id": request_id,
+            }
+
+        mock_http_gateway.async_call.side_effect = mock_async_call
+
+        # Request headers to forward - mix of allowed and blocked headers
+        request_headers = {
+            "x-trace-id": "trace-789",  # Allowed: x-* prefix
+            "x-user-id": "user-123",  # Allowed: x-* prefix
+            "content-type": "application/json",  # Blocked: no x-* prefix
+        }
+
+        # Create event send request
+        event_request = SendEventRequest(
+            task_id=created_task.id,
+            content=sample_text_content,
+        )
+
+        # Store initial event count for database validation
+        initial_event_count = len(await event_repository.list())
+
+        # When
+        result = await agents_acp_use_case._handle_event_send(
+            agent=sample_agent,
+            params=event_request,
+            request_headers=request_headers,
+        )
+
+        # Then
+        assert isinstance(result, EventEntity)
+
+        # Verify database interactions - should have created an event
+        final_event_count = len(await event_repository.list())
+        assert (
+            final_event_count > initial_event_count
+        ), "New event should have been created in database"
+
+        # Verify HTTP call was made (mock_async_call will assert headers)
+        mock_http_gateway.async_call.assert_called_once()
+
+    async def test_handle_event_send_without_request_headers(
+        self,
+        agents_acp_use_case,
+        mock_http_gateway,
+        agent_repository,
+        task_service,
+        event_repository,
+        sample_agent,
+        sample_text_content,
+    ):
+        """Test event sending without request headers (backwards compatibility)"""
+        # Given - Create agent and task first
+        await create_or_get_agent(agent_repository, sample_agent)
+        created_task = await task_service.create_task(
+            agent=sample_agent, task_name="event-no-headers-task"
+        )
+
+        # Mock successful event response and verify request field is None
+        async def mock_async_call(*args, **kwargs):
+            payload = kwargs.get("payload", {})
+            request_id = payload.get("id", "")
+            # Verify request field is None or not present
+            if "request" in payload.get("params", {}):
+                assert payload["params"]["request"] is None
+            return {
+                "jsonrpc": "2.0",
+                "result": {"status": "event_sent", "event_id": "event-999"},
+                "id": request_id,
+            }
+
+        mock_http_gateway.async_call.side_effect = mock_async_call
+
+        # Create event send request
+        event_request = SendEventRequest(
+            task_id=created_task.id,
+            content=sample_text_content,
+        )
+
+        # Store initial event count for database validation
+        initial_event_count = len(await event_repository.list())
+
+        # When - Call without request_headers parameter
+        result = await agents_acp_use_case._handle_event_send(
+            agent=sample_agent,
+            params=event_request,
+        )
+
+        # Then
+        assert isinstance(result, EventEntity)
+
+        # Verify database interactions - should have created an event
+        final_event_count = len(await event_repository.list())
+        assert (
+            final_event_count > initial_event_count
+        ), "New event should have been created in database"
+
+        # Verify HTTP call was made (mock_async_call will assert no headers)
+        mock_http_gateway.async_call.assert_called_once()
 
     async def test_handle_event_send_error_no_task_specified(
         self, agents_acp_use_case, sample_agent, sample_text_content

@@ -1,6 +1,8 @@
-import { Send } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import { ButtonHTMLAttributes, forwardRef } from 'react';
+
+import { Send } from 'lucide-react';
+
+import { cn } from '@/lib/utils';
 
 interface SubmitButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   className?: string;
@@ -15,8 +17,8 @@ export const SubmitButton = forwardRef<HTMLButtonElement, SubmitButtonProps>(
         type="submit"
         disabled={disabled}
         className={cn(
-          'z-10 hover:opacity-80 transition-opacity focus:outline-none focus:ring-2 focus:ring-ring focus:ring-opacity-50 rounded-full',
-          'flex items-center justify-center w-8 h-8 bg-current/10 border border-current/20',
+          'focus:ring-ring focus:ring-opacity-50 z-10 rounded-full transition-opacity hover:opacity-80 focus:ring-2 focus:outline-none',
+          'flex h-8 w-8 items-center justify-center border border-current/20 bg-current/10',
           disabled && 'cursor-not-allowed opacity-50',
           className
         )}

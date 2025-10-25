@@ -1,27 +1,6 @@
 'use client';
 
 import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form';
-import { SubmitButton } from '@/components/agentex/submit-button';
-import { UploadAttachmentButton } from '@/components/agentex/upload-attachment-button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Textarea } from '@/components/ui/textarea';
-import { zodResolver } from '@hookform/resolvers/zod';
-import type { Agent, DataContent, TextContent } from 'agentex/resources';
-import {
   createContext,
   ReactElement,
   ReactNode,
@@ -30,6 +9,8 @@ import {
   useRef,
   useState,
 } from 'react';
+
+import { zodResolver } from '@hookform/resolvers/zod';
 import {
   Control,
   useForm,
@@ -40,6 +21,28 @@ import {
 } from 'react-hook-form';
 import { z } from 'zod';
 import { createStore, useStore } from 'zustand';
+
+import { SubmitButton } from '@/components/agentex/submit-button';
+import { UploadAttachmentButton } from '@/components/agentex/upload-attachment-button';
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
+
+import type { Agent, DataContent, TextContent } from 'agentex/resources';
 
 type FormStoreProps = {
   theme: 'light' | 'dark';
@@ -106,7 +109,7 @@ function createDefaultValues(
   defaultValues?: CustomPartial<FormData>
 ): FormData {
   const defaultAgentIDFromDefaultValues = agentOptions.some(
-    (agent) => agent.id === defaultValues?.agentID
+    agent => agent.id === defaultValues?.agentID
   )
     ? defaultValues?.agentID
     : undefined;
@@ -131,12 +134,12 @@ function CreateUserMessageFormContent() {
     );
   }
 
-  const control = useStore(store, (s) => s.control);
-  const agentOptions = useStore(store, (s) => s.agentOptions);
-  const onSubmit = useStore(store, (s) => s.onSubmit);
-  const formHandleSubmit = useStore(store, (s) => s.handleSubmit);
-  const setValue = useStore(store, (s) => s.setValue);
-  const watch = useStore(store, (s) => s.watch);
+  const control = useStore(store, s => s.control);
+  const agentOptions = useStore(store, s => s.agentOptions);
+  const onSubmit = useStore(store, s => s.onSubmit);
+  const formHandleSubmit = useStore(store, s => s.handleSubmit);
+  const setValue = useStore(store, s => s.setValue);
+  const watch = useStore(store, s => s.watch);
 
   // Add state to track the actual form values for button disabled state
   const [currentTextContent, setCurrentTextContent] = useState('');
@@ -152,8 +155,8 @@ function CreateUserMessageFormContent() {
     setCurrentDataContent(dataContent || '');
   }, [textContent, dataContent]);
 
-  const handleSubmit = formHandleSubmit((data) => {
-    onSubmit(data, (resetFormData) => {
+  const handleSubmit = formHandleSubmit(data => {
+    onSubmit(data, resetFormData => {
       const currentStoreState = store.getState();
       currentStoreState.reset(
         resetFormData ??
@@ -174,7 +177,7 @@ function CreateUserMessageFormContent() {
           <Tabs
             className="m-0 p-0"
             value={kindField.value}
-            onValueChange={(value) => {
+            onValueChange={value => {
               switch (value) {
                 case 'text':
                   setValue('kind', 'text');
@@ -185,7 +188,7 @@ function CreateUserMessageFormContent() {
               }
             }}
           >
-            <div className="flex items-baseline-last gap-2 mt-0">
+            <div className="mt-0 flex items-baseline-last gap-2">
               <span className="text-sidebar-foreground">Message type: </span>
               <TabsList>
                 <TabsTrigger value="text">Text</TabsTrigger>
@@ -199,7 +202,7 @@ function CreateUserMessageFormContent() {
                 render={({ field }) => (
                   <FormItem
                     className="relative"
-                    onKeyDown={(e) => {
+                    onKeyDown={e => {
                       if (
                         e.key === 'Enter' &&
                         !e.shiftKey &&
@@ -219,16 +222,16 @@ function CreateUserMessageFormContent() {
                         <Textarea
                           placeholder="Ask anything..."
                           autoFocus
-                          className="pl-4 pr-12 pb-12 resize-none h-24 break-words overflow-wrap-anywhere w-full focus:border-primary-foreground focus:outline-none"
+                          className="overflow-wrap-anywhere focus:border-primary-foreground h-24 w-full resize-none pr-12 pb-12 pl-4 break-words focus:outline-none"
                           rows={3}
                           {...field}
-                          onChange={(e) => {
+                          onChange={e => {
                             field.onChange(e);
                             setCurrentTextContent(e.target.value);
                           }}
                         />
                         <SubmitButton
-                          className="absolute bottom-2 right-2"
+                          className="absolute right-2 bottom-2"
                           disabled={!currentTextContent.trim()}
                         />
                       </div>
@@ -251,16 +254,16 @@ function CreateUserMessageFormContent() {
                         <UploadAttachmentButton className="absolute bottom-2 left-2" />
                         <Textarea
                           placeholder="Enter JSON here..."
-                          className="pl-4 pr-12 pb-12 resize-none h-24 break-words overflow-wrap-anywhere w-full focus:border-primary-foreground focus:outline-none font-mono"
+                          className="overflow-wrap-anywhere focus:border-primary-foreground h-24 w-full resize-none pr-12 pb-12 pl-4 font-mono break-words focus:outline-none"
                           rows={3}
                           {...field}
-                          onChange={(e) => {
+                          onChange={e => {
                             field.onChange(e);
                             setCurrentDataContent(e.target.value);
                           }}
                         />
                         <SubmitButton
-                          className="absolute bottom-2 right-2"
+                          className="absolute right-2 bottom-2"
                           disabled={!currentDataContent.trim()}
                         />
                       </div>
@@ -278,7 +281,7 @@ function CreateUserMessageFormContent() {
           control={control}
           name="agentID"
           render={({ field }) => (
-            <FormItem className="flex gap-2 items-baseline-last mt-3">
+            <FormItem className="mt-3 flex items-baseline-last gap-2">
               <FormLabel>Agent</FormLabel>
               <FormControl>
                 <Select
@@ -289,7 +292,7 @@ function CreateUserMessageFormContent() {
                     <SelectValue placeholder="Select an agent" />
                   </SelectTrigger>
                   <SelectContent>
-                    {agentOptions.map((agent) => (
+                    {agentOptions.map(agent => (
                       <SelectItem key={agent.id} value={agent.id}>
                         {agent.name}
                       </SelectItem>
@@ -318,11 +321,11 @@ function CreateUserMessageFormSelectedAgent({
     );
   }
 
-  const selectedAgentID = useStore(store, (s) => s.watch('agentID'));
-  const agentOptions = useStore(store, (s) => s.agentOptions);
+  const selectedAgentID = useStore(store, s => s.watch('agentID'));
+  const agentOptions = useStore(store, s => s.agentOptions);
 
   const selectedAgent = agentOptions.find(
-    (agent) => agent.id === selectedAgentID
+    agent => agent.id === selectedAgentID
   );
 
   return render({ agent: selectedAgent ?? null });

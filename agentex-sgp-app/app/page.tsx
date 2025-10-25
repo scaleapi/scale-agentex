@@ -1,12 +1,11 @@
-'use server';
-
-import { NoAgent } from '@/entrypoints/no-agent';
 import { connection } from 'next/server';
+
+import { MainContent } from './main-content';
 
 export default async function RootPage() {
   await connection();
 
-  const sgpAppURL = process.env.NEXT_PUBLIC_SGP_APP_URL;
+  const sgpAppURL = process.env.NEXT_PUBLIC_SGP_APP_URL ?? '';
   const agentexAPIBaseURL =
     process.env.NEXT_PUBLIC_AGENTEX_API_BASE_URL ?? 'http://localhost:5003';
 
@@ -20,9 +19,6 @@ export default async function RootPage() {
   }
 
   return (
-    <NoAgent
-      sgpAppURL={sgpAppURL ?? ''}
-      agentexAPIBaseURL={agentexAPIBaseURL}
-    />
+    <MainContent sgpAppURL={sgpAppURL} agentexAPIBaseURL={agentexAPIBaseURL} />
   );
 }

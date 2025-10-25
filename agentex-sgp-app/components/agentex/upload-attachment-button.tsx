@@ -1,6 +1,8 @@
-import { Paperclip } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import { ButtonHTMLAttributes, forwardRef } from 'react';
+
+import { Paperclip } from 'lucide-react';
+
+import { cn } from '@/lib/utils';
 
 interface UploadAttachmentButtonProps
   extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -13,7 +15,6 @@ export const UploadAttachmentButton = forwardRef<
 >(({ className, onClick, ...props }, ref) => {
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     // TODO: Implement attach functionality
-    console.log('TODO: Implement attach functionality');
     onClick?.(e);
   };
 
@@ -23,7 +24,7 @@ export const UploadAttachmentButton = forwardRef<
       type="button"
       onClick={handleClick}
       className={cn(
-        'z-10 hover:opacity-80 transition-opacity focus:outline-none focus:ring-2 focus:ring-ring focus:ring-opacity-50 rounded-lg p-1 text-muted-foreground hover:text-foreground',
+        'focus:ring-ring focus:ring-opacity-50 text-muted-foreground hover:text-foreground z-10 rounded-lg p-1 transition-opacity hover:opacity-80 focus:ring-2 focus:outline-none',
         className
       )}
       {...props}

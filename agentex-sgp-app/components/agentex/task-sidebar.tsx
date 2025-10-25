@@ -1,71 +1,87 @@
-import { Button } from '@/components/ui/button';
-import { useAgentexRootStore } from '@/hooks/use-agentex-root-store';
-import { useTaskName } from '@/hooks/use-task-name';
-import type { Task, TaskMessage } from 'agentex/resources';
-import { MessageSquare } from 'lucide-react';
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+
 import Image from 'next/image';
-import useResizable from '../hooks/use-resizable';
-import { useLocalStorageState } from '../hooks/use-local-storage-state';
-import {
-  MIN_SIDEBAR_WIDTH,
-  MAX_SIDEBAR_WIDTH,
-  DEFAULT_SIDEBAR_WIDTH,
-} from '../ui/constants/sidebar';
 import { useRouter } from 'next/navigation';
+
+import { formatDistanceToNow } from 'date-fns';
+import { AnimatePresence, motion } from 'framer-motion';
+import {
+  MessageSquarePlus,
+  PanelLeftClose,
+  PanelLeftOpen,
+  SquarePen,
+} from 'lucide-react';
+
+import { IconButton } from '@/components/agentex/icon-button';
+import { ResizableSidebar } from '@/components/agentex/resizable-sidebar';
+import { useAgentexClient } from '@/components/providers';
+import { Button } from '@/components/ui/button';
+import { Separator } from '@/components/ui/separator';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useTasks } from '@/hooks/use-tasks';
+import { cn } from '@/lib/utils';
+
+import type { Task } from 'agentex/resources';
 
 type TaskButtonProps = {
   task: Task;
-  taskMessageCache: { taskID: Task['id']; messages: TaskMessage[] }[];
   selectedTaskID: Task['id'] | null;
   selectTask: (taskID: Task['id'] | null) => void;
 };
 
-function TaskButton({
-  task,
-  taskMessageCache,
-  selectedTaskID,
-  selectTask,
-}: TaskButtonProps) {
-  const cacheEntry = taskMessageCache.find((entry) => entry.taskID === task.id);
-  const messages = cacheEntry?.messages;
-  const taskName = useTaskName(task, messages);
+function TaskButton({ task, selectedTaskID, selectTask }: TaskButtonProps) {
+  const taskName = createTaskName(task);
 
   return (
     <Button
       variant="ghost"
-      className={`flex cursor-pointer justify-start w-full text-left pl-2 py-1 transition-colors hover:bg-sidebar-accent hover:text-sidebar-primary-foreground ${
+      className={`hover:bg-sidebar-accent hover:text-sidebar-primary-foreground flex h-auto w-full cursor-pointer flex-col items-start justify-start gap-1 px-2 py-2 text-left transition-colors ${
         selectedTaskID === task.id
           ? 'bg-sidebar-primary text-sidebar-primary-foreground'
           : 'text-sidebar-foreground'
       }`}
       onClick={() => selectTask(task.id)}
-      onKeyDown={(e) => {
+      onKeyDown={e => {
         if (e.key === 'Enter' || e.key === ' ') {
           selectTask(task.id);
         }
       }}
     >
-      <span className="truncate">{taskName}</span>
+      <span className="w-full truncate text-sm">{taskName}</span>
+      <span
+        className={cn(
+          'text-muted-foreground text-xs',
+          task.created_at ? 'block' : 'invisible'
+        )}
+      >
+        {task.created_at
+          ? formatDistanceToNow(new Date(task.created_at), { addSuffix: true })
+          : 'No date'}
+      </span>
     </Button>
   );
 }
 
 export type TaskSidebarProps = {
   selectedTaskID: Task['id'] | null;
+  selectedAgentName?: string;
   onSelectTask: (taskID: Task['id'] | null) => void;
 };
 
 export function TaskSidebar({
   selectedTaskID,
+  selectedAgentName,
   onSelectTask,
 }: TaskSidebarProps) {
-  const tasks = useAgentexRootStore((s) => s.tasks);
-  const taskMessageCache = useAgentexRootStore((s) => s.taskMessageCache);
-  const resizableContainerRef = useRef<HTMLDivElement>(null);
-  const [secondarySidebarWidth, setSecondarySidebarWidth] =
-    useLocalStorageState('sidebarWidth', DEFAULT_SIDEBAR_WIDTH);
+  const { agentexClient } = useAgentexClient();
+  const { data: tasks = [], isLoading: isLoadingTasks } = useTasks(
+    agentexClient,
+    selectedAgentName ? { agentName: selectedAgentName } : undefined
+  );
 
+  const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
+
+  // Reverse tasks to show newest first
   const reversedTasks = useMemo(() => [...tasks].reverse(), [tasks]);
 
   const handleTaskSelect = useCallback(
@@ -79,89 +95,135 @@ export function TaskSidebar({
     onSelectTask(null);
   }, [onSelectTask]);
 
-  const {
-    onMouseDown: handleStartResize,
-    size,
-    onDoubleClick: resetSidebarWidth,
-  } = useResizable({
-    ref: resizableContainerRef,
-    initialSize: secondarySidebarWidth,
-    minWidth: MIN_SIDEBAR_WIDTH,
-    maxWidth: MAX_SIDEBAR_WIDTH,
-    onResizeEnd: (newWidth) => {
-      setSecondarySidebarWidth(newWidth);
-    },
-  });
+  const toggleCollapse = useCallback(() => {
+    setIsCollapsed(prev => !prev);
+  }, []);
 
   return (
-    <div
-      ref={resizableContainerRef}
-      style={{ width: `${size}px` }}
-      className="relative flex flex-col px-2 py-4 gap-2 border-r border-sidebar-border group"
+    <ResizableSidebar
+      side="left"
+      storageKey="taskSidebarWidth"
+      className="px-2 py-4"
+      isCollapsed={isCollapsed}
+      renderCollapsed={() => (
+        <div className="flex flex-col items-center gap-4">
+          <IconButton
+            icon={PanelLeftOpen}
+            onClick={toggleCollapse}
+            variant="ghost"
+            className="text-sidebar-foreground"
+          />
+          <IconButton
+            icon={MessageSquarePlus}
+            onClick={handleNewChat}
+            variant="ghost"
+            className="text-sidebar-foreground"
+          />
+        </div>
+      )}
     >
-      <SidebarHeader handleNewChat={handleNewChat} />
-
-      <hr className="bg-sidebar-border h-1 px-4" />
-
-      <div className="flex flex-col overflow-y-auto gap-1 hide-scrollbar">
-        {reversedTasks.length > 0 ? (
-          reversedTasks.map((task) => (
-            <TaskButton
-              key={task.id}
-              task={task}
-              taskMessageCache={taskMessageCache}
-              selectedTaskID={selectedTaskID}
-              selectTask={handleTaskSelect}
-            />
-          ))
-        ) : (
-          <p className="text-sidebar-foreground text-sm">No tasks found.</p>
-        )}
+      <div className="flex h-full flex-col gap-2">
+        <SidebarHeader
+          handleNewChat={handleNewChat}
+          toggleCollapse={toggleCollapse}
+        />
+        <Separator />
+        <div className="hide-scrollbar flex flex-col gap-1 overflow-y-auto">
+          {isLoadingTasks ? (
+            <>
+              {[...Array(8)].map((_, i) => (
+                <div className="flex flex-col gap-1 px-4 py-2 pl-2" key={i}>
+                  <Skeleton className="h-5 w-full" />
+                  <Skeleton className="h-4 w-1/2" />
+                </div>
+              ))}
+            </>
+          ) : (
+            <AnimatePresence initial={false}>
+              {reversedTasks.length > 0 &&
+                reversedTasks.map(task => (
+                  <motion.div
+                    key={task.id}
+                    layout
+                    initial={{ opacity: 0, x: -50 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -50 }}
+                    transition={{
+                      layout: { duration: 0.3, ease: 'easeInOut' },
+                      opacity: {
+                        duration: 0.2,
+                        delay: 0.2,
+                      },
+                      x: {
+                        delay: 0.2,
+                        type: 'spring',
+                        damping: 30,
+                        stiffness: 300,
+                      },
+                    }}
+                  >
+                    <TaskButton
+                      task={task}
+                      selectedTaskID={selectedTaskID}
+                      selectTask={handleTaskSelect}
+                    />
+                  </motion.div>
+                ))}
+            </AnimatePresence>
+          )}
+        </div>
       </div>
-
-      {/* Drag handle to resize the sidebar */}
-      <div
-        className="absolute right-[-2px] top-0 w-1 h-full hover:w-1 hover:bg-sidebar-accent transition-all duration-300"
-        style={{
-          cursor:
-            size === MIN_SIDEBAR_WIDTH
-              ? 'e-resize'
-              : size === MAX_SIDEBAR_WIDTH
-                ? 'w-resize'
-                : 'col-resize',
-        }}
-        onMouseDown={handleStartResize}
-        onDoubleClick={resetSidebarWidth}
-      />
-    </div>
+    </ResizableSidebar>
   );
 }
-function SidebarHeader({ handleNewChat }: { handleNewChat: () => void }) {
+
+function SidebarHeader({
+  handleNewChat,
+  toggleCollapse,
+}: {
+  handleNewChat: () => void;
+  toggleCollapse: () => void;
+}) {
   const router = useRouter();
 
   return (
     <div className="flex flex-col gap-4">
-      <button
-        className="flex pl-3 justify-start items-center"
-        onClick={() => router.push('/')}
-      >
-        <Image
-          src="/scale-logo.svg"
-          alt="Scale"
-          width={60}
-          height={20}
-          className="text-gray-800 dark:invert"
+      <div className="flex items-center justify-between">
+        <Button variant="logo" onClick={() => router.push('/')}>
+          <Image
+            src="/scale-logo.svg"
+            alt="Scale"
+            className="text-sidebar-foreground dark:invert"
+            width={60}
+            height={20}
+          />
+        </Button>
+        <IconButton
+          icon={PanelLeftClose}
+          onClick={toggleCollapse}
+          variant="ghost"
+          className="text-sidebar-foreground"
         />
-      </button>
-
+      </div>
       <Button
+        onClick={handleNewChat}
         variant="ghost"
-        className="group cursor-pointer justify-start w-full text-left text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary-foreground transition-colors"
-        onClick={() => handleNewChat()}
+        className="text-sidebar-foreground flex items-center justify-start gap-2"
       >
-        <MessageSquare className="h-4 w-4 text-muted-foreground group-hover:text-sidebar-primary-foreground" />
-        New chat
+        <SquarePen className="size-5" />
+        New Chat
       </Button>
     </div>
   );
+}
+
+function createTaskName(task: Task): string {
+  if (
+    task?.params?.description &&
+    typeof task.params.description === 'string'
+  ) {
+    return task.params.description;
+  }
+
+  return 'Unnamed task';
 }

@@ -1,46 +1,65 @@
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useMemo } from 'react';
+
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+
+export enum SearchParamKey {
+  SGP_ACCOUNT_ID = 'account_id',
+  TASK_ID = 'task_id',
+  AGENT_NAME = 'agent_name',
+}
+
+type SearchParamUpdates = Partial<Record<SearchParamKey, string | null>>;
 
 type SafeSearchParams = {
   sgpAccountID: string | null;
   taskID: string | null;
-  setTaskID: (taskID: string | null) => void;
+  agentName: string | null;
+  updateParams: (updates: SearchParamUpdates, replace?: boolean) => void;
 };
 
 /**
  * This will suspend rendering. Be sure you put suspense boundary somewhere.
  */
 export function useSafeSearchParams(): SafeSearchParams {
-  const SGP_ACCOUNT_ID_SEARCH_PARAM = 'account_id' as const;
-  const TASK_ID_SEARCH_PARAM = 'task_id' as const;
-
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const sgpAccountID = searchParams.get(SGP_ACCOUNT_ID_SEARCH_PARAM);
+  const sgpAccountID = searchParams.get(SearchParamKey.SGP_ACCOUNT_ID);
+  const taskID = searchParams.get(SearchParamKey.TASK_ID);
+  const agentName = searchParams.get(SearchParamKey.AGENT_NAME);
 
-  const taskID = searchParams.get(TASK_ID_SEARCH_PARAM);
-
-  const setTaskID = useCallback(
-    (newTaskID: string | null): void => {
+  const updateParams = useCallback(
+    (updates: SearchParamUpdates, replace: boolean = false): void => {
       const params = new URLSearchParams(searchParams.toString());
-      if (newTaskID) {
-        params.set(TASK_ID_SEARCH_PARAM, newTaskID);
+
+      Object.entries(updates).forEach(([key, value]) => {
+        const paramKey = key as SearchParamKey;
+        if (value !== undefined) {
+          if (value === null) {
+            params.delete(paramKey);
+          } else {
+            params.set(paramKey, value);
+          }
+        }
+      });
+
+      if (replace) {
+        router.replace(`${pathname}?${params.toString()}`);
       } else {
-        params.delete(TASK_ID_SEARCH_PARAM);
+        router.push(`${pathname}?${params.toString()}`);
       }
-      router.push(`${pathname}?${params.toString()}`);
     },
-    [pathname, searchParams]
+    [pathname, searchParams, router]
   );
 
   return useMemo(
     () => ({
       sgpAccountID: sgpAccountID || null,
       taskID: taskID || null,
-      setTaskID,
+      agentName: agentName || null,
+      updateParams,
     }),
-    [sgpAccountID, taskID, setTaskID]
+    [sgpAccountID, taskID, agentName, updateParams]
   );
 }

@@ -30,6 +30,9 @@ out/
 ehthumbs.db
 Thumbs.db
 
+# Claude
+.claude/
+
 # Editor directories and files
 .vscode/
 .idea/

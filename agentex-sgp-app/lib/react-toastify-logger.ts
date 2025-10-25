@@ -1,5 +1,7 @@
-import type AgentexSDK from 'agentex';
+/* eslint-disable no-console */
 import { toast } from 'react-toastify';
+
+import type AgentexSDK from 'agentex';
 
 export function createReactToastifyLogger(
   toastLevel: Exclude<AgentexSDK['logLevel'], undefined>

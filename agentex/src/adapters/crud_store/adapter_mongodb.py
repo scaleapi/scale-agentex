@@ -190,22 +190,6 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
         else:
             return self.model_class(**data)
 
-    def _build_query(
-        self, id: str | None = None, name: str | None = None
-    ) -> dict[str, Any]:
-        """
-        Build a query based on provided id or name.
-        If both are provided, id takes precedence.
-
-        For id queries, this maps to MongoDB's _id field.
-        """
-        if id is not None:
-            # Always use _id field when querying by id
-            return {"_id": self._convert_id(id)}
-        elif name is not None:
-            return {"name": name}
-        return {}
-
     @retry_write_operation()
     async def create(self, item: T) -> T:
         """

@@ -75,6 +75,155 @@ class TestAgentAPIKeysIntegration:
         )
         return await agent_api_key_repo.create(agent_api_key)
 
+    async def test_invalid_create_api_key(self, isolated_client):
+        """Test that creating an API key with invalid parameters returns 400"""
+        response = await isolated_client.post(
+            "/agent_api_keys",
+            json={
+                "name": "test-api-key",
+            },
+        )
+        assert response.status_code == 400
+        assert (
+            response.json()["message"]
+            == "Either 'agent_id' or 'agent_name' must be provided to create an agent api_key."
+        )
+
+        response = await isolated_client.post(
+            "/agent_api_keys",
+            json={
+                "name": "test-api-key",
+                "agent_id": "invalid-agent-id",
+                "agent_name": "test-agent",
+            },
+        )
+        assert response.status_code == 400
+        assert (
+            response.json()["message"]
+            == "Only one of 'agent_id' or 'agent_name' should be provided to create an agent api_key."
+        )
+
+        response = await isolated_client.post(
+            "/agent_api_keys",
+            json={
+                "agent_id": "invalid-agent-id",
+                "name": "test-api-key",
+            },
+        )
+        assert response.status_code == 404
+        assert (
+            response.json()["message"]
+            == "Item with id 'invalid-agent-id' does not exist."
+        )
+
+    async def test_invalid_list_api_keys(self, isolated_client):
+        """Test that listing API keys with invalid parameters returns 400"""
+        response = await isolated_client.get(
+            "/agent_api_keys",
+        )
+        assert response.status_code == 400
+        assert (
+            response.json()["message"]
+            == "Either 'agent_id' or 'agent_name' must be provided to list agent api_keys."
+        )
+
+        response = await isolated_client.get(
+            "/agent_api_keys",
+            params={
+                "agent_id": "invalid-agent-id",
+                "agent_name": "test-agent",
+            },
+        )
+        assert response.status_code == 400
+        assert (
+            response.json()["message"]
+            == "Only one of 'agent_id' or 'agent_name' should be provided to list agent api_keys."
+        )
+
+        response = await isolated_client.get(
+            "/agent_api_keys",
+            params={
+                "agent_id": "invalid-agent-id",
+            },
+        )
+        assert response.status_code == 404
+        assert (
+            response.json()["message"]
+            == "Item with id 'invalid-agent-id' does not exist."
+        )
+
+    async def test_invalid_get_api_key_by_name(self, isolated_client):
+        """Test that listing API keys with invalid parameters returns 400"""
+        response = await isolated_client.get(
+            "/agent_api_keys/name/test-api-key",
+        )
+        assert response.status_code == 400
+        assert (
+            response.json()["message"]
+            == "Either 'agent_id' or 'agent_name' must be provided to get an agent api_key."
+        )
+
+        response = await isolated_client.get(
+            "/agent_api_keys/name/test-api-key",
+            params={
+                "agent_id": "invalid-agent-id",
+                "agent_name": "test-agent",
+            },
+        )
+        assert response.status_code == 400
+        assert (
+            response.json()["message"]
+            == "Only one of 'agent_id' or 'agent_name' should be provided to get an agent api_key."
+        )
+
+        response = await isolated_client.get(
+            "/agent_api_keys/name/test-api-key",
+            params={
+                "agent_id": "invalid-agent-id",
+            },
+        )
+        assert response.status_code == 404
+        assert (
+            response.json()["message"]
+            == "Item with id 'invalid-agent-id' does not exist."
+        )
+
+    async def test_invalid_delete_api_key_by_name(self, isolated_client):
+        """Test that listing API keys with invalid parameters returns 400"""
+        response = await isolated_client.delete(
+            "/agent_api_keys/name/test-api-key",
+        )
+        assert response.status_code == 400
+        assert (
+            response.json()["message"]
+            == "Either 'agent_id' or 'agent_name' must be provided to delete an agent api_key."
+        )
+
+        response = await isolated_client.delete(
+            "/agent_api_keys/name/test-api-key",
+            params={
+                "agent_id": "invalid-agent-id",
+                "agent_name": "test-agent",
+            },
+        )
+        assert response.status_code == 400
+        assert (
+            response.json()["message"]
+            == "Only one of 'agent_id' or 'agent_name' should be provided to delete an agent api_key."
+        )
+
+        response = await isolated_client.delete(
+            "/agent_api_keys/name/test-api-key",
+            params={
+                "agent_id": "invalid-agent-id",
+            },
+        )
+        assert response.status_code == 404
+        assert (
+            response.json()["message"]
+            == "Item with id 'invalid-agent-id' does not exist."
+        )
+
     async def test_create_api_key(self, isolated_client, test_agent):
         """Test that creating an API key works correctly"""
         # Given - No existing agent API keys (verify with GET)
@@ -258,6 +407,15 @@ class TestAgentAPIKeysIntegration:
         assert response.status_code == 404
         error_data = response.json()
         assert "not found" in error_data["message"]
+
+        response = await isolated_client.get(
+            "/agent_api_keys/non-existent-api-key-id",
+        )
+
+        # Then - Should return 404 with proper error message
+        assert response.status_code == 404
+        error_data = response.json()
+        assert "does not exist" in error_data["message"]
 
     async def test_delete_api_key_by_name(self, isolated_client, test_agent_api_key):
         """Test deleting an API key by name"""

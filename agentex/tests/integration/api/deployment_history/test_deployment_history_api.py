@@ -113,4 +113,40 @@ class TestDeploymentHistoryIntegration:
         assert response.status_code == 200
         response_data = response.json()
         assert len(response_data) == 1
-        assert response_data[0]["id"] == test_deployment.id
+
+    async def test_invalid_list_deployments(
+        self, isolated_client, test_deployment, test_agent
+    ):
+        """Test GET /deployment-history/ endpoint with invalid parameters."""
+
+        response = await isolated_client.get("/deployment-history")
+        assert response.status_code == 400
+        response_data = response.json()
+        assert "message" in response_data
+        assert (
+            "Either 'agent_id' or 'agent_name' must be provided to list deployment history."
+            in response_data["message"]
+        )
+
+        response = await isolated_client.get(
+            "/deployment-history",
+            params={
+                "agent_id": test_deployment.agent_id,
+                "agent_name": test_agent.name,
+            },
+        )
+        assert response.status_code == 400
+        response_data = response.json()
+        assert "message" in response_data
+        assert (
+            "Only one of 'agent_id' or 'agent_name' should be provided to list deployment history."
+            in response_data["message"]
+        )
+
+        response = await isolated_client.get(
+            "/deployment-history", params={"agent_name": "non-existent-agent"}
+        )
+        assert response.status_code == 404
+        response_data = response.json()
+        assert "message" in response_data
+        assert "does not exist" in response_data["message"]

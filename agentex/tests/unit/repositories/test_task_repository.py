@@ -109,6 +109,12 @@ async def test_task_repository_crud_operations(postgres_url):
     assert retrieved_task_by_name.name == "test-task"
     print("✅ GET by name operation successful")
 
+    # Test GET agent by task ID
+    retrieved_agent = await agent_repo.list(filters={"task_id": task_id})
+    assert len(retrieved_agent) == 1
+    assert retrieved_agent[0].id == agent_id
+    print("✅ GET agent by task ID operation successful")
+
     # Test UPDATE operation
     updated_task = TaskEntity(
         id=task_id,

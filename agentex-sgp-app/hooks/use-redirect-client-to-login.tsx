@@ -1,8 +1,10 @@
 'use client';
 
-import { useAppConfig } from '@/hooks/use-app-config';
-import { useRouter } from 'next/navigation';
 import { RefObject, useEffect, useRef } from 'react';
+
+import { useRouter } from 'next/navigation';
+
+import { useAgentexClient } from '@/components/providers';
 
 function redirectClientToLogin({
   sgpAppURL,
@@ -37,7 +39,7 @@ function redirectClientToLogin({
  * @returns never if redirect was successful, void otherwise
  */
 export function useRedirectClientToLoginRef(): RefObject<() => void> {
-  const { sgpAppURL } = useAppConfig();
+  const { sgpAppURL } = useAgentexClient();
   const router = useRouter();
 
   const ref = useRef(() =>
@@ -57,7 +59,7 @@ export function useRedirectClientToLoginRef(): RefObject<() => void> {
           typeof window !== 'undefined' ? window.location.href : undefined,
         router,
       });
-  }, [router]);
+  }, [router, sgpAppURL]);
 
   return ref;
 }
