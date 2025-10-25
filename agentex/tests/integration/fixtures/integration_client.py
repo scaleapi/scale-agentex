@@ -17,7 +17,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from src.api.app import app
-from src.api.authentication_cache import reset_auth_cache
 from src.config.dependencies import GlobalDependencies
 from src.config.environment_variables import EnvironmentVariables
 
@@ -304,7 +303,6 @@ async def isolated_integration_app(isolated_repositories, isolated_api_key_http_
     )
 
     # Clear any cached dependencies
-    await reset_auth_cache()
     EnvironmentVariables.clear_cache()
     GlobalDependencies._instances = {}
 

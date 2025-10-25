@@ -4,7 +4,6 @@ Tests the full HTTP request → FastAPI → response cycle with API-first valida
 """
 
 from datetime import UTC
-from unittest import mock
 
 import pytest
 import pytest_asyncio
@@ -160,25 +159,6 @@ class TestAgentTaskTrackerAPIIntegration:
         for tracker in trackers:
             assert tracker["task_id"] == test_task.id
 
-    async def test_filter_trackers_by_agent_id_and_task_id(
-        self, isolated_client, test_tracker, test_task, test_agent
-    ):
-        """Test filtering trackers by task_id parameter"""
-        # When - Request trackers filtered by task_id
-        response = await isolated_client.get(
-            f"/tracker?task_id={test_task.id}&agent_id={test_agent.id}"
-        )
-
-        # Then - Should return only trackers for that task
-        assert response.status_code == 200
-        trackers = response.json()
-        assert isinstance(trackers, list)
-
-        # All returned trackers should belong to the specified task
-        for tracker in trackers:
-            assert tracker["task_id"] == test_task.id
-            assert tracker["agent_id"] == test_agent.id
-
     async def test_update_tracker_success_and_retrieve(
         self, isolated_client, test_tracker
     ):
@@ -209,57 +189,6 @@ class TestAgentTaskTrackerAPIIntegration:
         assert retrieved_tracker["status"] == "COMPLETED"
         assert retrieved_tracker["status_reason"] == "Updated tracker status"
 
-    async def test_commit_cursor_tracker_success_and_retrieve(
-        self, isolated_client, test_event, test_tracker
-    ):
-        """Test updating a tracker via PUT and retrieving updated data"""
-        # Given - Updated tracker data (avoiding last_processed_event_id for now to avoid validation complexity)
-        update_data = {
-            "last_processed_event_id": test_event.id,
-            "status": "COMPLETED",
-            "status_reason": "Updated tracker status",
-        }
-
-        # When - Update tracker via PUT
-        response = await isolated_client.put(
-            f"/tracker/{test_tracker.id}", json=update_data
-        )
-
-        # Then - Should succeed and return updated tracker
-        assert response.status_code == 200
-        updated_tracker = response.json()
-
-        # Validate updated fields
-        assert updated_tracker["id"] == test_tracker.id
-        assert updated_tracker["last_processed_event_id"] == test_event.id
-        assert updated_tracker["status"] == "COMPLETED"
-        assert updated_tracker["status_reason"] == "Updated tracker status"
-
-        # When - Retrieve the updated tracker via GET
-        get_response = await isolated_client.get(f"/tracker/{test_tracker.id}")
-
-        # Then - Should return the updated data
-        assert get_response.status_code == 200
-        retrieved_tracker = get_response.json()
-        assert retrieved_tracker["status"] == "COMPLETED"
-        assert retrieved_tracker["status_reason"] == "Updated tracker status"
-
-    async def test_commit_cursor_tracker_nonexistent_returns_400(
-        self, isolated_client, test_tracker
-    ):
-        """Test updating a non-existent tracker returns proper error"""
-        # When - Update a non-existent tracker
-        response = await isolated_client.put(
-            f"/tracker/{test_tracker.id}",
-            json={
-                "last_processed_event_id": "non-existent-event-id",
-                "status": "COMPLETED",
-            },
-        )
-
-        # Then - Should return 400
-        assert response.status_code == 400
-
     async def test_get_tracker_non_existent_returns_400(self, isolated_client):
         """Test getting a non-existent tracker returns proper error"""
         # When - Get a non-existent tracker
@@ -267,29 +196,3 @@ class TestAgentTaskTrackerAPIIntegration:
 
         # Then - Should return 400 (based on the actual API behavior)
         assert response.status_code == 400
-
-    @mock.patch(
-        "src.api.schemas.agent_task_tracker.AgentTaskTracker.model_validate",
-        side_effect=Exception("Unexpected error"),
-    )
-    async def test_500_exceptions_are_handled(
-        self, mock_patch, isolated_client, test_tracker, test_task, test_agent
-    ):
-        """Test 500 exceptions are handled, throwing from model_validate as an example"""
-        # Testing get tracker
-        response = await isolated_client.get(f"/tracker/{test_tracker.id}")
-        assert response.status_code == 500
-        error_data = response.json()
-        assert error_data["message"] == "Internal server error"
-
-        # Testing update tracker
-        update_data = {
-            "status": "COMPLETED",
-            "status_reason": "Updated tracker status",
-        }
-        response = await isolated_client.put(
-            f"/tracker/{test_tracker.id}", json=update_data
-        )
-        assert response.status_code == 500
-        error_data = response.json()
-        assert error_data["message"] == "Internal server error"

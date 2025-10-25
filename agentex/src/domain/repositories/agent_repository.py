@@ -1,3 +1,4 @@
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated
@@ -50,12 +51,24 @@ class AgentRepository(PostgresCRUDRepository[AgentORM, AgentEntity]):
     async def acquire_advisory_lock(
         self,
         lock_key: int,
+        blocking: bool = True,
     ) -> AsyncIterator[bool]:
         async with (
             self.start_async_db_session(allow_writes=True) as session,
             async_sql_exception_handler(),
         ):
-            yield await session.scalar(select(func.pg_try_advisory_xact_lock(lock_key)))
+            if blocking:
+                start_time = time.time()
+                await session.execute(select(func.pg_advisory_xact_lock(lock_key)))
+                elapsed_time = time.time() - start_time
+                logger.info(
+                    f"Acquired advisory lock {lock_key} in {elapsed_time:.2f} seconds"
+                )
+                yield True
+            else:
+                yield await session.scalar(
+                    select(func.pg_try_advisory_xact_lock(lock_key))
+                )
 
 
 DAgentRepository = Annotated[AgentRepository, Depends(AgentRepository)]

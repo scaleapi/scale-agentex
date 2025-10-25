@@ -1,1 +1,0 @@
-"""Authorization adapters package."""

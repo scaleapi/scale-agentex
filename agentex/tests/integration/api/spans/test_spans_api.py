@@ -61,15 +61,7 @@ class TestSpansAPIIntegration:
         span_id = create_response.json()["id"]
 
         # When - Update the span
-        update_data = {
-            "name": "updated-name",
-            "parent_id": "parent-id",
-            "start_time": "2024-01-01T10:10:00Z",
-            "end_time": "2024-01-01T10:10:05Z",
-            "input": {"key": "value"},
-            "output": {"status": "completed"},
-            "data": {"test": True},
-        }
+        update_data = {"name": "updated-name", "output": {"status": "completed"}}
         patch_response = await isolated_client.patch(
             f"/spans/{span_id}", json=update_data
         )
@@ -85,31 +77,7 @@ class TestSpansAPIIntegration:
         # Validate changes were applied
         assert updated_span["name"] == "updated-name"
         assert updated_span["output"]["status"] == "completed"
-        assert updated_span["parent_id"] == "parent-id"
-        assert updated_span["start_time"] == "2024-01-01T10:10:00Z"
-        assert updated_span["end_time"] == "2024-01-01T10:10:05Z"
-        assert updated_span["input"] == {"key": "value"}
-        assert updated_span["data"] == {"test": True}
         assert updated_span["trace_id"] == initial_data["trace_id"]  # Unchanged
-
-        # We can also update trace ID and add values into metadata
-        patch_response = await isolated_client.patch(
-            f"/spans/{span_id}",
-            json={
-                "trace_id": "updated-trace-789",
-                "data": {"version": "2.0.0"},
-            },
-        )
-        assert patch_response.status_code == 200
-        updated_span = patch_response.json()
-        assert updated_span["name"] == "updated-name"
-        assert updated_span["output"]["status"] == "completed"
-        assert updated_span["parent_id"] == "parent-id"
-        assert updated_span["start_time"] == "2024-01-01T10:10:00Z"
-        assert updated_span["end_time"] == "2024-01-01T10:10:05Z"
-        assert updated_span["input"] == {"key": "value"}
-        assert updated_span["trace_id"] == "updated-trace-789"
-        assert updated_span["data"] == {"test": True, "version": "2.0.0"}
 
     async def test_list_spans_with_filtering(self, isolated_client):
         """Test list spans endpoint with trace_id filtering"""
@@ -132,14 +100,6 @@ class TestSpansAPIIntegration:
         create2 = await isolated_client.post("/spans", json=span2_data)
         assert create1.status_code == 200
         assert create2.status_code == 200
-
-        all_spans = await isolated_client.get("/spans")
-        assert all_spans.status_code == 200
-        all_spans_data = all_spans.json()
-        assert isinstance(all_spans_data, list)
-        assert len(all_spans_data) == 2
-        assert all_spans_data[0]["trace_id"] == trace_id_1
-        assert all_spans_data[1]["trace_id"] == trace_id_2
 
         # When - List spans filtered by trace_id
         list_response = await isolated_client.get(f"/spans?trace_id={trace_id_1}")

@@ -40,6 +40,11 @@ async def create_api_key(
             detail="Only one of 'agent_id' or 'agent_name' should be provided to create an agent api_key.",
         )
     agent = await agent_use_case.get(id=request.agent_id, name=request.agent_name)
+    if not agent:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Agent with ID '{request.agent_id}' or name '{request.agent_name}' not found.",
+        )
     # Check if external agent API key already exists for this name and agent ID
     existing_api_key = await agent_api_key_use_case.get_by_agent_id_and_name(
         agent_id=agent.id,
@@ -91,6 +96,11 @@ async def list_agent_api_keys(
             detail="Only one of 'agent_id' or 'agent_name' should be provided to list agent api_keys.",
         )
     agent = await agent_use_case.get(id=agent_id, name=agent_name)
+    if not agent:
+        raise HTTPException(
+            status_code=404,
+            detail="Agent not found.",
+        )
     agent_api_key_entities = await agent_api_key_use_case.list(agent_id=agent.id)
     return [
         AgentAPIKey.model_validate(agent_api_key_entity)
@@ -123,6 +133,11 @@ async def get_agent_api_key_by_name(
             detail="Only one of 'agent_id' or 'agent_name' should be provided to get an agent api_key.",
         )
     agent = await agent_use_case.get(id=agent_id, name=agent_name)
+    if not agent:
+        raise HTTPException(
+            status_code=404,
+            detail="Agent not found.",
+        )
     agent_api_key_entity = await agent_api_key_use_case.get_by_agent_id_and_name(
         agent_id=agent.id, name=name, api_key_type=api_key_type
     )
@@ -145,6 +160,11 @@ async def get_agent_api_key(
     agent_api_key_use_case: DAgentAPIKeysUseCase,
 ) -> AgentAPIKey:
     agent_api_key_entity = await agent_api_key_use_case.get(id=id)
+    if not agent_api_key_entity:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Agent api_key '{id}' not found.",
+        )
     return AgentAPIKey.model_validate(agent_api_key_entity)
 
 
@@ -179,14 +199,21 @@ async def delete_agent_api_key_by_name(
     if not agent_id and not agent_name:
         raise HTTPException(
             status_code=400,
-            detail="Either 'agent_id' or 'agent_name' must be provided to delete an agent api_key.",
+            detail="Either 'agent_id' or 'agent_name' must be provided to get an agent api_key.",
         )
     if agent_id and agent_name:
         raise HTTPException(
             status_code=400,
-            detail="Only one of 'agent_id' or 'agent_name' should be provided to delete an agent api_key.",
+            detail="Only one of 'agent_id' or 'agent_name' should be provided to get an agent api_key.",
         )
     agent = await agent_use_case.get(id=agent_id, name=agent_name)
+    if not agent:
+        raise HTTPException(
+            status_code=404,
+            detail="Agent not found.",
+        )
+
+    # If agent ID is provided, delete by agent ID and key name
     await agent_api_key_use_case.delete_by_agent_id_and_key_name(
         agent_id=agent.id, key_name=api_key_name, api_key_type=api_key_type
     )

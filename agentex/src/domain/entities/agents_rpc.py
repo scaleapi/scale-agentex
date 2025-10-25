@@ -69,10 +69,6 @@ class SendEventParams(BaseModel):
     )
     task: TaskEntity = Field(..., description="The task that the event was sent to")
     event: EventEntity = Field(..., description="The ID of the event")
-    request: dict[str, Any] | None = Field(
-        None,
-        description="Additional request context including headers",
-    )
 
 
 class CancelTaskParams(BaseModel):

@@ -234,7 +234,6 @@ class AgentTaskService:
         task: TaskEntity,
         acp_url: str,
         content: TaskMessageContentEntity | None = None,
-        request_headers: dict[str, str] | None = None,
     ) -> EventEntity:
         """Create an event and forward it to the ACP server"""
         event = await self.event_repository.create(
@@ -244,11 +243,7 @@ class AgentTaskService:
             content=content,
         )
         await self.acp_client.send_event(
-            agent=agent,
-            event=event,
-            task=task,
-            acp_url=acp_url,
-            request_headers=request_headers,
+            agent=agent, event=event, task=task, acp_url=acp_url
         )
         return event
 

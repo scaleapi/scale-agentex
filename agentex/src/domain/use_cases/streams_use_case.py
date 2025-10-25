@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends
 from pydantic import ValidationError
@@ -67,6 +67,21 @@ class StreamsUseCase:
                 )
             except ValidationError as e:
                 logger.warning(f"Failed to validate stream event data: {e}")
+
+    async def process_data(self, topic: str, data: dict[str, Any]) -> None:
+        """
+        Processes an incoming data: sends the data to Redis.
+        data should contain 'data' and 'encoding' fields
+        """
+        try:
+            # The Redis adapter now handles binary data properly
+            await self.stream_repository.send_data(topic, data)
+            logger.info(
+                f"Data sent successfully to stream repository for topic: {topic}"
+            )
+        except Exception as e:
+            logger.error(f"Error processing data: {e}", exc_info=True)
+            raise
 
     async def cleanup_stream(self, topic: str) -> None:
         """
@@ -164,7 +179,7 @@ class StreamsUseCase:
             yield f"data: {TaskStreamErrorEventEntity(type='error', message=str(e)).model_dump_json()}\n\n"
         finally:
             logger.info(f"SSE stream for task {task_id} has ended")
-            await self.cleanup_stream(stream_topic)
+            await self.stream_repository.cleanup_stream(stream_topic)
 
 
 DStreamsUseCase = Annotated[StreamsUseCase, Depends(StreamsUseCase)]

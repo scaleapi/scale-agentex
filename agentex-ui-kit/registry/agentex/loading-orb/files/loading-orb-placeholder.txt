@@ -1,6 +1,0 @@
-Download these assets and put them in your own /public/assets directory on your website
-
- - loading-orb.webm from http://localhost:3000/assets/loading-orb.webm
- - loading-orb.mp4 from http://localhost:3000/assets/loading-orb.mp4
-
-You can delete this file.

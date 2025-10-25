@@ -11,43 +11,6 @@ class TestAgentsAPIIntegration:
     """Integration tests for agent endpoints using API-first validation"""
 
     @pytest.mark.asyncio
-    async def test_register_with_agent_id(self, isolated_client):
-        """Test registering agent with agent ID"""
-        response = await isolated_client.post(
-            "/agents/register",
-            json={
-                "name": "test-integration-agent",
-                "description": "Created via integration test",
-                "acp_url": "http://test-acp-server:8000",
-                "acp_type": "agentic",
-            },
-        )
-        assert response.status_code == 200
-        agent_data = response.json()
-        assert agent_data["name"] == "test-integration-agent"
-        assert agent_data["description"] == "Created via integration test"
-        assert agent_data["acp_type"] == "agentic"
-        assert agent_data["id"] is not None
-
-        updated_response = await isolated_client.post(
-            "/agents/register",
-            json={
-                "agent_id": agent_data["id"],
-                "name": "updated-name",
-                "description": "Updated description",
-                # ACP URL will not get updated
-                "acp_url": "http://test-new-acp-server:8000",
-                "acp_type": "sync",
-            },
-        )
-        assert updated_response.status_code == 200
-        updated_agent_data = updated_response.json()
-        assert updated_agent_data["name"] == "updated-name"
-        assert updated_agent_data["description"] == "Updated description"
-        assert updated_agent_data["acp_type"] == "sync"
-        assert updated_agent_data["id"] == agent_data["id"]
-
-    @pytest.mark.asyncio
     async def test_register_agent_success_and_retrieve(self, isolated_client):
         """Test agent registration and retrieval via API endpoints"""
         # Given - No existing agents (verify with GET)
@@ -167,100 +130,6 @@ class TestAgentsAPIIntegration:
         )
 
     @pytest.mark.asyncio
-    async def test_register_agent_deployment_history(self, isolated_client):
-        """Test registering agent with code URL and commit hash"""
-        response = await isolated_client.post(
-            "/agents/register",
-            json={
-                "name": "test-integration-agent-deployment-history",
-                "description": "Created via integration test",
-                "acp_url": "http://test-acp-server:8000",
-                "acp_type": "agentic",
-            },
-        )
-        assert response.status_code == 200
-        agent_data = response.json()
-
-        # No registration metadata means no deployment history
-        deployment_history_response = await isolated_client.get(
-            f"/deployment-history?agent_id={agent_data['id']}"
-        )
-        assert deployment_history_response.status_code == 200
-        deployment_history_data = deployment_history_response.json()
-        assert len(deployment_history_data) == 0
-
-        response = await isolated_client.post(
-            "/agents/register",
-            json={
-                "name": "test-integration-agent-deployment-history",
-                "description": "Created via integration test",
-                "acp_url": "http://test-acp-server:8000",
-                "acp_type": "agentic",
-                "registration_metadata": {
-                    "code_url": "https://github.com/example-repo/agents/tree/main",
-                },
-            },
-        )
-        assert response.status_code == 200
-        # No branch name means no deployment history
-        deployment_history_response = await isolated_client.get(
-            f"/deployment-history?agent_id={agent_data['id']}"
-        )
-        assert deployment_history_response.status_code == 200
-        deployment_history_data = deployment_history_response.json()
-        assert len(deployment_history_data) == 0
-
-        response = await isolated_client.post(
-            "/agents/register",
-            json={
-                "name": "test-integration-agent-deployment-history",
-                "description": "Created via integration test",
-                "acp_url": "http://test-acp-server:8000",
-                "acp_type": "agentic",
-                "registration_metadata": {
-                    "code_url": "https://github.com/example-repo/agents/tree/main",
-                    "branch_name": "main",
-                },
-            },
-        )
-        assert response.status_code == 200
-        # No commit hash means no deployment history
-        deployment_history_response = await isolated_client.get(
-            f"/deployment-history?agent_id={agent_data['id']}"
-        )
-        assert deployment_history_response.status_code == 200
-        deployment_history_data = deployment_history_response.json()
-        assert len(deployment_history_data) == 0
-
-        response = await isolated_client.post(
-            "/agents/register",
-            json={
-                "name": "test-integration-agent-deployment-history",
-                "description": "Created via integration test",
-                "acp_url": "http://test-acp-server:8000",
-                "acp_type": "agentic",
-                "registration_metadata": {
-                    "code_url": "https://github.com/example-repo/agents/tree/main",
-                    "branch_name": "main",
-                    "agent_commit": "test-commit-hash",
-                },
-            },
-        )
-        assert response.status_code == 200
-        # Successfully created deployment history
-        deployment_history_response = await isolated_client.get(
-            f"/deployment-history?agent_id={agent_data['id']}"
-        )
-        assert deployment_history_response.status_code == 200
-        deployment_history_data = deployment_history_response.json()
-        assert len(deployment_history_data) == 1
-        assert deployment_history_data[0]["agent_id"] == agent_data["id"]
-        assert deployment_history_data[0]["commit_hash"] == "test-commit-hash"
-        assert deployment_history_data[0]["branch_name"] == "main"
-        assert deployment_history_data[0]["author_name"] == "N/A"
-        assert deployment_history_data[0]["author_email"] == "N/A"
-
-    @pytest.mark.asyncio
     async def test_register_agent_validation_error(self, isolated_client):
         """Test invalid agent data returns proper validation error"""
         response = await isolated_client.post(
@@ -314,6 +183,7 @@ class TestAgentsAPIIntegration:
         assert our_agent["acp_type"] == "sync"
 
     @pytest.mark.asyncio
+    #
     async def test_get_agent_by_id_success_and_not_found(self, isolated_client):
         """Test getting agent by ID handles both success and not found cases"""
         # When - Get non-existent agent

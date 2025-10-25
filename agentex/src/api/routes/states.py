@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from src.api.schemas.authorization_types import (
     AgentexResourceType,
@@ -45,8 +45,9 @@ async def get_state(
     state_id: DAuthorizedId(TaskChildResourceType.state, AuthorizedOperationType.read),
     states_use_case: DStatesUseCase,
 ) -> State:
-    # Will raise an exception if the state does not exist
     state_entity = await states_use_case.get(id=state_id)
+    if not state_entity:
+        raise HTTPException(404, "State not found")
     return State.model_validate(state_entity)
 
 
@@ -95,7 +96,8 @@ async def delete_task_state(
     ),
     states_use_case: DStatesUseCase,
 ) -> State:
-    # Will raise an exception if the state does not exist
     state_entity = await states_use_case.get(id=state_id)
+    if not state_entity:
+        raise HTTPException(404, "State not found")
     await states_use_case.delete(id=state_id)
     return State.model_validate(state_entity)

@@ -287,7 +287,6 @@ class AgentsACPUseCase(TaskMessageMixin):
         | SendEventRequestEntity,
         agent_id: str | None = None,
         agent_name: str | None = None,
-        request_headers: dict[str, str] | None = None,
     ) -> (
         list[TaskMessageEntity]
         | AsyncIterator[TaskMessageUpdateEntity]
@@ -303,13 +302,9 @@ class AgentsACPUseCase(TaskMessageMixin):
             method: JSON-RPC method name
             params: JSON-RPC parameters
             request_id: JSON-RPC request ID
-            request_headers: HTTP headers from the incoming request
 
         Returns:
-            - list[TaskMessageEntity] for synchronous MESSAGE_SEND
-            - AsyncIterator[TaskMessageUpdateEntity] for streaming MESSAGE_SEND
-            - TaskEntity for TASK_CREATE or TASK_CANCEL
-            - EventEntity for EVENT_SEND
+            Dict containing the result of the operation, or AsyncIterator[TaskMessage] for streaming
         """
         # Get the agent
         agent = await self.agent_repository.get(id=agent_id, name=agent_name)
@@ -331,7 +326,7 @@ class AgentsACPUseCase(TaskMessageMixin):
         elif method == AgentRPCMethod.TASK_CANCEL:
             return await self._handle_task_cancel(agent, params)
         elif method == AgentRPCMethod.EVENT_SEND:
-            return await self._handle_event_send(agent, params, request_headers)
+            return await self._handle_event_send(agent, params)
         else:
             raise ValueError(f"Unsupported method: {method}")
 
@@ -731,10 +726,7 @@ class AgentsACPUseCase(TaskMessageMixin):
         )
 
     async def _handle_event_send(
-        self,
-        agent: AgentEntity,
-        params: SendEventRequestEntity,
-        request_headers: dict[str, str] | None = None,
+        self, agent: AgentEntity, params: SendEventRequestEntity
     ) -> EventEntity:
         """
         Handle event/send method
@@ -742,10 +734,9 @@ class AgentsACPUseCase(TaskMessageMixin):
         Args:
             agent: The agent to send the event to
             params: Parameters containing task_id and event data
-            request_headers: HTTP headers from the incoming request
 
         Returns:
-            EventEntity for the created and forwarded event
+            Dict containing the result of the operation
         """
 
         if not params.task_id and not params.task_name:
@@ -760,7 +751,6 @@ class AgentsACPUseCase(TaskMessageMixin):
             task=task,
             content=params.content,
             acp_url=agent.acp_url,
-            request_headers=request_headers,
         )
         return event_entity
 

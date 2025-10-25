@@ -107,6 +107,32 @@ class AgentsUseCase:
         return agent
 
     async def maybe_update_agent_deployment_history(self, agent: AgentEntity) -> None:
+        logger.info(f"Maybe updating deployment history for agent {agent.id}")
+        if not agent.registration_metadata:
+            logger.info(
+                f"No registration metadata found for agent {agent.id}, skipping deployment history update"
+            )
+            return
+
+        commit_hash = agent.registration_metadata.get("agent_commit")
+        if not commit_hash:
+            logger.info(
+                f"No commit hash found for agent {agent.id}, skipping deployment history update"
+            )
+            return
+
+        last_deployment = (
+            await self.deployment_history_repo.get_last_deployment_for_agent(
+                agent_id=agent.id
+            )
+        )
+        if last_deployment and last_deployment.commit_hash == commit_hash:
+            logger.info(
+                f"Last deployment for agent {agent.id} is the same as the current deployment, skipping update"
+            )
+            return
+
+        logger.info(f"Creating new deployment history entry for agent {agent.id}")
         try:
             await self.deployment_history_repo.create_from_agent(agent)
         except Exception as e:

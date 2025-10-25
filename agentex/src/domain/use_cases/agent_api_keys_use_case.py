@@ -243,7 +243,11 @@ class AgentAPIKeysUseCase:
         Returns None if valid, otherwise JSONResponse with error.
         """
         agent_api_key = request.headers.get("X-Agent-API-Key")
-        assert agent_api_key, "Missing X-Agent-API-Key header."
+        if not agent_api_key:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Missing X-Agent-API-Key header."},
+            )
 
         api_key_entity = await self.agent_api_key_repo.get_external_by_agent_id_and_key(
             agent_id=agent_id, api_key=agent_api_key
@@ -264,7 +268,11 @@ class AgentAPIKeysUseCase:
         Returns None if valid, otherwise JSONResponse with error.
         """
         signature_header = request.headers.get("x-hub-signature-256")
-        assert signature_header, "Missing x-hub-signature-256 header."
+        if not signature_header:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Missing x-hub-signature-256 header."},
+            )
 
         if not payload_body:
             error_msg = "Empty payload in GitHub webhook."
@@ -333,7 +341,11 @@ class AgentAPIKeysUseCase:
         Returns None if valid, otherwise JSONResponse with error.
         """
         signature_header = request.headers.get("x-slack-signature")
-        assert signature_header, "Missing x-slack-signature header."
+        if not signature_header:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Missing x-slack-signature header."},
+            )
 
         request_timestamp_raw = request.headers.get("X-Slack-Request-Timestamp")
         if not request_timestamp_raw:
@@ -363,8 +375,24 @@ class AgentAPIKeysUseCase:
                 content={"detail": error_msg},
             )
 
-        # We already checked that the payload is not empty and parseable when looking for the challenge, so we can decode it
-        payload_json = json.loads(payload_body.decode("utf-8"))
+        if not payload_body:
+            error_msg = "Empty payload in Slack webhook."
+            logger.warning(error_msg)
+            return JSONResponse(
+                status_code=400,
+                content={"detail": error_msg},
+            )
+        payload_json = None
+        try:
+            payload_json = json.loads(payload_body.decode("utf-8"))
+        except json.JSONDecodeError:
+            error_msg = "Failed to parse Slack webhook payload as JSON."
+            logger.warning(error_msg)
+            return JSONResponse(
+                status_code=400,
+                content={"detail": error_msg},
+            )
+
         if not payload_json.get("api_app_id"):
             # Currently only supporting Slack webhooks with API app ID
             error_msg = "Slack webhook payload missing API app ID."

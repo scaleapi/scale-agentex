@@ -60,6 +60,11 @@ async def list_deployments(
             detail="Only one of 'agent_id' or 'agent_name' should be provided to list deployment history.",
         )
     agent = await agent_use_case.get(id=agent_id, name=agent_name)
+    if not agent:
+        raise HTTPException(
+            status_code=404,
+            detail="Agent not found.",
+        )
     deployments = await deployment_history_use_case.list_deployments(agent_id=agent.id)
 
     # Convert entities to API schemas
