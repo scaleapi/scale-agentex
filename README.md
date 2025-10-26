@@ -1,275 +1,309 @@
-# Agentex - Quick Start Development Guide
+<div align="center">
+  <h1 align="center">Agentex</h1>
+  <p align="center">
+    Build and deploy intelligent agents with ease
+    <br />
+    <a href="https://agentex.sgp.scale.com/docs"><strong>Explore the docs »</strong></a>
+    <br />
+    <br />
+    <a href="https://github.com/scaleapi/scale-agentex-python">Python SDK</a>
+    ·
+    <a href="https://github.com/scaleapi/scale-agentex/issues">Report Bug</a>
+    ·
+    <a href="https://github.com/scaleapi/scale-agentex/issues">Request Feature</a>
+  </p>
+  
+  <p align="center">
+    <a href="https://pypi.org/project/agentex-sdk/"><img src="https://img.shields.io/pypi/v/agentex-sdk?label=agentex-sdk" alt="PyPI Version"></a>
+    <img src="https://img.shields.io/badge/python-3.12+-blue" alt="Python 3.12+">
+    <a href="https://github.com/scaleapi/scale-agentex/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License"></a>
+    <a href="https://github.com/scaleapi/scale-agentex"><img src="https://img.shields.io/github/stars/scaleapi/scale-agentex?style=social" alt="GitHub Stars"></a>
+  </p>
+</div>
 
-Build and deploy intelligent agents with ease using Agentex's comprehensive platform.
+## About The Project
 
-## 🚀 Quick 3-Terminal Setup
+AI agent capabilities can be understood in five levels, from simple chatbots to fully autonomous, self-driving agentic systems:
 
-Get started with Agentex in under 5 minutes using our three-terminal workflow:
+<img width="960" height="417" alt="Levels of AI" src="https://github.com/user-attachments/assets/1ea51bb2-1a86-4f9a-8df0-a63c614c4b07" />
+
+Today, most AI applications are limited to Level 3 (L3) and below, relying on synchronous request/response patterns. This restricts their ability to handle complex, long-running, or autonomous workflows.
+
+Agentex is designed to be future-proof, enabling you to build, deploy, and scale agents at any level (L1–L5). As your needs grow, you can seamlessly progress from basic to advanced agentic AI—without changing your core architecture.
+
+In this README we will start with scaffolding an L1 example just to learn the ropes. For more complicated levels, refer to the Python SDK and Docs mentioned below. Since we have documentation resources in several places, here is how to use each of them.
+
+| Resource | Description |
+|----------|-------------|
+| **This README** | **Getting Started**: Spin up a simple agent on your local computer from scratch in minutes. This comes with a full development UI and agent server. |
+| **[Python SDK](https://github.com/scaleapi/scale-agentex-python)** | **Examples**: Agent-building tutorials that work out of the box. These show how to build up from simple to more complex agents using Agentex. |
+| **[Docs Site](https://agentex.sgp.scale.com/docs)** | **Concepts**: More in depth details on the what, why, and how of building L1-L5 agents.<br><br>**Enterprise Support**: Description of how our zero-ops deployment works. Learn how to share hundreds of agents with the rest of your company. Each agent is hosted and scaled independently on cloud-agnostic infrastructure. |
+
+## Getting Started
+
+Here is what we will build together in this README. We'll start with a Hello World agent, but quickly switch to a more intelligent one!
+
+https://github.com/user-attachments/assets/2543490f-e861-41b0-82fa-fd0ba5a02b95
+
 
 ### Prerequisites
 
-#### Python Version Requirement ⚠️
-
-**IMPORTANT**: Agentex SDK requires Python 3.12 or higher. 
-
-First, check your current Python version:
-```bash
-python --version
-# or
-python3 --version
-```
-
-If you're not on Python 3.12+, follow the setup instructions below for your preferred Python version manager:
-
-##### Option 1: Using pyenv (Recommended for macOS/Linux)
-```bash
-# Install pyenv if not already installed
-curl https://pyenv.run | bash
-# or on macOS: brew install pyenv
-
-# Install and set Python 3.12
-pyenv install 3.12.0
-pyenv global 3.12.0  # Set globally
-# or pyenv local 3.12.0  # Set for current project only
-
-# Verify installation
-python --version  # Should show Python 3.12.x
-```
-
-##### Option 2: Using conda/miniconda
-```bash
-# Create new environment with Python 3.12
-conda create -n agentex-sdk python=3.12
-conda activate agentex-sdk
-
-# Verify installation
-python --version  # Should show Python 3.12.x
-```
-
-##### Option 3: Using uv (Fast Python installer)
-```bash
-# Install uv if not already installed
-pip install uv
-
-# Install Python 3.12 with uv
-uv python install 3.12
-
-# Create and activate virtual environment
-uv venv --python 3.12
-source .venv/bin/activate
-
-# Verify installation
-python --version  # Should show Python 3.12.x
-```
-
-#### Install underlying dependencies
+- **Install Python 3.12+ (Required)**: https://www.python.org/downloads/
 
 ```bash
-# Install required tools (make sure you're using Python 3.12+)
-pip install uv
+# Install uv (fast Python package manager) https://docs.astral.sh/uv/getting-started/installation/
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install Docker and Node.js
 brew install docker docker-compose node
 
-# Optional but recommended - Docker management UI
-brew install lazydocker
-echo "alias lzd='lazydocker'" >> ~/.zshrc
-source ~/.zshrc
-
-# In the main agentex directory
-# Do this if you need to work with packages from scale-pypi such as egp_services/scale-oldowan
-source ./setup-codeartifact.sh
+# Stop redis - On Mac the default redis will conflict with the redis that is started up by our docker compose file
+brew services stop redis
 ```
 
-#### Install the SDK
+#### Install the Agentex SDK
 
-**⚠️ Important**: Verify you're using Python 3.12+ before installing:
-```bash
-python --version  # Must show 3.12.x or higher
-```
-
-##### Option 0: Editable Install (Recommended for Development)
-
-Use this if you want to:
-- Contribute to agentex-sdk development
-- Modify SDK source code and see changes immediately
-- Debug SDK issues or add custom features
-- Stay on the bleeding edge with latest unreleased features
+You will need the Agentex CLI to create your first Agent. Use `uv tool` to install the `agentex` CLI in an self-contained environment, but still make it globally available. 
 
 ```bash
-# Clone the SDK repository
-cd ../  # Go up one directory from your current project
-git clone git@github.com:scaleapi/agentex-python.git
-cd agentex-python
-
-# Create virtual environment with Python 3.12
-uv venv
-source .venv/bin/activate  # Activate the virtual environment
-
-# Install in editable mode - changes to source code are reflected immediately
-uv sync  # This installs the SDK in development/editable mode
-
-# Verify editable installation
-python -c "import agentex; print(f'agentex-sdk version: {agentex.__version__} (editable)')"
+uv tool install agentex-sdk
 ```
 
-**What this does**: An editable install links your local SDK code to your Python environment. When you modify the SDK source files, the changes are immediately available without reinstalling - perfect for development!
+The installation was successful if you see help output after you run `agentex -h`.
 
-##### Option 1: Standard Installation
-
-Use this for normal usage when you just want to use the SDK:
-
-```bash
-# Install via pip
-pip install agentex-sdk
-
-# Install via uv 
-uv add agentex-sdk  # If you have an existing project
-uv pip install agentex-sdk # else
-
-# Verify you got the latest version (should be 0.2.4 or higher)
-python -c "import agentex; print(f'agentex-sdk version: {agentex.__version__}')"
-```
-
-**Troubleshooting**: If you see version 0.0.1, it means you're using Python < 3.12. The latest agentex-sdk versions require Python 3.12+.
+<img width="563" height="199" alt="Agentex CLI help output" src="https://github.com/user-attachments/assets/2df54b87-9f0d-4c04-9461-456bda76d7fa" />
 
 
----
+## Setup
 
-## Terminal 1: Backend Services
+Before you share your agents with other people (or your company), you'll want a fully isolated developer sandbox. This allows you to freely develop agents without affecting anyone else or be affected by anyone else.
 
-Set up and start all backend services:
+To do this, you just need to spin up the [Agentex Server](https://github.com/scaleapi/scale-agentex/tree/main/agentex) and a [Developer UI](https://github.com/scaleapi/scale-agentex/tree/main/agentex-sgp-app) which allows you to interact with your agent nicely. This way you'll know how your agent feels in a simple UI.
+
+> Each agent also ships with a `dev.ipynb` notebook for those uninterested in a UI, but more on that later
+
+### Terminal 1 - Agentex Server
+
+First, open up a terminal. Then run the following commands.
+
+*Note: you should run these commands at the root of this repository.*
 
 ```bash
 cd agentex/
-# Optional: make clean to clear venv and uv.lock
-
-# Note: no need to source the venv because it is running in docker-compose
-make dev      # Installs uv dependencies and starts Docker services
-
-# Optional: Monitor Docker containers with a UI
-lzd  # (lazydocker command)
+# Install dependencies in a virtual environment
+uv venv && source .venv/bin/activate && uv sync 
+# Start backend services via docker compose (see Makefile for details)
+make dev
 ```
 
-**Services started:**
-- 🔌 **Port 5003**: Backend API server
-- 🗄️ **Port 5432**: PostgreSQL database  
-- ⚡ **Port 6379**: Redis cache
-- 🍃 **Port 27017**: MongoDB
-- ⏱️ **Port 7233**: Temporal server
-- 🌐 **Port 8080**: Temporal Web UI
+### (Optional) Terminal 1.5 - LazyDocker
 
----
-
-## Terminal 2: Frontend
-
-Set up and start the web interface:
+It's hard to see if everything is healthy when you just run docker compose in a single terminal since all the logs are jumbled up. Instead, we recommend installing [lazydocker](https://github.com/jesseduffield/lazydocker) and running the following shortcut in a separate terminal.
 
 ```bash
-cd agentex-web/
-make dev  # Installs npm dependencies and starts dev server
+lzd
 ```
 
-**Service started:**
-- 🌐 **Port 3000**: Next.js web interface
+This gives a terminal for you to ensure all of the backend servers are healthy and you can review logs for each individual server in isolation. You know your Agent Server is fully running if all of the services from the docker compose are marked `(healthy)` in the top left panel of lazydocker.
 
-Access at: **http://localhost:3000**
+<img width="863" height="729" alt="image" src="https://github.com/user-attachments/assets/ba651d08-f72e-4614-a100-f972e41c9374" />
 
----
 
-## Terminal 3: SDK & Agent Development
+### Terminal 2 - Frontend Server
 
-The Agentex Python SDK is now available as a separate package. Install it to create and run your agents!
+Then, open up a second terminal. Then run the following commands.
 
-NOTE: This SDK is portable anywhere in your file directories. However, to hook into our CI/CD system, please
-clone the agentex-agents repository: https://github.com/scaleapi/agentex-agents, and work within your team.
-
-### Verify SDK is installed
+*Note: you should run these commands at the root of this repository.*
 
 ```bash
-# Verify installation
-agentex --help
+cd agentex-sgp-app/
+# Install dependencies (see Makefile for details)
+make install
+# Starts web interface on localhost (default port 3000)
+make dev
 ```
 
-### Create Your First Agent
+## Create Your First Agent
+
+The Agentex Python SDK natively ships with a CLI. Use this CLI to scaffold your first "Hello World" agent. Run `agentex -h` to ensure the CLI is available.
+
+### Terminal 3 - Initialize your Agent code
+
+Let's create a **sync** agent at first. A sync agent is blocking on each user query. The agent cannot take additional requests while it's responding. This is the most classic chat-style agent you're probably very familiar with by now. You'll need to have a directory to put this agent in, so please have a destination in mind.
 
 ```bash
-# IMPORTANT: Set development mode for all terminals where you use the SDK
-export ENVIRONMENT=development
-
-# Create a new agent
+# Creates a working AI agent at your specified directory
 agentex init
-# Follow the prompts to create your agent
+```
 
-# Run your agent
+Here is an example of the CLI flow you should follow with some example responses. You can change the responses if you'd like.
+
+<img width="573" height="759" alt="image" src="https://github.com/user-attachments/assets/7a41cda6-b020-483b-bf63-cef7c684f35a" />
+
+
+
+### Set up your agent's environment
+
+Set up your virtual environment, install dependencies, and enter your virtual environment
+
+```bash
 cd your-agent-name/
-export ENVIRONMENT=development && agentex agents run --manifest manifest.yaml
+uv venv && source .venv/bin/activate && uv sync 
 ```
 
-**Agent started:**
-- 🤖 **Port 8000**: Your agent's ACP server
+> Note: If you are using an IDE, we recommend you setting your virtual environment path to `.venv/bin/python` to get linting
 
-> **Note**: For the SDK installation and usage instructions, visit the [agentex-python repository](https://github.com/scaleapi/agentex-python)
+### Your Agent Server
 
----
+In the same Terminal 3, start your Agent Server (in your virtual environment).
 
-## 🎯 Verify Everything Works
+This server will auto-reload as you make changes to your agent code. Your print statements and error logs will appear here.
 
-1. **Backend Health**: `curl http://localhost:5003/health`
-2. **Frontend Access**: Open http://localhost:3000
-3. **SDK Installation**: Run `agentex --help`
-4. **Agent Interaction**: Use the web UI to chat with your agent
-5. **Docker Status**: Run `docker ps` or `lzd` to see all services
-
----
-
-## 🛠️ Essential CLI Commands
-
-### Agent Management
 ```bash
-agentex agents list          # List all agents
-agentex agents run --manifest manifest.yaml  # Run agent locally
-agentex agents build --manifest manifest.yaml --push  # Build & deploy
+# Starts your agent
+agentex agents run --manifest manifest.yaml
 ```
 
-### Package Management
+> The `manifest.yaml` defines important parameters the Agentex backend needs to know to start the agent like its name and the location of crucial project files. For now, the `agentex init` command sets this up correctly for you based on your answers to the CLI questions. If you want to learn about all of these parameters and how to edit this file, please refer to our [docs](https://agentex.sgp.scale.com/docs).
+
+## Test your Agent
+
+You should see your agent appear in the developer UI when you visit http://localhost:3000 in your browser. As you can see, this agent just responds with a "Hello World" message. It's main purpose is to show how simple the agent's standard entrypoint is.
+
+<img width="1728" height="992" alt="image" src="https://github.com/user-attachments/assets/0bedc20f-850c-48cf-b134-ed8814eab48d" />
+
+Let's make it slightly more interesting by allowing an AI to respond in a streaming fashion.
+
+Simply copy the code from [this streaming example](https://github.com/scaleapi/scale-agentex-python/blob/main/examples/tutorials/00_sync/020_streaming/project/acp.py) and replace your existing `project/acp.py` file with it (see the above video for a walkthrough):
+
+> Note: As you can see, code and files are very portable. As long as your `manifest.yaml` and `acp.py` is configured correctly your agent should work out of the box.
+
+Your agent should auto-reload and look like this now:
+
+<img width="1728" height="991" alt="image" src="https://github.com/user-attachments/assets/4d482101-2494-44f8-9ad3-4521487a2e78" />
+
+At this point, feel free to play around with the UI.
+1. Start a conversation with your agent
+2. See your agent respond
+3. Investigate your agent's behavior by opening the traces tab (top right corner icon). 
+
+> Troubleshooting: If your agent response doesn't stream, you should run `brew services stop redis` as mentioned in the preqrequisite section.
+
+## Recommended Next Steps
+
+> To do more complex things like those suggested below, it's best to consult the [Python SDK tutorials](https://github.com/scaleapi/scale-agentex-python/tree/main/examples) and [Docs Site](https://agentex.sgp.scale.com/docs) for guidance.
+
+The world is your oyster at this point. Here are some suggestions on what to try next!
+
+> Hint: If you need help you can probably vibe-code some of these with Claude Code, Cursor, or Codex. Just make sure to add our docs as context!
+
+|What to try|Description|
+|--|--|
+| **Make your AI Agentic** | Add a tool call or two to see how that changes the Agent's behavior in the UI. |
+| **Make multiple agents** | Why stop at 1? Make a couple agents |
+| **Multi Agent System** | Make agents that use sub-agents. Use our Agent Developer Kit (ADK) to send messages between agents. |
+| **Async Agent** | A chat agent is cool, but an asynchronous agent that in the background is even cooler. Switch to the "Agentic ACP" agent to make your first async agent. |
+| **Temporal-Powered Async Agent** | As your agents get more complex and start incorporating the following techniques (human escalation, complex multi-step tools). We have partnered with [Temporal](https://docs.temporal.io/develop/python) to power up our Agents with Temporal's durable execution. |
+
+### Set up environment variables
+
+In order for us to use AI, you need an API key to the provider of your choice. Our tutorial starts you off with an OpenAI call for simplicity. To start, define your OpenAI API Key in a `.env` file as shown below. 
+
+> If you do not use OpenAI, replace the OpenAI call with the LLM provider of your choice and put the appropriate API key in the `.env` file.
+
+Create a .env file in the root of your agent folder (at the same level as the `manifest.yaml`).
+
 ```bash
-# For new projects
-uv add agentex-sdk           # Add the SDK to your project (if using uv)
-pip install agentex-sdk      # Or install with pip
+touch .env
 
-# For existing projects
-agentex uv sync              # Sync dependencies (if using uv)
-agentex uv add requests      # Add new dependencies
+# Add environment variables to this file i.e.
+OPENAI_API_KEY="..."
 ```
 
-### Development Tools
-```bash
-agentex init                 # Create new agent
-agentex tasks list          # View agent tasks
-agentex secrets create      # Manage secrets
-```
+> If you modify your .env file, you will need to restart the server via `Ctrl-C` and re-run this command. Note: This will not delete any chat history you already have. This history is persisted by the Agentex backend service.
+
+## Contact
+
+**Original Authors**  
+| [@felix8696](https://github.com/felixs8696) | [@jasonyang101](https://github.com/jasonyang101) |
+|--------------------------------------------|----------------------------------------------------|
+| <a href="https://github.com/felixs8696"><img src="https://github.com/felixs8696.png" width="60" height="60" alt="@felix8696" /></a> | <a href="https://github.com/jasonyang101"><img src="https://github.com/jasonyang101.png" width="60" height="60" alt="@jasonyang101" /></a> |
+
+**Maintainers**  
+| [@danielmillerp](https://github.com/danielmillerp) | [@RoxyFarhad](https://github.com/RoxyFarhad) | [@smoreinis](https://github.com/smoreinis) | [@MichaelSun48](https://github.com/MichaelSun48) | [@declan-scale](https://github.com/declan-scale) |
+|----------------------------------------------------|-----------------------------------------------|-----------------------------------------------|------------------------------------------------|-----------------------------------------------|
+| <a href="https://github.com/danielmillerp"><img src="https://github.com/danielmillerp.png" width="60" height="60" alt="@danielmillerp" /></a> | <a href="https://github.com/RoxyFarhad"><img src="https://github.com/RoxyFarhad.png" width="60" height="60" alt="@RoxyFarhad" /></a> | <a href="https://github.com/smoreinis"><img src="https://github.com/smoreinis.png" width="60" height="60" alt="@smoreinis" /></a> | <a href="https://github.com/MichaelSun48"><img src="https://github.com/MichaelSun48.png" width="60" height="60" alt="@MichaelSun48" /></a> | <a href="https://github.com/declan-scale"><img src="https://github.com/declan-scale.png" width="60" height="60" alt="@declan-scale" /></a> |
 
 ---
 
-## 📦 Package Management Options
-
-When creating an agent with `agentex init`, you can choose between:
-
-### Option 1: uv (Recommended)
-- Uses `pyproject.toml` for dependency management
-- Faster dependency resolution and installation
-- Better dependency isolation
-- Use `agentex uv` commands for package management
-
-### Option 2: pip (Traditional)
-- Uses `requirements.txt` for dependency management
-- Traditional pip-based workflow
-- Good for teams familiar with pip
+**Scale AI**  [![GitHub](https://img.shields.io/badge/GitHub-@scaleapi-181717?logo=github&style=flat-square)](https://github.com/scaleapi)  
+**Project Link:** [https://github.com/scaleapi/scale-agentex](https://github.com/scaleapi/scale-agentex)
 
 ---
 
-## 🚨 Common Problems & Solutions
+## Why Open Source?
 
-### Redis Port Conflict
+At Scale, we've spent the last three years building enterprise AI agents and learned how different every use case is. To unify our approach, we built a single delivery framework and now we're open-sourcing it to share what we've learned. Many enterprises have built upon open source tooling, and we want to contribute to that ecosystem. Our goal is simple: see more useful AI in production.
+
+Agentex is also cloud-agnostic and Kubernetes-native. We intentionally kept it lightweight and unopinionated to maximize flexibility and to incur minimal infrastructure and security overhead.
+
+Here are the differences between Open Source vs Enterprise to meet different organizational needs:
+
+| Feature | Open Source Edition | Enterprise Edition |
+|---------|--------------------|--------------------|
+| **Source Code** | ✅ Open source server, developer UI, and SDK | ✅ Open source server, developer UI, and SDK |
+| **Local Development** | ✅ Use this repo for local development | ✅ Use this repo for local development |
+| **Community Support** | ✅ GitHub issues, discussions, pull requests | ✅ GitHub issues, discussions, pull requests |
+| **GitOps Setup** | ❌ DIY deployment using public helm charts and the `agentex` CLI in CI/CD | ✅ Scale sets up CI/CD on select repositories for automatic agent deployment |
+| **Builder Tools** | ❌ Bring your own (vector stores, models, etc.) | ✅ Model inference, knowledge bases, etc. |
+| **Agent Operations (AgentOps)** | ❌ Not included | ✅ Full agent lifecycle management: hosting, version control, interaction UI, tracing, evaluation |
+| **Identity Management** | ❌ No user management | ✅ SSO/SAML authentication, centralized API key management |
+| **Enterprise Operations** | ❌ Self-service setup | ✅ Uptime/availability SLAs, security reviews, deployment, installation, ongoing maintenance |
+
+**Ready for Enterprise?** Contact our team at [enterprise@scale.com](mailto:enterprise@scale.com) to discuss your requirements.
+
+> For our current and future customers, Agentex is a module that is hosted and deployed as part of the Scale GenAI Platform's Enterprise License. This open source project is meant to give people a local development ability and community support.
+
+---
+## Contributing
+
+Contributions make the open source community amazing! Any contributions you make are **greatly appreciated**.
+
+### Making changes to the Agentex Server
+
+1. **Fork the repository**
+
+2. **Create your feature branch**
+   ```bash
+   git checkout -b feature/AmazingFeature
+   ```
+
+4. **Make your changes and test**
+   ```bash
+   # Run all tests
+   make test
+   ```
+
+5. **Commit your changes**
+   ```bash
+   git commit -m 'Add some AmazingFeature'
+   ```
+
+6. **Push to the branch**
+   ```bash
+   git push origin feature/AmazingFeature
+   ```
+
+7. **Open a Pull Request**
+
+### Making Changes to the Agentex Python SDK
+
+Please visit: https://github.com/scaleapi/scale-agentex-python
+
+---
+## Troubleshooting
+
+#### Redis Port Conflict
 If you have Redis running locally, it may conflict with Docker Redis:
 ```bash
 # Stop local Redis (macOS)
@@ -279,99 +313,37 @@ brew services stop redis
 sudo systemctl stop redis-server
 ```
 
-### Port Already in Use
-Use this command to find and kill processes on conflicting ports:
+#### Port or Address Already in Use
+
+- If you are running multiple agents at the same time and see `ACP: ERROR:    [Errno 48] Address already in use`, modify the `local_development.agent.port` field in your `manifest.yaml` to use a different port for each agent or just Ctrl-C any agents you're not currently working on. Don't wory your messages will still persist.
+- If you are running processes that conflict witht he ports in the docker compose, either kill those conflicting processes (if you don't need them) or modify the docker compose to use different ports.
+
+Use this command to find and kill processes on conflicting ports (if you don't need those processes).
 ```bash
-# Kill process on specific port (replace 8000 with your port)
-kill -9 $(lsof -i TCP:8000 | grep LISTEN | awk '{print $2}')
+# Kill process on specific port (replace <port> and <PID> accordingly)
+lsof -i TCP:<port>
+kill -9 <PID>
 ```
 
-Referenced from: [What's Running on Port 8000? (And how to stop it)](https://medium.com/@valgaze/utility-post-whats-running-on-port-8000-and-how-to-stop-it-2ed771fbb422)
-
-### Docker Permission Issues
-```bash
-# Add user to docker group (Linux)
-sudo usermod -aG docker $USER
-# Restart terminal after running this
-```
-
-### `agentex` Command Not Found
+#### `agentex` Command Not Found
 If you get "command not found: agentex", make sure you've installed the SDK:
 ```bash
-pip install agentex-sdk
+uv tool install agentex-sdk
 # Now agentex commands should work
 agentex --help
 ```
 
-### Wrong agentex-sdk Version (0.0.1 instead of latest)
+#### Wrong agentex-sdk Version (0.0.1 instead of latest)
 If you only get agentex-sdk version 0.0.1, it's because you're using Python < 3.12:
 ```bash
 # Check your Python version
 python --version
 
 # If it shows < 3.12, upgrade Python first (see Prerequisites section above)
-# Then reinstall the SDK
-pip uninstall agentex-sdk
-pip install agentex-sdk
+# Then uninstall the SDK via whatever you used to install the older version and reinstall agentex-sdk using UV
+uv tool uninstall agentex-sdk
+uv tool install agentex-sdk
 
 # Verify you now have the latest version
 python -c "import agentex; print(f'agentex-sdk version: {agentex.__version__}')"
 ```
-
-### Environment Variables
-For SDK usage, always set the development environment:
-```bash
-export ENVIRONMENT=development
-```
-
----
-
-## 📁 Repository Structure
-
-```
-agentex/
-├── agentex/           # Backend server & services
-├── agentex-web/       # Next.js frontend 
-└── agentex-auth/      # Authentication proxy
-```
-
-### Individual READMEs
-- **[agentex/README.md](agentex/README.md)**: Backend setup, Docker services, database migrations
-- **[agentex-web/README.md](agentex-web/README.md)**: Frontend setup, environment variables
-
-### External Resources
-- **[agentex-python](https://github.com/scaleapi/agentex-python)**: Python SDK, CLI tools, and tutorials
-
----
-
-## 🎓 Next Steps
-
-1. **Explore SDK Features**: Check out the [agentex-python repository](https://github.com/scaleapi/agentex-python)
-2. **Read Documentation**: Visit [dev.agentex.scale.com/docs](https://dev.agentex.scale.com/docs)
-3. **Check Examples**: Explore the examples in the agentex-python repository
-4. **Monitor with Temporal**: Access Temporal UI at http://localhost:8080
-5. **View API Docs**: Backend API documentation at http://localhost:5003/api
-
----
-
-## 🔗 Quick Links
-
-- **Web Interface**: http://localhost:3000
-- **Backend API**: http://localhost:5003
-- **Temporal UI**: http://localhost:8080  
-- **Documentation**: https://agentex.scale.com/docs
-- **Python SDK**: https://github.com/scaleapi/agentex-python
-
----
-
-## 🐳 Docker Management
-
-**Useful Docker Commands:**
-```bash
-docker ps              # List running containers
-docker compose down     # Stop all services
-docker compose up       # Restart services
-lzd                    # LazyDocker UI (if installed)
-```
-
-Happy building! 🚀 

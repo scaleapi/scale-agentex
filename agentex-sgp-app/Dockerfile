@@ -31,6 +31,7 @@ RUN npm config set registry https://registry.npmjs.org/ && \
 
 # Copy source code (node_modules and .next excluded by .dockerignore)
 COPY . .
+COPY LICENSE /app/LICENSE
 
 # Build the application (creates fresh .next directory)
 RUN npm run build
