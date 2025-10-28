@@ -125,18 +125,11 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
           content: prompt as string,
         };
 
-    try {
-      await sendMessageMutation.mutateAsync({
-        taskId: currentTaskId,
-        agentName: agentName!,
-        content,
-      });
-    } catch (error) {
-      toast.error({
-        title: 'Failed to send message',
-        message: error instanceof Error ? error.message : 'Please try again.',
-      });
-    }
+    await sendMessageMutation.mutateAsync({
+      taskId: currentTaskId,
+      agentName: agentName!,
+      content,
+    });
   }, [
     isDisabled,
     prompt,

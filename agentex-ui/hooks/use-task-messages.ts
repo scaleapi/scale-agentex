@@ -1,16 +1,18 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  agentRPCWithStreaming,
   agentRPCNonStreaming,
+  agentRPCWithStreaming,
   aggregateMessageEvents,
 } from 'agentex/lib';
 import { v4 } from 'uuid';
+
+import { toast } from '@/components/agentex/toast';
 
 import { agentsKeys } from './use-agents';
 
 import type AgentexSDK from 'agentex';
 import type { IDeltaAccumulator } from 'agentex/lib';
-import type { TaskMessage, TaskMessageContent, Agent } from 'agentex/resources';
+import type { Agent, TaskMessage, TaskMessageContent } from 'agentex/resources';
 
 type TaskMessagesData = {
   messages: TaskMessage[];
@@ -208,6 +210,12 @@ export function useSendMessage({
           );
         }
       }
+    },
+    onError: error => {
+      toast.error({
+        title: 'Failed to send message',
+        message: error instanceof Error ? error.message : 'Please try again.',
+      });
     },
   });
 }
