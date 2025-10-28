@@ -62,7 +62,7 @@ export function useInfiniteTasks(
   agentexClient: AgentexSDK,
   options?: { agentName?: string; limit?: number }
 ) {
-  const { agentName, limit = 10 } = options || {};
+  const { agentName, limit = 30 } = options || {};
 
   return useInfiniteQuery({
     queryKey: tasksKeys.byAgentName(agentName),

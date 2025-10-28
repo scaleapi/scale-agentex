@@ -107,7 +107,7 @@ export function TaskSidebar({
     isFetchingNextPage,
   } = useInfiniteTasks(
     agentexClient,
-    selectedAgentName ? { agentName: selectedAgentName, limit: 20 } : undefined
+    selectedAgentName ? { agentName: selectedAgentName } : undefined
   );
 
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
