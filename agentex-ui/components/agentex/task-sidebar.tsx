@@ -45,12 +45,15 @@ function TaskButton({ task, selectedTaskID, selectTask }: TaskButtonProps) {
   );
   const agentsString = useMemo(() => {
     if (!task.agents || task.agents.length === 0) return 'No agents';
+
+    const firstAgent = task.agents[0];
+    if (!firstAgent) return 'No agents';
+
     if (task.agents.length === 1) {
-      return `${task.agents[0]?.name}`;
-    } else if (task.agents?.length > 1) {
-      return `${task.agents[0]?.name} + ${task.agents.length - 1} more`;
+      return firstAgent.name;
     }
-    return 'No agents';
+
+    return `${firstAgent.name} + ${task.agents.length - 1} more`;
   }, [task.agents]);
 
   return (
@@ -92,11 +95,13 @@ function TaskButton({ task, selectedTaskID, selectTask }: TaskButtonProps) {
         <div
           className={cn(
             'text-muted-foreground w-full truncate text-xs',
-            task.agents?.length || task.created_at ? 'block' : 'invisible'
+            (task.agents && task.agents.length > 0) || task.created_at
+              ? 'block'
+              : 'invisible'
           )}
         >
           {createdAtString}
-          {task.agents?.length && task.created_at && ' • '}
+          {task.agents && task.agents.length > 0 && task.created_at && ' • '}
           {agentsString}
         </div>
       </Button>
