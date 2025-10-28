@@ -1,7 +1,7 @@
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 
 import type AgentexSDK from 'agentex';
-import type { Task } from 'agentex/resources';
+import type { Task, TaskListParams } from 'agentex/resources';
 
 /**
  * Query key factory for tasks
@@ -52,5 +52,38 @@ export function useTask({
     },
     enabled: !!taskId,
     staleTime: 30 * 1000,
+  });
+}
+
+/**
+ * useQuery hook for infinite scrolling tasks
+ */
+export function useInfiniteTasks(
+  agentexClient: AgentexSDK,
+  options?: { agentName?: string; limit?: number }
+) {
+  const { agentName, limit = 10 } = options || {};
+
+  return useInfiniteQuery({
+    queryKey: tasksKeys.byAgentName(agentName),
+    queryFn: async ({ pageParam = 1 }): Promise<Task[]> => {
+      const params: TaskListParams | undefined = agentName
+        ? {
+            agent_name: agentName,
+            limit,
+            page_number: pageParam as number,
+          }
+        : undefined;
+      return agentexClient.tasks.list(params);
+    },
+    getNextPageParam: (lastPage, allPages) => {
+      if (lastPage.length < limit) {
+        return undefined;
+      }
+      return allPages.length + 1;
+    },
+    initialPageParam: 1,
+    staleTime: 30 * 1000,
+    refetchOnWindowFocus: true,
   });
 }
