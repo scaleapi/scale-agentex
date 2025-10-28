@@ -138,7 +138,7 @@ function MemoizedTaskMessagesComponentImpl({
     if (!autoScrollEnabled) return;
 
     const previousCount = previousMessageCountRef.current;
-    const currentCount = messages.length;
+    const currentCount = messagePairs.length;
 
     if (currentCount > previousCount && lastPairRef.current) {
       setTimeout(() => {
@@ -150,7 +150,7 @@ function MemoizedTaskMessagesComponentImpl({
     }
 
     previousMessageCountRef.current = currentCount;
-  }, [messages.length, autoScrollEnabled]);
+  }, [messagePairs.length, autoScrollEnabled]);
 
   // Helper function to render a message
   const renderMessage = (message: TaskMessage) => {
