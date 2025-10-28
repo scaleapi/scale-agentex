@@ -70,7 +70,11 @@ function TaskMessageToolPairComponent({
         ease: 'easeInOut',
       }}
     >
-      <div className="mb-2 flex items-center gap-2">
+      <button
+        className="mb-2 flex items-center gap-2"
+        type="button"
+        onClick={() => setIsCollapsed(!isCollapsed)}
+      >
         <Wrench className="size-4" />
         <ShimmeringText
           enabled={!toolResponseMessage}
@@ -80,17 +84,13 @@ function TaskMessageToolPairComponent({
               : 'Used tool:  ' + toolRequestMessage.content.name
           }
         />
-        <button type="button" onClick={() => setIsCollapsed(!isCollapsed)}>
-          <ChevronDownIcon
-            className={cn(
-              'size-4 transition-transform duration-500',
-              isCollapsed ? '' : 'scale-y-[-1]'
-            )}
-          />
-        </button>
-        {/* The taskmessage state doesn't seem to be working properly, so this status badge is inaccurate. */}
-        {/* {getStatusBadge(state)} */}
-      </div>
+        <ChevronDownIcon
+          className={cn(
+            'size-4 transition-transform duration-500',
+            isCollapsed ? '' : 'scale-y-[-1]'
+          )}
+        />
+      </button>
       <Collapsible collapsed={isCollapsed}>
         <div className="ml-6 flex flex-col gap-4">
           <ToolInput input={toolRequestMessage.content.arguments} />
@@ -103,4 +103,4 @@ function TaskMessageToolPairComponent({
 
 const MemoizedTaskMessageToolPairComponent = memo(TaskMessageToolPairComponent);
 
-export { TaskMessageToolPairComponent, MemoizedTaskMessageToolPairComponent };
+export { MemoizedTaskMessageToolPairComponent, TaskMessageToolPairComponent };

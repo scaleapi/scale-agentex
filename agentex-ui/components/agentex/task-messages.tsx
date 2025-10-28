@@ -20,9 +20,7 @@ import { ShimmeringText } from '../ui/shimmering-text';
 
 type TaskMessagesComponentProps = {
   taskId: string;
-  autoScrollEnabled?: boolean;
 };
-// Type for a message pair (user message + agent response(s))
 type MessagePair = {
   id: string;
   userMessage: TaskMessage;
@@ -31,7 +29,6 @@ type MessagePair = {
 
 function MemoizedTaskMessagesComponentImpl({
   taskId,
-  autoScrollEnabled = true,
 }: TaskMessagesComponentProps) {
   const lastPairRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -134,12 +131,9 @@ function MemoizedTaskMessagesComponentImpl({
     return () => window.removeEventListener('resize', measureHeight);
   }, [messages]);
 
-  // Scroll to top when new message arrives (only if auto-scroll enabled)
   useEffect(() => {
-    if (!autoScrollEnabled) return;
-
     const previousCount = previousMessageCountRef.current;
-    const currentCount = messages.length;
+    const currentCount = messagePairs.length;
 
     if (currentCount > previousCount && lastPairRef.current) {
       setTimeout(() => {
@@ -151,7 +145,7 @@ function MemoizedTaskMessagesComponentImpl({
     }
 
     previousMessageCountRef.current = currentCount;
-  }, [messages.length, autoScrollEnabled]);
+  }, [messagePairs.length]);
 
   // Helper function to render a message
   const renderMessage = (message: TaskMessage) => {

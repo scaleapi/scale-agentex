@@ -102,7 +102,6 @@ function ContentArea({
   const { agentName, updateParams } = useSafeSearchParams();
   const [prompt, setPrompt] = useState<string>('');
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [localAgentName, setLocalAgentName] = useLocalStorageState<
     string | undefined
@@ -116,9 +115,6 @@ function ContentArea({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading]);
-
-  // Show thread view when we have a task ID
-  const inThread = !!taskID;
 
   const handleSelectAgent = useCallback(
     (agentName: string | undefined) => {
@@ -134,7 +130,10 @@ function ContentArea({
   // Scroll detection - track if user is near bottom
   useEffect(() => {
     const container = scrollContainerRef.current;
-    if (!container) return;
+    if (!container) {
+      setShowScrollButton(false);
+      return;
+    }
 
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = container;
@@ -143,38 +142,28 @@ function ContentArea({
       const scrollThreshold = 100; // pixels from bottom
       const isNearBottom = distanceFromBottom < scrollThreshold;
 
-      setAutoScrollEnabled(isNearBottom);
       setShowScrollButton(!isNearBottom);
     };
 
     container.addEventListener('scroll', handleScroll);
     return () => container.removeEventListener('scroll', handleScroll);
-  }, [inThread]);
-
-  // Scroll to absolute bottom when task loads or changes
-  useEffect(() => {
-    if (scrollContainerRef.current && taskID) {
-      // Use a small delay to ensure content is rendered and heights are calculated
-      setTimeout(() => {
-        if (scrollContainerRef.current) {
-          // Scroll to the maximum possible scroll position (includes blank space)
-          scrollContainerRef.current.scrollTo({
-            top: scrollContainerRef.current.scrollHeight,
-            behavior: 'smooth',
-          });
-        }
-      }, 150);
-    }
   }, [taskID]);
 
-  // Scroll to bottom handler for button
-  const scrollToBottom = () => {
-    scrollContainerRef.current?.scrollTo({
+  const scrollToBottom = useCallback(() => {
+    if (!scrollContainerRef.current) return;
+    scrollContainerRef.current.scrollTo({
       top: scrollContainerRef.current.scrollHeight,
       behavior: 'smooth',
     });
-    setAutoScrollEnabled(true); // Re-enable auto-scroll when user clicks button
-  };
+  }, [scrollContainerRef]);
+
+  useEffect(() => {
+    if (scrollContainerRef.current && taskID) {
+      setTimeout(() => {
+        scrollToBottom();
+      }, 150);
+    }
+  }, [scrollToBottom, taskID]);
 
   return (
     <AnimatePresence>
@@ -183,7 +172,6 @@ function ContentArea({
         className={`relative flex h-full flex-1 flex-col ${!taskID ? 'justify-center' : 'justify-between'}`}
         transition={{ duration: 0.25, ease: 'easeInOut' }}
       >
-        {/* Top Bar */}
         {taskID && agentName && (
           <motion.div
             key="topbar"
@@ -201,7 +189,6 @@ function ContentArea({
           </motion.div>
         )}
 
-        {/* Content Area */}
         {taskID ? (
           <motion.div
             key="chat-view"
@@ -215,10 +202,7 @@ function ContentArea({
             <div className="flex min-h-full w-full flex-col items-center px-4 sm:px-6 md:px-8">
               <div className="w-full max-w-3xl">
                 <TaskProvider taskId={taskID}>
-                  <MemoizedTaskMessagesComponent
-                    taskId={taskID}
-                    autoScrollEnabled={autoScrollEnabled}
-                  />
+                  <MemoizedTaskMessagesComponent taskId={taskID} />
                 </TaskProvider>
               </div>
             </div>
@@ -249,37 +233,9 @@ function ContentArea({
           </motion.div>
         )}
 
-        {/* Scroll to bottom button */}
-        {taskID && (
-          <AnimatePresence>
-            {showScrollButton && (
-              <motion.div
-                className="pointer-events-none absolute bottom-28 left-1/2 -translate-x-1/2"
-                initial={{ y: 30, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: 30, opacity: 0 }}
-                transition={{
-                  duration: 0.2,
-                  type: 'spring',
-                  stiffness: 300,
-                  damping: 35,
-                  mass: 0.8,
-                }}
-              >
-                <IconButton
-                  className="pointer-events-auto size-10 rounded-full shadow-lg"
-                  onClick={scrollToBottom}
-                  icon={ArrowDown}
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
-        )}
-
-        {/* Prompt Input */}
         <motion.div
           layout="position"
-          className="flex w-full justify-center px-4 py-4 sm:px-6 md:px-8"
+          className="relative flex w-full justify-center px-4 py-4 sm:px-6 md:px-8"
           transition={{
             layout: {
               type: 'spring',
@@ -289,6 +245,32 @@ function ContentArea({
             },
           }}
         >
+          {taskID && (
+            <AnimatePresence>
+              {showScrollButton && (
+                <motion.div
+                  className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-4 -translate-x-1/2"
+                  initial={{ y: 30, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={{ y: 30, opacity: 0 }}
+                  transition={{
+                    duration: 0.2,
+                    type: 'spring',
+                    stiffness: 300,
+                    damping: 35,
+                    mass: 0.8,
+                  }}
+                >
+                  <IconButton
+                    className="pointer-events-auto size-10 rounded-full shadow-lg"
+                    onClick={scrollToBottom}
+                    icon={ArrowDown}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          )}
+
           <div className="w-full max-w-3xl">
             <PromptInput prompt={prompt} setPrompt={setPrompt} />
           </div>

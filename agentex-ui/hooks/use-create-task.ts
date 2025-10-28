@@ -3,6 +3,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { agentRPCNonStreaming } from 'agentex/lib';
 
+import { toast } from '@/components/agentex/toast';
+
 import { tasksKeys } from './use-tasks';
 
 import type AgentexSDK from 'agentex';
@@ -62,6 +64,12 @@ export function useCreateTask({
 
       // Invalidate all task queries to ensure consistency
       queryClient.invalidateQueries({ queryKey: tasksKeys.all });
+    },
+    onError: error => {
+      toast.error({
+        title: 'Failed to create task',
+        message: error instanceof Error ? error.message : 'Please try again.',
+      });
     },
   });
 }

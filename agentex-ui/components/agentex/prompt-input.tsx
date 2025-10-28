@@ -9,9 +9,9 @@ import { EditorView, keymap } from '@codemirror/view';
 import CodeMirror from '@uiw/react-codemirror';
 import { DataContent, TextContent } from 'agentex/resources';
 import { ArrowUp } from 'lucide-react';
-import { toast } from 'react-toastify';
 
 import { IconButton } from '@/components/agentex/icon-button';
+import { toast } from '@/components/agentex/toast';
 import { useAgentexClient } from '@/components/providers';
 import { Switch } from '@/components/ui/switch';
 import { useAgents } from '@/hooks/use-agents';
