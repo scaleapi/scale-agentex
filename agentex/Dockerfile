@@ -23,13 +23,13 @@ COPY agentex/pyproject.toml agentex/README.md ./
 
 # Install core dependencies
 ENV UV_PROJECT_ENVIRONMENT=/usr/local
-RUN uv sync
+RUN uv sync --native-tls --allow-insecure-host pypi.org --allow-insecure-host files.pythonhosted.org
 
 # Development stage (for docker-compose)
 FROM base AS dev
 
 # Install dev dependencies
-RUN uv sync --group dev
+RUN uv sync --native-tls --allow-insecure-host pypi.org --allow-insecure-host files.pythonhosted.org --group dev
 
 COPY agentex/src/ ./src/
 EXPOSE 5003
