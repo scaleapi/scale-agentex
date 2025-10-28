@@ -116,9 +116,6 @@ function ContentArea({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading]);
 
-  // Show thread view when we have a task ID
-  const inThread = !!taskID;
-
   const handleSelectAgent = useCallback(
     (agentName: string | undefined) => {
       updateParams({
@@ -133,7 +130,10 @@ function ContentArea({
   // Scroll detection - track if user is near bottom
   useEffect(() => {
     const container = scrollContainerRef.current;
-    if (!container) return;
+    if (!container) {
+      setShowScrollButton(false);
+      return;
+    }
 
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = container;
@@ -147,7 +147,7 @@ function ContentArea({
 
     container.addEventListener('scroll', handleScroll);
     return () => container.removeEventListener('scroll', handleScroll);
-  }, [inThread]);
+  }, [taskID]);
 
   const scrollToBottom = useCallback(() => {
     if (!scrollContainerRef.current) return;
