@@ -102,7 +102,6 @@ function ContentArea({
   const { agentName, updateParams } = useSafeSearchParams();
   const [prompt, setPrompt] = useState<string>('');
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [localAgentName, setLocalAgentName] = useLocalStorageState<
     string | undefined
@@ -143,7 +142,6 @@ function ContentArea({
       const scrollThreshold = 100; // pixels from bottom
       const isNearBottom = distanceFromBottom < scrollThreshold;
 
-      setAutoScrollEnabled(isNearBottom);
       setShowScrollButton(!isNearBottom);
     };
 
@@ -151,30 +149,21 @@ function ContentArea({
     return () => container.removeEventListener('scroll', handleScroll);
   }, [inThread]);
 
-  // Scroll to absolute bottom when task loads or changes
-  useEffect(() => {
-    if (scrollContainerRef.current && taskID) {
-      // Use a small delay to ensure content is rendered and heights are calculated
-      setTimeout(() => {
-        if (scrollContainerRef.current) {
-          // Scroll to the maximum possible scroll position (includes blank space)
-          scrollContainerRef.current.scrollTo({
-            top: scrollContainerRef.current.scrollHeight,
-            behavior: 'smooth',
-          });
-        }
-      }, 150);
-    }
-  }, [taskID]);
-
-  // Scroll to bottom handler for button
-  const scrollToBottom = () => {
-    scrollContainerRef.current?.scrollTo({
+  const scrollToBottom = useCallback(() => {
+    if (!scrollContainerRef.current) return;
+    scrollContainerRef.current.scrollTo({
       top: scrollContainerRef.current.scrollHeight,
       behavior: 'smooth',
     });
-    setAutoScrollEnabled(true); // Re-enable auto-scroll when user clicks button
-  };
+  }, [scrollContainerRef]);
+
+  useEffect(() => {
+    if (scrollContainerRef.current && taskID) {
+      setTimeout(() => {
+        scrollToBottom();
+      }, 150);
+    }
+  }, [scrollToBottom, taskID]);
 
   return (
     <AnimatePresence>
@@ -213,10 +202,7 @@ function ContentArea({
             <div className="flex min-h-full w-full flex-col items-center px-4 sm:px-6 md:px-8">
               <div className="w-full max-w-3xl">
                 <TaskProvider taskId={taskID}>
-                  <MemoizedTaskMessagesComponent
-                    taskId={taskID}
-                    autoScrollEnabled={autoScrollEnabled}
-                  />
+                  <MemoizedTaskMessagesComponent taskId={taskID} />
                 </TaskProvider>
               </div>
             </div>
