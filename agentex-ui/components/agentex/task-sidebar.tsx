@@ -22,16 +22,36 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useInfiniteTasks } from '@/hooks/use-tasks';
 import { cn } from '@/lib/utils';
 
-import type { Task } from 'agentex/resources';
+import type { TaskListResponse } from 'agentex/resources';
 
 type TaskButtonProps = {
-  task: Task;
-  selectedTaskID: Task['id'] | null;
-  selectTask: (taskID: Task['id'] | null) => void;
+  task: TaskListResponse.TaskListResponseItem;
+  selectedTaskID: TaskListResponse.TaskListResponseItem['id'] | null;
+  selectTask: (
+    taskID: TaskListResponse.TaskListResponseItem['id'] | null
+  ) => void;
 };
 
 function TaskButton({ task, selectedTaskID, selectTask }: TaskButtonProps) {
   const taskName = createTaskName(task);
+  const createdAtString = useMemo(
+    () =>
+      task.created_at
+        ? formatDistanceToNow(new Date(task.created_at), {
+            addSuffix: true,
+          })
+        : 'No date',
+    [task.created_at]
+  );
+  const agentsString = useMemo(() => {
+    if (!task.agents || task.agents.length === 0) return 'No agents';
+    if (task.agents.length === 1) {
+      return `${task.agents[0]?.name}`;
+    } else if (task.agents?.length > 1) {
+      return `${task.agents[0]?.name} + ${task.agents.length - 1} more`;
+    }
+    return 'No agents';
+  }, [task.agents]);
 
   return (
     <motion.div
@@ -69,27 +89,27 @@ function TaskButton({ task, selectedTaskID, selectTask }: TaskButtonProps) {
         }}
       >
         <span className="w-full truncate text-sm">{taskName}</span>
-        <span
+        <div
           className={cn(
-            'text-muted-foreground text-xs',
-            task.created_at ? 'block' : 'invisible'
+            'text-muted-foreground w-full truncate text-xs',
+            task.agents?.length || task.created_at ? 'block' : 'invisible'
           )}
         >
-          {task.created_at
-            ? formatDistanceToNow(new Date(task.created_at), {
-                addSuffix: true,
-              })
-            : 'No date'}
-        </span>
+          {createdAtString}
+          {task.agents?.length && task.created_at && ' • '}
+          {agentsString}
+        </div>
       </Button>
     </motion.div>
   );
 }
 
 export type TaskSidebarProps = {
-  selectedTaskID: Task['id'] | null;
+  selectedTaskID: TaskListResponse.TaskListResponseItem['id'] | null;
   selectedAgentName?: string;
-  onSelectTask: (taskID: Task['id'] | null) => void;
+  onSelectTask: (
+    taskID: TaskListResponse.TaskListResponseItem['id'] | null
+  ) => void;
 };
 
 export function TaskSidebar({
@@ -138,7 +158,7 @@ export function TaskSidebar({
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const handleTaskSelect = useCallback(
-    (taskID: Task['id'] | null) => {
+    (taskID: TaskListResponse.TaskListResponseItem['id'] | null) => {
       onSelectTask(taskID);
     },
     [onSelectTask]
@@ -265,7 +285,7 @@ function SidebarHeader({
   );
 }
 
-function createTaskName(task: Task): string {
+function createTaskName(task: TaskListResponse.TaskListResponseItem): string {
   if (
     task?.params?.description &&
     typeof task.params.description === 'string'

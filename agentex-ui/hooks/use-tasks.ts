@@ -1,7 +1,11 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 
 import type AgentexSDK from 'agentex';
-import type { Task, TaskListParams } from 'agentex/resources';
+import type {
+  TaskListResponse,
+  TaskListParams,
+  TaskRetrieveResponse,
+} from 'agentex/resources';
 
 /**
  * Query key factory for tasks
@@ -26,8 +30,11 @@ export function useTasks(
 
   return useQuery({
     queryKey: tasksKeys.byAgentName(agentName),
-    queryFn: async (): Promise<Task[]> => {
-      const params = agentName ? { agent_name: agentName } : undefined;
+    queryFn: async (): Promise<TaskListResponse> => {
+      const params: TaskListParams = {
+        relationships: ['agents'],
+        ...(agentName ? { agent_name: agentName } : {}),
+      };
       return agentexClient.tasks.list(params);
     },
     staleTime: 30 * 1000, // 30 seconds
@@ -47,8 +54,10 @@ export function useTask({
 }) {
   return useQuery({
     queryKey: tasksKeys.byId(taskId),
-    queryFn: async (): Promise<Task> => {
-      return agentexClient.tasks.retrieve(taskId);
+    queryFn: async (): Promise<TaskRetrieveResponse> => {
+      return agentexClient.tasks.retrieve(taskId, {
+        relationships: ['agents'],
+      });
     },
     enabled: !!taskId,
     staleTime: 30 * 1000,
@@ -66,14 +75,13 @@ export function useInfiniteTasks(
 
   return useInfiniteQuery({
     queryKey: tasksKeys.byAgentName(agentName),
-    queryFn: async ({ pageParam = 1 }): Promise<Task[]> => {
-      const params: TaskListParams | undefined = agentName
-        ? {
-            agent_name: agentName,
-            limit,
-            page_number: pageParam as number,
-          }
-        : undefined;
+    queryFn: async ({ pageParam = 1 }): Promise<TaskListResponse> => {
+      const params: TaskListParams = {
+        limit,
+        page_number: pageParam as number,
+        relationships: ['agents'],
+        ...(agentName ? { agent_name: agentName } : {}),
+      };
       return agentexClient.tasks.list(params);
     },
     getNextPageParam: (lastPage, allPages) => {
