@@ -51,7 +51,11 @@ export function TaskMessageReasoning({ message }: TaskMessageReasoningProps) {
         ease: 'easeInOut',
       }}
     >
-      <div className="mb-2 flex items-center gap-2">
+      <button
+        className="mb-2 flex items-center gap-2"
+        type="button"
+        onClick={() => setIsCollapsed(!isCollapsed)}
+      >
         <BrainIcon className="size-4" />
         <ShimmeringText
           enabled={!nextMessage}
@@ -61,15 +65,14 @@ export function TaskMessageReasoning({ message }: TaskMessageReasoningProps) {
               : `Planning next steps...`
           }
         />
-        <button onClick={() => setIsCollapsed(!isCollapsed)}>
-          <ChevronDownIcon
-            className={cn(
-              'size-4 transition-transform duration-500',
-              isCollapsed ? '' : 'scale-y-[-1]'
-            )}
-          />
-        </button>
-      </div>
+
+        <ChevronDownIcon
+          className={cn(
+            'size-4 transition-transform duration-500',
+            isCollapsed ? '' : 'scale-y-[-1]'
+          )}
+        />
+      </button>
       <Collapsible collapsed={isCollapsed}>
         <Response className="ml-6 grid border-l-4 border-gray-300 pl-3 text-gray-500">
           {reasoningText}
