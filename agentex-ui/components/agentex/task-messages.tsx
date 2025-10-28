@@ -197,23 +197,25 @@ function MemoizedTaskMessagesComponentImpl({
             containerHeight={containerHeight}
           >
             <AnimatePresence>
-              {pair.agentMeesages.length > 0 && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.3 }}
-                  className="px-4 py-2"
-                >
-                  <ShimmeringText text='Thinking ...' enabled={true} />
-                </motion.div>
-              )}
               {renderMessage(pair.userMessage)}
               {pair.agentMessages.map(agentMessage => (
                 <Fragment key={agentMessage.id}>
                   {renderMessage(agentMessage)}
                 </Fragment>
               ))}
+            </AnimatePresence>
+            <AnimatePresence>
+            {pair.agentMessages.length === 0 && (
+                <motion.div
+                  initial={{ opacity: 0 , y: 10 }}
+                  animate={{ opacity: 1, y: 10 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                  className="px-4 py-2"
+                >
+                  <ShimmeringText text='Thinking ...' enabled={true} />
+                </motion.div>
+              )}
             </AnimatePresence>
           </TaskMessageScrollContainer>
         );
