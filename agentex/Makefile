@@ -15,19 +15,19 @@ help: ## Show this help message
 
 install: ## Install dependencies
 	@echo "🚀 Installing dependencies..."
-	uv sync
+	uv sync --native-tls --allow-insecure-host pypi.org --allow-insecure-host files.pythonhosted.org
 	cd .. && uv run pre-commit install
 
 install-dev: ../repo-setup ## Install dependencies including dev group
 	@echo "🚀 Installing dependencies with dev group..."
-	uv sync --group dev
+	uv sync --native-tls --allow-insecure-host pypi.org --allow-insecure-host files.pythonhosted.org --group dev
 
 ../repo-setup:
 	@$(MAKE) -C .. repo-setup
 
 install-docs: ## Install docs dependencies
 	@echo "🚀 Installing docs dependencies..."
-	uv sync --group docs
+	uv sync --native-tls --allow-insecure-host pypi.org --allow-insecure-host files.pythonhosted.org --group docs
 
 clean: ## Clean virtual environment and lock file
 	@echo "🧹 Cleaning virtual environment..."
@@ -74,12 +74,12 @@ apply-migrations: ## Apply database migrations
 
 serve-docs: ## Serve documentation locally
 	@echo "📚 Installing docs dependencies..."
-	uv sync --group docs
+	uv sync --native-tls --allow-insecure-host pypi.org --allow-insecure-host files.pythonhosted.org --group docs
 	cd docs && uv run mkdocs serve -a localhost:8001
 
 build-docs: ## Build documentation
 	@echo "📚 Building documentation..."
-	uv sync --group docs
+	uv sync --native-tls --allow-insecure-host pypi.org --allow-insecure-host files.pythonhosted.org --group docs
 	cd docs && uv run mkdocs build
 
 docker-build: ## Build production Docker image
