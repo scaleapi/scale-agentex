@@ -1,6 +1,6 @@
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
 
-import { AnimatePresence } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 
 import { TaskMessageDataContentComponent } from '@/components/agentex/task-message-data-content';
 import { TaskMessageReasoning } from '@/components/agentex/task-message-reasoning-content';
@@ -16,6 +16,7 @@ import type {
   ToolRequestContent,
   ToolResponseContent,
 } from 'agentex/resources';
+import { ShimmeringText } from '../ui/shimmering-text';
 
 type TaskMessagesComponentProps = {
   taskId: string;
@@ -196,6 +197,17 @@ function MemoizedTaskMessagesComponentImpl({
             containerHeight={containerHeight}
           >
             <AnimatePresence>
+              {pair.agentMeesages.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="px-4 py-2"
+                >
+                  <ShimmeringText text='Thinking ...' enabled={true} />
+                </motion.div>
+              )}
               {renderMessage(pair.userMessage)}
               {pair.agentMessages.map(agentMessage => (
                 <Fragment key={agentMessage.id}>
