@@ -183,7 +183,6 @@ function ContentArea({
         className={`relative flex h-full flex-1 flex-col ${!taskID ? 'justify-center' : 'justify-between'}`}
         transition={{ duration: 0.25, ease: 'easeInOut' }}
       >
-        {/* Top Bar */}
         {taskID && agentName && (
           <motion.div
             key="topbar"
@@ -201,7 +200,6 @@ function ContentArea({
           </motion.div>
         )}
 
-        {/* Content Area */}
         {taskID ? (
           <motion.div
             key="chat-view"
@@ -249,37 +247,9 @@ function ContentArea({
           </motion.div>
         )}
 
-        {/* Scroll to bottom button */}
-        {taskID && (
-          <AnimatePresence>
-            {showScrollButton && (
-              <motion.div
-                className="pointer-events-none absolute bottom-28 left-1/2 -translate-x-1/2"
-                initial={{ y: 30, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: 30, opacity: 0 }}
-                transition={{
-                  duration: 0.2,
-                  type: 'spring',
-                  stiffness: 300,
-                  damping: 35,
-                  mass: 0.8,
-                }}
-              >
-                <IconButton
-                  className="pointer-events-auto size-10 rounded-full shadow-lg"
-                  onClick={scrollToBottom}
-                  icon={ArrowDown}
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
-        )}
-
-        {/* Prompt Input */}
         <motion.div
           layout="position"
-          className="flex w-full justify-center px-4 py-4 sm:px-6 md:px-8"
+          className="relative flex w-full justify-center px-4 py-4 sm:px-6 md:px-8"
           transition={{
             layout: {
               type: 'spring',
@@ -289,6 +259,32 @@ function ContentArea({
             },
           }}
         >
+          {taskID && (
+            <AnimatePresence>
+              {showScrollButton && (
+                <motion.div
+                  className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-4 -translate-x-1/2"
+                  initial={{ y: 30, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={{ y: 30, opacity: 0 }}
+                  transition={{
+                    duration: 0.2,
+                    type: 'spring',
+                    stiffness: 300,
+                    damping: 35,
+                    mass: 0.8,
+                  }}
+                >
+                  <IconButton
+                    className="pointer-events-auto size-10 rounded-full shadow-lg"
+                    onClick={scrollToBottom}
+                    icon={ArrowDown}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          )}
+
           <div className="w-full max-w-3xl">
             <PromptInput prompt={prompt} setPrompt={setPrompt} />
           </div>
