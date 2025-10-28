@@ -9,9 +9,9 @@ import { EditorView, keymap } from '@codemirror/view';
 import CodeMirror from '@uiw/react-codemirror';
 import { DataContent, TextContent } from 'agentex/resources';
 import { ArrowUp } from 'lucide-react';
-import { toast } from 'react-toastify';
 
 import { IconButton } from '@/components/agentex/icon-button';
+import { toast } from '@/components/agentex/toast';
 import { useAgentexClient } from '@/components/providers';
 import { Switch } from '@/components/ui/switch';
 import { useAgents } from '@/hooks/use-agents';
@@ -125,11 +125,18 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
           content: prompt as string,
         };
 
-    await sendMessageMutation.mutateAsync({
-      taskId: currentTaskId,
-      agentName: agentName!,
-      content,
-    });
+    try {
+      await sendMessageMutation.mutateAsync({
+        taskId: currentTaskId,
+        agentName: agentName!,
+        content,
+      });
+    } catch (error) {
+      toast.error({
+        title: 'Failed to send message',
+        message: error instanceof Error ? error.message : 'Please try again.',
+      });
+    }
   }, [
     isDisabled,
     prompt,

@@ -3,9 +3,9 @@
 import { useCallback, useRef, useState } from 'react';
 
 import { Check, Copy } from 'lucide-react';
-import { toast } from 'react-toastify';
 
 import { IconButton } from '@/components/agentex/icon-button';
+import { toast } from '@/components/agentex/toast';
 import {
   Tooltip,
   TooltipContent,
@@ -47,7 +47,10 @@ export function CopyButton({
           }, timeout);
         },
         err => {
-          toast.error('Failed to copy content:', err);
+          toast.error({
+            title: 'Failed to copy content',
+            message: err instanceof Error ? err.message : 'Please try again.',
+          });
         }
       );
     } else if (onClick) {
