@@ -10,13 +10,13 @@ import { useAgentexClient } from '@/components/providers';
 import { useTaskMessages } from '@/hooks/use-task-messages';
 
 import { TaskMessageToolPairComponent } from './task-message-tool-pair';
+import { ShimmeringText } from '../ui/shimmering-text';
 
 import type {
   TaskMessage,
   ToolRequestContent,
   ToolResponseContent,
 } from 'agentex/resources';
-import { ShimmeringText } from '../ui/shimmering-text';
 
 type TaskMessagesComponentProps = {
   taskId: string;
@@ -199,15 +199,15 @@ function MemoizedTaskMessagesComponentImpl({
               ))}
             </AnimatePresence>
             <AnimatePresence>
-            {pair.agentMessages.length === 0 && (
+              {pair.agentMessages.length === 0 && (
                 <motion.div
-                  initial={{ opacity: 0 , y: 10 }}
+                  initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 10 }}
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3 }}
                   className="px-4 py-2"
                 >
-                  <ShimmeringText text='Thinking ...' enabled={true} />
+                  <ShimmeringText text="Thinking ..." enabled={true} />
                 </motion.div>
               )}
             </AnimatePresence>
