@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
@@ -99,22 +99,6 @@ export function TaskSidebar({
   const toggleCollapse = useCallback(() => {
     setIsCollapsed(prev => !prev);
   }, []);
-
-  // Global keyboard shortcut: cmd + k for new chat
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
-        event.preventDefault();
-        handleNewChat();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [handleNewChat]);
 
   return (
     <ResizableSidebar

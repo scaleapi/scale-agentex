@@ -45,6 +45,22 @@ function NoAgentImpl() {
     [updateParams]
   );
 
+  // Global keyboard shortcut: cmd + k for new chat
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
+        event.preventDefault();
+        handleSelectTask(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [handleSelectTask]);
+
   return (
     <div className="fixed inset-0 flex w-full">
       <AnimatePresence>
