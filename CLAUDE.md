@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Agentex is a comprehensive platform for building and deploying intelligent agents. This repository contains:
 
 - **agentex/** - Backend services (FastAPI + Temporal workflows)
-- **agentex-sgp-app/** - Developer UI for interacting with agents
+- **agentex-ui/** - Developer UI for interacting with agents
 
 The platform integrates with the separate [agentex-python SDK](https://github.com/scaleapi/scale-agentex-python) for creating and running agents.
 
@@ -30,7 +30,7 @@ make dev                    # Starts Docker services and backend
 
 **Terminal 2 - Frontend:**
 ```bash
-cd agentex-sgp-app/
+cd agentex-ui/
 npm install
 npm run dev                 # Starts Next.js dev server
 ```
@@ -94,7 +94,7 @@ make build-docs           # Build documentation
 make docker-build         # Build production Docker image
 ```
 
-### Frontend (agentex-sgp-app/)
+### Frontend (agentex-ui/)
 
 ```bash
 npm install               # Install npm dependencies
@@ -219,7 +219,7 @@ Tests are organized by type and use different strategies:
 - **States**: Key-value state storage for agents
 - **Deployment History**: Track agent deployment versions and changes
 
-### Frontend Architecture (agentex-sgp-app/)
+### Frontend Architecture (agentex-ui/)
 
 - **Framework**: Next.js 15 with React 19 and App Router
 - **Styling**: Tailwind CSS with Radix UI components
@@ -310,4 +310,4 @@ sudo systemctl stop redis-server
 
 This repository contains two main components:
 - **Backend**: `agentex/src/`, `agentex/database/`, `agentex/tests/`
-- **Frontend**: `agentex-sgp-app/`
+- **Frontend**: `agentex-ui/`

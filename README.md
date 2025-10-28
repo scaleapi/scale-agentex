@@ -78,7 +78,7 @@ The installation was successful if you see help output after you run `agentex -h
 
 Before you share your agents with other people (or your company), you'll want a fully isolated developer sandbox. This allows you to freely develop agents without affecting anyone else or be affected by anyone else.
 
-To do this, you just need to spin up the [Agentex Server](https://github.com/scaleapi/scale-agentex/tree/main/agentex) and a [Developer UI](https://github.com/scaleapi/scale-agentex/tree/main/agentex-sgp-app) which allows you to interact with your agent nicely. This way you'll know how your agent feels in a simple UI.
+To do this, you just need to spin up the [Agentex Server](https://github.com/scaleapi/scale-agentex/tree/main/agentex) and a [Developer UI](https://github.com/scaleapi/scale-agentex/tree/main/agentex-ui) which allows you to interact with your agent nicely. This way you'll know how your agent feels in a simple UI.
 
 > Each agent also ships with a `dev.ipynb` notebook for those uninterested in a UI, but more on that later
 
@@ -116,7 +116,7 @@ Then, open up a second terminal. Then run the following commands.
 *Note: you should run these commands at the root of this repository.*
 
 ```bash
-cd agentex-sgp-app/
+cd agentex-ui/
 # Install dependencies (see Makefile for details)
 make install
 # Starts web interface on localhost (default port 3000)
