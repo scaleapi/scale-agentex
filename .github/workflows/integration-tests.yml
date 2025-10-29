@@ -4,6 +4,68 @@ on:
   workflow_dispatch:
     inputs:
       commit-sha:
-        description: "Commit SHA to test against"
-        required: true
+        description: "Commit SHA to test against (defaults to main)"
+        required: false
         type: string
+        default: main
+
+jobs:
+  build-images:
+    name: "Build AgentEx Images"
+    uses: ./.github/workflows/build-agentex.yml
+    with:
+      commit-sha: ${{ inputs.commit-sha || 'main' }}
+
+  pull-agent-images:
+    name: "Pull AgentEx Images"
+    needs: build-images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Discover available images
+        id: discover
+        run: |
+          echo "🔍 Discovering available images..."
+
+          # Get packages, excluding the current repo to avoid conflicts
+          PACKAGES=$(gh api repos/scaleapi/agentex-python/packages?package_type=container --jq '.[].name')          echo "📦 Available packages:"
+          echo "$PACKAGES"
+
+          # Store for other jobs
+          echo "images<<EOF" >> $GITHUB_OUTPUT
+          echo "$PACKAGES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          # # Pull images
+          # for package in $PACKAGES; do
+          #   echo "🐳 Pulling ghcr.io/${{ github.repository_owner }}/$package:latest"
+          #   docker pull "ghcr.io/${{ github.repository_owner }}/$package:latest" || echo "⚠️ Couldn't pull $package:latest, trying main..."
+          #   docker pull "ghcr.io/${{ github.repository_owner }}/$package:main" 2>/dev/null || echo "ℹ️ $package:main not available"
+          # done
+          #
+      - name: Pull images from GHCR
+        run: |
+          docker pull ghcr.io/your-org/repo-name/image-name:tag
+          docker pull ghcr.io/your-org/another-repo/service:latest
+
+  run-integration-tests:
+    name: "Run Integration Tests"
+    needs: build-images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit-sha || 'main' }}
+
+      - name: Placeholder - Integration Tests
+        run: |
+          echo "🧪 Integration tests will run here"
+          echo "📦 AgentEx images have been built with commit SHA: ${{ inputs.commit-sha || 'main' }}"
+          echo "🔄 This is where actual integration test commands should be added"
