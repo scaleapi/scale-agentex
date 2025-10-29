@@ -38,11 +38,13 @@ function TaskButton({ task }: TaskButtonProps) {
 
   const handleTaskSelect = useCallback(
     (taskID: TaskListResponse.TaskListResponseItem['id']) => {
+      const firstAgentName = task.agents?.[0]?.name ?? null;
       updateParams({
         [SearchParamKey.TASK_ID]: taskID,
+        [SearchParamKey.AGENT_NAME]: firstAgentName,
       });
     },
-    [updateParams]
+    [updateParams, task.agents]
   );
 
   const createdAtString = useMemo(

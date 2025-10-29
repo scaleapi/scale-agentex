@@ -10,11 +10,9 @@ import { useTaskSubscription } from '@/hooks/use-task-subscription';
 export function TaskProvider({
   taskId,
   children,
-  fallback,
 }: {
   taskId: string;
   children: ReactNode;
-  fallback?: ReactNode;
 }) {
   const { agentexClient } = useAgentexClient();
   const { agentName } = useSafeSearchParams();
@@ -27,10 +25,6 @@ export function TaskProvider({
     taskId,
     enabled: !!taskId && agent?.acp_type === 'agentic',
   });
-
-  if (!taskId && fallback) {
-    return <>{fallback}</>;
-  }
 
   return <>{children}</>;
 }
