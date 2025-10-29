@@ -3,11 +3,12 @@ name: Release AgentEx
 
 on:
   workflow_call:
-    commit-sha:
-      description: "Commit SHA to release (defaults to latest commit on main)"
-      required: true
-      type: string
-      default: github.sha
+    inputs:
+      commit-sha:
+        description: "Commit SHA to release (defaults to latest commit on main)"
+        required: true
+        type: string
+        default: github.sha
 
 permissions:
   contents: read # This is needed for checking out code

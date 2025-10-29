@@ -11,15 +11,15 @@ on:
 
 permissions:
   contents: read
-  packages: read
+  packages: write
 
 jobs:
-  # build-images:
-  #   name: "Build AgentEx Images"
-  #   uses: ./.github/workflows/build-agentex.yml
-  #   with:
-  #     commit-sha: ${{ inputs.commit-sha || 'main' }}
-  #
+  build-images:
+    name: "Build AgentEx Images"
+    uses: ./.github/workflows/build-agentex.yml
+    with:
+      commit-sha: ${{ inputs.commit-sha || 'main' }}
+
   pull-agent-images:
     name: "Pull AgentEx Images"
     runs-on: ubuntu-latest
