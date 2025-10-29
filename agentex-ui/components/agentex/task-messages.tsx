@@ -106,6 +106,18 @@ function MemoizedTaskMessagesComponentImpl({
     return pairs;
   }, [messages]);
 
+  const shouldShowThinkingForLastPair = useMemo(() => {
+    if (messagePairs.length === 0) return false;
+
+    const lastPair = messagePairs[messagePairs.length - 1]!;
+    const hasNoAgentMessages = lastPair.agentMessages.length === 0;
+    const rpcStatus = queryData?.rpcStatus;
+
+    return (
+      hasNoAgentMessages && (rpcStatus === 'pending' || rpcStatus === 'success')
+    );
+  }, [messagePairs, queryData?.rpcStatus]);
+
   // Measure the scrollable container height
   useEffect(() => {
     const measureHeight = () => {
@@ -182,6 +194,7 @@ function MemoizedTaskMessagesComponentImpl({
     >
       {messagePairs.map((pair, index) => {
         const isLastPair = index === messagePairs.length - 1;
+        const shouldShowThinking = isLastPair && shouldShowThinkingForLastPair;
 
         return (
           <TaskMessageScrollContainer
@@ -199,11 +212,10 @@ function MemoizedTaskMessagesComponentImpl({
               ))}
             </AnimatePresence>
             <AnimatePresence>
-              {pair.agentMessages.length === 0 && (
+              {shouldShowThinking && (
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 10 }}
-                  exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3 }}
                   className="px-4 py-2"
                 >
