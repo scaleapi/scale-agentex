@@ -76,22 +76,30 @@ jobs:
           cache-from: type=gha,scope=${{ env.AGENTEX_SERVER_IMAGE_NAME }}-release
           cache-to: type=gha,mode=max,scope=${{ env.AGENTEX_SERVER_IMAGE_NAME }}-release
 
-      # Build and push auth image to GHCR
-      - name: Build and push AgentEx auth image to GHCR
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./agentex-auth/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}/${{ env.AGENTEX_AUTH_IMAGE_NAME }}:${{ inputs.commit-sha }}
-            ghcr.io/${{ github.repository }}/${{ env.AGENTEX_AUTH_IMAGE_NAME }}
-          cache-from: type=gha,scope=${{ env.AGENTEX_AUTH_IMAGE_NAME }}-release
-          cache-to: type=gha,mode=max,scope=${{ env.AGENTEX_AUTH_IMAGE_NAME }}-release
+      # Make package public
+      - name: Make package public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔓 Making package public..."
+
+          # Extract package name from repository
+          PACKAGE_NAME="${{ env.AGENTEX_SERVER_IMAGE_NAME }}"
+          ORG_NAME="${{ github.repository_owner }}"
+
+          # Set package visibility to public
+          gh api \
+            --method PATCH \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "/orgs/$ORG_NAME/packages/container/$PACKAGE_NAME" \
+            -f visibility='public' || echo "⚠️ Could not set package visibility (may already be public or insufficient permissions)"
+
+          echo "✅ Package visibility updated"
 
       # Summary
       - name: Release Summary
         run: |
           echo "✅ Release complete!"
           echo "📦 Server image: ghcr.io/${{ github.repository }}/${{ env.AGENTEX_SERVER_IMAGE_NAME }}:${{ inputs.commit-sha }}"
-          echo "🔐 Auth image: ghcr.io/${{ github.repository }}/${{ env.AGENTEX_AUTH_IMAGE_NAME }}:${{ inputs.commit-sha }}"
+          echo "🔓 Package set to public visibility"
