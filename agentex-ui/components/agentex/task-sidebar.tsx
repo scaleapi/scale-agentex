@@ -19,6 +19,10 @@ import { useAgentexClient } from '@/components/providers';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  SearchParamKey,
+  useSafeSearchParams,
+} from '@/hooks/use-safe-search-params';
 import { useInfiniteTasks } from '@/hooks/use-tasks';
 import { cn } from '@/lib/utils';
 
@@ -26,14 +30,21 @@ import type { TaskListResponse } from 'agentex/resources';
 
 type TaskButtonProps = {
   task: TaskListResponse.TaskListResponseItem;
-  selectedTaskID: TaskListResponse.TaskListResponseItem['id'] | null;
-  selectTask: (
-    taskID: TaskListResponse.TaskListResponseItem['id'] | null
-  ) => void;
 };
 
-function TaskButton({ task, selectedTaskID, selectTask }: TaskButtonProps) {
+function TaskButton({ task }: TaskButtonProps) {
+  const { taskID, updateParams } = useSafeSearchParams();
   const taskName = createTaskName(task);
+
+  const handleTaskSelect = useCallback(
+    (taskID: TaskListResponse.TaskListResponseItem['id']) => {
+      updateParams({
+        [SearchParamKey.TASK_ID]: taskID,
+      });
+    },
+    [updateParams]
+  );
+
   const createdAtString = useMemo(
     () =>
       task.created_at
@@ -80,14 +91,14 @@ function TaskButton({ task, selectedTaskID, selectTask }: TaskButtonProps) {
       <Button
         variant="ghost"
         className={`hover:bg-sidebar-accent hover:text-sidebar-primary-foreground flex h-auto w-full cursor-pointer flex-col items-start justify-start gap-1 px-2 py-2 text-left transition-colors ${
-          selectedTaskID === task.id
+          taskID === task.id
             ? 'bg-sidebar-primary text-sidebar-primary-foreground'
             : 'text-sidebar-foreground'
         }`}
-        onClick={() => selectTask(task.id)}
+        onClick={() => handleTaskSelect(task.id)}
         onKeyDown={e => {
           if (e.key === 'Enter' || e.key === ' ') {
-            selectTask(task.id);
+            handleTaskSelect(task.id);
           }
         }}
       >
@@ -109,19 +120,8 @@ function TaskButton({ task, selectedTaskID, selectTask }: TaskButtonProps) {
   );
 }
 
-export type TaskSidebarProps = {
-  selectedTaskID: TaskListResponse.TaskListResponseItem['id'] | null;
-  selectedAgentName?: string;
-  onSelectTask: (
-    taskID: TaskListResponse.TaskListResponseItem['id'] | null
-  ) => void;
-};
-
-export function TaskSidebar({
-  selectedTaskID,
-  selectedAgentName,
-  onSelectTask,
-}: TaskSidebarProps) {
+export function TaskSidebar() {
+  const { agentName, updateParams } = useSafeSearchParams();
   const { agentexClient } = useAgentexClient();
 
   const {
@@ -132,7 +132,7 @@ export function TaskSidebar({
     isFetchingNextPage,
   } = useInfiniteTasks(
     agentexClient,
-    selectedAgentName ? { agentName: selectedAgentName } : undefined
+    agentName ? { agentName: agentName } : undefined
   );
 
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
@@ -162,16 +162,11 @@ export function TaskSidebar({
     return () => scrollContainer.removeEventListener('scroll', handleScroll);
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  const handleTaskSelect = useCallback(
-    (taskID: TaskListResponse.TaskListResponseItem['id'] | null) => {
-      onSelectTask(taskID);
-    },
-    [onSelectTask]
-  );
-
   const handleNewChat = useCallback(() => {
-    onSelectTask(null);
-  }, [onSelectTask]);
+    updateParams({
+      [SearchParamKey.TASK_ID]: null,
+    });
+  }, [updateParams]);
 
   const toggleCollapse = useCallback(() => {
     setIsCollapsed(prev => !prev);
@@ -223,14 +218,7 @@ export function TaskSidebar({
             <>
               <AnimatePresence initial={false}>
                 {tasks.length > 0 &&
-                  tasks.map(task => (
-                    <TaskButton
-                      key={task.id}
-                      task={task}
-                      selectedTaskID={selectedTaskID}
-                      selectTask={handleTaskSelect}
-                    />
-                  ))}
+                  tasks.map(task => <TaskButton key={task.id} task={task} />)}
               </AnimatePresence>
               {isFetchingNextPage && (
                 <div className="flex items-center justify-center py-4">
