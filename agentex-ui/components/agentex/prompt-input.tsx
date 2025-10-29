@@ -14,7 +14,6 @@ import { IconButton } from '@/components/agentex/icon-button';
 import { toast } from '@/components/agentex/toast';
 import { useAgentexClient } from '@/components/providers';
 import { Switch } from '@/components/ui/switch';
-import { useAgents } from '@/hooks/use-agents';
 import { useCreateTask } from '@/hooks/use-create-task';
 import {
   SearchParamKey,
@@ -45,7 +44,6 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
 
   const { agentexClient } = useAgentexClient();
 
-  const { data: agents = [] } = useAgents(agentexClient);
   const createTaskMutation = useCreateTask({ agentexClient });
   const sendMessageMutation = useSendMessage({ agentexClient });
 
@@ -90,7 +88,6 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
 
     setPrompt('');
 
-    // Create task if one doesn't exist
     if (!currentTaskId) {
       const task = await createTaskMutation.mutateAsync({
         agentName: agentName,
@@ -101,16 +98,8 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
       });
       currentTaskId = task.id;
       updateParams({ [SearchParamKey.TASK_ID]: currentTaskId });
-
-      // For agentic agents, task creation includes the initial message
-      // so we don't need to send a separate message
-      const agent = agents.find(a => a.name === agentName);
-      if (agent?.acp_type === 'agentic') {
-        return;
-      }
     }
 
-    // Send the message for existing tasks or non-agentic agents
     const content: TextContent | DataContent = isSendingJSON
       ? {
           type: 'data',
@@ -135,7 +124,6 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
     prompt,
     taskID,
     agentName,
-    agents,
     createTaskMutation,
     updateParams,
     sendMessageMutation,
@@ -232,7 +220,6 @@ const DataInput = ({
   isDisabled: boolean;
   handleSendPrompt: () => void;
 }) => {
-  // Create a custom keymap extension to handle Cmd+Enter
   const commandEnterKeymap = useMemo(
     () =>
       Prec.highest(
@@ -242,9 +229,9 @@ const DataInput = ({
             run: () => {
               if (!isDisabled && prompt.trim()) {
                 handleSendPrompt();
-                return true; // Prevent default
+                return true;
               }
-              return false; // Allow default
+              return false;
             },
           },
         ])
