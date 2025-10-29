@@ -20,29 +20,6 @@ export const tasksKeys = {
 };
 
 /**
- * Fetches the list of tasks, optionally filtered by agent name
- */
-export function useTasks(
-  agentexClient: AgentexSDK,
-  options?: { agentName?: string }
-) {
-  const { agentName } = options || {};
-
-  return useQuery({
-    queryKey: tasksKeys.byAgentName(agentName),
-    queryFn: async (): Promise<TaskListResponse> => {
-      const params: TaskListParams = {
-        relationships: ['agents'],
-        ...(agentName ? { agent_name: agentName } : {}),
-      };
-      return agentexClient.tasks.list(params);
-    },
-    staleTime: 30 * 1000, // 30 seconds
-    refetchOnWindowFocus: true,
-  });
-}
-
-/**
  * Fetches a single task by ID
  */
 export function useTask({
