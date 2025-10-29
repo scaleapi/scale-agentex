@@ -30,21 +30,21 @@ async def handle_message_send(params: SendMessageParams) -> AsyncGenerator[TaskM
             )
 ```
 
-### Agentic ACP: Three Streaming Options
+### Async ACP: Three Streaming Options
 
 Becuase Agentic Agents are completely async, they do not yield nor return anything in their ACP handlers. Instead, they should call the appropriate ADK functions to stream updates to the client.
 
 **Pub/Sub Architecture:**
-Agentex uses a **pub/sub mechanism** in the server to handle Agentic ACP streaming. Clients subscribe to **server-side events (SSE)** from Agentex, which allows them to receive streaming publications from agents in real-time. When an agent streams content, it publishes updates through the ADK, and all subscribed clients receive these updates immediately.
+Agentex uses a **pub/sub mechanism** in the server to handle Async ACP streaming. Clients subscribe to **server-side events (SSE)** from Agentex, which allows them to receive streaming publications from agents in real-time. When an agent streams content, it publishes updates through the ADK, and all subscribed clients receive these updates immediately.
 
-The ADK provides two different streaming approaches for agents behind Agentic ACPs depending on your needs:
+The ADK provides two different streaming approaches for agents behind Async ACPs depending on your needs:
 
 ## 1. Auto Send (Recommended for Most Cases)
 
 **Agentex handles everything automatically:**
 
 ```python
-# Agentic ACP - Auto send handles all delta accumulation
+# Async ACP - Auto send handles all delta accumulation
 @acp.on_task_event_send
 async def handle_event_send(params: SendEventParams):
     # Echo user message
@@ -80,7 +80,7 @@ async def handle_event_send(params: SendEventParams):
 **You get full control but handle everything manually:**
 
 ```python
-# Agentic ACP - Non-auto send: YOU handle everything
+# Async ACP - Non-auto send: YOU handle everything
 @acp.on_task_event_send
 async def handle_event_send(params: SendEventParams):
     # YOU must create the streaming context manually

@@ -91,7 +91,7 @@ The `@acp.on_message_send` handler receives:
 
 ### Not Ideal For:
 
-❌ **Multi-step workflows** - Use Agentic ACP
+❌ **Multi-step workflows** - Use Async ACP
 ❌ **Complex state management** - Limited state tracking
 ❌ **Resource coordination** - No initialization/cleanup hooks
 ❌ **Long-running processes** - Better suited for quick responses
@@ -101,13 +101,13 @@ The `@acp.on_message_send` handler receives:
 - **Keep handlers simple** - Sync ACP is for straightforward logic
 - **Handle errors gracefully** - Return error messages to users
 - **Use optional state sparingly** - For simple session data only
-- **Consider migration** - Switch to Agentic ACP as complexity grows
+- **Consider migration** - Switch to Async ACP as complexity grows
 
 ---
 
 ## Next Steps
 
-- **Need more complexity?** Learn about [Agentic ACP](agentic/overview.md)
+- **Need more complexity?** Learn about [Async ACP](agentic/overview.md)
 - **Ready to upgrade?** See the [Migration Guide](../concepts/migration_guide.md)
 - **New to Agentex?** Follow the [Quick Start Guide on GitHub](https://github.com/scaleapi/scale-agentex#quick-start)
 - **Ready to build?** Check out [Sync ACP Tutorials on GitHub](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/00_sync)
