@@ -112,7 +112,7 @@ function TaskButton({ task }: TaskButtonProps) {
           )}
         >
           {createdAtString}
-          {' • '}
+          {task.created_at && ' • '}
           {agentsString}
         </div>
       </Button>
