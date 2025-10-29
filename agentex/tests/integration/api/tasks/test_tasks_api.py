@@ -1088,3 +1088,199 @@ class TestTasksAPIIntegration:
         assert {(d["id"], d["name"]) for d in paginated_tasks} == {
             (d.id, d.name) for d in test_pagination_tasks
         }
+
+    async def test_get_task_by_id_with_agents_view(
+        self, isolated_client, test_agent, test_task
+    ):
+        """Test GET /tasks/{task_id}?relationships=agents includes agent data"""
+        # When - Request task WITH agents view
+        response = await isolated_client.get(
+            f"/tasks/{test_task.id}?relationships=agents"
+        )
+
+        # Then - Should include agents array with agent data
+        assert response.status_code == 200
+        task_data = response.json()
+
+        assert task_data["id"] == test_task.id
+        assert task_data["name"] == "test-task"
+        assert "agents" in task_data
+        assert task_data["agents"] is not None
+        assert isinstance(task_data["agents"], list)
+        assert len(task_data["agents"]) == 1
+
+        # Verify agent data is present and correct
+        agent_data = task_data["agents"][0]
+        assert agent_data["id"] == test_agent.id
+        assert agent_data["name"] == "test-agent"
+        assert agent_data["description"] == "Test agent for integration testing"
+        assert agent_data["acp_type"] == "sync"
+
+    async def test_get_task_by_id_without_agents_view(self, isolated_client, test_task):
+        """Test GET /tasks/{task_id} without view parameter does NOT include agent data"""
+        # When - Request task WITHOUT view parameter
+        response = await isolated_client.get(f"/tasks/{test_task.id}")
+
+        # Then - Should NOT include agents array (or it should be null/empty)
+        assert response.status_code == 200
+        task_data = response.json()
+
+        assert task_data["id"] == test_task.id
+        assert task_data["name"] == "test-task"
+        # agents field should be None or not present when view is not requested
+        assert task_data.get("agents") is None
+
+    async def test_get_task_by_name_with_agents_view(
+        self, isolated_client, test_agent, test_task
+    ):
+        """Test GET /tasks/name/{task_name}?relationships=agents includes agent data"""
+        # When - Request task by name WITH agents view
+        response = await isolated_client.get(
+            f"/tasks/name/{test_task.name}?relationships=agents"
+        )
+
+        # Then - Should include agents array with agent data
+        assert response.status_code == 200
+        task_data = response.json()
+
+        assert task_data["name"] == "test-task"
+        assert "agents" in task_data
+        assert isinstance(task_data["agents"], list)
+        assert len(task_data["agents"]) == 1
+        assert task_data["agents"][0]["id"] == test_agent.id
+        assert task_data["agents"][0]["name"] == "test-agent"
+
+    async def test_list_tasks_with_agents_view(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test GET /tasks?relationships=agents includes agent data for all tasks"""
+        # Given - Create multiple agents and tasks
+        agent_repo = isolated_repositories["agent_repository"]
+        agent1 = AgentEntity(
+            id=orm_id(),
+            name="list-view-agent-1",
+            description="First agent for list view testing",
+            acp_url="http://test-acp-1:8000",
+            acp_type=ACPType.SYNC,
+        )
+        agent2 = AgentEntity(
+            id=orm_id(),
+            name="list-view-agent-2",
+            description="Second agent for list view testing",
+            acp_url="http://test-acp-2:8000",
+            acp_type=ACPType.AGENTIC,
+        )
+        created_agent1 = await agent_repo.create(agent1)
+        created_agent2 = await agent_repo.create(agent2)
+
+        task_repo = isolated_repositories["task_repository"]
+        task1 = TaskEntity(
+            id=orm_id(),
+            name="list-view-task-1",
+            status=TaskStatus.RUNNING,
+            status_reason="First task for list view testing",
+        )
+        task2 = TaskEntity(
+            id=orm_id(),
+            name="list-view-task-2",
+            status=TaskStatus.COMPLETED,
+            status_reason="Second task for list view testing",
+        )
+        created_task1 = await task_repo.create(agent_id=created_agent1.id, task=task1)
+        created_task2 = await task_repo.create(agent_id=created_agent2.id, task=task2)
+
+        # When - Request tasks list WITH agents view
+        response = await isolated_client.get("/tasks?relationships=agents")
+
+        # Then - Should include agents array for all tasks
+        assert response.status_code == 200
+        tasks = response.json()
+
+        # Find our test tasks
+        test_task1 = next((t for t in tasks if t["id"] == created_task1.id), None)
+        test_task2 = next((t for t in tasks if t["id"] == created_task2.id), None)
+
+        assert test_task1 is not None
+        assert test_task2 is not None
+
+        # Verify agents data is present
+        assert "agents" in test_task1
+        assert isinstance(test_task1["agents"], list)
+        assert len(test_task1["agents"]) == 1
+        assert test_task1["agents"][0]["name"] == "list-view-agent-1"
+
+        assert "agents" in test_task2
+        assert isinstance(test_task2["agents"], list)
+        assert len(test_task2["agents"]) == 1
+        assert test_task2["agents"][0]["name"] == "list-view-agent-2"
+
+    async def test_list_tasks_without_agents_view(self, isolated_client, test_task):
+        """Test GET /tasks without view parameter does NOT include agent data"""
+        # When - Request tasks list WITHOUT view parameter
+        response = await isolated_client.get("/tasks")
+
+        # Then - Should NOT include agents array
+        assert response.status_code == 200
+        tasks = response.json()
+
+        found_task = next((t for t in tasks if t["id"] == test_task.id), None)
+        assert found_task is not None
+        # agents field should be None or not present
+        assert found_task.get("agents") is None
+
+    async def test_list_tasks_filters_work_with_views(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test that filtering and relationships work together correctly"""
+        # Given - Create multiple agents with tasks
+        agent_repo = isolated_repositories["agent_repository"]
+        target_agent = AgentEntity(
+            id=orm_id(),
+            name="target-filter-agent",
+            description="Agent to filter by",
+            acp_url="http://test-acp-1:8000",
+            acp_type=ACPType.SYNC,
+        )
+        other_agent = AgentEntity(
+            id=orm_id(),
+            name="other-filter-agent",
+            description="Other agent",
+            acp_url="http://test-acp-2:8000",
+            acp_type=ACPType.AGENTIC,
+        )
+        created_target = await agent_repo.create(target_agent)
+        created_other = await agent_repo.create(other_agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        target_task = TaskEntity(
+            id=orm_id(),
+            name="filter-view-target-task",
+            status=TaskStatus.RUNNING,
+            status_reason="Target task",
+        )
+        other_task = TaskEntity(
+            id=orm_id(),
+            name="filter-view-other-task",
+            status=TaskStatus.COMPLETED,
+            status_reason="Other task",
+        )
+        await task_repo.create(agent_id=created_target.id, task=target_task)
+        await task_repo.create(agent_id=created_other.id, task=other_task)
+
+        # When - Filter by agent_id AND request agents view
+        response = await isolated_client.get(
+            f"/tasks?agent_id={created_target.id}&relationships=agents"
+        )
+
+        # Then - Should return only filtered task WITH agent data
+        assert response.status_code == 200
+        tasks = response.json()
+
+        # Should only have target agent's task
+        target_tasks = [t for t in tasks if t["name"] == "filter-view-target-task"]
+        assert len(target_tasks) == 1
+
+        task_data = target_tasks[0]
+        assert "agents" in task_data
+        assert len(task_data["agents"]) == 1
+        assert task_data["agents"][0]["name"] == "target-filter-agent"

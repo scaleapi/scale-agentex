@@ -13,6 +13,40 @@ class BaseModel(PydanticBaseModel):
         populate_by_name=True,
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def extract_sqlalchemy_relationships(cls, data: Any) -> Any:
+        """
+        Extract loaded SQLAlchemy relationships from ORM objects.
+
+        This validator handles SQLAlchemy ORM objects by extracting both:
+        - Column values
+        - Loaded relationships
+
+        For non-ORM objects, it passes the data through unchanged.
+        """
+        # Check if this is a SQLAlchemy ORM object
+        if not hasattr(data, "__table__"):
+            return data
+
+        try:
+            from sqlalchemy import inspect as sqlalchemy_inspect
+        except ImportError:
+            return data
+
+        inst = sqlalchemy_inspect(data)
+        result = {}
+
+        # Extract column values
+        for column_key in inst.mapper.columns.keys():
+            result[column_key] = getattr(data, column_key)
+
+        for rel_attr in inst.mapper.relationships:
+            if rel_attr.key not in inst.unloaded:
+                result[rel_attr.key] = getattr(data, rel_attr.key)
+
+        return result
+
     @classmethod
     def from_model(cls: type[T], model: T | None = None) -> T | None:
         if not model:

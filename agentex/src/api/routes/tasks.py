@@ -1,4 +1,6 @@
-from fastapi import APIRouter
+from typing import Annotated
+
+from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
 from src.api.schemas.authorization_types import (
@@ -7,7 +9,12 @@ from src.api.schemas.authorization_types import (
     AuthorizedOperationType,
 )
 from src.api.schemas.delete_response import DeleteResponse
-from src.api.schemas.tasks import Task, UpdateTaskRequest
+from src.api.schemas.tasks import (
+    Task,
+    TaskRelationships,
+    TaskResponse,
+    UpdateTaskRequest,
+)
 from src.domain.services.authorization_service import DAuthorizationService
 from src.domain.use_cases.streams_use_case import DStreamsUseCase
 from src.domain.use_cases.tasks_use_case import DTaskUseCase
@@ -28,36 +35,40 @@ router = APIRouter(
 
 @router.get(
     "/{task_id}",
-    response_model=Task,
+    response_model=TaskResponse,
     summary="Get Task by ID",
     description="Get a task by its unique ID.",
 )
 async def get_task(
     task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.read),
     task_use_case: DTaskUseCase,
-) -> Task:
-    task_entity = await task_use_case.get_task(id=task_id)
-    return Task.model_validate(task_entity)
+    relationships: Annotated[list[TaskRelationships], Query()] = None,
+) -> TaskResponse:
+    task_entity = await task_use_case.get_task(id=task_id, relationships=relationships)
+    return TaskResponse.model_validate(task_entity)
 
 
 @router.get(
     "/name/{task_name}",
-    response_model=Task,
+    response_model=TaskResponse,
     summary="Get Task by Name",
     description="Get a task by its unique name.",
 )
 async def get_task_by_name(
     task_name: DAuthorizedName(AgentexResourceType.task, AuthorizedOperationType.read),
     task_use_case: DTaskUseCase,
-) -> Task:
+    relationships: Annotated[list[TaskRelationships], Query()] = None,
+) -> TaskResponse:
     """Get a task by its unique name."""
-    task_entity = await task_use_case.get_task(name=task_name)
-    return Task.model_validate(task_entity)
+    task_entity = await task_use_case.get_task(
+        name=task_name, relationships=relationships
+    )
+    return TaskResponse.model_validate(task_entity)
 
 
 @router.get(
     "",
-    response_model=list[Task],
+    response_model=list[TaskResponse],
     summary="List Tasks",
     description="List all tasks.",
 )
@@ -68,6 +79,7 @@ async def list_tasks(
     agent_name: str | None = None,
     limit: int = 50,
     page_number: int = 1,
+    relationships: Annotated[list[TaskRelationships], Query()] = None,
 ):
     """List all tasks."""
 
@@ -77,8 +89,9 @@ async def list_tasks(
         agent_name=agent_name,
         limit=limit,
         page_number=page_number,
+        relationships=relationships,
     )
-    return [Task.model_validate(task_entity) for task_entity in task_entities]
+    return [TaskResponse.model_validate(task_entity) for task_entity in task_entities]
 
 
 @router.delete(

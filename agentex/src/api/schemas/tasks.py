@@ -4,7 +4,14 @@ from typing import Any
 
 from pydantic import Field
 
+from src.api.schemas.agents import Agent
 from src.utils.model_utils import BaseModel
+
+
+class TaskRelationships(str, Enum):
+    """Task relationships that can be loaded"""
+
+    AGENTS = "agents"
 
 
 class TaskStatus(str, Enum):
@@ -49,6 +56,15 @@ class Task(BaseModel):
     task_metadata: dict[str, Any] | None = Field(
         None,
         title="Task metadata",
+    )
+
+
+class TaskResponse(Task):
+    """Task response model with optional related data based on relationships"""
+
+    agents: list["Agent"] | None = Field(
+        default=None,
+        title="Agents associated with this task (only populated when 'agents' view is requested)",
     )
 
 

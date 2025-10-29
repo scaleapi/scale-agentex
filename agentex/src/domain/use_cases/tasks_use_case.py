@@ -3,7 +3,7 @@ from typing import Annotated, Any
 from fastapi import Depends
 
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
-from src.domain.entities.tasks import TaskEntity, TaskStatus
+from src.domain.entities.tasks import TaskEntity, TaskRelationships, TaskStatus
 from src.domain.exceptions import ClientError
 from src.domain.services.task_service import DAgentTaskService
 from src.utils.logging import make_logger
@@ -23,13 +23,18 @@ class TasksUseCase:
         self.task_service = task_service
 
     async def get_task(
-        self, id: str | None = None, name: str | None = None
+        self,
+        id: str | None = None,
+        name: str | None = None,
+        relationships: list[TaskRelationships] | None = None,
     ) -> TaskEntity:
         """Get task details and current state from ACP server"""
         if not id and not name:
             raise ClientError("Either id or name must be provided")
 
-        task = await self.task_service.get_task(id=id, name=name)
+        task = await self.task_service.get_task(
+            id=id, name=name, relationships=relationships
+        )
         if task.status == TaskStatus.DELETED:
             if id:
                 raise ItemDoesNotExist(f"Task {id} not found")
@@ -64,6 +69,7 @@ class TasksUseCase:
         id: str | list[str] | None = None,
         agent_id: str | None = None,
         agent_name: str | None = None,
+        relationships: list[TaskRelationships] | None = None,
     ) -> list[TaskEntity]:
         """List all tasks from repository"""
         return await self.task_service.list_tasks(
@@ -72,6 +78,7 @@ class TasksUseCase:
             agent_name=agent_name,
             limit=limit,
             page_number=page_number,
+            relationships=relationships,
         )
 
     async def update_mutable_fields_on_task(
