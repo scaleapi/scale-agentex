@@ -8,7 +8,6 @@ import { PromptInput } from '@/components/agentex/prompt-input';
 import { TaskTopBar } from '@/components/agentex/task-top-bar';
 import { useAgentexClient } from '@/components/providers';
 import { useAgents } from '@/hooks/use-agents';
-import { useLocalStorageState } from '@/hooks/use-local-storage-state';
 import {
   useSafeSearchParams,
   SearchParamKey,
@@ -28,24 +27,11 @@ export function PrimaryContent({
 }: ContentAreaProps) {
   const { taskID } = useSafeSearchParams();
   const { agentexClient } = useAgentexClient();
-  const { data: agents = [], isLoading } = useAgents(agentexClient);
+  const { data: agents = [] } = useAgents(agentexClient);
   const { agentName, updateParams } = useSafeSearchParams();
   const [prompt, setPrompt] = useState<string>('');
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const [localAgentName] = useLocalStorageState<string | undefined>(
-    'lastSelectedAgent',
-    undefined
-  );
-
-  useEffect(() => {
-    if (!isLoading) {
-      if (!agentName && localAgentName) {
-        updateParams({ [SearchParamKey.AGENT_NAME]: localAgentName });
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading]);
 
   const handleSelectAgent = useCallback(
     (agentName: string | undefined) => {
