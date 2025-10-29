@@ -62,7 +62,7 @@ export function useInfiniteTasks(
       return agentexClient.tasks.list(params);
     },
     getNextPageParam: (lastPage, allPages) => {
-      if (lastPage.length < limit) {
+      if (!lastPage || lastPage.length < limit) {
         return undefined;
       }
       return allPages.length + 1;
