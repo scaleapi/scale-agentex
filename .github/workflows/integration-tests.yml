@@ -1,0 +1,9 @@
+name: Run Agentex Integration Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit-sha:
+        description: "Commit SHA to test against"
+        required: true
+        type: string
