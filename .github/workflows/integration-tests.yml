@@ -9,16 +9,19 @@ on:
         type: string
         default: main
 
-jobs:
-  build-images:
-    name: "Build AgentEx Images"
-    uses: ./.github/workflows/build-agentex.yml
-    with:
-      commit-sha: ${{ inputs.commit-sha || 'main' }}
+permissions:
+  contents: read
+  packages: read
 
+jobs:
+  # build-images:
+  #   name: "Build AgentEx Images"
+  #   uses: ./.github/workflows/build-agentex.yml
+  #   with:
+  #     commit-sha: ${{ inputs.commit-sha || 'main' }}
+  #
   pull-agent-images:
     name: "Pull AgentEx Images"
-    needs: build-images
     runs-on: ubuntu-latest
     steps:
       - name: Login to GitHub Container Registry
@@ -28,44 +31,58 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Discover available images
-        id: discover
+      - name: Discover and pull agentex-python packages
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          echo "🔍 Discovering available images..."
+          echo "🔍 Discovering packages from agentex-python repo..."
 
-          # Get packages, excluding the current repo to avoid conflicts
-          PACKAGES=$(gh api repos/scaleapi/agentex-python/packages?package_type=container --jq '.[].name')          echo "📦 Available packages:"
+          # Get package names using the API query
+          PACKAGES=$(gh api "orgs/scaleapi/packages?package_type=container" --jq '.[] | select(.repository.name == "agentex-python") | .name')
+
+          if [ -z "$PACKAGES" ]; then
+            echo "❌ No packages found in agentex-python repo"
+            exit 0
+          fi
+
+          echo "📦 Found packages:"
           echo "$PACKAGES"
 
-          # Store for other jobs
-          echo "images<<EOF" >> $GITHUB_OUTPUT
-          echo "$PACKAGES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # Pull each package
+          for package in $PACKAGES; do
+            echo "🐳 Pulling ghcr.io/scaleapi/$package:latest"
+            docker pull "ghcr.io/scaleapi/$package:latest" || echo "⚠️ Failed to pull $package:latest"
+          done
 
-          # # Pull images
-          # for package in $PACKAGES; do
-          #   echo "🐳 Pulling ghcr.io/${{ github.repository_owner }}/$package:latest"
-          #   docker pull "ghcr.io/${{ github.repository_owner }}/$package:latest" || echo "⚠️ Couldn't pull $package:latest, trying main..."
-          #   docker pull "ghcr.io/${{ github.repository_owner }}/$package:main" 2>/dev/null || echo "ℹ️ $package:main not available"
-          # done
-          #
-      - name: Pull images from GHCR
+      - name: Show pulled images
         run: |
-          docker pull ghcr.io/your-org/repo-name/image-name:tag
-          docker pull ghcr.io/your-org/another-repo/service:latest
+          echo "🐳 Successfully pulled images:"
+          docker images | grep "ghcr.io/scaleapi" || echo "No scaleapi images found"
 
-  run-integration-tests:
-    name: "Run Integration Tests"
-    needs: build-images
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.commit-sha || 'main' }}
-
-      - name: Placeholder - Integration Tests
-        run: |
-          echo "🧪 Integration tests will run here"
-          echo "📦 AgentEx images have been built with commit SHA: ${{ inputs.commit-sha || 'main' }}"
-          echo "🔄 This is where actual integration test commands should be added"
+  # run-integration-tests:
+  #   name: "Run Integration Tests"
+  #   needs: pull-agent-images
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #       with:
+  #         ref: ${{ inputs.commit-sha || 'main' }}
+  #
+  #     - name: Login to GitHub Container Registry
+  #       uses: docker/login-action@v3
+  #       with:
+  #         registry: ghcr.io
+  #         username: ${{ github.repository_owner }}
+  #         password: ${{ secrets.GITHUB_TOKEN }}
+  #
+  #     - name: Verify available images
+  #       run: |
+  #         echo "🐳 Available Docker images for testing:"
+  #         docker images | grep "ghcr.io/scaleapi" || echo "No scaleapi images available"
+  #
+  #     - name: Placeholder - Integration Tests
+  #       run: |
+  #         echo "🧪 Integration tests will run here"
+  #         echo "📦 AgentEx Python dependency images are available for testing"
+  #         echo "🔄 This is where actual integration test commands should be added"

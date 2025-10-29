@@ -1,4 +1,4 @@
-# .github/workflows/release.yml
+# .github/workflows/build-agentex.yml
 name: Release AgentEx
 
 on:
