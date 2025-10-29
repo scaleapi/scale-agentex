@@ -14,22 +14,17 @@ import type AgentexSDK from 'agentex';
 import type { IDeltaAccumulator } from 'agentex/lib';
 import type { Agent, TaskMessage, TaskMessageContent } from 'agentex/resources';
 
-type TaskMessagesData = {
+export type TaskMessagesData = {
   messages: TaskMessage[];
   deltaAccumulator: IDeltaAccumulator | null;
+  rpcStatus: 'idle' | 'pending' | 'success' | 'error';
 };
 
-/**
- * Query key factory for task messages
- */
 export const taskMessagesKeys = {
   all: ['taskMessages'] as const,
   byTaskId: (taskId: string) => [...taskMessagesKeys.all, taskId] as const,
 };
 
-/**
- * Hook to fetch and cache messages for a specific task
- */
 export function useTaskMessages({
   agentexClient,
   taskId,
@@ -41,10 +36,9 @@ export function useTaskMessages({
     queryKey: taskMessagesKeys.byTaskId(taskId),
     queryFn: async (): Promise<TaskMessagesData> => {
       if (!taskId) {
-        return { messages: [], deltaAccumulator: null };
+        return { messages: [], deltaAccumulator: null, rpcStatus: 'idle' };
       }
 
-      // Fetch existing messages from the backend
       const messages = await agentexClient.messages.list({
         task_id: taskId,
       });
@@ -52,10 +46,11 @@ export function useTaskMessages({
       return {
         messages,
         deltaAccumulator: null,
+        rpcStatus: 'idle',
       };
     },
     enabled: !!taskId,
-    staleTime: Infinity, // Messages don't change unless we update them
+    staleTime: Infinity,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
   });
@@ -67,10 +62,6 @@ type SendMessageParams = {
   content: TaskMessageContent;
 };
 
-/**
- * Mutation hook to send a message and stream the response
- * Updates the React Query cache during streaming
- */
 export function useSendMessage({
   agentexClient,
 }: {
@@ -82,7 +73,6 @@ export function useSendMessage({
     mutationFn: async ({ taskId, agentName, content }: SendMessageParams) => {
       const queryKey = taskMessagesKeys.byTaskId(taskId);
 
-      // Get the agent to determine communication pattern
       const agents = queryClient.getQueryData<Agent[]>(agentsKeys.all) || [];
       const agent = agents.find(a => a.name === agentName);
 
@@ -90,11 +80,14 @@ export function useSendMessage({
         throw new Error(`Agent with name ${agentName} not found`);
       }
 
-      // Route message handling based on agent communication pattern
       switch (agent.acp_type) {
         case 'agentic': {
-          // Fire-and-forget pattern: send event, agent handles async response
-          // The SSE subscription will receive the response and update the cache
+          queryClient.setQueryData<TaskMessagesData>(queryKey, data => ({
+            messages: data?.messages || [],
+            deltaAccumulator: data?.deltaAccumulator || null,
+            rpcStatus: 'pending',
+          }));
+
           const response = await agentRPCNonStreaming(
             agentexClient,
             { agentName },
@@ -103,29 +96,38 @@ export function useSendMessage({
           );
 
           if (response.error != null) {
+            queryClient.setQueryData<TaskMessagesData>(queryKey, data => ({
+              messages: data?.messages || [],
+              deltaAccumulator: data?.deltaAccumulator || null,
+              rpcStatus: 'error',
+            }));
             throw new Error(response.error.message);
           }
 
-          // For agentic agents, we don't optimistically update or stream
-          // The subscribeTaskState SSE connection will handle updates
+          queryClient.setQueryData<TaskMessagesData>(queryKey, data => ({
+            messages: data?.messages || [],
+            deltaAccumulator: data?.deltaAccumulator || null,
+            rpcStatus: 'pending',
+          }));
+
           return (
             queryClient.getQueryData<TaskMessagesData>(queryKey) || {
               messages: [],
               deltaAccumulator: null,
+              rpcStatus: 'pending',
             }
           );
         }
 
         case 'sync': {
-          // Streaming pattern: immediate response with real-time updates
           const currentData = queryClient.getQueryData<TaskMessagesData>(
             queryKey
           ) || {
             messages: [],
             deltaAccumulator: null,
+            rpcStatus: 'pending',
           };
 
-          // Create temporary user message for optimistic UI
           const tempUserMessage: TaskMessage = {
             id: v4(),
             content,
@@ -135,18 +137,17 @@ export function useSendMessage({
             updated_at: new Date().toISOString(),
           };
 
-          // Optimistically add user message to cache
           let latestMessages = [...currentData.messages, tempUserMessage];
           let latestDeltaAccumulator = currentData.deltaAccumulator;
 
           queryClient.setQueryData<TaskMessagesData>(queryKey, {
             messages: latestMessages,
             deltaAccumulator: latestDeltaAccumulator,
+            rpcStatus: 'pending',
           });
 
           const controller = new AbortController();
 
-          // Stream agent response and update cache in real-time
           for await (const response of agentRPCWithStreaming(
             agentexClient,
             { agentName },
@@ -155,10 +156,14 @@ export function useSendMessage({
             { signal: controller.signal }
           )) {
             if (response.error != null) {
+              queryClient.setQueryData<TaskMessagesData>(queryKey, data => ({
+                messages: data?.messages || [],
+                deltaAccumulator: data?.deltaAccumulator || null,
+                rpcStatus: 'error',
+              }));
               throw new Error(response.error.message);
             }
 
-            // Get current state from cache (might have been updated by SSE subscription)
             const cacheData =
               queryClient.getQueryData<TaskMessagesData>(queryKey);
             if (cacheData) {
@@ -166,7 +171,6 @@ export function useSendMessage({
               latestDeltaAccumulator = cacheData.deltaAccumulator;
             }
 
-            // Aggregate the message events
             const result = aggregateMessageEvents(
               latestMessages,
               latestDeltaAccumulator,
@@ -176,19 +180,17 @@ export function useSendMessage({
             latestMessages = result.messages;
             latestDeltaAccumulator = result.deltaAccumulator;
 
-            // Update the cache immediately during streaming
             queryClient.setQueryData<TaskMessagesData>(queryKey, {
               messages: latestMessages,
               deltaAccumulator: latestDeltaAccumulator,
+              rpcStatus: 'pending',
             });
 
-            // If the last message is done, invalidate the spans query
             if (response.result.type === 'done') {
               queryClient.invalidateQueries({ queryKey: ['spans', taskId] });
             }
           }
 
-          // Replace temporary user message with server-authoritative version
           const finalMessages = await agentexClient.messages.list({
             task_id: taskId,
           });
@@ -196,6 +198,7 @@ export function useSendMessage({
           queryClient.setQueryData<TaskMessagesData>(queryKey, {
             messages: finalMessages,
             deltaAccumulator: null,
+            rpcStatus: 'success',
           });
 
           return {

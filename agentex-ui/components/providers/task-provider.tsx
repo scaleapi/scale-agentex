@@ -7,13 +7,6 @@ import { useAgents } from '@/hooks/use-agents';
 import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 import { useTaskSubscription } from '@/hooks/use-task-subscription';
 
-/**
- * Task provider component
- * Bootstraps real-time SSE subscription for a specific task
- *
- * TODO: Debug why subscribeTaskState doesn't receive events from agentRPCWithStreaming
- * Currently both streams are active (redundant) but only RPC stream updates UI
- */
 export function TaskProvider({
   taskId,
   children,
@@ -29,8 +22,6 @@ export function TaskProvider({
   const { data: agents = [] } = useAgents(agentexClient);
   const agent = agents.find(a => a.name === agentName);
 
-  // SSE subscription - connects on mount, should receive all task events
-  // Currently only receives initial load, not new events from message/send
   useTaskSubscription({
     agentexClient,
     taskId,
