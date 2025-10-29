@@ -2,10 +2,16 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from src.api.schemas.tasks import Task
 from src.utils.model_utils import BaseModel
+
+
+class TaskRelationships(str, Enum):
+    """Task relationships that can be loaded"""
+
+    AGENTS = "agents"
 
 
 class TaskStatus(str, Enum):
@@ -52,6 +58,9 @@ class TaskEntity(BaseModel):
         None,
         title="Task metadata",
     )
+
+    # allow extra fields for agents relationships
+    model_config = ConfigDict(extra="allow")
 
 
 def convert_task_to_entity(task: Task) -> TaskEntity:

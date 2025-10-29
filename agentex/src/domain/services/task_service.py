@@ -9,7 +9,7 @@ from src.domain.entities.events import EventEntity
 from src.domain.entities.task_message_updates import TaskMessageUpdateEntity
 from src.domain.entities.task_messages import TaskMessageContentEntity
 from src.domain.entities.task_stream_events import TaskStreamTaskUpdatedEventEntity
-from src.domain.entities.tasks import TaskEntity, TaskStatus
+from src.domain.entities.tasks import TaskEntity, TaskRelationships, TaskStatus
 from src.domain.repositories.event_repository import DEventRepository
 from src.domain.repositories.task_repository import DTaskRepository
 from src.domain.repositories.task_state_repository import DTaskStateRepository
@@ -132,12 +132,17 @@ class AgentTaskService:
         await self.task_repository.update(task)
 
     async def get_task(
-        self, id: str | None = None, name: str | None = None
+        self,
+        id: str | None = None,
+        name: str | None = None,
+        relationships: list[TaskRelationships] | None = None,
     ) -> TaskEntity:
         """
         Get a task from the repository.
         """
-        return await self.task_repository.get(id=id, name=name)
+        return await self.task_repository.get(
+            id=id, name=name, relationships=relationships
+        )
 
     async def update_task(self, task: TaskEntity) -> TaskEntity:
         """
@@ -176,6 +181,7 @@ class AgentTaskService:
         id: str | list[str] | None = None,
         agent_id: str | None = None,
         agent_name: str | None = None,
+        relationships: list[TaskRelationships] | None = None,
     ) -> list[TaskEntity]:
         """
         List all tasks from the repository.
@@ -187,6 +193,7 @@ class AgentTaskService:
             agent_name=agent_name,
             limit=limit,
             page_number=page_number,
+            relationships=relationships,
         )
 
     async def send_message(

@@ -3,6 +3,7 @@ from typing import Annotated, Literal
 
 from fastapi import Depends
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from src.adapters.crud_store.adapter_postgres import (
     ColumnPrimitiveValue,
     PostgresCRUDRepository,
@@ -10,13 +11,22 @@ from src.adapters.crud_store.adapter_postgres import (
 )
 from src.adapters.orm import AgentORM, AgentTaskTrackerORM, TaskAgentORM, TaskORM
 from src.config.dependencies import DDatabaseAsyncReadWriteSessionMaker
-from src.domain.entities.tasks import TaskEntity, TaskStatus
+from src.domain.entities.tasks import TaskEntity, TaskRelationships, TaskStatus
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
 
 
-class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity]):
+class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationships]):
+    """Repository for Task entity with relationship loading support"""
+
+    orm_class = TaskORM
+    entity_class = TaskEntity
+    relationships = TaskRelationships
+    relationships_to_load_options = {
+        TaskRelationships.AGENTS: selectinload(TaskORM.agents),
+    }
+
     def __init__(
         self, async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker
     ):
@@ -30,18 +40,23 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity]):
         agent_id: str | None = None,
         agent_name: str | None = None,
         order_by: str | None = None,
-        order_direction: Literal["asc", "desc"] = "desc",
+        order_direction: Literal["asc", "desc"] = "asc",
         limit: int | None = None,
         page_number: int | None = None,
+        relationships: list[TaskRelationships] | None = None,
     ) -> list[TaskEntity]:
         """
         List Tasks with custom filters that may require joining tables.
 
         Args:
-            - task_filters (dict[str, ColumnPrimitiveValue | Sequence[ColumnPrimitiveValue]] | None): Filters on the task table itself.
-                Keys are column names. Values are either the value to match, or a list of values to match.
-            - agent_id (str | None): Filter tasks by agent ID using the join table
-            - agent_name (str | None): Filter tasks by agent name
+            - task_filters: Filters on the task table itself
+            - agent_id: Filter tasks by agent ID using the join table
+            - agent_name: Filter tasks by agent name
+            - order_by: Column to order by
+            - order_direction: Direction to order by
+            - limit: Maximum number of results to return
+            - page_number: Page number to return
+            - relationships: List of relationships to eagerly load (e.g., [TaskRelationships.AGENTS])
         """
 
         query = select(TaskORM)
@@ -61,6 +76,7 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity]):
             query=query,
             limit=limit,
             page_number=page_number,
+            relationships=relationships,
         )
 
     async def create(self, agent_id: str, task: TaskEntity) -> TaskEntity:
@@ -70,7 +86,6 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity]):
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
         ):
-            # Create the task ORM without agents
             task_data = task.to_dict()
 
             orm = self.orm(**task_data)

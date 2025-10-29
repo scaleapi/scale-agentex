@@ -2,12 +2,12 @@ import builtins
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
+from enum import StrEnum
 from typing import (
     Annotated,
     Any,
     Generic,
     Literal,
-    TypeVar,
 )
 
 from fastapi import Depends
@@ -22,7 +22,9 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.interfaces import LoaderOption
 from sqlalchemy.sql import Select
+from typing_extensions import TypeVar
 
 from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
 from src.adapters.crud_store.port import CRUDRepository
@@ -71,11 +73,71 @@ async def async_sql_exception_handler():
 T = TypeVar("T", bound=BaseModel)
 M = TypeVar("M", bound=BaseORM)
 
-
 ColumnPrimitiveValue = str | int | float | bool | datetime | None
 
 
-class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T]):
+class EmptyRelationships(StrEnum):
+    """Default empty relationships enum for repositories without relationships"""
+
+    pass
+
+
+Relationships = TypeVar(
+    "Relationships",
+    bound=StrEnum,
+    default=EmptyRelationships,
+)
+
+
+class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
+    """
+    Base PostgreSQL CRUD repository with support for optional relationship loading.
+
+    Subclasses can define:
+    - orm_class: The SQLAlchemy ORM model class
+    - entity_class: The Pydantic entity class
+    - relationships: StrEnum of available relationships (optional)
+    - relationships_to_load_options: Dict mapping relationships to SQLAlchemy load options (optional)
+
+    For backward compatibility, repositories without relationships can use the 2-parameter syntax:
+        PostgresCRUDRepository[M, T]
+    This automatically uses EmptyRelationships as the third parameter.
+    """
+
+    orm_class: type[M]
+    entity_class: type[T]
+    relationships: type[Relationships] = EmptyRelationships
+    relationships_to_load_options: dict[Relationships, LoaderOption] = {}
+
+    def __init_subclass__(cls) -> None:
+        """Validate subclass configuration at class definition time"""
+        super().__init_subclass__()
+
+        # Only validate if relationships are defined
+        if hasattr(cls, "relationships") and cls.relationships != EmptyRelationships:
+            missing = [
+                rel
+                for rel in cls.relationships
+                if rel not in cls.relationships_to_load_options
+            ]
+            if missing:
+                raise TypeError(
+                    f"{cls.__name__}: Missing loader options for relationships: {missing}"
+                )
+
+    @classmethod
+    def _get_query_options(
+        cls, relationships: list[Relationships] | None
+    ) -> list[LoaderOption]:
+        """Convert list of relationships to SQLAlchemy loader options"""
+        if (
+            not relationships
+            or not hasattr(cls, "relationships")
+            or cls.relationships == EmptyRelationships
+        ):
+            return []
+        return [cls.relationships_to_load_options[rel] for rel in set(relationships)]
+
     def __init__(
         self,
         async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker,
@@ -127,12 +189,17 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T]):
                 for orm_instance in orm_instances
             ]
 
-    async def get(self, id: str | None = None, name: str | None = None) -> T:
+    async def get(
+        self,
+        id: str | None = None,
+        name: str | None = None,
+        relationships: list[Relationships] | None = None,
+    ) -> T:
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
         ):
-            result = await self._get(session, id, name)
+            result = await self._get(session, id, name, relationships=relationships)
             return self.entity.model_validate(result)
 
     async def get_by_field(self, field_name: str, field_value: Any) -> T | None:
@@ -228,13 +295,16 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T]):
             return [self.entity.model_validate(result) for result in results]
 
     async def batch_get(
-        self, ids: list[str] | None = None, names: list[str] | None = None
+        self,
+        ids: list[str] | None = None,
+        names: list[str] | None = None,
+        relationships: list[Relationships] | None = None,
     ) -> list[T]:
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
         ):
-            results = await self._batch_get(session, ids, names)
+            results = await self._batch_get(session, ids, names, relationships)
             return [self.entity.model_validate(result) for result in results]
 
     async def update(self, item: T) -> T:
@@ -395,6 +465,7 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T]):
         query: Select | None = None,
         limit: int | None = None,
         page_number: int | None = None,
+        relationships: list[Relationships] | None = None,
     ) -> list[T]:
         async with (
             self.start_async_db_session(True) as session,
@@ -402,6 +473,9 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T]):
         ):
             if query is None:
                 query = select(self.orm)
+
+            if relationships:
+                query = query.options(*self._get_query_options(relationships))
 
             order_by_clauses = self.create_order_by_clauses(
                 order_by=order_by,
@@ -413,7 +487,6 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T]):
             if order_by_clauses:
                 query = query.order_by(*order_by_clauses)
 
-            # Apply filters if provided
             if filters:
                 filter_conditions = self.create_where_clauses_from_filters(
                     filters=filters
@@ -431,7 +504,6 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T]):
             if page_number is not None:
                 query = query.offset((page_number - 1) * limit)
 
-            # Execute the query
             result = await session.execute(query)
             results = result.scalars()
             return [self.entity.model_validate(result) for result in results]
@@ -441,15 +513,22 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T]):
         session: AsyncSession,
         id: str | None = None,
         name: str | None = None,
+        relationships: builtins.list[Relationships] | None = None,
     ) -> M:
+        query = select(self.orm)
+
+        if relationships:
+            query = query.options(*self._get_query_options(relationships))
+
         if id is not None:
-            result = await session.scalar(select(self.orm).filter(self.orm.id == id))
+            query = query.filter(self.orm.id == id)
         elif name is not None:
-            result = await session.scalar(
-                select(self.orm).filter(self.orm.name == name)
-            )
+            query = query.filter(self.orm.name == name)
         else:
             raise ClientError("Either id or name must be provided.")
+
+        result = await session.scalar(query)
+
         if result is None:
             if id is not None:
                 error_message = f"Item with id '{id}' does not exist."
@@ -463,17 +542,19 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T]):
         session: AsyncSession,
         ids: builtins.list[str] | None = None,
         names: builtins.list[str] | None = None,
+        relationships: builtins.list[Relationships] | None = None,
     ) -> M:
         if ids is not None:
-            results = await session.execute(
-                select(self.orm).filter(self.orm.id.in_(ids))
-            )
+            query = select(self.orm).filter(self.orm.id.in_(ids))
         elif names is not None:
-            results = await session.execute(
-                select(self.orm).filter(self.orm.name.in_(names))
-            )
+            query = select(self.orm).filter(self.orm.name.in_(names))
         else:
             raise ClientError("Either ids or names must be provided.")
+
+        if relationships:
+            query = query.options(*self._get_query_options(relationships))
+
+        results = await session.execute(query)
         if results is None:
             if ids is not None:
                 error_message = f"Item with id '{ids}' does not exist."
