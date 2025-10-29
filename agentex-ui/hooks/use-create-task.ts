@@ -55,7 +55,7 @@ export function useCreateTask({
         queryClient.setQueryData<InfiniteData<TaskListResponse>>(
           queryKey,
           old => {
-            if (!old) {
+            if (!old || !old.pages || old.pages.length === 0) {
               // If no cache exists, create initial structure
               return {
                 pages: [[newTask]],
