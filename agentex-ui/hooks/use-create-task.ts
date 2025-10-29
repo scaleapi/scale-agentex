@@ -16,7 +16,6 @@ import type { Task, TaskListResponse } from 'agentex/resources';
 
 type CreateTaskParams = {
   agentName: string;
-  name?: string;
   params?: Record<string, unknown>;
 };
 
@@ -33,7 +32,6 @@ export function useCreateTask({
   return useMutation({
     mutationFn: async ({
       agentName,
-      // name,
       params,
     }: CreateTaskParams): Promise<Task> => {
       const response = await agentRPCNonStreaming(
@@ -41,10 +39,6 @@ export function useCreateTask({
         { agentName },
         'task/create',
         {
-          // TODO: Theres a crazy backend error where if you create two tasks with teh same name, it
-          // returns the same task id for the second one rather than creating a new task.
-          // Uncomment this once that bug is fixed.
-          // name: name ?? null,
           params: params ?? {},
         }
       );
