@@ -165,6 +165,4 @@ message = await adk.messages.create(task_id=task_id, content=content)
 state = await adk.state.get_by_task_and_agent(task_id=task_id, agent_id=agent_id)
 ```
 
-## Next Steps
-
-Ready to dive into the details? Start with **[Concepts](../concepts/task.md)** to understand core concepts, then explore **[Types](types.md)** for complete API reference. 
+ 

@@ -4,7 +4,7 @@ Agents are the core building blocks of Agentex applications. Understanding what 
 
 ## What is an Agent?
 
-In Agentex, this of **an Agent as just code** - specifically, it is just Python code that adheres to the Agent-to-Client Protocol (ACP). This allows clients to speak to any agent the same way regardless of the agent's complexity. This allows agent developers full unopinionated control over which libraries they use, which models they use, and how they implement their business logic.
+In Agentex, think of **an Agent as just code** - specifically, it is just Python code that adheres to the Agent-to-Client Protocol (ACP). This allows clients to speak to any agent the same way regardless of the agent's complexity. This allows agent developers full unopinionated control over which libraries they use, which models they use, and how they implement their business logic.
 
 An agent defines:
 

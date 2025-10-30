@@ -64,7 +64,7 @@ class TaskResponse(Task):
 
     agents: list["Agent"] | None = Field(
         default=None,
-        title="Agents associated with this task (only populated when 'agents' view is requested)",
+        title="Agents associated with this task (only populated when 'agent' view is requested)",
     )
 
 

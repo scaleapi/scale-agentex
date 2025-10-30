@@ -11,54 +11,15 @@ Today, most AI applications are limited to Level 3 (L3) and below, relying on sy
 !!! note "Agentex is for all levels of AI agents"
     While Agentex is built to support advanced L4+ agents, it natively supports L1–L3 agents and simple request/response agents as well. You can start with basic conversational or task-based AI and seamlessly progress to fully autonomous, distributed, and asynchronous agents—all on the same platform. Agentex is future-proofed for a world where AI will be distributed across all levels.
 
-## 🚀 Get Started
+## Quick Start
 
-**Ready to build your first agent?**
+Follow our [Getting Started Guide on GitHub](https://github.com/scaleapi/agentex#getting-started){target="_blank"} to set up your environment and create your first agent.
 
-**[→ Quick Start Guide on GitHub](https://github.com/scaleapi/scale-agentex#quick-start)** (5 minutes)
+The GitHub README will you how to scaffold an L1 example just to learn the ropes. These Docs are meant to teach you concepts to help you extend all the way to L5 agents. For working code snippets that demonstrate these concepts, refer to the Python SDK. Here is how to use each type of our documentation.
 
-The README will guide you through:
+| Resource | Description |
+|----------|-------------|
+| **[Agentex README](https://github.com/scaleapi/agentex#getting-started)** | **Getting Started**: Spin up a simple agent on your local computer from scratch in minutes. This comes with a full development UI and agent server. |
+| **[Python SDK](https://github.com/scaleapi/scale-agentex-python)** | **Examples**: Agent-building tutorials that work out of the box. These show how to build up from simple to more complex agents using Agentex. |
+| **[Docs Site](https://agentex.sgp.scale.com/docs)** | **Concepts**: More in depth details on the what, why, and how of building L1-L5 agents.<br><br>**Enterprise Support**: Description of how our zero-ops deployment works. Learn how to share hundreds of agents with the rest of your company. Each agent is hosted and scaled independently on cloud-agnostic infrastructure. |
 
-- Installing prerequisites (Docker, Python 3.12+)
-- Setting up your local development environment
-- Creating and running your first agent with `agentex init`
-- Accessing the web UI to interact with your agent
-
-**Then return here to dive deeper:**
-
-## Learning Path 🎓
-
-### 1. Choose Your Approach
-
-Read [Developing Agentex Agents](developing_agentex_agents.md) to understand the different approaches (Sync, Agentic, Temporal) and decide which fits your use case.
-
-### 2. Learn by Example
-
-**[Browse Tutorials on GitHub](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials)** - Complete, runnable examples:
-
-- **Sync ACP** - Simple request/response agents
-- **Agentic ACP** - Stateful workflows and complex agents
-- **Temporal** - Production-ready enterprise patterns
-
-### 3. Understand the Architecture
-
-Learn how Agentex works at a system level:
-
-- [Architecture Overview](concepts/architecture.md) - System design and message flow
-- [Agent-to-Client Protocol (ACP)](acp/overview.md) - Communication protocol details
-
-!!! warning "Important"
-    Pay special attention to the [Critical Concepts](concepts/callouts/overview.md) - they contain essential information about race conditions, message handling, and other implementation details.
-
-### 4. Configure & Deploy
-
-- [Manifest Setup](manifest_setup.md) - Agent configuration and deployment specifications
-- [Deployment Guide](deployment/overview.md) - Deploy using CI/CD pipelines
-
-### 5. API Reference
-
-Keep the [API Reference](api/overview.md) handy for detailed Python SDK documentation when building your agents.
-
----
-
-Scale's Agentic Infrastructure is deployed as part of the [Scale GenAI Platform](https://scale.com/genai-platform). To get your own private enterprise deployment, book a demo with Scale's Enterprise sales team.

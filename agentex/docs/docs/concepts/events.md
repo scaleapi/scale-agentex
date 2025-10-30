@@ -127,9 +127,4 @@ async def handle_with_context(params: SendEventParams):
 - **Agent Creates Messages**: Agent developers create TaskMessages, not the server
 - **Cursor-Based**: Use with Agent Task Tracker for progress tracking
 
-## Next Steps
-
-- Learn about [Agent Task Tracker](agent_task_tracker.md) for distributed coordination
-- Explore [State Management](state.md) for maintaining agent context
-- See [Critical Concepts - Events vs Messages](callouts/events_vs_messages.md) for critical distinctions
-- Review the [Tutorials](../tutorials.md) for hands-on examples 
+ 

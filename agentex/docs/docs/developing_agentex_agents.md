@@ -118,24 +118,4 @@ When you outgrow your current approach, Agentex provides clear upgrade paths:
 
 ---
 
-## Next Steps
-
-### Ready to Build?
-
-1. **Choose your approach** using the decision framework above
-2. **Read the concepts** for your chosen approach:
-   - [Agent-to-Client Protocol (ACP)](acp/overview.md) - Covers Sync and Agentic ACP
-   - [Temporal Guide](temporal-guide.md)
-3. **Set up your environment** with the [Quick Start Guide on GitHub](https://github.com/scaleapi/scale-agentex#quick-start)
-4. **Follow the tutorials** to see it in action
-5. **Create your agent** with `agentex init`
-
-### Need Help Deciding?
-
-- **Browse tutorials** to see different approaches in action
-- **Read the concepts** to understand technical differences
-- **Check out critical concepts** for important considerations: [Critical Concepts](concepts/callouts/overview.md)
-
----
-
 **Remember**: You can always start simple and upgrade later. Agentex is designed to grow with your needs. 

@@ -200,8 +200,4 @@ For complete type definitions, see:
 
 ::: agentex.types.text_delta.TextDelta
 
-## Next Steps
-
-- Learn about [State Concepts](state.md) for persistent data during streaming
-- Explore [Advanced Streaming Concepts](callouts/streaming.md) for complex streaming patterns
-- See [TaskMessage Concepts](task_message.md) for message structure 
+ 

@@ -219,9 +219,3 @@ kubectl logs -f -l app.kubernetes.io/name=agentex-agent -n your-namespace
 helm status my-agent -n your-namespace
 ```
 
----
-
-## Next Steps
-
-- Need configuration help? See [Manifest Configuration](../manifest_setup.md)
-- Return to [Deployment Overview](overview.md)

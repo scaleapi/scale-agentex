@@ -294,6 +294,7 @@ kubernetes:
 ```
 
 **Best Practices:**
+
 - Include team name for isolation: `{team}-{agent}-{env}`
 - Use lowercase with hyphens: `sgp-my-agent-dev`
 - Keep under 63 characters (Kubernetes limit)
@@ -307,12 +308,14 @@ auth:
 ```
 
 **Auth Principal Purpose:**
+
 - **User Identification**: Identifies the user/service account deploying the agent
 - **Deployment Authorization**: Controls who can deploy agents to specific environments
 - **Account/Tenant Isolation**: Associates deployments with specific accounts or tenants
 - **Audit Trail**: Tracks who deployed which agents and when
 
 **Best Practices:**
+
 - **Unique per environment**: Use different user_id for dev vs prod deployment contexts
 - **Environment-specific**: `my-dev-cluster-user-id` vs `my-prod-cluster-user-id`
 - **Consistent format**: Use same naming pattern across your organization
@@ -335,6 +338,7 @@ helm_overrides:
 ```
 
 **Common Overrides:**
+
 - **replicaCount**: Number of pod replicas
 - **resources**: CPU and memory requests/limits
 - **autoscaling**: Horizontal pod autoscaling settings
@@ -396,13 +400,3 @@ EOF
 4. **Environment-specific overrides**: Use `--override-file` for different deployment environments
 5. **Consistent naming**: Use kebab-case for agent names (e.g., `my-agent`, not `my_agent`)
 
-## Next Steps
-
-After configuring your manifest:
-
-1. Test locally with `agentex agents run --manifest manifest.yaml`
-2. Build your image with `agentex agents build --manifest manifest.yaml`
-3. Configure secrets with `agentex secrets sync --manifest manifest.yaml --cluster your-cluster`
-4. Deploy with `agentex agents deploy --environment dev --cluster your-cluster --manifest manifest.yaml`
-
-For deployment-specific configuration, see the [Deployment Guide](deployment/overview.md).

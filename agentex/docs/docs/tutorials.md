@@ -81,9 +81,3 @@ Before starting any tutorial:
 2. **Development environment set up**: Follow the [Quick Start Guide](https://github.com/scaleapi/scale-agentex#quick-start)
 3. **Basic Python knowledge**: Familiarity with async/await patterns
 
-## Next Steps
-
-- **[Choosing Your Approach](developing_agentex_agents.md)** - Decide which tutorials to follow
-- **[Agent-to-Client Protocol (ACP)](acp/overview.md)** - Understand the theory behind the examples
-- **[API Reference](api/overview.md)** - Look up SDK functions while building
-- **[Deployment Guide](deployment/overview.md)** - Deploy your agent when ready
