@@ -8,7 +8,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { CopyButton } from '@/components/agentex/copy-button';
 import { cn } from '@/lib/utils';
 
-type JsonValue =
+export type JsonValue =
   | string
   | number
   | boolean
@@ -43,7 +43,7 @@ interface JsonCollapsibleProps extends React.HTMLAttributes<HTMLDivElement> {
   copyContent: string;
   collapsedContent: React.ReactNode;
   expandedContent: React.ReactNode;
-  defaultExpanded?: boolean;
+  shouldBeExpanded?: boolean;
   keyName?: string | undefined;
 }
 
@@ -51,15 +51,15 @@ function JsonCollapsible({
   copyContent,
   collapsedContent,
   expandedContent,
-  defaultExpanded = false,
+  shouldBeExpanded = false,
   keyName,
   ...props
 }: JsonCollapsibleProps) {
-  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+  const [isExpanded, setIsExpanded] = useState(shouldBeExpanded);
 
   return (
     <div {...props}>
-      <div className="hover:bg-accent/50 group/line flex items-center gap-2 rounded px-2 py-0.5">
+      <div className="hover:bg-accent/50 group/line flex items-center gap-2 rounded px-2">
         <button
           onClick={() => setIsExpanded(!isExpanded)}
           className="flex flex-1 items-center gap-1 font-mono text-sm"
@@ -89,14 +89,16 @@ interface JsonNodeProps {
   data: JsonValue;
   keyName?: string;
   level?: number;
-  defaultExpanded?: boolean;
+  currentDepth?: number;
+  maxOpenDepth?: number;
 }
 
 function JsonNode({
   data,
   keyName,
   level = 0,
-  defaultExpanded = false,
+  currentDepth = 0,
+  maxOpenDepth = 0,
 }: JsonNodeProps) {
   // Try to parse JSON strings
   let parsedData = data;
@@ -117,6 +119,10 @@ function JsonNode({
 
   const indentClassName = level > 0 ? 'ml-4' : '';
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // Calculate if this node should be expanded based on depth
+  // maxOpenDepth < 0 means expand all (treat as infinity)
+  const shouldExpand = maxOpenDepth < 0 || currentDepth < maxOpenDepth;
 
   let content = null;
   let dataType:
@@ -140,10 +146,11 @@ function JsonNode({
             key={index}
             data={item}
             level={level + 1}
-            defaultExpanded={defaultExpanded}
+            currentDepth={currentDepth + 1}
+            maxOpenDepth={maxOpenDepth}
           />
         ))}
-        defaultExpanded={defaultExpanded}
+        shouldBeExpanded={shouldExpand}
         className={indentClassName}
       />
     );
@@ -174,10 +181,11 @@ function JsonNode({
             data={value}
             keyName={key}
             level={level + 1}
-            defaultExpanded={defaultExpanded}
+            currentDepth={currentDepth + 1}
+            maxOpenDepth={maxOpenDepth}
           />
         ))}
-        defaultExpanded={defaultExpanded}
+        shouldBeExpanded={shouldExpand}
         className={indentClassName}
       />
     );
@@ -220,7 +228,7 @@ function JsonNode({
   return (
     <div
       className={cn(
-        'hover:bg-accent/50 group/line flex items-center gap-2 rounded px-2 py-0.5',
+        'hover:bg-accent/50 group/line flex items-center gap-2 rounded px-2',
         indentClassName
       )}
     >
@@ -259,13 +267,13 @@ function JsonNode({
 
 interface JsonViewerProps {
   data: JsonValue;
-  defaultExpanded?: boolean;
+  defaultOpenDepth?: number;
   className?: string;
 }
 
 export function JsonViewer({
   data,
-  defaultExpanded = false,
+  defaultOpenDepth = 0,
   className,
 }: JsonViewerProps) {
   return (
@@ -275,7 +283,7 @@ export function JsonViewer({
         className
       )}
     >
-      <JsonNode data={data} defaultExpanded={defaultExpanded} />
+      <JsonNode data={data} currentDepth={0} maxOpenDepth={defaultOpenDepth} />
     </div>
   );
 }

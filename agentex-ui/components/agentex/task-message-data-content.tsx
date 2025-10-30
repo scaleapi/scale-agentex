@@ -1,8 +1,6 @@
-import { useMemo } from 'react';
-
 import { cva } from 'class-variance-authority';
 
-import { CodeBlock } from '@/components/ai-elements/code-block';
+import { JsonViewer, type JsonValue } from '@/components/agentex/json-viewer';
 import { cn } from '@/lib/utils';
 
 import type { DataContent } from 'agentex/resources';
@@ -25,13 +23,13 @@ function TaskMessageDataContentComponent({
   content,
   key,
 }: TaskMessageDataContentComponentProps) {
-  const dataString = useMemo(
-    () => JSON.stringify(content.data, null, 2),
-    [content.data]
-  );
   return (
     <div className={cn(variants({ author: content.author }))}>
-      <CodeBlock key={key} language="json" code={dataString} />
+      <JsonViewer
+        key={key}
+        data={content.data as JsonValue}
+        defaultOpenDepth={1}
+      />
     </div>
   );
 }

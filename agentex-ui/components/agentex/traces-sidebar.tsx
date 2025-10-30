@@ -98,7 +98,7 @@ export function TracesSidebar({ isOpen }: TracesSidebarProps) {
                         </div>
                         <JsonViewer
                           data={JSON.parse(JSON.stringify(span))}
-                          defaultExpanded={false}
+                          defaultOpenDepth={0}
                         />
                       </div>
                     );
