@@ -86,7 +86,7 @@ nav:
   - Deployment:
       - Overview: deployment/overview.md
       - Commands Reference: deployment/commands.md
-      - Manifest Configuration: manifest_setup.md
+      - Agent Configuration Files: configuration.md
       - Integrate CI/CD: deployment/cicd.md
   - API Reference:
       - Overview: api/overview.md

@@ -250,6 +250,6 @@ agentex agents deploy \
 ## Next Steps
 
 - Review [Deployment Commands](commands.md) for detailed command documentation
-- Configure [Manifest Configuration](../manifest_setup.md) for your agent
+- Configure [Agent Configuration Files](../configuration.md) for your agent
 - Set up monitoring and alerting for your deployed agents
 - Create a staging environment for testing before production deployments
