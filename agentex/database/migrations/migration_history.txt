@@ -1,4 +1,5 @@
-09368a02d6cc -> d7addd4229e8 (head), soft delete status
+d7addd4229e8 -> 329fbafa4ff9 (head), change_default_acp_to_async
+09368a02d6cc -> d7addd4229e8, soft delete status
 739800d3e1ce -> 09368a02d6cc, deployment history
 dbac39ab82c3 -> 739800d3e1ce, registration metadata
 87454c35c13e -> dbac39ab82c3, add_task_metadata
@@ -14,4 +15,3 @@ e7bab805840b -> 7736391266fa, add_acp_type_to_agents
 5b1c4391600d -> 588bf9d4ab7a, optional workflow params
 1718c7749b91 -> 5b1c4391600d, acp_url
 <base> -> 1718c7749b91, init
-2025_10_29_0000_update_acp_type_default_to_async_a1b2c3d4e5f6.py - Changed server default for acp_type from 'agentic' to 'async' for new agents
