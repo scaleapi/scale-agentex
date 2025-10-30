@@ -178,6 +178,23 @@ Simply copy the code from [this streaming example](https://github.com/scaleapi/s
 
 > Note: As you can see, code and files are very portable. As long as your `manifest.yaml` and `acp.py` is configured correctly your agent should work out of the box.
 
+### Set up environment variables
+
+In order for us to use AI, you need an API key to the provider of your choice. Our tutorial starts you off with an OpenAI call for simplicity. To start, define your OpenAI API Key in a `.env` file as shown below. 
+
+> If you do not use OpenAI, replace the OpenAI call with the LLM provider of your choice and put the appropriate API key in the `.env` file.
+
+Create a .env file in the root of your agent folder (at the same level as the `manifest.yaml`).
+
+```bash
+touch .env
+
+# Add environment variables to this file i.e.
+OPENAI_API_KEY="..."
+```
+
+> If you modify your .env file, you will need to restart the server via `Ctrl-C` and re-run this command. Note: This will not delete any chat history you already have. This history is persisted by the Agentex backend service.
+
 Your agent should auto-reload and look like this now:
 
 <img width="1728" height="991" alt="image" src="https://github.com/user-attachments/assets/4d482101-2494-44f8-9ad3-4521487a2e78" />
@@ -205,23 +222,6 @@ The world is your oyster at this point. Here are some suggestions on what to try
 | **Async Agent** | A chat agent is cool, but an asynchronous agent that in the background is even cooler. Switch to the "Agentic ACP" agent to make your first async agent. |
 | **Temporal-Powered Async Agent** | As your agents get more complex and start incorporating the following techniques (human escalation, complex multi-step tools). We have partnered with [Temporal](https://docs.temporal.io/develop/python) to power up our Agents with Temporal's durable execution. |
 
-### Set up environment variables
-
-In order for us to use AI, you need an API key to the provider of your choice. Our tutorial starts you off with an OpenAI call for simplicity. To start, define your OpenAI API Key in a `.env` file as shown below. 
-
-> If you do not use OpenAI, replace the OpenAI call with the LLM provider of your choice and put the appropriate API key in the `.env` file.
-
-Create a .env file in the root of your agent folder (at the same level as the `manifest.yaml`).
-
-```bash
-touch .env
-
-# Add environment variables to this file i.e.
-OPENAI_API_KEY="..."
-```
-
-> If you modify your .env file, you will need to restart the server via `Ctrl-C` and re-run this command. Note: This will not delete any chat history you already have. This history is persisted by the Agentex backend service.
-
 ## Contact
 
 **Original Authors**  
@@ -234,10 +234,6 @@ OPENAI_API_KEY="..."
 |----------------------------------------------------|-----------------------------------------------|-----------------------------------------------|------------------------------------------------|-----------------------------------------------|
 | <a href="https://github.com/danielmillerp"><img src="https://github.com/danielmillerp.png" width="60" height="60" alt="@danielmillerp" /></a> | <a href="https://github.com/RoxyFarhad"><img src="https://github.com/RoxyFarhad.png" width="60" height="60" alt="@RoxyFarhad" /></a> | <a href="https://github.com/smoreinis"><img src="https://github.com/smoreinis.png" width="60" height="60" alt="@smoreinis" /></a> | <a href="https://github.com/MichaelSun48"><img src="https://github.com/MichaelSun48.png" width="60" height="60" alt="@MichaelSun48" /></a> | <a href="https://github.com/declan-scale"><img src="https://github.com/declan-scale.png" width="60" height="60" alt="@declan-scale" /></a> |
 
----
-
-**Scale AI**  [![GitHub](https://img.shields.io/badge/GitHub-@scaleapi-181717?logo=github&style=flat-square)](https://github.com/scaleapi)  
-**Project Link:** [https://github.com/scaleapi/scale-agentex](https://github.com/scaleapi/scale-agentex)
 
 ---
 
@@ -260,45 +256,9 @@ Here are the differences between Open Source vs Enterprise to meet different org
 | **Identity Management** | ❌ No user management | ✅ SSO/SAML authentication, centralized API key management |
 | **Enterprise Operations** | ❌ Self-service setup | ✅ Uptime/availability SLAs, security reviews, deployment, installation, ongoing maintenance |
 
-**Ready for Enterprise?** Contact our team at [enterprise@scale.com](mailto:enterprise@scale.com) to discuss your requirements.
+**Ready for Enterprise?** Contact our team at https://scale.com/demo to discuss your requirements.
 
 > For our current and future customers, Agentex is a module that is hosted and deployed as part of the Scale GenAI Platform's Enterprise License. This open source project is meant to give people a local development ability and community support.
-
----
-## Contributing
-
-Contributions make the open source community amazing! Any contributions you make are **greatly appreciated**.
-
-### Making changes to the Agentex Server
-
-1. **Fork the repository**
-
-2. **Create your feature branch**
-   ```bash
-   git checkout -b feature/AmazingFeature
-   ```
-
-4. **Make your changes and test**
-   ```bash
-   # Run all tests
-   make test
-   ```
-
-5. **Commit your changes**
-   ```bash
-   git commit -m 'Add some AmazingFeature'
-   ```
-
-6. **Push to the branch**
-   ```bash
-   git push origin feature/AmazingFeature
-   ```
-
-7. **Open a Pull Request**
-
-### Making Changes to the Agentex Python SDK
-
-Please visit: https://github.com/scaleapi/scale-agentex-python
 
 ---
 ## Troubleshooting
@@ -347,3 +307,9 @@ uv tool install agentex-sdk
 # Verify you now have the latest version
 python -c "import agentex; print(f'agentex-sdk version: {agentex.__version__}')"
 ```
+
+---
+## Contributing
+
+Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to contribute to this project.
+
