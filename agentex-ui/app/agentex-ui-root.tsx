@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { ToastContainer } from 'react-toastify';
 
@@ -70,18 +70,16 @@ export function AgentexUIRoot({
         sgpAppURL={sgpAppURL ?? ''}
         agentexAPIBaseURL={agentexAPIBaseURL}
       >
-        <Suspense fallback={<div>Loading...</div>}>
-          <div className="fixed inset-0 flex w-full">
-            <TaskSidebar />
-            <PrimaryContent
-              isTracesSidebarOpen={isTracesSidebarOpen}
-              toggleTracesSidebar={() =>
-                setIsTracesSidebarOpen(!isTracesSidebarOpen)
-              }
-            />
-            <TracesSidebar isOpen={isTracesSidebarOpen} />
-          </div>
-        </Suspense>
+        <div className="fixed inset-0 flex w-full">
+          <TaskSidebar />
+          <PrimaryContent
+            isTracesSidebarOpen={isTracesSidebarOpen}
+            toggleTracesSidebar={() =>
+              setIsTracesSidebarOpen(!isTracesSidebarOpen)
+            }
+          />
+          <TracesSidebar isOpen={isTracesSidebarOpen} />
+        </div>
       </AgentexProvider>
       <ToastContainer />
     </QueryProvider>

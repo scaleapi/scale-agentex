@@ -36,13 +36,19 @@ function TaskButton({ task }: TaskButtonProps) {
   const { taskID, updateParams } = useSafeSearchParams();
   const taskName = createTaskName(task);
 
+  const firstAgentName = useMemo(
+    () => task.agents?.[0]?.name ?? null,
+    [task.agents]
+  );
+
   const handleTaskSelect = useCallback(
     (taskID: TaskListResponse.TaskListResponseItem['id']) => {
       updateParams({
         [SearchParamKey.TASK_ID]: taskID,
+        [SearchParamKey.AGENT_NAME]: firstAgentName,
       });
     },
-    [updateParams]
+    [updateParams, firstAgentName]
   );
 
   const createdAtString = useMemo(
