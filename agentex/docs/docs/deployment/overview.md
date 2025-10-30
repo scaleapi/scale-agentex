@@ -5,6 +5,7 @@ Deploying your agent to production involves three main steps that prepare, confi
 ## Prerequisites
 
 Before deploying, you need:
+
 - **kubectl** installed and configured
 - **Cluster access** - Contact your cluster administrators for access
 - **Namespace** - Get a namespace provisioned for your agent
@@ -93,8 +94,41 @@ agentex agents deploy --environment prod --cluster prod-cluster \
   --no-interactive
 ```
 
-## Next Steps
 
-1. Review the [Commands Reference](commands.md) for detailed command documentation
-2. Configure your agent with the [Manifest Configuration](../manifest_setup.md) guide
-3. Follow the Quick Start sequence above to deploy your agent
+## Moving to Production: CI/CD Deployment
+
+Agentex is designed from the ground up for automated, enterprise-grade deployment. Rather than treating CI/CD as an afterthought, the platform embraces a **"build once, deploy everywhere"** philosophy where the same Docker image flows through development, staging, and production environments with security and automation built in from day one.
+
+### Why CI/CD with Agentex?
+
+Manual deployments don't scale. When you're managing multiple agents across environments, copying commands between terminals and manually syncing secrets becomes error-prone and time-consuming. Agentex's deployment architecture solves this by integrating three critical capabilities:
+
+**Immutable Artifacts**: Build your agent once into a Docker image, then deploy that exact same artifact to dev, staging, and production. No "works on my machine" problems, no environment drift.
+
+**Secure Secrets Management**: Secrets never live in code. The `agentex secrets sync` command bridges your secrets manager (AWS Secrets Manager, Azure Key Vault, etc.) directly to Kubernetes, creating a secure pipeline where credentials flow from source of truth to runtime without ever touching disk or code repositories.
+
+**Environment Promotion**: Use the same manifest and commands across all environments. The only difference is which secrets YAML you load and which environment profile you select—everything else is identical.
+
+### The Automated Pipeline
+
+A typical CI/CD pipeline for Agentex follows four core stages:
+
+1. **Build** - Create a Docker image with `agentex agents build` and generate metadata (commit SHA, author, timestamp) for audit trails
+2. **Push** - Upload the image to your container registry (GCR, ECR, ACR, or GitHub Container Registry)
+3. **Secrets Sync** - Run `agentex secrets sync` to inject credentials from your secrets manager into the Kubernetes namespace
+4. **Deploy** - Execute `agentex agents deploy` with environment-specific Helm overrides to roll out the agent
+
+These four stages are the **core Agentex deployment steps**, but your organization can integrate additional phases around them based on your release processes—testing phases (unit, integration, E2E tests), security scanning, compliance checks, manual approval gates, or any custom validation steps your team requires. The Agentex commands are designed to fit seamlessly into your existing CI/CD workflows.
+
+### Getting Started with CI/CD
+
+Ready to automate your deployments? The [CI/CD Setup Guide](cicd.md) walks through:
+
+- Setting up GitHub Actions workflows for automatic deployment
+- Configuring secrets synchronization with your secrets manager
+- Implementing build metadata for deployment history tracking
+- Environment-specific deployment strategies
+
+The commands you've learned in this guide (build, secrets sync, deploy) are the same commands your CI/CD pipeline will use—just executed automatically instead of manually.
+
+

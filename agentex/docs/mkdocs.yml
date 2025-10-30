@@ -27,6 +27,7 @@ extra_javascript:
   - extra-loader.js
 markdown_extensions:
   - admonition
+  - attr_list
   - codehilite
   - toc:
       permalink: true
@@ -46,22 +47,16 @@ markdown_extensions:
 nav:
   - Introduction: index.md
   - Getting Started:
-      - Choosing Your Approach: developing_agentex_agents.md
-      - Architecture Overview: concepts/architecture.md
-  - Development Guides:
-      - Tutorials: tutorials.md
-      - Temporal Guide: temporal-guide.md
-      - OpenAI Agents SDK + Temporal: guides/openai_temporal_integration.md
-      - Migration: concepts/migration_guide.md
-      - Jupyter Notebooks: local_development/notebooks.md
-  - Agent Client Protocol:
-      - Overview: acp/overview.md
-      - Sync ACP: acp/sync.md
+      - Architecture Overview: getting_started/agentex_overview.md
+      - Choose Your Agent Type: getting_started/choose_your_agent_type.md
+  - Agent Types:
+      - Agent to Client Protocol (ACP): agent_types/overview.md
+      - Sync ACP: agent_types/sync.md
       - Agentic ACP:
-          - Overview: acp/agentic/overview.md
-          - Base Implementation: acp/agentic/base.md
-          - Temporal Implementation: acp/agentic/temporal.md
-      - Best Practices: acp/best-practices.md
+          - Overview: agent_types/agentic/overview.md
+          - Base Implementation: agent_types/agentic/base.md
+          - Temporal Implementation: agent_types/agentic/temporal.md
+      - Migration Guide: agent_types/agent_type_migration_guide.md
   - Core Concepts:
       - Agents: concepts/agents.md
       - Tasks: concepts/task.md
@@ -69,25 +64,30 @@ nav:
       - Events: concepts/events.md
       - State: concepts/state.md
       - Streaming: concepts/streaming.md
-  - Critical Concepts:
-      - Overview: concepts/callouts/overview.md
-      - Delta Accumulation: concepts/callouts/streaming.md
-      - Race Conditions: concepts/callouts/race_conditions.md
-      - Message Handling: concepts/callouts/message_handling.md
-      - Events vs Messages: concepts/callouts/events_vs_messages.md
-      - State Scoping: concepts/callouts/state_management.md
-  - Advanced Concepts:
-      - State Machines: concepts/state_machines.md
-      - Agent Task Tracker: concepts/agent_task_tracker.md
-      - Webhooks: concepts/webhooks.md
-  - Design Patterns:
-      - Overview: design_patterns/overview.md
-      - Multi-Activity Tools: design_patterns/multi_activity_tools.md
-      - Human-in-the-Loop: design_patterns/human_in_the_loop.md
+  - Development Guides:
+      - Tutorials: development_guides/tutorials.md
+      - Jupyter Notebooks (dev.ipynb): development_guides/jupyter_notebooks.md
+      - Streaming: development_guides/streaming.md
+      - Race Conditions: development_guides/race_conditions.md
+      - Message Handling: development_guides/message_handling.md
+      - Events vs Messages: development_guides/events_vs_messages.md
+      - State Scoping: development_guides/state_management.md
+      - State Machines: development_guides/state_machines.md
+      - Agent Task Tracker: development_guides/agent_task_tracker.md
+      - Webhooks: development_guides/webhooks.md
+  - Temporal Development:
+      - Overview: temporal_development/overview.md
+      - Use Cases: temporal_development/use_cases.md
+      - Core Concepts: temporal_development/core_concepts.md
+      - Multi-Activity Tools: temporal_development/multi_activity_tools.md
+      - Human-in-the-Loop: temporal_development/human_in_the_loop.md
+      - OpenAI Integration: temporal_development/openai_integration.md
+      - Troubleshooting: temporal_development/troubleshooting.md
   - Deployment:
       - Overview: deployment/overview.md
       - Commands Reference: deployment/commands.md
       - Manifest Configuration: manifest_setup.md
+      - Integrate CI/CD: deployment/cicd.md
   - API Reference:
       - Overview: api/overview.md
       - Agent Development Kit: api/adk.md

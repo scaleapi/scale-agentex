@@ -130,8 +130,4 @@ For practical usage examples and patterns, see:
 - [State Concepts](../concepts/state.md) - Managing persistent state
 - [Agent-to-Client Protocol (ACP)](../acp/overview.md) - Sync and Agentic ACP handler parameters explained
 
-## Next Steps
-
-- Explore individual [Concepts](../concepts/task.md) for detailed explanations
-- See [Advanced Concepts](../concepts/callouts/overview.md) for implementation patterns
-- Check [Tutorials](../tutorials.md) for practical examples 
+ 
