@@ -1,4 +1,4 @@
-agentex/docs/docs/deployment/cicd.md# Integrate CI/CD
+# Integrate CI/CD
 
 This guide shows how to integrate Agentex into your CI/CD pipeline to automatically build, push, and deploy your agent to a Kubernetes cluster whenever code changes are pushed to your repository.
 
