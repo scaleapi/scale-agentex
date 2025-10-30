@@ -1,6 +1,6 @@
 # Deploying Your Agent
 
-Deploying your agent to production involves three main steps that prepare, configure, and deploy your agent to a Kubernetes cluster. This guide provides an overview of the deployment process and links to detailed documentation for each command.
+With your agent developed and tested locally, the next step is deploying it to a live Kubernetes cluster where it can handle production workloads. Agentex provides deployment commands that work in both manual workflows (for learning and troubleshooting) and automated CI/CD pipelines (recommended for production).
 
 ## Prerequisites
 
@@ -17,20 +17,15 @@ kubectl config current-context  # Check cluster connection
 kubectl get namespace your-namespace  # Verify namespace exists
 ```
 
-!!! Note
-    If your company has CI/CD pipelines set up, much of this may be automated. This guide covers manual deployment.
+## The Deployment Process
 
-## Overview
-
-The deployment process follows three steps:
+Deploying an agent involves three core commands:
 
 1. **[Build](commands.md#agentex-agents-build)** - Create and push a Docker image
 2. **[Sync Secrets](commands.md#agentex-secrets-sync)** - Configure credentials in cluster
 3. **[Deploy](commands.md#agentex-agents-deploy)** - Deploy using Helm charts
 
-## Quick Start
-
-For experienced users, here's the complete deployment sequence:
+### Quick Command Reference
 
 ```bash
 # 1. Build and push your agent image
@@ -46,60 +41,17 @@ agentex secrets sync --manifest manifest.yaml \
 agentex agents deploy --environment prod --cluster production \
   --manifest manifest.yaml \
   --no-interactive
-
-# 4. Check deployment status
-kubectl get pods -n agentex-agents
-helm status my-agent-production -n agentex-agents
 ```
 
-## Detailed Documentation
+For detailed command documentation, usage examples, and troubleshooting, see the [Commands Reference](commands.md).
 
-- **[Commands Reference](commands.md)** - Complete guide for all deployment commands
-- **[Manifest Configuration](../manifest_setup.md)** - Configure your agent's manifest.yaml and environments.yaml
+---
 
-## Common Workflows
-
-### Development Deployment
-For deploying to a development cluster:
-
-```bash
-# Build without pushing (for local development)
-agentex agents build --manifest manifest.yaml
-
-# Sync secrets interactively
-agentex secrets sync --manifest manifest.yaml --cluster dev-cluster
-
-# Deploy with interactive prompts
-agentex agents deploy --environment dev --cluster dev-cluster --manifest manifest.yaml
-```
-
-### Production Deployment
-For production deployments with CI/CD:
-
-```bash
-# Build and push to production registry
-agentex agents build --manifest manifest.yaml \
-  --registry your-prod-registry.com --push
-
-# Sync secrets non-interactively
-# Typically this prod-secrets.yaml is setup by fetching from
-#   your companys secret management vaults and created in the pipelines
-agentex secrets sync --manifest manifest.yaml \
-  --cluster prod-cluster --namespace production \
-  --values prod-secrets.yaml --no-interactive
-
-# Deploy to production environment
-agentex agents deploy --environment prod --cluster prod-cluster \
-  --manifest manifest.yaml \
-  --no-interactive
-```
-
-
-## Moving to Production: CI/CD Deployment
+## Production Deployment: CI/CD Integration
 
 Agentex is designed from the ground up for automated, enterprise-grade deployment. Rather than treating CI/CD as an afterthought, the platform embraces a **"build once, deploy everywhere"** philosophy where the same Docker image flows through development, staging, and production environments with security and automation built in from day one.
 
-### Why CI/CD with Agentex?
+### Why Automate with CI/CD?
 
 Manual deployments don't scale. When you're managing multiple agents across environments, copying commands between terminals and manually syncing secrets becomes error-prone and time-consuming. Agentex's deployment architecture solves this by integrating three critical capabilities:
 
@@ -124,11 +76,17 @@ These four stages are the **core Agentex deployment steps**, but your organizati
 
 Ready to automate your deployments? The [CI/CD Setup Guide](cicd.md) walks through:
 
-- Setting up GitHub Actions workflows for automatic deployment
+- Setting up CI/CD pipelines for automatic deployment (examples use GitHub Actions)
 - Configuring secrets synchronization with your secrets manager
 - Implementing build metadata for deployment history tracking
 - Environment-specific deployment strategies
 
-The commands you've learned in this guide (build, secrets sync, deploy) are the same commands your CI/CD pipeline will use—just executed automatically instead of manually.
+The commands shown in the Quick Reference above are the same commands your CI/CD pipeline will use—just executed automatically instead of manually.
 
+---
 
+## Next Steps
+
+- **[Integrate CI/CD](cicd.md)** - Set up automated deployment pipelines (recommended for production)
+- **[Commands Reference](commands.md)** - Detailed documentation for all deployment commands
+- **[Agent Configuration Files](../configuration.md)** - Configure your agent's manifest.yaml and environments.yaml
