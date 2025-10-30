@@ -22,6 +22,9 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
+const URL_REGEX =
+  /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&//=]*)/g;
+
 const valueStyles = cva('', {
   variants: {
     type: {
@@ -43,6 +46,46 @@ function serializeValue(data: JsonValue): string {
     return data;
   }
   return String(data);
+}
+
+function LinkifiedString({ value }: { value: string }) {
+  const parts: (string | React.ReactElement)[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  const regex = new RegExp(URL_REGEX);
+
+  while ((match = regex.exec(value)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(value.substring(lastIndex, match.index));
+    }
+
+    const url = match[0];
+    parts.push(
+      <a
+        key={match.index}
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-blue-600 underline hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+        onClick={e => e.stopPropagation()}
+      >
+        {url}
+      </a>
+    );
+
+    lastIndex = regex.lastIndex;
+  }
+
+  if (lastIndex < value.length) {
+    parts.push(value.substring(lastIndex));
+  }
+
+  if (parts.length === 0) {
+    return <>{value}</>;
+  }
+
+  return <>{parts}</>;
 }
 
 interface JsonCollapsibleProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -147,7 +190,7 @@ function JsonNode({
   const [isExpanded, setIsExpanded] = useState(false);
   const shouldExpand = maxOpenDepth < 0 || currentDepth < maxOpenDepth;
 
-  let content = null;
+  let content: React.ReactNode = null;
   let dataType:
     | 'string'
     | 'number'
@@ -226,7 +269,13 @@ function JsonNode({
   switch (typeof parsedData) {
     case 'string':
       dataType = 'string';
-      content = `"${parsedData}"`;
+      content = (
+        <>
+          &quot;
+          <LinkifiedString value={parsedData} />
+          &quot;
+        </>
+      );
       break;
     case 'number':
       dataType = 'number';
