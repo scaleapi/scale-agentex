@@ -25,7 +25,7 @@
 
 AI agent capabilities can be understood in five levels, from simple chatbots to fully autonomous, self-driving agentic systems:
 
-<img width="960" height="417" alt="Levels of AI" src="https://github.com/user-attachments/assets/1ea51bb2-1a86-4f9a-8df0-a63c614c4b07" />
+<img width="960" height="417" alt="Levels of AI" src="agentex/docs/docs/images/levels_of_ai.png" />
 
 Today, most AI applications are limited to Level 3 (L3) and below, relying on synchronous request/response patterns. This restricts their ability to handle complex, long-running, or autonomous workflows.
 
@@ -43,7 +43,7 @@ In this README we will start with scaffolding an L1 example just to learn the ro
 
 Here is what we will build together in this README. We'll start with a Hello World agent, but quickly switch to a more intelligent one!
 
-https://github.com/user-attachments/assets/2543490f-e861-41b0-82fa-fd0ba5a02b95
+https://github.com/user-attachments/assets/9badad0d-f939-4243-ba39-68cafdae0078
 
 
 ### Prerequisites
@@ -71,7 +71,7 @@ uv tool install agentex-sdk
 
 The installation was successful if you see help output after you run `agentex -h`.
 
-<img width="563" height="199" alt="Agentex CLI help output" src="https://github.com/user-attachments/assets/2df54b87-9f0d-4c04-9461-456bda76d7fa" />
+<img width="563" height="199" alt="Agentex CLI help output" src="https://github.com/user-attachments/assets/50799cf0-c925-4fd9-84bd-044a6ef97287" />
 
 
 ## Setup
@@ -106,7 +106,7 @@ lzd
 
 This gives a terminal for you to ensure all of the backend servers are healthy and you can review logs for each individual server in isolation. You know your Agent Server is fully running if all of the services from the docker compose are marked `(healthy)` in the top left panel of lazydocker.
 
-<img width="863" height="729" alt="image" src="https://github.com/user-attachments/assets/ba651d08-f72e-4614-a100-f972e41c9374" />
+<img width="863" height="729" alt="image" src="agentex/docs/docs/images/lazydocker.png" />
 
 
 ### Terminal 2 - Frontend Server
@@ -138,7 +138,7 @@ agentex init
 
 Here is an example of the CLI flow you should follow with some example responses. You can change the responses if you'd like.
 
-<img width="573" height="759" alt="image" src="https://github.com/user-attachments/assets/7a41cda6-b020-483b-bf63-cef7c684f35a" />
+<img width="573" height="759" alt="image" src="agentex/docs/docs/images/agentex_init.png" />
 
 
 
@@ -170,7 +170,7 @@ agentex agents run --manifest manifest.yaml
 
 You should see your agent appear in the developer UI when you visit http://localhost:3000 in your browser. As you can see, this agent just responds with a "Hello World" message. It's main purpose is to show how simple the agent's standard entrypoint is.
 
-<img width="1728" height="992" alt="image" src="https://github.com/user-attachments/assets/0bedc20f-850c-48cf-b134-ed8814eab48d" />
+<img width="1728" height="992" alt="image" src="agentex/docs/docs/images/agentex_web.png" />
 
 Let's make it slightly more interesting by allowing an AI to respond in a streaming fashion.
 
@@ -197,7 +197,7 @@ OPENAI_API_KEY="..."
 
 Your agent should auto-reload and look like this now:
 
-<img width="1728" height="991" alt="image" src="https://github.com/user-attachments/assets/4d482101-2494-44f8-9ad3-4521487a2e78" />
+<img width="1728" height="991" alt="image" src="agentex/docs/docs/images/agentex_web.png" />
 
 At this point, feel free to play around with the UI.
 1. Start a conversation with your agent
