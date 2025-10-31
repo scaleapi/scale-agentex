@@ -1,6 +1,6 @@
 import { cva } from 'class-variance-authority';
 
-import { Response } from '@/components/ai-elements/response';
+import { MarkdownResponse } from '@/components/agentex/markdown-response';
 import { cn } from '@/lib/utils';
 
 import type { TextContent } from 'agentex/resources';
@@ -25,7 +25,7 @@ function TaskMessageTextContentComponent({
 }: TaskMessageTextContentComponentProps) {
   return (
     <div className={cn(variants({ author: content.author }))}>
-      <Response key={key}>{content.content}</Response>
+      <MarkdownResponse key={key}>{content.content}</MarkdownResponse>
     </div>
   );
 }

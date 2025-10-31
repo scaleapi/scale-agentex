@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { BrainIcon, ChevronDownIcon } from 'lucide-react';
 
-import { Response } from '@/components/ai-elements/response';
+import { MarkdownResponse } from '@/components/agentex/markdown-response';
 import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 import { useTaskMessages } from '@/hooks/use-task-messages';
 import { cn } from '@/lib/utils';
@@ -74,45 +74,26 @@ export function TaskMessageReasoning({ message }: TaskMessageReasoningProps) {
         />
       </button>
       <Collapsible collapsed={isCollapsed}>
-        <Response className="ml-6 grid border-l-4 border-gray-300 pl-3 text-gray-500">
+        <MarkdownResponse className="ml-6 grid border-l-4 border-gray-300 pl-3 text-gray-500">
           {reasoningText}
-        </Response>
+        </MarkdownResponse>
       </Collapsible>
     </motion.div>
   );
 }
 
-// TODO: use this method of calculating message duration once the server authoritative timestamps are accurate
-// const getMessageDuration = (message: TaskMessage): number => {
-//   if (!message.created_at || !message.updated_at) {
-//     return 0;
-//   }
-
-//   const createdAt = new Date(message.created_at).getTime();
-//   const updatedAt = new Date(message.updated_at).getTime();
-//   const durationMs = updatedAt - createdAt;
-
-//   const diffSec = durationMs / 1000;
-
-//   // Convert to seconds and round up
-//   return diffSec < 10 ? Math.round(diffSec * 10) / 10 : Math.round(diffSec);
-// };
-
 const calculateThinkingTime = (
   message: TaskMessage,
   nextBlockTimestamp: TaskMessage['created_at']
 ) => {
-  // Need both user prompt and agent response to calculate thinking time
   if (!message.created_at || !nextBlockTimestamp) {
     return null;
   }
 
-  // Convert ISO strings to Date objects and return the difference in seconds
   const promptDate = new Date(message.created_at);
   const responseDate = new Date(nextBlockTimestamp);
   const diffMs = responseDate.getTime() - promptDate.getTime();
   const diffSec = diffMs / 1000;
 
-  // Round to nearest 10th of a second for times less than 10 seconds, otherwise round to nearest second
   return diffSec < 10 ? Math.round(diffSec * 10) / 10 : Math.round(diffSec);
 };

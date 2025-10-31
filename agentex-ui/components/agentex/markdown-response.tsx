@@ -4,7 +4,7 @@ import { type ComponentProps, memo } from 'react';
 
 import { Streamdown } from 'streamdown';
 
-type ResponseProps = ComponentProps<typeof Streamdown>;
+type MarkdownResponseProps = ComponentProps<typeof Streamdown>;
 
 const components = {
   a: ({
@@ -20,15 +20,16 @@ const components = {
   ),
 };
 
-export const Response = memo(
-  ({ className, ...props }: ResponseProps) => (
+function MarkdownResponseImpl({ className, ...props }: MarkdownResponseProps) {
+  return (
     <Streamdown
       className={className ?? ''}
       components={components}
       {...props}
     />
-  ),
-  (prevProps, nextProps) => prevProps.children === nextProps.children
-);
+  );
+}
 
-Response.displayName = 'Response';
+const MemoizedMarkdownResponse = memo(MarkdownResponseImpl);
+
+export { MemoizedMarkdownResponse as MarkdownResponse };
