@@ -6,6 +6,7 @@ import { BrainIcon, ChevronDownIcon } from 'lucide-react';
 import { MarkdownResponse } from '@/components/agentex/markdown-response';
 import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 import { useTaskMessages } from '@/hooks/use-task-messages';
+import { calculateThinkingTime } from '@/lib/date-utils';
 import { cn } from '@/lib/utils';
 
 import { useAgentexClient } from '../providers';
@@ -81,22 +82,6 @@ function TaskMessageReasoningImpl({ message }: TaskMessageReasoningProps) {
     </motion.div>
   );
 }
-
-const calculateThinkingTime = (
-  message: TaskMessage,
-  nextBlockTimestamp: TaskMessage['created_at']
-) => {
-  if (!message.created_at || !nextBlockTimestamp) {
-    return null;
-  }
-
-  const promptDate = new Date(message.created_at);
-  const responseDate = new Date(nextBlockTimestamp);
-  const diffMs = responseDate.getTime() - promptDate.getTime();
-  const diffSec = diffMs / 1000;
-
-  return diffSec < 10 ? Math.round(diffSec * 10) / 10 : Math.round(diffSec);
-};
 
 const TaskMessageReasoning = memo(TaskMessageReasoningImpl);
 

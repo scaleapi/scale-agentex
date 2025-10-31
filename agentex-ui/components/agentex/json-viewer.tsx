@@ -12,15 +12,9 @@ import {
 
 import { CopyButton } from '@/components/agentex/copy-button';
 import { Button } from '@/components/ui/button';
+import { serializeValue } from '@/lib/json-utils';
+import type { JsonValue } from '@/lib/types';
 import { cn } from '@/lib/utils';
-
-export type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | JsonValue[]
-  | { [key: string]: JsonValue };
 
 const URL_REGEX =
   /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&//=]*)/g;
@@ -37,16 +31,6 @@ const valueStyles = cva('', {
     },
   },
 });
-
-function serializeValue(data: JsonValue): string {
-  if (typeof data === 'object' && data !== null) {
-    return JSON.stringify(data, null, 2);
-  }
-  if (typeof data === 'string') {
-    return data;
-  }
-  return String(data);
-}
 
 function LinkifiedString({ value }: { value: string }) {
   const parts: (string | React.ReactElement)[] = [];

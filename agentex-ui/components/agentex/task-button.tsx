@@ -8,6 +8,7 @@ import {
   SearchParamKey,
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
+import { createTaskName } from '@/lib/task-utils';
 import { cn } from '@/lib/utils';
 
 import type { TaskListResponse } from 'agentex/resources';
@@ -111,16 +112,5 @@ function TaskButtonImpl({ task }: TaskButtonProps) {
 }
 
 const TaskButton = memo(TaskButtonImpl);
-
-function createTaskName(task: TaskListResponse.TaskListResponseItem): string {
-  if (
-    task?.params?.description &&
-    typeof task.params.description === 'string'
-  ) {
-    return task.params.description;
-  }
-
-  return 'Unnamed task';
-}
 
 export { TaskButton };
