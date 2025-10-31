@@ -48,9 +48,7 @@
     "tailwindcss": "^4",
     "tw-animate-css": "^1.3.6",
     "typescript": "5.9.2",
-    "uuid": "^11.1.0",
-    "zod": "^4.0.17",
-    "zustand": "^5.0.8"
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
