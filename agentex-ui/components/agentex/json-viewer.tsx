@@ -51,12 +51,11 @@ function serializeValue(data: JsonValue): string {
 function LinkifiedString({ value }: { value: string }) {
   const parts: (string | React.ReactElement)[] = [];
   let lastIndex = 0;
-  let match: RegExpExecArray | null;
 
-  const regex = new RegExp(URL_REGEX);
+  const matches = value.matchAll(URL_REGEX);
 
-  while ((match = regex.exec(value)) !== null) {
-    if (match.index > lastIndex) {
+  for (const match of matches) {
+    if (match.index !== undefined && match.index > lastIndex) {
       parts.push(value.substring(lastIndex, match.index));
     }
 
@@ -67,14 +66,14 @@ function LinkifiedString({ value }: { value: string }) {
         href={url}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-blue-600 underline hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+        className="underline"
         onClick={e => e.stopPropagation()}
       >
         {url}
       </a>
     );
 
-    lastIndex = regex.lastIndex;
+    lastIndex = (match.index ?? 0) + url.length;
   }
 
   if (lastIndex < value.length) {
@@ -110,7 +109,7 @@ function JsonCollapsible({
   showCopyButton = true,
   ...props
 }: JsonCollapsibleProps) {
-  const [isExpanded, setIsExpanded] = useState(
+  const [isExpanded, setIsExpanded] = useState(() =>
     forceExpandState !== null ? forceExpandState : shouldBeExpanded
   );
 

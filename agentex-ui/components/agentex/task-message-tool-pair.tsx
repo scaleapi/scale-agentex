@@ -52,7 +52,7 @@ function TaskMessageToolPairComponentImpl({
 }: TaskMessageToolPairProps) {
   const [isCollapsed, setIsCollapsed] = useState(true);
 
-  const reponseObject = useMemo<JsonValue>(() => {
+  const responseObject = useMemo<JsonValue>(() => {
     const content = toolResponseMessage?.content.content;
     if (typeof content === 'string') {
       try {
@@ -66,12 +66,12 @@ function TaskMessageToolPairComponentImpl({
 
   const isError = useMemo<boolean>(
     () =>
-      typeof reponseObject === 'object' &&
-      reponseObject !== null &&
-      'status' in reponseObject &&
-      typeof reponseObject.status === 'string' &&
-      reponseObject.status.toLowerCase() === 'error',
-    [reponseObject]
+      typeof responseObject === 'object' &&
+      responseObject !== null &&
+      'status' in responseObject &&
+      typeof responseObject.status === 'string' &&
+      responseObject.status.toLowerCase() === 'error',
+    [responseObject]
   );
 
   return (
@@ -114,7 +114,7 @@ function TaskMessageToolPairComponentImpl({
           />
           <TaskMessageToolHeaderAndJsonComponent
             title="Result"
-            data={reponseObject}
+            data={responseObject}
           />
         </div>
       </Collapsible>
