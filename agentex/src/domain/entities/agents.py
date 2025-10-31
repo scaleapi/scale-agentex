@@ -16,7 +16,9 @@ class AgentStatus(str, Enum):
 
 class ACPType(str, Enum):
     SYNC = "sync"
-    AGENTIC = "agentic"
+    ASYNC = "async"
+
+    AGENTIC = "agentic"  # deprecated: use ASYNC instead
 
 
 class AgentEntity(BaseModel):
@@ -28,8 +30,8 @@ class AgentEntity(BaseModel):
     name: str = Field(..., description="The unique name of the agent.")
     description: str = Field(..., description="The description of the action.")
     acp_type: ACPType = Field(
-        ACPType.AGENTIC,
-        description="The type of the ACP Server (Either sync or agentic)",
+        ACPType.ASYNC,
+        description="The type of the ACP Server (Either sync or async)",
     )
     status: AgentStatus = Field(
         AgentStatus.UNKNOWN,

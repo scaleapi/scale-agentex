@@ -30,7 +30,7 @@ class AgentsUseCase:
         description: str,
         acp_url: str,
         agent_id: str | None = None,
-        acp_type: ACPType = ACPType.AGENTIC,
+        acp_type: ACPType = ACPType.ASYNC,
         registration_metadata: dict[str, Any] | None = None,
     ) -> AgentEntity:
         # If an agent_id is passed, then the agent expects that it is already in the db

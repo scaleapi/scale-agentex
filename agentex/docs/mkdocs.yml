@@ -52,10 +52,10 @@ nav:
   - Agent Types:
       - Agent to Client Protocol (ACP): agent_types/overview.md
       - Sync ACP: agent_types/sync.md
-      - Agentic ACP:
-          - Overview: agent_types/agentic/overview.md
-          - Base Implementation: agent_types/agentic/base.md
-          - Temporal Implementation: agent_types/agentic/temporal.md
+      - Async ACP:
+          - Overview: agent_types/async/overview.md
+          - Base Implementation: agent_types/async/base.md
+          - Temporal Implementation: agent_types/async/temporal.md
       - Migration Guide: agent_types/agent_type_migration_guide.md
   - Core Concepts:
       - Agents: concepts/agents.md

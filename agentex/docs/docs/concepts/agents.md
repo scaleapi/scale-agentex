@@ -67,7 +67,7 @@ The way you implement agents depends on which ACP (Agent-to-Client Protocol) typ
 
 **Sync ACP** agents are the simplest form - just a single function that processes messages and returns responses.
 
-**Agentic ACP** agents have multiple handler functions that manage the complete interaction lifecycle.
+**Async ACP** agents have multiple handler functions that manage the complete interaction lifecycle.
 
 ## Agent Relationships
 
@@ -163,7 +163,7 @@ async def handle_message_send(params: SendMessageParams):
         content="Hello from the agent!"
     )
 
-# Agentic ACP - Create messages explicitly
+# Async ACP - Create messages explicitly
 @acp.on_task_event_send
 async def handle_event_send(params: SendEventParams):
     await adk.messages.create(

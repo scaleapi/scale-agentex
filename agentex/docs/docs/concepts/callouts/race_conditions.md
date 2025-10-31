@@ -1,4 +1,4 @@
-# Race Conditions in Agentic ACP
+# Race Conditions in Async ACP
 
 !!! danger "Critical for Production Systems"
     **All agentic ACP types can experience race conditions that corrupt agent state and cause unpredictable behavior.** Temporal ACP handles these better through singleton workflows and message queuing, but understanding race conditions is crucial for all production systems.
@@ -9,7 +9,7 @@ In **all agentic ACP types**, multiple events can trigger concurrent processing,
 
 **Temporal ACP** handles this better because workflows are singleton instances with built-in message queuing, while **Base ACP** requires manual race condition handling.
 
-### ❌ What Happens with Race Conditions (All Agentic ACP)
+### ❌ What Happens with Race Conditions (All Async ACP)
 
 ```python
 # Any agentic ACP - Multiple events can trigger simultaneously
@@ -229,7 +229,7 @@ async def on_task_event_send(self, params):
 
 ### Using Agent Task Tracker Cursors for Safe Processing
 
-For Base Agentic ACP, you can use **Agent Task Tracker cursors** to coordinate processing and reduce race conditions:
+For Base Async ACP, you can use **Agent Task Tracker cursors** to coordinate processing and reduce race conditions:
 
 ```python
 @acp.on_task_event_send
@@ -320,7 +320,7 @@ async def cursor_batch_handler(params: SendEventParams):
 ```
 
 !!! warning "Not a Complete Solution"
-    Agent Task Tracker cursors **reduce** race conditions but don't eliminate them entirely. For complete race condition prevention, use **Temporal Agentic ACP** which provides guaranteed sequential processing.
+    Agent Task Tracker cursors **reduce** race conditions but don't eliminate them entirely. For complete race condition prevention, use **Temporal Async ACP** which provides guaranteed sequential processing.
 
 ## Common Race Condition Scenarios
 

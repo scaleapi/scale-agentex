@@ -1,6 +1,6 @@
-# Temporal Agentic ACP
+# Temporal Async ACP
 
-**Temporal Agentic ACP** provides production-ready agent development with **durable execution**, **fault tolerance**, and **automatic state management**. Instead of implementing ACP handlers directly, you implement Temporal workflows that are automatically integrated with the ACP protocol.
+**Temporal Async ACP** provides production-ready agent development with **durable execution**, **fault tolerance**, and **automatic state management**. Instead of implementing ACP handlers directly, you implement Temporal workflows that are automatically integrated with the ACP protocol.
 
 ## When to Use
 
@@ -26,11 +26,11 @@
 
 ### Not Ideal For:
 
-❌ **Learning Agentex basics** - Start with Base Agentic ACP
+❌ **Learning Agentex basics** - Start with Base Async ACP
 ❌ **Simple prototypes** - Higher complexity overhead
 ❌ **Development without Temporal** - Requires Temporal infrastructure
 
-## Key Differences from Base Agentic ACP
+## Key Differences from Base Async ACP
 
 ### No Manual ACP Handlers
 
@@ -110,7 +110,7 @@ from agentex.lib.types.fastacp import TemporalACPConfig
 
 # Create the ACP server
 acp = FastACP.create(
-    acp_type="agentic",
+    acp_type="async",
     config=TemporalACPConfig(
         type="temporal",
         temporal_address=os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
@@ -320,7 +320,7 @@ if __name__ == "__main__":
 
 ## Next Steps
 
-- **Getting started?** Learn about [Base Agentic ACP](base.md) first
+- **Getting started?** Learn about [Base Async ACP](base.md) first
 - **Need to migrate?** Check the [Migration Guide](../../concepts/migration_guide.md)
 - **New to Agentex?** Follow the [Quick Start Guide on GitHub](https://github.com/scaleapi/scale-agentex#quick-start)
 - **Ready to build?** Check out [Temporal Tutorials on GitHub](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic/100_temporal)

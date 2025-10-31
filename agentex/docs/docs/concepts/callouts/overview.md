@@ -17,7 +17,7 @@ This section covers critical implementation details that require special attenti
 **Critical for LLM integrations** - The important distinction between Agentex TaskMessages and LLM-compatible message formats, and when conversion is needed.
 
 ### [Events vs Messages](events_vs_messages.md)
-**Critical for Agentic ACP** - Understanding that events are ephemeral notifications, not persistent objects like TaskMessages.
+**Critical for Async ACP** - Understanding that events are ephemeral notifications, not persistent objects like TaskMessages.
 
 ### [Task/Agent Scoped State](state_management.md)
 **Critical for multi-agent systems** - How state is scoped per (task_id, agent_id) and why this design enables parallel agent execution.

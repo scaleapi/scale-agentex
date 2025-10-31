@@ -66,7 +66,7 @@ async def test_event_repository_crud_operations(postgres_url):
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
         acp_url="http://localhost:8000/acp",
-        acp_type=ACPType.AGENTIC,
+        acp_type=ACPType.ASYNC,
     )
 
     created_agent = await agent_repo.create(agent)

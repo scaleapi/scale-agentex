@@ -54,7 +54,7 @@ from agentex.lib.plugins.openai_agents import OpenAIAgentsPlugin
 import os
 
 acp = FastACP.create(
-    acp_type="agentic",
+    acp_type="async",
     config=TemporalACPConfig(
         type="temporal",
         temporal_address=os.getenv("TEMPORAL_ADDRESS", "localhost:7233"),

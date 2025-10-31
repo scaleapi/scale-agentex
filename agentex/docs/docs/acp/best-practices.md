@@ -14,7 +14,7 @@ Guidelines for building robust, maintainable, and secure agents with ACP.
 
 - **Async operations** - Use `await` for all ADK operations
 - **Efficient state access** - Batch state operations when possible
-- **Resource cleanup** - Always clean up resources in Agentic ACP
+- **Resource cleanup** - Always clean up resources in Async ACP
 - **Caching** - Cache expensive operations when appropriate
 
 ## Security

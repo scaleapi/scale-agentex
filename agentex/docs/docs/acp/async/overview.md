@@ -1,10 +1,10 @@
-# Agentic ACP
+# Async ACP
 
-**Agentic ACP** is the powerful, event-driven approach for complex agent interactions. It provides complete control over task lifecycle, state management, and workflows through three distinct handlers.
+**Async ACP** is the powerful, event-driven approach for complex agent interactions. It provides complete control over task lifecycle, state management, and workflows through three distinct handlers.
 
-## What is Agentic ACP?
+## What is Async ACP?
 
-Agentic ACP provides full lifecycle control where:
+Async ACP provides full lifecycle control where:
 
 - You implement **three handler methods** for complete lifecycle management
 - Tasks require **explicit initialization** and cleanup
@@ -13,9 +13,9 @@ Agentic ACP provides full lifecycle control where:
 
 ## Two Implementation Approaches
 
-Agentic ACP can be implemented in two ways:
+Async ACP can be implemented in two ways:
 
-| Aspect | Base Agentic ACP | Temporal Agentic ACP |
+| Aspect | Base Async ACP | Temporal Async ACP |
 |--------|------------------|----------------------|
 | **Best for** | Learning, development, POCs | Production, enterprise |
 | **State Management** | Agentex state APIs | Temporal event sourcing or Agentex state |
@@ -26,7 +26,7 @@ Agentic ACP can be implemented in two ways:
 
 ## Core Architecture
 
-Both Base and Temporal Agentic ACP share the same three-handler pattern:
+Both Base and Temporal Async ACP share the same three-handler pattern:
 
 ```python
 @acp.on_task_create
@@ -68,7 +68,7 @@ graph TD
 
 ## Asynchronous Event Processing
 
-Think of Agentic ACP like a **postal system for agents** - each agent has its own mailbox where events are delivered asynchronously, and agents decide when and how to process their mail.
+Think of Async ACP like a **postal system for agents** - each agent has its own mailbox where events are delivered asynchronously, and agents decide when and how to process their mail.
 
 ### Every Agent Has a Mailbox
 
@@ -148,24 +148,24 @@ async def handle_event_send(params: SendEventParams):
 
 ## Choose Your Implementation
 
-### Base Agentic ACP
+### Base Async ACP
 
 Perfect for learning and development. Use Agentex's built-in state management.
 
-**[→ Read Base Agentic ACP Guide](base.md)**
+**[→ Read Base Async ACP Guide](base.md)**
 
-### Temporal Agentic ACP
+### Temporal Async ACP
 
 Production-ready with durable execution and automatic fault tolerance.
 
-**[→ Read Temporal Agentic ACP Guide](temporal.md)**
+**[→ Read Temporal Async ACP Guide](temporal.md)**
 
 ---
 
 ## Next Steps
 
-- **Getting started?** Learn about [Base Agentic ACP](base.md) first
-- **Ready for production?** Explore [Temporal Agentic ACP](temporal.md)
+- **Getting started?** Learn about [Base Async ACP](base.md) first
+- **Ready for production?** Explore [Temporal Async ACP](temporal.md)
 - **Need to upgrade?** Check the [Migration Guide](../../concepts/migration_guide.md)
 - **New to Agentex?** Follow the [Quick Start Guide on GitHub](https://github.com/scaleapi/scale-agentex#quick-start)
 - **Ready to build?** Check out [Agentic Tutorials on GitHub](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic)

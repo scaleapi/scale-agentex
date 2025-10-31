@@ -128,6 +128,6 @@ For practical usage examples and patterns, see:
 - [TaskMessage Concepts](../concepts/task_message.md) - Working with messages
 - [Streaming Concepts](../concepts/streaming.md) - Real-time message streaming
 - [State Concepts](../concepts/state.md) - Managing persistent state
-- [Agent-to-Client Protocol (ACP)](../acp/overview.md) - Sync and Agentic ACP handler parameters explained
+- [Agent-to-Client Protocol (ACP)](../acp/overview.md) - Sync and Async ACP handler parameters explained
 
  
