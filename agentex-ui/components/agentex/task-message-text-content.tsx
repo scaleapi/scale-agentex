@@ -1,3 +1,5 @@
+import { memo } from 'react';
+
 import { cva } from 'class-variance-authority';
 
 import { MarkdownResponse } from '@/components/agentex/markdown-response';
@@ -19,7 +21,7 @@ type TaskMessageTextContentComponentProps = {
   key?: string | undefined;
 };
 
-function TaskMessageTextContentComponent({
+function TaskMessageTextContentComponentImpl({
   content,
   key,
 }: TaskMessageTextContentComponentProps) {
@@ -29,5 +31,9 @@ function TaskMessageTextContentComponent({
     </div>
   );
 }
+
+const TaskMessageTextContentComponent = memo(
+  TaskMessageTextContentComponentImpl
+);
 
 export { TaskMessageTextContentComponent };

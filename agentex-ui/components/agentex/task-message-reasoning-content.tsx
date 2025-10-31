@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 
 import { motion } from 'framer-motion';
 import { BrainIcon, ChevronDownIcon } from 'lucide-react';
@@ -18,7 +18,7 @@ type TaskMessageReasoningProps = {
   message: TaskMessage;
 };
 
-export function TaskMessageReasoning({ message }: TaskMessageReasoningProps) {
+function TaskMessageReasoningImpl({ message }: TaskMessageReasoningProps) {
   const [isCollapsed, setIsCollapsed] = useState(true);
 
   const { taskID } = useSafeSearchParams();
@@ -97,3 +97,7 @@ const calculateThinkingTime = (
 
   return diffSec < 10 ? Math.round(diffSec * 10) / 10 : Math.round(diffSec);
 };
+
+const TaskMessageReasoning = memo(TaskMessageReasoningImpl);
+
+export { TaskMessageReasoning };

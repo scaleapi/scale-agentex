@@ -30,6 +30,6 @@ function MarkdownResponseImpl({ className, ...props }: MarkdownResponseProps) {
   );
 }
 
-const MemoizedMarkdownResponse = memo(MarkdownResponseImpl);
+const MarkdownResponse = memo(MarkdownResponseImpl);
 
-export { MemoizedMarkdownResponse as MarkdownResponse };
+export { MarkdownResponse };
