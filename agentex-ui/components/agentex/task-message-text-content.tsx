@@ -16,15 +16,15 @@ const variants = cva('', {
   },
 });
 
-type TaskMessageTextContentComponentProps = {
+type TaskMessageTextContentProps = {
   content: TextContent;
   key?: string | undefined;
 };
 
-function TaskMessageTextContentComponentImpl({
+function TaskMessageTextContentImpl({
   content,
   key,
-}: TaskMessageTextContentComponentProps) {
+}: TaskMessageTextContentProps) {
   return (
     <div className={cn(variants({ author: content.author }))}>
       <MarkdownResponse key={key}>{content.content}</MarkdownResponse>
@@ -32,8 +32,6 @@ function TaskMessageTextContentComponentImpl({
   );
 }
 
-const TaskMessageTextContentComponent = memo(
-  TaskMessageTextContentComponentImpl
-);
+const TaskMessageTextContent = memo(TaskMessageTextContentImpl);
 
-export { TaskMessageTextContentComponent };
+export { TaskMessageTextContent };

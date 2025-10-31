@@ -17,15 +17,15 @@ const variants = cva('', {
   },
 });
 
-type TaskMessageDataContentComponentProps = {
+type TaskMessageDataContentProps = {
   content: DataContent;
   key?: string | undefined;
 };
 
-function TaskMessageDataContentComponentImpl({
+function TaskMessageDataContentImpl({
   content,
   key,
-}: TaskMessageDataContentComponentProps) {
+}: TaskMessageDataContentProps) {
   return (
     <div className={cn(variants({ author: content.author }))}>
       <JsonViewer
@@ -37,8 +37,6 @@ function TaskMessageDataContentComponentImpl({
   );
 }
 
-const TaskMessageDataContentComponent = memo(
-  TaskMessageDataContentComponentImpl
-);
+const TaskMessageDataContent = memo(TaskMessageDataContentImpl);
 
-export { TaskMessageDataContentComponent };
+export { TaskMessageDataContent };

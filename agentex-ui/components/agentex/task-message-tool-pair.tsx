@@ -20,7 +20,7 @@ type TaskMessageToolHeaderAndJsonProps = {
   data: JsonValue;
 };
 
-function TaskMessageToolHeaderAndJsonComponent({
+function TaskMessageToolHeaderAndJson({
   title,
   data,
 }: TaskMessageToolHeaderAndJsonProps) {
@@ -47,7 +47,7 @@ type TaskMessageToolPairProps = {
     | undefined;
 };
 
-function TaskMessageToolPairComponentImpl({
+function TaskMessageToolPairImpl({
   toolRequestMessage,
   toolResponseMessage,
 }: TaskMessageToolPairProps) {
@@ -109,22 +109,17 @@ function TaskMessageToolPairComponentImpl({
       </button>
       <Collapsible collapsed={isCollapsed}>
         <div className="ml-6 flex flex-col gap-4">
-          <TaskMessageToolHeaderAndJsonComponent
+          <TaskMessageToolHeaderAndJson
             title="Parameters"
             data={toolRequestMessage.content.arguments as JsonValue}
           />
-          <TaskMessageToolHeaderAndJsonComponent
-            title="Result"
-            data={responseObject}
-          />
+          <TaskMessageToolHeaderAndJson title="Result" data={responseObject} />
         </div>
       </Collapsible>
     </motion.div>
   );
 }
 
-const MemoizedTaskMessageToolPairComponent = memo(
-  TaskMessageToolPairComponentImpl
-);
+const TaskMessageToolPair = memo(TaskMessageToolPairImpl);
 
-export { MemoizedTaskMessageToolPairComponent };
+export { TaskMessageToolPair };

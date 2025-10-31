@@ -7,8 +7,7 @@ import {
 import { v4 } from 'uuid';
 
 import { toast } from '@/components/agentex/toast';
-
-import { agentsKeys } from './use-agents';
+import { agentsKeys } from '@/hooks/use-agents';
 
 import type AgentexSDK from 'agentex';
 import type { IDeltaAccumulator } from 'agentex/lib';

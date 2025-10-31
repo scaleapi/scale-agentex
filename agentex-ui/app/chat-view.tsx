@@ -2,7 +2,7 @@ import { useRef } from 'react';
 
 import { motion } from 'framer-motion';
 
-import { MemoizedTaskMessagesComponent } from '@/components/agentex/task-messages';
+import { TaskMessages } from '@/components/agentex/task-messages';
 import { TaskProvider } from '@/components/providers';
 
 export function ChatView({ taskID }: { taskID: string }) {
@@ -21,7 +21,7 @@ export function ChatView({ taskID }: { taskID: string }) {
       <div className="flex min-h-full w-full flex-col items-center px-4 sm:px-6 md:px-8">
         <div className="w-full max-w-3xl">
           <TaskProvider taskId={taskID}>
-            <MemoizedTaskMessagesComponent taskId={taskID} />
+            <TaskMessages taskId={taskID} />
           </TaskProvider>
         </div>
       </div>
