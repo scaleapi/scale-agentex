@@ -7,21 +7,15 @@ import type {
   TaskRetrieveResponse,
 } from 'agentex/resources';
 
-/**
- * Query key factory for tasks
- */
 export const tasksKeys = {
   all: ['tasks'] as const,
+  individual: ['task'] as const,
   byAgentName: (agentName: string | undefined) =>
-    agentName
-      ? ([...tasksKeys.all, 'agent', agentName] as const)
-      : tasksKeys.all,
-  byId: (taskId: string) => [...tasksKeys.all, taskId] as const,
+    agentName ? ([...tasksKeys.all, agentName] as const) : tasksKeys.all,
+  individualById: (taskId: string) =>
+    [...tasksKeys.individual, taskId] as const,
 };
 
-/**
- * Fetches a single task by ID
- */
 export function useTask({
   agentexClient,
   taskId,
@@ -30,20 +24,16 @@ export function useTask({
   taskId: string;
 }) {
   return useQuery({
-    queryKey: tasksKeys.byId(taskId),
+    queryKey: tasksKeys.individualById(taskId),
     queryFn: async (): Promise<TaskRetrieveResponse> => {
       return agentexClient.tasks.retrieve(taskId, {
         relationships: ['agents'],
       });
     },
     enabled: !!taskId,
-    staleTime: 30 * 1000,
   });
 }
 
-/**
- * useQuery hook for infinite scrolling tasks
- */
 export function useInfiniteTasks(
   agentexClient: AgentexSDK,
   options?: { agentName?: string; limit?: number }
@@ -62,13 +52,11 @@ export function useInfiniteTasks(
       return agentexClient.tasks.list(params);
     },
     getNextPageParam: (lastPage, allPages) => {
-      if (!lastPage || lastPage.length < limit) {
+      if (lastPage.length < limit) {
         return undefined;
       }
       return allPages.length + 1;
     },
     initialPageParam: 1,
-    staleTime: 30 * 1000,
-    refetchOnWindowFocus: true,
   });
 }
