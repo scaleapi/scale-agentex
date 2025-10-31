@@ -15,6 +15,8 @@ module.exports = [
       'postcss.config.mjs',
       'next.config.ts',
       'next-env.d.ts',
+      'vitest.config.mts',
+      'vitest.setup.ts',
     ],
   },
   ...compat.extends('next/core-web-vitals', 'next/typescript', 'prettier'),
@@ -68,25 +70,25 @@ module.exports = [
       'import/no-extraneous-dependencies': [
         'error',
         {
-          devDependencies: ['**/*.test.ts'],
+          devDependencies: ['**/*.test.{ts,tsx,js,jsx}'],
         },
       ],
       'no-console': ['error', { allow: ['warn', 'error'] }],
       'no-else-return': 'error',
       'prefer-const': 'error',
       'no-var': 'error',
-      
+
       // Import sorting and organization
       'import/order': [
         'warn',
         {
           groups: [
-            'builtin',        // Node.js built-in modules (fs, path, etc.)
-            'external',       // npm packages (react, next, etc.)
-            'internal',       // Aliased imports (@/...)
+            'builtin', // Node.js built-in modules (fs, path, etc.)
+            'external', // npm packages (react, next, etc.)
+            'internal', // Aliased imports (@/...)
             ['parent', 'sibling'], // Relative imports (../, ./)
-            'index',          // Index imports (./)
-            'type',           // TypeScript type imports
+            'index', // Index imports (./)
+            'type', // TypeScript type imports
           ],
           pathGroups: [
             {

@@ -1,6 +1,6 @@
 import { connection } from 'next/server';
 
-import { AgentexUIRoot } from './agentex-ui-root';
+import { AgentexUIRoot } from '@/app/agentex-ui-root';
 
 export default async function RootPage() {
   await connection();

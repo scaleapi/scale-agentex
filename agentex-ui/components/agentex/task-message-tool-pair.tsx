@@ -3,9 +3,10 @@ import { memo, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { ChevronDownIcon, Wrench, XCircleIcon } from 'lucide-react';
 
-import { JsonViewer, type JsonValue } from '@/components/agentex/json-viewer';
+import { JsonViewer } from '@/components/agentex/json-viewer';
 import { Collapsible } from '@/components/ui/collapsible';
 import { ShimmeringText } from '@/components/ui/shimmering-text';
+import type { JsonValue } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 import type {
@@ -19,7 +20,7 @@ type TaskMessageToolHeaderAndJsonProps = {
   data: JsonValue;
 };
 
-function TaskMessageToolHeaderAndJsonComponent({
+function TaskMessageToolHeaderAndJson({
   title,
   data,
 }: TaskMessageToolHeaderAndJsonProps) {
@@ -46,7 +47,7 @@ type TaskMessageToolPairProps = {
     | undefined;
 };
 
-function TaskMessageToolPairComponentImpl({
+function TaskMessageToolPairImpl({
   toolRequestMessage,
   toolResponseMessage,
 }: TaskMessageToolPairProps) {
@@ -108,22 +109,17 @@ function TaskMessageToolPairComponentImpl({
       </button>
       <Collapsible collapsed={isCollapsed}>
         <div className="ml-6 flex flex-col gap-4">
-          <TaskMessageToolHeaderAndJsonComponent
+          <TaskMessageToolHeaderAndJson
             title="Parameters"
             data={toolRequestMessage.content.arguments as JsonValue}
           />
-          <TaskMessageToolHeaderAndJsonComponent
-            title="Result"
-            data={responseObject}
-          />
+          <TaskMessageToolHeaderAndJson title="Result" data={responseObject} />
         </div>
       </Collapsible>
     </motion.div>
   );
 }
 
-const MemoizedTaskMessageToolPairComponent = memo(
-  TaskMessageToolPairComponentImpl
-);
+const TaskMessageToolPair = memo(TaskMessageToolPairImpl);
 
-export { MemoizedTaskMessageToolPairComponent };
+export { TaskMessageToolPair };

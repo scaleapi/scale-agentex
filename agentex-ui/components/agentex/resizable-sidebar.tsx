@@ -13,7 +13,7 @@ export const MIN_SIDEBAR_WIDTH = 120;
 export const MAX_SIDEBAR_WIDTH = 500;
 export const DEFAULT_COLLAPSED_WIDTH = 60;
 
-interface ResizableSidebarProps extends React.HTMLAttributes<HTMLDivElement> {
+type ResizableSidebarProps = React.HTMLAttributes<HTMLDivElement> & {
   side: 'left' | 'right';
   storageKey: string;
   defaultWidth?: number;
@@ -22,7 +22,7 @@ interface ResizableSidebarProps extends React.HTMLAttributes<HTMLDivElement> {
   isCollapsed?: boolean;
   collapsedWidth?: number;
   renderCollapsed?: () => React.ReactNode;
-}
+};
 
 export function ResizableSidebar({
   children,

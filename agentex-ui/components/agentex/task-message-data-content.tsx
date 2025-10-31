@@ -1,6 +1,9 @@
+import { memo } from 'react';
+
 import { cva } from 'class-variance-authority';
 
-import { JsonViewer, type JsonValue } from '@/components/agentex/json-viewer';
+import { JsonViewer } from '@/components/agentex/json-viewer';
+import type { JsonValue } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 import type { DataContent } from 'agentex/resources';
@@ -14,15 +17,15 @@ const variants = cva('', {
   },
 });
 
-type TaskMessageDataContentComponentProps = {
+type TaskMessageDataContentProps = {
   content: DataContent;
   key?: string | undefined;
 };
 
-function TaskMessageDataContentComponent({
+function TaskMessageDataContentImpl({
   content,
   key,
-}: TaskMessageDataContentComponentProps) {
+}: TaskMessageDataContentProps) {
   return (
     <div className={cn(variants({ author: content.author }))}>
       <JsonViewer
@@ -34,4 +37,6 @@ function TaskMessageDataContentComponent({
   );
 }
 
-export { TaskMessageDataContentComponent };
+const TaskMessageDataContent = memo(TaskMessageDataContentImpl);
+
+export { TaskMessageDataContent };

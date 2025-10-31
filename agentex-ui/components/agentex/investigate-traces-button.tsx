@@ -7,11 +7,11 @@ import { ArrowRight } from 'lucide-react';
 import { useAgentexClient } from '@/components/providers';
 import { cn } from '@/lib/utils';
 
-interface InvestigateTracesButtonProps {
+type InvestigateTracesButtonProps = {
   className?: string;
   disabled?: boolean;
   taskId: string;
-}
+};
 
 export const InvestigateTracesButton = forwardRef<
   HTMLAnchorElement,
