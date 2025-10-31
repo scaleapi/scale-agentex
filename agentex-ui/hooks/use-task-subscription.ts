@@ -1,22 +1,25 @@
 import { useEffect } from 'react';
 
-import { useQueryClient } from '@tanstack/react-query';
+import { InfiniteData, useQueryClient } from '@tanstack/react-query';
 import { subscribeTaskState } from 'agentex/lib';
 
-import { taskMessagesKeys } from './use-task-messages';
-import { tasksKeys } from './use-tasks';
+import { updateTaskInInfiniteQuery } from '@/hooks/use-create-task';
+import { taskMessagesKeys } from '@/hooks/use-task-messages';
+import type { TaskMessagesData } from '@/hooks/use-task-messages';
+import { tasksKeys } from '@/hooks/use-tasks';
 
-import type { TaskMessagesData } from './use-task-messages';
 import type AgentexSDK from 'agentex';
-import type { Task } from 'agentex/resources';
+import type { TaskListResponse, TaskRetrieveResponse } from 'agentex/resources';
 
 export function useTaskSubscription({
   agentexClient,
   taskId,
+  agentName,
   enabled = true,
 }: {
   agentexClient: AgentexSDK;
   taskId: string;
+  agentName: string;
   enabled?: boolean;
 }) {
   const queryClient = useQueryClient();
@@ -58,11 +61,18 @@ export function useTaskSubscription({
         },
         onAgentsChange() {},
         onTaskChange(task) {
-          queryClient.setQueryData<Task>(tasksKeys.byId(taskId), task);
-          queryClient.setQueryData<Task[]>(tasksKeys.all, old => {
-            if (!old) return [task];
-            return old.map(t => (t.id === task.id ? task : t));
-          });
+          queryClient.setQueryData<TaskRetrieveResponse>(
+            tasksKeys.individualById(taskId),
+            task
+          );
+          queryClient.setQueryData<InfiniteData<TaskListResponse>>(
+            tasksKeys.all,
+            data => updateTaskInInfiniteQuery(task, agentName, data)
+          );
+          queryClient.setQueryData<InfiniteData<TaskListResponse>>(
+            tasksKeys.byAgentName(agentName),
+            data => updateTaskInInfiniteQuery(task, agentName, data)
+          );
         },
         onStreamStatusChange() {},
         onError() {
@@ -82,5 +92,5 @@ export function useTaskSubscription({
     return () => {
       abortController.abort();
     };
-  }, [agentexClient, taskId, enabled, queryClient]);
+  }, [agentexClient, taskId, enabled, queryClient, agentName]);
 }
