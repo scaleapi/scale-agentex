@@ -50,9 +50,9 @@ export function AgentsList({ agents, isLoading = false }: AgentsListProps) {
   );
 }
 
-interface AgentBadgeProps {
+type AgentBadgeProps = {
   agent: Agent;
-}
+};
 
 function AgentBadge({ agent }: AgentBadgeProps) {
   const { agentName, updateParams } = useSafeSearchParams();

@@ -4,10 +4,9 @@ import { Paperclip } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 
-interface UploadAttachmentButtonProps
-  extends ButtonHTMLAttributes<HTMLButtonElement> {
+type UploadAttachmentButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   className?: string;
-}
+};
 
 export const UploadAttachmentButton = forwardRef<
   HTMLButtonElement,

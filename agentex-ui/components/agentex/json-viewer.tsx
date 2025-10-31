@@ -87,7 +87,7 @@ function LinkifiedString({ value }: { value: string }) {
   return <>{parts}</>;
 }
 
-interface JsonCollapsibleProps extends React.HTMLAttributes<HTMLDivElement> {
+type JsonCollapsibleProps = React.HTMLAttributes<HTMLDivElement> & {
   copyContent: string;
   collapsedContent: React.ReactNode;
   expandedContent: React.ReactNode;
@@ -96,7 +96,7 @@ interface JsonCollapsibleProps extends React.HTMLAttributes<HTMLDivElement> {
   keyName?: string | undefined;
   extraButtons?: React.ReactNode;
   showCopyButton?: boolean;
-}
+};
 
 function JsonCollapsible({
   copyContent,
@@ -152,7 +152,7 @@ function JsonCollapsible({
   );
 }
 
-interface JsonNodeProps {
+type JsonNodeProps = {
   data: JsonValue;
   keyName?: string;
   level?: number;
@@ -160,7 +160,7 @@ interface JsonNodeProps {
   maxOpenDepth?: number;
   forceExpandState?: boolean | null;
   extraButtons?: React.ReactNode;
-}
+};
 
 function JsonNode({
   data,
@@ -340,11 +340,11 @@ function JsonNode({
   );
 }
 
-interface JsonViewerProps {
+type JsonViewerProps = {
   data: JsonValue;
   defaultOpenDepth?: number;
   className?: string;
-}
+};
 
 export function JsonViewer({
   data,

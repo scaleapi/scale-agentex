@@ -23,14 +23,13 @@ const iconSizeVariants = cva('', {
   },
 });
 
-export interface IconButtonProps
-  extends Omit<ButtonProps, 'size' | 'asChild'>,
-    VariantProps<typeof iconSizeVariants> {
-  icon: ForwardRefExoticComponent<
-    Omit<LucideProps, 'ref'> & RefAttributes<SVGSVGElement>
-  >;
-  label?: string;
-}
+export type IconButtonProps = Omit<ButtonProps, 'size' | 'asChild'> &
+  VariantProps<typeof iconSizeVariants> & {
+    icon: ForwardRefExoticComponent<
+      Omit<LucideProps, 'ref'> & RefAttributes<SVGSVGElement>
+    >;
+    label?: string;
+  };
 
 const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
   ({ icon, label, iconSize, children, ...props }, ref) => {

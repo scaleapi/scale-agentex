@@ -14,9 +14,9 @@ import { ShimmeringText } from '../ui/shimmering-text';
 
 import type { TaskMessage } from 'agentex/resources';
 
-interface TaskMessageReasoningProps {
+type TaskMessageReasoningProps = {
   message: TaskMessage;
-}
+};
 
 export function TaskMessageReasoning({ message }: TaskMessageReasoningProps) {
   const [isCollapsed, setIsCollapsed] = useState(true);

@@ -4,10 +4,10 @@ import { Send } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 
-interface SubmitButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+type SubmitButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   className?: string;
   disabled?: boolean;
-}
+};
 
 export const SubmitButton = forwardRef<HTMLButtonElement, SubmitButtonProps>(
   ({ className, disabled = false, ...props }, ref) => {

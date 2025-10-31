@@ -16,10 +16,10 @@ import {
 import { ChatView } from './chat-view';
 import { HomeView } from './home-view';
 
-interface ContentAreaProps {
+type ContentAreaProps = {
   isTracesSidebarOpen: boolean;
   toggleTracesSidebar: () => void;
-}
+};
 
 export function PrimaryContent({
   isTracesSidebarOpen,
