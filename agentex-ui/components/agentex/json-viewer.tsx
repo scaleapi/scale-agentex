@@ -1,20 +1,29 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useEffect, useState, useCallback } from 'react';
 
 import { cva } from 'class-variance-authority';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+} from 'lucide-react';
 
 import { CopyButton } from '@/components/agentex/copy-button';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-type JsonValue =
+export type JsonValue =
   | string
   | number
   | boolean
   | null
   | JsonValue[]
   | { [key: string]: JsonValue };
+
+const URL_REGEX =
+  /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&//=]*)/g;
 
 const valueStyles = cva('', {
   variants: {
@@ -39,27 +48,80 @@ function serializeValue(data: JsonValue): string {
   return String(data);
 }
 
+function LinkifiedString({ value }: { value: string }) {
+  const parts: (string | React.ReactElement)[] = [];
+  let lastIndex = 0;
+
+  const matches = value.matchAll(URL_REGEX);
+
+  for (const match of matches) {
+    if (match.index !== undefined && match.index > lastIndex) {
+      parts.push(value.substring(lastIndex, match.index));
+    }
+
+    const url = match[0];
+    parts.push(
+      <a
+        key={match.index}
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline"
+        onClick={e => e.stopPropagation()}
+      >
+        {url}
+      </a>
+    );
+
+    lastIndex = (match.index ?? 0) + url.length;
+  }
+
+  if (lastIndex < value.length) {
+    parts.push(value.substring(lastIndex));
+  }
+
+  if (parts.length === 0) {
+    return <>{value}</>;
+  }
+
+  return <>{parts}</>;
+}
+
 interface JsonCollapsibleProps extends React.HTMLAttributes<HTMLDivElement> {
   copyContent: string;
   collapsedContent: React.ReactNode;
   expandedContent: React.ReactNode;
-  defaultExpanded?: boolean;
+  shouldBeExpanded?: boolean;
+  forceExpandState?: boolean | null;
   keyName?: string | undefined;
+  extraButtons?: React.ReactNode;
+  showCopyButton?: boolean;
 }
 
 function JsonCollapsible({
   copyContent,
   collapsedContent,
   expandedContent,
-  defaultExpanded = false,
+  shouldBeExpanded = false,
+  forceExpandState = null,
   keyName,
+  extraButtons,
+  showCopyButton = true,
   ...props
 }: JsonCollapsibleProps) {
-  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+  const [isExpanded, setIsExpanded] = useState(() =>
+    forceExpandState !== null ? forceExpandState : shouldBeExpanded
+  );
+
+  useEffect(() => {
+    if (forceExpandState !== null) {
+      setIsExpanded(forceExpandState);
+    }
+  }, [forceExpandState]);
 
   return (
     <div {...props}>
-      <div className="hover:bg-accent/50 group/line flex items-center gap-2 rounded px-2 py-0.5">
+      <div className="hover:bg-accent/50 group/line flex items-center gap-2 rounded px-2">
         <button
           onClick={() => setIsExpanded(!isExpanded)}
           className="flex flex-1 items-center gap-1 font-mono text-sm"
@@ -76,8 +138,13 @@ function JsonCollapsible({
           )}
           <span className="text-muted-foreground">{collapsedContent}</span>
         </button>
-        <div className="opacity-0 transition-opacity group-hover/line:opacity-100">
-          <CopyButton content={copyContent} />
+        <div className="flex items-center gap-2">
+          {extraButtons}
+          {showCopyButton && (
+            <div className="opacity-0 transition-opacity group-hover/line:opacity-100">
+              <CopyButton content={copyContent} />
+            </div>
+          )}
         </div>
       </div>
       {isExpanded && <div>{expandedContent}</div>}
@@ -89,16 +156,21 @@ interface JsonNodeProps {
   data: JsonValue;
   keyName?: string;
   level?: number;
-  defaultExpanded?: boolean;
+  currentDepth?: number;
+  maxOpenDepth?: number;
+  forceExpandState?: boolean | null;
+  extraButtons?: React.ReactNode;
 }
 
 function JsonNode({
   data,
   keyName,
   level = 0,
-  defaultExpanded = false,
+  currentDepth = 0,
+  maxOpenDepth = 0,
+  forceExpandState = null,
+  extraButtons,
 }: JsonNodeProps) {
-  // Try to parse JSON strings
   let parsedData = data;
   if (typeof data === 'string') {
     try {
@@ -106,9 +178,7 @@ function JsonNode({
       if (typeof parsed === 'object' && parsed !== null) {
         parsedData = parsed;
       }
-    } catch {
-      // Not valid JSON, keep as string
-    }
+    } catch {}
   }
 
   const copyContent = keyName
@@ -117,8 +187,9 @@ function JsonNode({
 
   const indentClassName = level > 0 ? 'ml-4' : '';
   const [isExpanded, setIsExpanded] = useState(false);
+  const shouldExpand = maxOpenDepth < 0 || currentDepth < maxOpenDepth;
 
-  let content = null;
+  let content: React.ReactNode = null;
   let dataType:
     | 'string'
     | 'number'
@@ -128,7 +199,6 @@ function JsonNode({
     | 'array'
     | null = null;
 
-  // Render arrays
   if (Array.isArray(parsedData) && parsedData.length > 0) {
     return (
       <JsonCollapsible
@@ -140,16 +210,20 @@ function JsonNode({
             key={index}
             data={item}
             level={level + 1}
-            defaultExpanded={defaultExpanded}
+            currentDepth={currentDepth + 1}
+            maxOpenDepth={maxOpenDepth}
+            forceExpandState={forceExpandState}
           />
         ))}
-        defaultExpanded={defaultExpanded}
+        shouldBeExpanded={shouldExpand}
+        forceExpandState={forceExpandState}
+        extraButtons={extraButtons}
+        showCopyButton={!extraButtons}
         className={indentClassName}
       />
     );
   }
 
-  // Render objects
   if (
     typeof parsedData === 'object' &&
     parsedData !== null &&
@@ -174,23 +248,33 @@ function JsonNode({
             data={value}
             keyName={key}
             level={level + 1}
-            defaultExpanded={defaultExpanded}
+            currentDepth={currentDepth + 1}
+            maxOpenDepth={maxOpenDepth}
+            forceExpandState={forceExpandState}
           />
         ))}
-        defaultExpanded={defaultExpanded}
+        shouldBeExpanded={shouldExpand}
+        forceExpandState={forceExpandState}
+        extraButtons={extraButtons}
+        showCopyButton={!extraButtons}
         className={indentClassName}
       />
     );
   }
 
-  // Check if string is long (more than 6 lines worth of characters, ~80 chars per line)
   const isLongString =
     typeof parsedData === 'string' && parsedData.length > 480;
 
   switch (typeof parsedData) {
     case 'string':
       dataType = 'string';
-      content = `"${parsedData}"`;
+      content = (
+        <>
+          &quot;
+          <LinkifiedString value={parsedData} />
+          &quot;
+        </>
+      );
       break;
     case 'number':
       dataType = 'number';
@@ -220,7 +304,7 @@ function JsonNode({
   return (
     <div
       className={cn(
-        'hover:bg-accent/50 group/line flex items-center gap-2 rounded px-2 py-0.5',
+        'hover:bg-accent/50 group/line flex items-center gap-2 rounded px-2',
         indentClassName
       )}
     >
@@ -231,7 +315,6 @@ function JsonNode({
         )}
         onClick={e => {
           if (isLongString) {
-            // Only toggle if not clicking the copy button
             const target = e.target as HTMLElement;
             if (!target.closest('button')) {
               setIsExpanded(!isExpanded);
@@ -259,15 +342,55 @@ function JsonNode({
 
 interface JsonViewerProps {
   data: JsonValue;
-  defaultExpanded?: boolean;
+  defaultOpenDepth?: number;
   className?: string;
 }
 
 export function JsonViewer({
   data,
-  defaultExpanded = false,
+  defaultOpenDepth = 0,
   className,
 }: JsonViewerProps) {
+  const [forceExpandState, setForceExpandState] = useState<boolean | null>(
+    null
+  );
+
+  const shouldShowExpand = useMemo(() => {
+    return forceExpandState === null
+      ? defaultOpenDepth === 0
+      : !forceExpandState;
+  }, [forceExpandState, defaultOpenDepth]);
+
+  const toggleForceExpandState = useCallback(() => {
+    setForceExpandState(shouldShowExpand);
+  }, [shouldShowExpand]);
+
+  const extraButtons = useMemo(() => {
+    return (
+      <>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={toggleForceExpandState}
+          className="text-muted-foreground hover:text-foreground h-6 gap-1.5 text-xs"
+        >
+          {shouldShowExpand ? (
+            <>
+              <ChevronsUpDown className="h-3 w-3" />
+              Expand All
+            </>
+          ) : (
+            <>
+              <ChevronsDownUp className="h-3 w-3" />
+              Collapse All
+            </>
+          )}
+        </Button>
+        <CopyButton content={JSON.stringify(data, null, 2)} />
+      </>
+    );
+  }, [data, shouldShowExpand, toggleForceExpandState]);
+
   return (
     <div
       className={cn(
@@ -275,7 +398,13 @@ export function JsonViewer({
         className
       )}
     >
-      <JsonNode data={data} defaultExpanded={defaultExpanded} />
+      <JsonNode
+        data={data}
+        currentDepth={0}
+        maxOpenDepth={defaultOpenDepth}
+        forceExpandState={forceExpandState}
+        extraButtons={extraButtons}
+      />
     </div>
   );
 }

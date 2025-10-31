@@ -1,13 +1,12 @@
 import { memo, useMemo, useState } from 'react';
 
 import { motion } from 'framer-motion';
-import { ChevronDownIcon, Wrench } from 'lucide-react';
+import { ChevronDownIcon, Wrench, XCircleIcon } from 'lucide-react';
 
-import { ToolInput, ToolOutput } from '@/components/ai-elements/tool';
+import { JsonViewer, type JsonValue } from '@/components/agentex/json-viewer';
+import { Collapsible } from '@/components/ui/collapsible';
+import { ShimmeringText } from '@/components/ui/shimmering-text';
 import { cn } from '@/lib/utils';
-
-import { Collapsible } from '../ui/collapsible';
-import { ShimmeringText } from '../ui/shimmering-text';
 
 import type {
   TaskMessage,
@@ -15,50 +14,65 @@ import type {
   ToolResponseContent,
 } from 'agentex/resources';
 
-export type TaskMessageToolPairProps = {
+type TaskMessageToolHeaderAndJsonProps = {
+  title: string;
+  data: JsonValue;
+};
+
+function TaskMessageToolHeaderAndJsonComponent({
+  title,
+  data,
+}: TaskMessageToolHeaderAndJsonProps) {
+  return (
+    <div className="space-y-2 overflow-hidden">
+      <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+        {title}
+      </h4>
+      <div className="bg-muted/50 rounded-md">
+        <JsonViewer
+          data={data}
+          defaultOpenDepth={1}
+          className="bg-background max-h-[200px] overflow-y-auto"
+        />
+      </div>
+    </div>
+  );
+}
+
+type TaskMessageToolPairProps = {
   toolRequestMessage: TaskMessage & { content: ToolRequestContent };
   toolResponseMessage?:
     | (TaskMessage & { content: ToolResponseContent })
     | undefined;
 };
 
-function TaskMessageToolPairComponent({
+function TaskMessageToolPairComponentImpl({
   toolRequestMessage,
   toolResponseMessage,
 }: TaskMessageToolPairProps) {
   const [isCollapsed, setIsCollapsed] = useState(true);
 
-  // const state = useMemo(() => {
-  //   const streamingStatus = toolResponseMessage?.streaming_status;
-  //   if (streamingStatus === 'IN_PROGRESS') {
-  //     return 'input-streaming';
-  //   } else {
-  //     try {
-  //       const content = toolResponseMessage?.content.content;
-  //       if (typeof content === 'string') {
-  //         const parsed = JSON.parse(content);
-  //         if (parsed.status === 'error') {
-  //           return 'output-error';
-  //         }
-  //       }
-  //     } catch {
-  //       return 'output-available';
-  //     }
-  //     return 'output-available';
-  //   }
-  // }, [toolResponseMessage]);
-
-  const reponseObject = useMemo(() => {
+  const responseObject = useMemo<JsonValue>(() => {
     const content = toolResponseMessage?.content.content;
     if (typeof content === 'string') {
       try {
-        return JSON.parse(content);
+        return JSON.parse(content) as JsonValue;
       } catch {
-        return content;
+        return content as JsonValue;
       }
     }
-    return content;
+    return content as JsonValue;
   }, [toolResponseMessage]);
+
+  const isError = useMemo<boolean>(
+    () =>
+      typeof responseObject === 'object' &&
+      responseObject !== null &&
+      'status' in responseObject &&
+      typeof responseObject.status === 'string' &&
+      responseObject.status.toLowerCase() === 'error',
+    [responseObject]
+  );
 
   return (
     <motion.div
@@ -84,6 +98,7 @@ function TaskMessageToolPairComponent({
               : 'Used tool:  ' + toolRequestMessage.content.name
           }
         />
+        {isError && <XCircleIcon className="size-4 text-red-600" />}
         <ChevronDownIcon
           className={cn(
             'size-4 transition-transform duration-500',
@@ -93,14 +108,22 @@ function TaskMessageToolPairComponent({
       </button>
       <Collapsible collapsed={isCollapsed}>
         <div className="ml-6 flex flex-col gap-4">
-          <ToolInput input={toolRequestMessage.content.arguments} />
-          <ToolOutput output={reponseObject} errorText={undefined} />
+          <TaskMessageToolHeaderAndJsonComponent
+            title="Parameters"
+            data={toolRequestMessage.content.arguments as JsonValue}
+          />
+          <TaskMessageToolHeaderAndJsonComponent
+            title="Result"
+            data={responseObject}
+          />
         </div>
       </Collapsible>
     </motion.div>
   );
 }
 
-const MemoizedTaskMessageToolPairComponent = memo(TaskMessageToolPairComponent);
+const MemoizedTaskMessageToolPairComponent = memo(
+  TaskMessageToolPairComponentImpl
+);
 
-export { MemoizedTaskMessageToolPairComponent, TaskMessageToolPairComponent };
+export { MemoizedTaskMessageToolPairComponent };

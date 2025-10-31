@@ -9,7 +9,7 @@ import { TaskMessageTextContentComponent } from '@/components/agentex/task-messa
 import { useAgentexClient } from '@/components/providers';
 import { useTaskMessages } from '@/hooks/use-task-messages';
 
-import { TaskMessageToolPairComponent } from './task-message-tool-pair';
+import { MemoizedTaskMessageToolPairComponent } from './task-message-tool-pair';
 import { ShimmeringText } from '../ui/shimmering-text';
 
 import type {
@@ -36,10 +36,8 @@ function MemoizedTaskMessagesComponentImpl({
 
   const { agentexClient } = useAgentexClient();
 
-  // Use query hook to get messages from cache if taskId is provided
   const { data: queryData } = useTaskMessages({ agentexClient, taskId });
 
-  // Prefer query data if available, otherwise use prop messages
   const messages = useMemo(() => queryData?.messages ?? [], [queryData]);
   const previousMessageCountRef = useRef(messages.length);
 
@@ -58,7 +56,6 @@ function MemoizedTaskMessagesComponentImpl({
     [messages]
   );
 
-  // Group messages into pairs (user message + subsequent agent messages)
   const messagePairs = useMemo<MessagePair[]>(() => {
     const pairs: MessagePair[] = [];
     let currentUserMessage: TaskMessage | null = null;
@@ -68,7 +65,6 @@ function MemoizedTaskMessagesComponentImpl({
       const isUserMessage = message.content.author === 'user';
 
       if (isUserMessage) {
-        // Save previous pair if exists
         if (currentUserMessage) {
           pairs.push({
             id: currentUserMessage.id || `pair-${pairs.length}`,
@@ -76,25 +72,21 @@ function MemoizedTaskMessagesComponentImpl({
             agentMessages: currentAgentMessages,
           });
         }
-        // Start new pair
         currentUserMessage = message;
         currentAgentMessages = [];
       } else {
-        // Add to current agent messages
         if (currentUserMessage) {
           currentAgentMessages.push(message);
         } else {
-          // Agent message without a user message - create a pair with just agent messages
           pairs.push({
             id: message.id || `pair-${pairs.length}`,
-            userMessage: message, // Use the agent message as the "user" message
+            userMessage: message,
             agentMessages: [],
           });
         }
       }
     }
 
-    // Add the last pair
     if (currentUserMessage) {
       pairs.push({
         id: currentUserMessage.id || `pair-${pairs.length}`,
@@ -118,11 +110,9 @@ function MemoizedTaskMessagesComponentImpl({
     );
   }, [messagePairs, queryData?.rpcStatus]);
 
-  // Measure the scrollable container height
   useEffect(() => {
     const measureHeight = () => {
       if (containerRef.current) {
-        // Walk up the DOM tree to find the scrollable container (has overflow-y-auto)
         let element = containerRef.current.parentElement;
         while (element) {
           const overflowY = window.getComputedStyle(element).overflowY;
@@ -135,10 +125,8 @@ function MemoizedTaskMessagesComponentImpl({
       }
     };
 
-    // Measure on mount and when messages change
     measureHeight();
 
-    // Recalculate on window resize
     window.addEventListener('resize', measureHeight);
     return () => window.removeEventListener('resize', measureHeight);
   }, [messages]);
@@ -159,7 +147,6 @@ function MemoizedTaskMessagesComponentImpl({
     previousMessageCountRef.current = currentCount;
   }, [messagePairs.length]);
 
-  // Helper function to render a message
   const renderMessage = (message: TaskMessage) => {
     switch (message.content.type) {
       case 'text':
@@ -170,7 +157,7 @@ function MemoizedTaskMessagesComponentImpl({
         return <TaskMessageReasoning message={message} />;
       case 'tool_request':
         return (
-          <TaskMessageToolPairComponent
+          <MemoizedTaskMessageToolPairComponent
             toolRequestMessage={
               message as TaskMessage & { content: ToolRequestContent }
             }
