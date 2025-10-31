@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
-export type CopyButtonProps = {
+type CopyButtonProps = {
   tooltip?: string;
   onClick?: () => void;
   content?: string;

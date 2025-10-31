@@ -23,7 +23,7 @@ const iconSizeVariants = cva('', {
   },
 });
 
-export type IconButtonProps = Omit<ButtonProps, 'size' | 'asChild'> &
+type IconButtonProps = Omit<ButtonProps, 'size' | 'asChild'> &
   VariantProps<typeof iconSizeVariants> & {
     icon: ForwardRefExoticComponent<
       Omit<LucideProps, 'ref'> & RefAttributes<SVGSVGElement>

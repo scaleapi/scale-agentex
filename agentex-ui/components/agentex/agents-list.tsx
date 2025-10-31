@@ -7,7 +7,7 @@ import { AgentBadge } from '@/components/agentex/agent-badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 
-export type AgentsListProps = {
+type AgentsListProps = {
   agents: Agent[];
   isLoading?: boolean;
 };
