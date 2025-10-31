@@ -6,6 +6,12 @@ import { useAgentexClient } from '@/components/providers';
 
 import type { Span } from 'agentex/resources';
 
+export const spansKeys = {
+  all: ['spans'] as const,
+  byTraceId: (traceId: string | null) =>
+    traceId ? ([...spansKeys.all, traceId] as const) : spansKeys.all,
+};
+
 type UseSpansState = {
   spans: Span[];
   isLoading: boolean;
@@ -16,7 +22,7 @@ export function useSpans(traceId: string | null): UseSpansState {
   const { agentexClient } = useAgentexClient();
 
   const { data, isLoading, error } = useQuery<Span[], Error>({
-    queryKey: ['spans', traceId],
+    queryKey: spansKeys.byTraceId(traceId),
     queryFn: async ({ signal }) => {
       if (!traceId) {
         return [];

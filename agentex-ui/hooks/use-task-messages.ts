@@ -50,7 +50,6 @@ export function useTaskMessages({
       };
     },
     enabled: !!taskId,
-    staleTime: Infinity,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
   });

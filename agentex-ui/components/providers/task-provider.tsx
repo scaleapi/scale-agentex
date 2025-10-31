@@ -23,7 +23,8 @@ export function TaskProvider({
   useTaskSubscription({
     agentexClient,
     taskId,
-    enabled: !!taskId && agent?.acp_type === 'agentic',
+    agentName: agentName || '',
+    enabled: !!taskId && (agent?.acp_type === 'agentic' || !agentName),
   });
 
   return <>{children}</>;

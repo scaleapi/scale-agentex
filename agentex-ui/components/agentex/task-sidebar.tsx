@@ -144,12 +144,10 @@ export function TaskSidebar() {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // Flatten all pages into a single array of tasks
   const tasks = useMemo(() => {
-    return data?.pages.flatMap(page => page) ?? [];
+    return data?.pages?.flatMap(page => page) ?? [];
   }, [data]);
 
-  // Scroll detection for infinite loading
   useEffect(() => {
     const scrollContainer = scrollContainerRef.current;
     if (!scrollContainer) return;

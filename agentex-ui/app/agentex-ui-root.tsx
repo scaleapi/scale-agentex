@@ -7,7 +7,6 @@ import { ToastContainer } from 'react-toastify';
 import { TaskSidebar } from '@/components/agentex/task-sidebar';
 import { TracesSidebar } from '@/components/agentex/traces-sidebar';
 import { AgentexProvider } from '@/components/providers';
-import { QueryProvider } from '@/components/providers/query-provider';
 import { useLocalStorageState } from '@/hooks/use-local-storage-state';
 import {
   SearchParamKey,
@@ -65,7 +64,7 @@ export function AgentexUIRoot({
   }, [handleSelectTask]);
 
   return (
-    <QueryProvider>
+    <>
       <AgentexProvider
         sgpAppURL={sgpAppURL ?? ''}
         agentexAPIBaseURL={agentexAPIBaseURL}
@@ -82,6 +81,6 @@ export function AgentexUIRoot({
         </div>
       </AgentexProvider>
       <ToastContainer />
-    </QueryProvider>
+    </>
   );
 }
