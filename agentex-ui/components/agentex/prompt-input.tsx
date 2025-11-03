@@ -69,13 +69,13 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
   // Focus the prompt input when taskID is cleared
   useEffect(() => {
     if (!taskID && isClient) {
-      setTimeout(() => {
+      requestAnimationFrame(() => {
         if (isSendingJSON) {
           codeMirrorViewRef.current?.focus();
         } else {
           textInputRef.current?.focus();
         }
-      }, 0);
+      });
     }
   }, [taskID, isClient, isSendingJSON]);
 
