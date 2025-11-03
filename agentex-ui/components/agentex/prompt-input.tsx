@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { closeBrackets } from '@codemirror/autocomplete';
 import { json } from '@codemirror/lang-json';
@@ -47,6 +47,9 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
   const createTaskMutation = useCreateTask({ agentexClient });
   const sendMessageMutation = useSendMessage({ agentexClient });
 
+  const textInputRef = useRef<HTMLInputElement>(null);
+  const codeMirrorViewRef = useRef<EditorView | null>(null);
+
   const handleSetJson = useCallback(
     (value: boolean) => {
       if (value && !prompt.trim()) {
@@ -62,6 +65,19 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
   useEffect(() => {
     setIsClient(true);
   }, []);
+
+  // Focus the prompt input when taskID is cleared
+  useEffect(() => {
+    if (!taskID && isClient) {
+      requestAnimationFrame(() => {
+        if (isSendingJSON) {
+          codeMirrorViewRef.current?.focus();
+        } else {
+          textInputRef.current?.focus();
+        }
+      });
+    }
+  }, [taskID, isClient, isSendingJSON]);
 
   const isDisabled = useMemo(
     () => !agentName || !isClient,
@@ -142,6 +158,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
             setPrompt={setPrompt}
             isDisabled={isDisabled}
             handleSendPrompt={handleSendPrompt}
+            codeMirrorViewRef={codeMirrorViewRef}
           />
         ) : (
           <TextInput
@@ -149,6 +166,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
             setPrompt={setPrompt}
             isDisabled={isDisabled}
             handleSendPrompt={handleSendPrompt}
+            inputRef={textInputRef}
           />
         )}
         <IconButton
@@ -177,14 +195,17 @@ const TextInput = ({
   setPrompt,
   isDisabled,
   handleSendPrompt,
+  inputRef,
 }: {
   prompt: string;
   setPrompt: (prompt: string) => void;
   isDisabled: boolean;
   handleSendPrompt: () => void;
+  inputRef: React.RefObject<HTMLInputElement | null>;
 }) => {
   return (
     <input
+      ref={inputRef}
       id="prompt-text-input"
       type="text"
       value={prompt}
@@ -214,11 +235,13 @@ const DataInput = ({
   setPrompt,
   isDisabled,
   handleSendPrompt,
+  codeMirrorViewRef,
 }: {
   prompt: string;
   setPrompt: (prompt: string) => void;
   isDisabled: boolean;
   handleSendPrompt: () => void;
+  codeMirrorViewRef: React.MutableRefObject<EditorView | null>;
 }) => {
   const commandEnterKeymap = useMemo(
     () =>
@@ -244,6 +267,9 @@ const DataInput = ({
       className="mx-1 w-full rounded-full text-sm"
       value={prompt}
       onChange={(value: string) => setPrompt(value)}
+      onCreateEditor={view => {
+        codeMirrorViewRef.current = view;
+      }}
       extensions={[json(), noOutlineTheme, closeBrackets(), commandEnterKeymap]}
       placeholder='{ "message": "Enter JSON here..." }'
       basicSetup={{
