@@ -7,6 +7,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Loader2,
+  MessageSquare,
   MessageSquarePlus,
   PanelLeftClose,
   PanelLeftOpen,
@@ -176,6 +177,14 @@ export function TaskSidebar() {
     setIsCollapsed(prev => !prev);
   }, []);
 
+  const handleFeedback = useCallback(() => {
+    window.open(
+      'https://github.com/scaleapi/scale-agentex/issues/new',
+      '_blank',
+      'noopener,noreferrer'
+    );
+  }, []);
+
   return (
     <ResizableSidebar
       side="left"
@@ -231,6 +240,17 @@ export function TaskSidebar() {
               )}
             </>
           )}
+        </div>
+        <div className="mt-auto px-2 pt-2">
+          <Separator className="mb-2" />
+          <Button
+            onClick={handleFeedback}
+            variant="ghost"
+            className="text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary-foreground flex w-full items-center justify-start gap-2"
+          >
+            <MessageSquare className="size-4" />
+            Give Feedback
+          </Button>
         </div>
       </div>
     </ResizableSidebar>
