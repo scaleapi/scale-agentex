@@ -171,7 +171,7 @@ def sample_agent():
         id=str(uuid4()),
         name="test-agent",
         description="A test agent for use case testing",
-        acp_type=ACPType.ASYNC,
+        acp_type=ACPType.AGENTIC,
         status=AgentStatus.READY,
         acp_url="http://test-acp.example.com",
     )

@@ -46,9 +46,9 @@ async def handle_message_send(params: SendMessageParams):
     )
 ```
 
-### Async ACP - Full Lifecycle Management
+### Agentic ACP - Full Lifecycle Management
 
-**Async ACP** gives you complete control over task lifecycle with event-driven handlers. This is for complex workflows and stateful interactions.
+**Agentic ACP** gives you complete control over task lifecycle with event-driven handlers. This is for complex workflows and stateful interactions.
 
 **Key Characteristics:**
 
@@ -95,9 +95,9 @@ async def handle_message_send(params: SendMessageParams):
 # 3. Task Completion - Unnecessary in Sync ACP
 ```
 
-### Async ACP Lifecycle
+### Agentic ACP Lifecycle
 
-In Async ACP, you control the entire task lifecycle:
+In Agentic ACP, you control the entire task lifecycle:
 
 ```python
 # 1. Task Creation - Initialize whatever you need
@@ -128,7 +128,7 @@ Task IDs work the same way in both ACP types - they're globally unique identifie
 async def handle_message_send(params: SendMessageParams):
     task_id = params.task.id  # Available in message params
     
-# Async ACP  
+# Agentic ACP  
 @acp.on_task_create
 async def handle_task_create(params: CreateTaskParams):
     task_id = params.task.id  # Available in all handlers
@@ -177,7 +177,7 @@ This flat structure allows:
 - **Notification System**: Events signal that new messages have arrived, like "new mail in your mailbox"
 - **Content Wrapper**: Events contain `TaskMessageContent` but are not the source of truth
 - **Ephemeral**: Events are notifications, not stored entities you query later
-- **Triggering Mechanism**: In Async ACP, events trigger your `@acp.on_task_event_send` handlers
+- **Triggering Mechanism**: In Agentic ACP, events trigger your `@acp.on_task_event_send` handlers
 
 #### Processing Strategies:
 

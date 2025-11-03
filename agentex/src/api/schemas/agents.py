@@ -16,9 +16,7 @@ class AgentStatus(str, Enum):
 
 class ACPType(str, Enum):
     SYNC = "sync"
-    ASYNC = "async"
-
-    AGENTIC = "agentic"  # deprecated: use ASYNC instead
+    AGENTIC = "agentic"
 
 
 class AgentRPCMethod(str, Enum):
@@ -38,7 +36,7 @@ class Agent(BaseModel):
     )
     acp_type: ACPType = Field(
         ...,
-        description="The type of the ACP Server (Either sync or async)",
+        description="The type of the ACP Server (Either sync or agentic)",
     )
     status_reason: str | None = Field(
         None, description="The reason for the status of the action."

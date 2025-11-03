@@ -38,7 +38,7 @@ def sample_agent():
         id=str(uuid4()),
         name="test-agent",
         description="A test agent for deployment history testing",
-        acp_type=ACPType.ASYNC,
+        acp_type=ACPType.AGENTIC,
         status=AgentStatus.READY,
         acp_url="http://test-acp.example.com",
     )
@@ -215,7 +215,7 @@ class TestDeploymentHistoryUseCase:
             id=str(uuid4()),
             name="test-agent-1",
             description="First test agent",
-            acp_type=ACPType.ASYNC,
+            acp_type=ACPType.AGENTIC,
             status=AgentStatus.READY,
             acp_url="http://test-acp1.example.com",
         )
@@ -223,7 +223,7 @@ class TestDeploymentHistoryUseCase:
             id=str(uuid4()),
             name="test-agent-2",
             description="Second test agent",
-            acp_type=ACPType.ASYNC,
+            acp_type=ACPType.AGENTIC,
             status=AgentStatus.READY,
             acp_url="http://test-acp2.example.com",
         )

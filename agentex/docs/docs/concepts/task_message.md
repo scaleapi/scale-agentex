@@ -203,7 +203,7 @@ await adk.messages.create(
     If you want to **send a message directly to an agent** (not just create it in the task ledger), use the appropriate ACP function:
     
     - **Sync ACP**: Use `adk.acp.send_message()` to trigger the agent's `@acp.on_message_send` handler
-    - **Async ACP**: Use `adk.acp.send_event()` to trigger the agent's `@acp.on_task_event_send` handler
+    - **Agentic ACP**: Use `adk.acp.send_event()` to trigger the agent's `@acp.on_task_event_send` handler
     
     Simply using `adk.messages.create()` only adds the message to the task ledger - it doesn't notify or trigger the agent to process it.
 

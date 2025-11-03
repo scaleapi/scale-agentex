@@ -71,7 +71,7 @@ async def test_task_repository_crud_operations(postgres_url):
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
         acp_url="http://localhost:8000/acp",
-        acp_type=ACPType.ASYNC,
+        acp_type=ACPType.AGENTIC,
     )
 
     created_agent = await agent_repo.create(agent)
@@ -219,7 +219,7 @@ async def test_task_repository_params_support(postgres_url):
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
         acp_url="http://localhost:8000/acp",
-        acp_type=ACPType.ASYNC,
+        acp_type=ACPType.AGENTIC,
     )
 
     created_agent = await agent_repo.create(agent)
@@ -357,7 +357,7 @@ async def test_task_repository_task_metadata_support(postgres_url):
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
         acp_url="http://localhost:8000/acp",
-        acp_type=ACPType.ASYNC,
+        acp_type=ACPType.AGENTIC,
     )
 
     created_agent = await agent_repo.create(agent)
@@ -548,7 +548,7 @@ async def test_task_repository_null_task_metadata_handling(postgres_url):
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
         acp_url="http://localhost:8000/acp",
-        acp_type=ACPType.ASYNC,
+        acp_type=ACPType.AGENTIC,
     )
 
     created_agent = await agent_repo.create(agent)
@@ -694,7 +694,7 @@ async def test_list_with_join_includes_task_metadata(postgres_url):
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
         acp_url="http://localhost:8000/acp",
-        acp_type=ACPType.ASYNC,
+        acp_type=ACPType.AGENTIC,
     )
     await agent_repo.create(agent_1)
 
@@ -705,7 +705,7 @@ async def test_list_with_join_includes_task_metadata(postgres_url):
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
         acp_url="http://localhost:8000/acp",
-        acp_type=ACPType.ASYNC,
+        acp_type=ACPType.AGENTIC,
     )
     await agent_repo.create(agent_2)
 
@@ -897,7 +897,7 @@ async def test_list_with_join(postgres_url):
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
         acp_url="http://localhost:8000/acp",
-        acp_type=ACPType.ASYNC,
+        acp_type=ACPType.AGENTIC,
     )
     await agent_repo.create(agent_1)
 
@@ -908,7 +908,7 @@ async def test_list_with_join(postgres_url):
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
         acp_url="http://localhost:8000/acp",
-        acp_type=ACPType.ASYNC,
+        acp_type=ACPType.AGENTIC,
     )
     await agent_repo.create(agent_2)
 
