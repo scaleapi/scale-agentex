@@ -14,12 +14,6 @@ permissions:
   packages: write
 
 jobs:
-  build-images:
-    name: "Build AgentEx Images"
-    uses: ./.github/workflows/build-agentex.yml
-    with:
-      commit-sha: ${{ inputs.commit-sha || 'main' }}
-
   pull-agent-images:
     name: "Pull AgentEx Images"
     runs-on: ubuntu-latest
@@ -31,17 +25,48 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Discover and pull agentex-python packages
+      - name: Debug API Permissions
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "🔍 Discovering packages from agentex-python repo..."
+          echo "🔍 Testing API permissions..."
 
-          # Get package names using the API query
-          PACKAGES=$(gh api "orgs/scaleapi/packages?package_type=container" --jq '.[] | select(.repository.name == "agentex-python") | .name')
+          # Test basic user access
+          echo "👤 Current user:"
+          gh api user --jq '.login' || echo "❌ User API failed"
+
+          # Test organization access
+          echo "🏢 Organization access:"
+          gh api orgs/scaleapi --jq '.login' || echo "❌ Org API failed"
+
+          # Test different package API endpoints
+          echo "📦 Testing package API endpoints:"
+
+          echo "1. Basic packages endpoint:"
+          gh api "orgs/scaleapi/packages" --jq 'length' || echo "❌ Basic packages API failed"
+
+          echo "2. Container packages endpoint:"
+          gh api "orgs/scaleapi/packages?package_type=container" --jq 'length' || echo "❌ Container packages API failed"
+
+          echo "3. Public packages endpoint:"
+          gh api "orgs/scaleapi/packages?package_type=container&visibility=public" --jq 'length' || echo "❌ Public packages API failed"
+
+      - name: Discover and pull scale-agentex-python packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "🔍 Discovering packages from scale-agentex-python repo..."
+
+          # First get all packages and save to temp file to avoid shell issues
+          gh api "orgs/scaleapi/packages?package_type=container" > /tmp/packages.json
+
+          # Extract packages from scale-agentex-python repo
+          PACKAGES=$(cat /tmp/packages.json | jq -r '.[] | select(.repository.name == "scale-agentex-python") | .name')
 
           if [ -z "$PACKAGES" ]; then
-            echo "❌ No packages found in agentex-python repo"
+            echo "❌ No packages found in scale-agentex-python repo"
+            echo "🔍 Available packages and their repos:"
+            cat /tmp/packages.json | jq -r '.[] | "\(.name) -> \(.repository.name // "null")"'
             exit 0
           fi
 
