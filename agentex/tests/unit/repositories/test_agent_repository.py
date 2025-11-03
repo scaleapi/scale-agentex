@@ -64,7 +64,7 @@ async def test_agent_repository_crud_operations(postgres_url, isolated_test_sche
                 description="A test agent for unit testing",
                 docker_image="test/agent:latest",
                 status=AgentStatus.READY,
-                acp_type=ACPType.ASYNC,
+                acp_type=ACPType.AGENTIC,
                 acp_url="http://localhost:8000/acp",
             )
 

@@ -95,7 +95,7 @@ def sample_agent():
         name="test-agent",
         description="A test agent for unit testing",
         status=AgentStatus.READY,
-        acp_type=ACPType.ASYNC,
+        acp_type=ACPType.AGENTIC,
         acp_url="http://test-acp.example.com",
     )
 

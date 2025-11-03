@@ -73,7 +73,7 @@ async def test_agent_api_key_repository_crud_operations(
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
         acp_url="http://localhost:8000/acp",
-        acp_type=ACPType.ASYNC,
+        acp_type=ACPType.AGENTIC,
     )
 
     created_agent = await agent_repo.create(agent)

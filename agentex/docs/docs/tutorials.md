@@ -14,11 +14,11 @@ Perfect for learning basic agent patterns with simple request-response interacti
 - **[Multiturn](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/00_sync/010_multiturn)** - Add conversation history and memory
 - **[Streaming](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/00_sync/020_streaming)** - Stream real-time responses to clients
 
-### Async ACP - Base (Learning & Development)
+### Agentic ACP - Base (Learning & Development)
 
 Learn stateful workflows with full lifecycle control. Great for development and understanding advanced patterns.
 
-- **[Hello Async ACP](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic/00_base/000_hello_acp)** - Three-handler pattern fundamentals
+- **[Hello Agentic ACP](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic/00_base/000_hello_acp)** - Three-handler pattern fundamentals
 - **[Multiturn](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic/00_base/010_multiturn)** - Build stateful conversations
 - **[Streaming](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic/00_base/020_streaming)** - Stream responses in complex workflows
 - **[Tracing](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic/00_base/030_tracing)** - Add observability and debugging
@@ -26,7 +26,7 @@ Learn stateful workflows with full lifecycle control. Great for development and 
 - **[Batch Events](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic/00_base/080_batch_events)** - Handle multiple events efficiently
 - **[Multi-Agent Assembly Line](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic/00_base/090_multi_agent_non_temporal)** - Coordinate multiple agents without Temporal
 
-### Async ACP - Temporal (Production)
+### Agentic ACP - Temporal (Production)
 
 Enterprise-ready patterns with durable execution. For production deployments requiring reliability and fault tolerance.
 

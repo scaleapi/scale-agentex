@@ -68,7 +68,7 @@ async def test_agent_task_tracker_repository_crud_operations(postgres_url):
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
         acp_url="http://localhost:8000/acp",
-        acp_type=ACPType.ASYNC,
+        acp_type=ACPType.AGENTIC,
     )
 
     created_agent = await agent_repo.create(agent)

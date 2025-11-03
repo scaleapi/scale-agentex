@@ -355,7 +355,7 @@ class AgentsACPUseCase(TaskMessageMixin):
             agent=agent, task_name=params.name, task_params=params.params
         )
 
-        if agent.acp_type in [ACPType.AGENTIC, ACPType.ASYNC]:
+        if agent.acp_type == ACPType.AGENTIC:
             await self.task_service.forward_task_to_acp(
                 agent=agent,
                 task=task,

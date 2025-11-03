@@ -114,14 +114,14 @@ async def generate_streaming_response(input_text: str) -> AsyncGenerator[str, No
             yield chunk.choices[0].delta.content
 ```
 
-### Async ACP Streaming
+### Agentic ACP Streaming
 
 For event-driven workflows:
 
 ```python
 @acp.on_task_event_send
 async def handle_event_send(params: SendEventParams):
-    """Streaming in Async ACP"""
+    """Streaming in Agentic ACP"""
     
     # Use ADK streaming module for manual control
     stream = adk.streaming.create_stream(

@@ -92,11 +92,6 @@ ACP_TYPE_TO_ALLOWED_RPC_METHODS = {
         AgentRPCMethod.TASK_CANCEL,
         AgentRPCMethod.EVENT_SEND,
     ],
-    ACPType.ASYNC: [
-        AgentRPCMethod.TASK_CREATE,
-        AgentRPCMethod.TASK_CANCEL,
-        AgentRPCMethod.EVENT_SEND,
-    ],
 }
 
 

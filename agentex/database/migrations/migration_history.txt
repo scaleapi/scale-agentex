@@ -1,5 +1,4 @@
-d7addd4229e8 -> 329fbafa4ff9 (head), change_default_acp_to_async
-09368a02d6cc -> d7addd4229e8, soft delete status
+09368a02d6cc -> d7addd4229e8 (head), soft delete status
 739800d3e1ce -> 09368a02d6cc, deployment history
 dbac39ab82c3 -> 739800d3e1ce, registration metadata
 87454c35c13e -> dbac39ab82c3, add_task_metadata

@@ -1,6 +1,6 @@
 # Jupyter Notebooks for Agent Development
 
-Jupyter Notebooks provide an excellent environment for developing and testing AgentEx agents. This guide will walk you through how to use notebooks effectively for both **Sync ACP** and **Async ACP** agents.
+Jupyter Notebooks provide an excellent environment for developing and testing AgentEx agents. This guide will walk you through how to use notebooks effectively for both **Sync ACP** and **Agentic ACP** agents.
 
 ## Prerequisites
 
@@ -103,11 +103,11 @@ for agent_rpc_response_chunk in client.agents.send_message_stream(
     print(f"Streaming update: {task_message_update}")
 ```
 
-## Async ACP Agents
+## Agentic ACP Agents
 
 ### Lifecycle Overview
 
-Async ACP agents work asynchronously:
+Agentic ACP agents work asynchronously:
 
 - **Send events** → **Agent processes when ready** → **Subscribe to responses**
 - Events are like **mobile phone notifications** - asynchronous and non-blocking
@@ -129,10 +129,10 @@ AGENT_NAME = "your-agentic-agent-name"
 
 ### Step 1: Create a Task (Required)
 
-For async agents, you **must** create a task first:
+For agentic agents, you **must** create a task first:
 
 ```python
-# Create a new task (REQUIRED for async agents)
+# Create a new task (REQUIRED for agentic agents)
 rpc_response = client.agents.create_task(
     agent_name=AGENT_NAME,
     params={
@@ -169,7 +169,7 @@ print(f"Sent event: {event.id}")
 
 ### Step 3: Subscribe to Async Responses
 
-Since async agents work asynchronously, you need to subscribe to responses:
+Since agentic agents work asynchronously, you need to subscribe to responses:
 
 ```python
 from agentex.lib.utils.dev_tools import subscribe_to_async_task_messages
@@ -234,7 +234,7 @@ When using `cancel_task`:
 
 ### Working with Different Content Types
 
-Both sync and async agents support various content types:
+Both sync and agentic agents support various content types:
 
 ```python
 # Text content (most common)

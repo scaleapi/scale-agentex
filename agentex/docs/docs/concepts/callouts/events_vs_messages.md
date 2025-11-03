@@ -1,7 +1,7 @@
 # Events vs Messages
 
-!!! danger "Critical for Async ACP"
-    **Events and TaskMessages serve different purposes and are stored in separate database tables.** This distinction is fundamental to understanding how Async ACP works.
+!!! danger "Critical for Agentic ACP"
+    **Events and TaskMessages serve different purposes and are stored in separate database tables.** This distinction is fundamental to understanding how Agentic ACP works.
 
 ## The Core Distinction
 
