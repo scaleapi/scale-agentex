@@ -1,9 +1,9 @@
 # Events
 
-Events are persistent database records that coordinate agent processing workflows in **Agentic ACP only**. They represent activity within tasks and enable event-driven architectures for building sophisticated, distributed agents.
+Events are persistent database records that coordinate agent processing workflows in **Async ACP only**. They represent activity within tasks and enable event-driven architectures for building sophisticated, distributed agents.
 
-!!! warning "Agentic ACP Only"
-    Events are **only available in Agentic ACP**, not Sync ACP. Sync ACP uses direct request/response patterns without events.
+!!! warning "Async ACP Only"
+    Events are **only available in Async ACP**, not Sync ACP. Sync ACP uses direct request/response patterns without events.
 
 ## What Are Events?
 
@@ -11,7 +11,7 @@ Events are **processing coordination objects** stored in the events database tab
 
 **Key Characteristics:**
 
-- **Agentic ACP Only**: Not available in Sync ACP
+- **Async ACP Only**: Not available in Sync ACP
 - **Persistent**: Stored permanently in the events database table
 - **Sequential**: Ordered by `sequence_id` for predictable processing
 - **Pre-saved**: Written to database **BEFORE** being delivered to agents via ACP
@@ -31,7 +31,7 @@ class Event:
 
 ## When to Use Events
 
-Use events in Agentic ACP when you need:
+Use events in Async ACP when you need:
 
 - **Batch Processing**: Accumulate multiple events and process together
 - **Progress Tracking**: Track which events have been processed
@@ -40,7 +40,7 @@ Use events in Agentic ACP when you need:
 
 ## Event Processing Flow
 
-The event processing flow in Agentic ACP:
+The event processing flow in Async ACP:
 
 1. **User Action**: User sends message or performs action  
 2. **Event Created**: Event written to events table **BEFORE** ACP delivery
@@ -122,7 +122,7 @@ async def handle_with_context(params: SendEventParams):
 
 ## Key Points
 
-- **Agentic ACP Only**: Events are not available in Sync ACP
+- **Async ACP Only**: Events are not available in Sync ACP
 - **Pre-stored**: Events written to database before ACP delivery
 - **Agent Creates Messages**: Agent developers create TaskMessages, not the server
 - **Cursor-Based**: Use with Agent Task Tracker for progress tracking
