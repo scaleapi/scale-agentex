@@ -3,8 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 
-import { formatDistanceToNow } from 'date-fns';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
 import {
   Loader2,
   MessageSquarePlus,
@@ -15,6 +14,7 @@ import {
 
 import { IconButton } from '@/components/agentex/icon-button';
 import { ResizableSidebar } from '@/components/agentex/resizable-sidebar';
+import { TaskButton } from '@/components/agentex/task-button';
 import { useAgentexClient } from '@/components/providers';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -24,107 +24,6 @@ import {
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
 import { useInfiniteTasks } from '@/hooks/use-tasks';
-import { cn } from '@/lib/utils';
-
-import type { TaskListResponse } from 'agentex/resources';
-
-type TaskButtonProps = {
-  task: TaskListResponse.TaskListResponseItem;
-};
-
-function TaskButton({ task }: TaskButtonProps) {
-  const { taskID, updateParams } = useSafeSearchParams();
-  const taskName = createTaskName(task);
-
-  const firstAgentName = useMemo(
-    () => task.agents?.[0]?.name ?? null,
-    [task.agents]
-  );
-
-  const handleTaskSelect = useCallback(
-    (taskID: TaskListResponse.TaskListResponseItem['id']) => {
-      updateParams({
-        [SearchParamKey.TASK_ID]: taskID,
-        [SearchParamKey.AGENT_NAME]: firstAgentName,
-      });
-    },
-    [updateParams, firstAgentName]
-  );
-
-  const createdAtString = useMemo(
-    () =>
-      task.created_at
-        ? formatDistanceToNow(new Date(task.created_at), {
-            addSuffix: true,
-          })
-        : 'No date',
-    [task.created_at]
-  );
-  const agentsString = useMemo(() => {
-    if (!task.agents || task.agents.length === 0) return 'No agents';
-
-    const firstAgent = task.agents[0];
-    if (!firstAgent) return 'No agents';
-
-    if (task.agents.length === 1) {
-      return firstAgent.name;
-    }
-
-    return `${firstAgent.name} + ${task.agents.length - 1} more`;
-  }, [task.agents]);
-
-  return (
-    <motion.div
-      className=""
-      layout
-      initial={{ opacity: 0, x: -50 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -50 }}
-      transition={{
-        layout: { duration: 0.3, ease: 'easeInOut' },
-        opacity: {
-          duration: 0.2,
-          delay: 0.2,
-        },
-        x: {
-          delay: 0.2,
-          type: 'spring',
-          damping: 30,
-          stiffness: 300,
-        },
-      }}
-    >
-      <Button
-        variant="ghost"
-        className={`hover:bg-sidebar-accent hover:text-sidebar-primary-foreground flex h-auto w-full cursor-pointer flex-col items-start justify-start gap-1 px-2 py-2 text-left transition-colors ${
-          taskID === task.id
-            ? 'bg-sidebar-primary text-sidebar-primary-foreground'
-            : 'text-sidebar-foreground'
-        }`}
-        onClick={() => handleTaskSelect(task.id)}
-        onKeyDown={e => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            handleTaskSelect(task.id);
-          }
-        }}
-      >
-        <span className="w-full truncate text-sm">{taskName}</span>
-        <div
-          className={cn(
-            'text-muted-foreground w-full truncate text-xs',
-            (task.agents && task.agents.length > 0) || task.created_at
-              ? 'block'
-              : 'invisible'
-          )}
-        >
-          {createdAtString}
-          {task.agents && task.agents.length > 0 && task.created_at && ' • '}
-          {agentsString}
-        </div>
-      </Button>
-    </motion.div>
-  );
-}
 
 export function TaskSidebar() {
   const { agentName, updateParams } = useSafeSearchParams();
@@ -280,15 +179,4 @@ function SidebarHeader({
       </Button>
     </div>
   );
-}
-
-function createTaskName(task: TaskListResponse.TaskListResponseItem): string {
-  if (
-    task?.params?.description &&
-    typeof task.params.description === 'string'
-  ) {
-    return task.params.description;
-  }
-
-  return 'Unnamed task';
 }

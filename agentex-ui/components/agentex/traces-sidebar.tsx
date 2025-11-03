@@ -14,7 +14,7 @@ import { useSpans } from '@/hooks/use-spans';
 const MIN_SIDEBAR_WIDTH = 350;
 const DEFAULT_SIDEBAR_WIDTH = 350;
 
-export type TracesSidebarProps = {
+type TracesSidebarProps = {
   isOpen: boolean;
 };
 

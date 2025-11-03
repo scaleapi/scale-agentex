@@ -3,6 +3,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowDown } from 'lucide-react';
 
+import { ChatView } from '@/app/chat-view';
+import { HomeView } from '@/app/home-view';
 import { IconButton } from '@/components/agentex/icon-button';
 import { PromptInput } from '@/components/agentex/prompt-input';
 import { TaskTopBar } from '@/components/agentex/task-top-bar';
@@ -13,13 +15,10 @@ import {
   SearchParamKey,
 } from '@/hooks/use-safe-search-params';
 
-import { ChatView } from './chat-view';
-import { HomeView } from './home-view';
-
-interface ContentAreaProps {
+type ContentAreaProps = {
   isTracesSidebarOpen: boolean;
   toggleTracesSidebar: () => void;
-}
+};
 
 export function PrimaryContent({
   isTracesSidebarOpen,

@@ -1,6 +1,8 @@
+import { memo } from 'react';
+
 import { cva } from 'class-variance-authority';
 
-import { Response } from '@/components/ai-elements/response';
+import { MarkdownResponse } from '@/components/agentex/markdown-response';
 import { cn } from '@/lib/utils';
 
 import type { TextContent } from 'agentex/resources';
@@ -14,20 +16,22 @@ const variants = cva('', {
   },
 });
 
-type TaskMessageTextContentComponentProps = {
+type TaskMessageTextContentProps = {
   content: TextContent;
   key?: string | undefined;
 };
 
-function TaskMessageTextContentComponent({
+function TaskMessageTextContentImpl({
   content,
   key,
-}: TaskMessageTextContentComponentProps) {
+}: TaskMessageTextContentProps) {
   return (
     <div className={cn(variants({ author: content.author }))}>
-      <Response key={key}>{content.content}</Response>
+      <MarkdownResponse key={key}>{content.content}</MarkdownResponse>
     </div>
   );
 }
 
-export { TaskMessageTextContentComponent };
+const TaskMessageTextContent = memo(TaskMessageTextContentImpl);
+
+export { TaskMessageTextContent };

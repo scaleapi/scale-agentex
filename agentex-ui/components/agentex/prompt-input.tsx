@@ -21,7 +21,7 @@ import {
 } from '@/hooks/use-safe-search-params';
 import { useSendMessage } from '@/hooks/use-task-messages';
 
-export type PromptInputProps = {
+type PromptInputProps = {
   prompt: string;
   setPrompt: (prompt: string) => void;
 };

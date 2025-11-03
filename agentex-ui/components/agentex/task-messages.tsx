@@ -2,15 +2,14 @@ import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AnimatePresence, motion } from 'framer-motion';
 
-import { TaskMessageDataContentComponent } from '@/components/agentex/task-message-data-content';
+import { TaskMessageDataContent } from '@/components/agentex/task-message-data-content';
 import { TaskMessageReasoning } from '@/components/agentex/task-message-reasoning-content';
 import { TaskMessageScrollContainer } from '@/components/agentex/task-message-scroll-container';
-import { TaskMessageTextContentComponent } from '@/components/agentex/task-message-text-content';
+import { TaskMessageTextContent } from '@/components/agentex/task-message-text-content';
+import { TaskMessageToolPair } from '@/components/agentex/task-message-tool-pair';
 import { useAgentexClient } from '@/components/providers';
+import { ShimmeringText } from '@/components/ui/shimmering-text';
 import { useTaskMessages } from '@/hooks/use-task-messages';
-
-import { MemoizedTaskMessageToolPairComponent } from './task-message-tool-pair';
-import { ShimmeringText } from '../ui/shimmering-text';
 
 import type {
   TaskMessage,
@@ -18,7 +17,7 @@ import type {
   ToolResponseContent,
 } from 'agentex/resources';
 
-type TaskMessagesComponentProps = {
+type TaskMessagesProps = {
   taskId: string;
 };
 type MessagePair = {
@@ -27,9 +26,7 @@ type MessagePair = {
   agentMessages: TaskMessage[];
 };
 
-function MemoizedTaskMessagesComponentImpl({
-  taskId,
-}: TaskMessagesComponentProps) {
+function TaskMessagesImpl({ taskId }: TaskMessagesProps) {
   const lastPairRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerHeight, setContainerHeight] = useState<number>(0);
@@ -150,14 +147,14 @@ function MemoizedTaskMessagesComponentImpl({
   const renderMessage = (message: TaskMessage) => {
     switch (message.content.type) {
       case 'text':
-        return <TaskMessageTextContentComponent content={message.content} />;
+        return <TaskMessageTextContent content={message.content} />;
       case 'data':
-        return <TaskMessageDataContentComponent content={message.content} />;
+        return <TaskMessageDataContent content={message.content} />;
       case 'reasoning':
         return <TaskMessageReasoning message={message} />;
       case 'tool_request':
         return (
-          <MemoizedTaskMessageToolPairComponent
+          <TaskMessageToolPair
             toolRequestMessage={
               message as TaskMessage & { content: ToolRequestContent }
             }
@@ -217,6 +214,6 @@ function MemoizedTaskMessagesComponentImpl({
   );
 }
 
-const MemoizedTaskMessagesComponent = memo(MemoizedTaskMessagesComponentImpl);
+const TaskMessages = memo(TaskMessagesImpl);
 
-export { MemoizedTaskMessagesComponent };
+export { TaskMessages };

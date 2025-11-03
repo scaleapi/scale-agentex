@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { ToastContainer } from 'react-toastify';
 
+import { PrimaryContent } from '@/app/primary-content';
 import { TaskSidebar } from '@/components/agentex/task-sidebar';
 import { TracesSidebar } from '@/components/agentex/traces-sidebar';
 import { AgentexProvider } from '@/components/providers';
@@ -12,8 +13,6 @@ import {
   SearchParamKey,
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
-
-import { PrimaryContent } from './primary-content';
 
 type AgentexUIRootProps = {
   sgpAppURL: string;
