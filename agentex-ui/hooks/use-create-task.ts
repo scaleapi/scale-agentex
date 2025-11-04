@@ -18,6 +18,17 @@ import type {
   TaskRetrieveResponse,
 } from 'agentex/resources';
 
+/**
+ * Updates a task within an infinite query cache structure for optimistic updates.
+ *
+ * If the task exists in any page, updates it in place. Otherwise, adds it to the top
+ * of the first page with a temporary agent object attached for display purposes.
+ *
+ * @param task - Task - The task entity to update or insert
+ * @param agentName - string - The name of the agent associated with this task
+ * @param data - InfiniteData<TaskListResponse> | undefined - Current paginated task list cache data
+ * @returns InfiniteData<TaskListResponse> | undefined - Updated cache data with the task included
+ */
 export function updateTaskInInfiniteQuery(
   task: Task,
   agentName: string,
@@ -69,6 +80,16 @@ type CreateTaskParams = {
   params?: Record<string, unknown>;
 };
 
+/**
+ * Creates a new task for an agent via the Agentex RPC API.
+ *
+ * On success, automatically updates all relevant React Query caches (individual task,
+ * all tasks list, agent-specific tasks list) for immediate UI updates. On error,
+ * displays a user-facing toast notification.
+ *
+ * @param agentexClient - AgentexSDK - The SDK client used to send the task creation request
+ * @returns UseMutationResult<Task, Error, CreateTaskParams> - Mutation object with mutate/mutateAsync functions
+ */
 export function useCreateTask({
   agentexClient,
 }: {

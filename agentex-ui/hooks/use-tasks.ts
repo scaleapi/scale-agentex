@@ -16,6 +16,17 @@ export const tasksKeys = {
     [...tasksKeys.individual, taskId] as const,
 };
 
+/**
+ * Fetches a single task with full details and relationships.
+ *
+ * Retrieves complete task information including status, parameters, and associated
+ * agent relationships. The query is disabled when no taskId is provided to prevent
+ * unnecessary API calls.
+ *
+ * @param agentexClient - AgentexSDK - The SDK client used to fetch the task
+ * @param taskId - string - The unique ID of the task to retrieve
+ * @returns UseQueryResult<TaskRetrieveResponse> - Query result containing the full task details
+ */
 export function useTask({
   agentexClient,
   taskId,
@@ -34,6 +45,17 @@ export function useTask({
   });
 }
 
+/**
+ * Fetches tasks with infinite scroll pagination for task lists.
+ *
+ * Loads tasks in pages for efficient rendering of long task lists. Supports optional
+ * filtering by agent name to show only tasks for a specific agent. Each task includes
+ * agent relationships for display purposes.
+ *
+ * @param agentexClient - AgentexSDK - The SDK client used to fetch paginated tasks
+ * @param options - { agentName?: string; limit?: number } - Optional filters and page size configuration
+ * @returns UseInfiniteQueryResult<InfiniteData<TaskListResponse>> - Infinite query with fetchNextPage support
+ */
 export function useInfiniteTasks(
   agentexClient: AgentexSDK,
   options?: { agentName?: string; limit?: number }

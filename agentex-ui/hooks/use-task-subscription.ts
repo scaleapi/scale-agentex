@@ -11,6 +11,19 @@ import { tasksKeys } from '@/hooks/use-tasks';
 import type AgentexSDK from 'agentex';
 import type { TaskListResponse, TaskRetrieveResponse } from 'agentex/resources';
 
+/**
+ * Subscribes to real-time updates for a task's state, messages, and streaming status.
+ *
+ * Establishes a persistent connection to the Agentex backend to receive live task updates
+ * as they happen. Automatically updates React Query cache when events arrive, triggering
+ * UI re-renders. The subscription cleans up automatically on unmount or when dependencies change.
+ *
+ * @param agentexClient - AgentexSDK - The SDK client used to establish the subscription connection
+ * @param taskId - string - The unique ID of the task to monitor
+ * @param agentName - string - The name of the agent executing the task (used for cache updates)
+ * @param enabled - boolean - Whether the subscription should be active (default: true), should be false for sync agents
+ * @returns void - This hook manages side effects and does not return a value
+ */
 export function useTaskSubscription({
   agentexClient,
   taskId,
