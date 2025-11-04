@@ -22,10 +22,10 @@ const URL_REGEX =
 const valueStyles = cva('', {
   variants: {
     type: {
-      string: 'text-green-600 dark:text-green-400',
-      number: 'text-blue-600 dark:text-blue-400',
-      boolean: 'text-purple-600 dark:text-purple-400',
-      null: 'text-orange-500',
+      string: 'text-green-700 dark:text-green-300',
+      number: 'text-blue-700 dark:text-blue-300',
+      boolean: 'text-purple-700 dark:text-purple-300',
+      null: 'text-orange-700 dark:text-orange-300',
       object: 'text-muted-foreground',
       array: 'text-muted-foreground',
     },

@@ -96,12 +96,14 @@ export function TaskSidebar() {
             onClick={toggleCollapse}
             variant="ghost"
             className="text-foreground"
+            aria-label="Open Task Sidebar"
           />
           <IconButton
             icon={MessageSquarePlus}
             onClick={handleNewChat}
             variant="ghost"
             className="text-foreground"
+            aria-label="New Chat"
           />
         </div>
       )}
@@ -181,12 +183,14 @@ function SidebarHeader({
           onClick={toggleCollapse}
           variant="ghost"
           className="text-foreground"
+          aria-label="Close Task Sidebar"
         />
       </div>
       <Button
         onClick={handleNewChat}
         variant="ghost"
         className="text-foreground flex items-center justify-between gap-2 py-2 pr-2 pl-4"
+        aria-label="New Chat"
       >
         <div className="flex items-center gap-2">
           <SquarePen className="size-5" />

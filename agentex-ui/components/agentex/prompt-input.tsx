@@ -180,6 +180,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
           onClick={handleSendPrompt}
           disabled={isDisabled || !prompt.trim()}
           icon={ArrowUp}
+          aria-label="Send Prompt"
         />
       </div>
       <div
@@ -190,7 +191,11 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
         }}
       >
         Send JSON:
-        <Switch checked={isSendingJSON} onCheckedChange={handleSetJson} />
+        <Switch
+          checked={isSendingJSON}
+          onCheckedChange={handleSetJson}
+          aria-label="Send JSON"
+        />
       </div>
     </div>
   );
