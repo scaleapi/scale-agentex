@@ -5,7 +5,7 @@ The Agent-to-Client Protocol (ACP) is the foundation of how agents communicate w
 - **Standard message formats** for agent interactions into [`TaskMessage`](https://github.com/scaleapi/scale-agentex-python/blob/main/src/agentex/types/task_message.py) objects
 - **Decorated functions** that agents must implement as entrypoints to agent logic
     - Sync ACP: [`on_message_send`](https://github.com/scaleapi/scale-agentex-python/blob/main/src/agentex/lib/sdk/fastacp/base/base_acp_server.py#L346)
-    - Agentic ACP: [`on_task_create`](https://github.com/scaleapi/scale-agentex-python/blob/main/src/agentex/lib/sdk/fastacp/base/base_acp_server.py#L314), [`on_task_event_send`](https://github.com/scaleapi/scale-agentex-python/blob/main/src/agentex/lib/sdk/fastacp/base/base_acp_server.py#L321), [`on_task_cancel`](https://github.com/scaleapi/scale-agentex-python/blob/main/src/agentex/lib/sdk/fastacp/base/base_acp_server.py#L339)
+    - Async ACP: [`on_task_create`](https://github.com/scaleapi/scale-agentex-python/blob/main/src/agentex/lib/sdk/fastacp/base/base_acp_server.py#L314), [`on_task_event_send`](https://github.com/scaleapi/scale-agentex-python/blob/main/src/agentex/lib/sdk/fastacp/base/base_acp_server.py#L321), [`on_task_cancel`](https://github.com/scaleapi/scale-agentex-python/blob/main/src/agentex/lib/sdk/fastacp/base/base_acp_server.py#L339)
 - **Lifecycle management** for conversations and workflows
 - **Streaming and communication** between clients and agents
 
@@ -25,7 +25,7 @@ Agentex supports three agent types with different execution models and capabilit
 - Blocking, synchronous execution is acceptable
 - Processing one request at a time is sufficient
 
-**Use Agentic Agents (Base) when:**
+**Use Async Agents (Base) when:**
 
 - Asynchronous workflows and stateful applications needed
 - Must handle multiple concurrent requests

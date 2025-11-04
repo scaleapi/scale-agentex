@@ -1168,7 +1168,7 @@ class TestTasksAPIIntegration:
             name="list-view-agent-2",
             description="Second agent for list view testing",
             acp_url="http://test-acp-2:8000",
-            acp_type=ACPType.AGENTIC,
+            acp_type=ACPType.ASYNC,
         )
         created_agent1 = await agent_repo.create(agent1)
         created_agent2 = await agent_repo.create(agent2)
@@ -1246,7 +1246,7 @@ class TestTasksAPIIntegration:
             name="other-filter-agent",
             description="Other agent",
             acp_url="http://test-acp-2:8000",
-            acp_type=ACPType.AGENTIC,
+            acp_type=ACPType.ASYNC,
         )
         created_target = await agent_repo.create(target_agent)
         created_other = await agent_repo.create(other_agent)

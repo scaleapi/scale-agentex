@@ -1,6 +1,6 @@
-# Base Agentic ACP
+# Base Async ACP
 
-**Base Agentic ACP** is the foundational asynchronous model for Agentex. It gives you full control over the task lifecycle with three handlers while Agentex takes care of transport, streaming, and message delivery.
+**Base Async ACP** is the foundational asynchronous model for Agentex. It gives you full control over the task lifecycle with three handlers while Agentex takes care of transport, streaming, and message delivery.
 
 ## Core Characteristics
 
@@ -42,9 +42,9 @@ from agentex.lib.types.fastacp import AgenticACPConfig
 from agentex.lib.types.acp import CreateTaskParams, SendEventParams, CancelTaskParams
 from agentex.lib import adk
 
-# Create Base Agentic ACP server
+# Create Base Async ACP server
 acp = FastACP.create(
-    acp_type="agentic",
+    acp_type="async",
     config=AgenticACPConfig(type="base")
 )
 

@@ -4,7 +4,7 @@ Agentex supports three agent types with different execution models and capabilit
 
 ## Agent Type Comparison
 
-| Agent Type | [Sync Agents](../acp/sync.md) | [Agentic Agents (Base)](../acp/agentic/base.md) | [Agentic Agents (Temporal)](../acp/agentic/temporal.md) |
+| Agent Type | [Sync Agents](../agent_types/sync.md) | [Async Agents (Base)](../agent_types/async/base.md) | [Async Agents (Temporal)](../agent_types/async/temporal.md) |
 |---------|-------------|----------------|-----------------|
 | **Execution Model** | Blocking, synchronous | Asynchronous, non-blocking | Asynchronous, non-blocking |
 | **Concurrent Requests** | Processes one request at a time | Can process multiple concurrent requests | Can process multiple concurrent requests |
@@ -17,7 +17,7 @@ Agentex supports three agent types with different execution models and capabilit
 | **Example Use Cases** | FAQ bots, translation services, data lookups | Interactive applications, multi-step analysis, complex business logic | Enterprise integrations, multi-day processes, distributed coordination |
 | **Typical Complexity** | ~30 lines, 1 file | ~80 lines, 1 file | 150+ lines, 4 files |
 
-**Learn more:** [Sync ACP](../acp/sync.md) \| [Agentic ACP](../acp/agentic/overview.md) \| [Temporal Guide](../development_guides/temporal_guide.md) \| [Tutorials](../development_guides/tutorials.md)
+**Learn more:** [Sync ACP](../agent_types/sync.md) \| [Async ACP](../agent_types/async/overview.md) \| [Temporal Guide](../development_guides/temporal_guide.md) \| [Tutorials](../development_guides/tutorials.md)
 
 ---
 
@@ -25,12 +25,12 @@ Agentex supports three agent types with different execution models and capabilit
 
 | Current Type | When to Upgrade | Upgrade To | Key Benefit |
 |--------------|----------------|------------|-------------|
-| **Sync** | Need to handle concurrent requests, perform long running tasks, you find yourself polling or dealing with resource contention issues. | **Agentic (Base)** | Asynchronous execution and state management |
-| **Agentic (Base)** | Need workflows that survive crashes, have complex multi-step tool calls, or need human-in-the-loop approvals | **Agentic (Temporal)** | Durable execution and complex transactional reliability |
+| **Sync** | Need to handle concurrent requests, perform long running tasks, you find yourself polling or dealing with resource contention issues. | **Async (Base)** | Asynchronous execution and state management |
+| **Async (Base)** | Need workflows that survive crashes, have complex multi-step tool calls, or need human-in-the-loop approvals | **Async (Temporal)** | Durable execution and complex transactional reliability |
 
 ## Migration Guides
 
-### Sync → Agentic (Base)
+### Sync → Async (Base)
 
 **What changes:**
 
@@ -42,14 +42,14 @@ Agentex supports three agent types with different execution models and capabilit
 
 2. Change from returning content to explicitly calling `adk.messages.create()` for all messages
 
-3. Update ACP configuration from `acp_type="sync"` to `acp_type="agentic"` with `AgenticACPConfig(type="base")`
+3. Update ACP configuration from `acp_type="sync"` to `acp_type="async"` with `AgenticACPConfig(type="base")`
 
 !!! tip
-    It's probably easier just to run `agentex init` to bootstrap the skeleton of a new Agentex agent (choose `Agentic - ACP Only` when asked for the type) and then copy over the logic yourself.
+    It's probably easier just to run `agentex init` to bootstrap the skeleton of a new Agentex agent (choose `Async - ACP Only` when asked for the type) and then copy over the logic yourself.
 
-**Guide:** [Migration Guide](../concepts/migration_guide.md#sync-to-agentic)
+**Guide:** [Migration Guide](../concepts/migration_guide.md#sync-to-async)
 
-### Agentic (Base) → Agentic (Temporal)
+### Async (Base) → Async (Temporal)
 
 **What changes:**
 
@@ -66,8 +66,8 @@ Agentex supports three agent types with different execution models and capabilit
 4. Store state in workflow class variables (e.g., `self._state`) instead of only using `adk.state` API
 
 !!! tip
-    It's probably easier just to run `agentex init` to bootstrap the skeleton of a new Agentex agent (choose `Agentic - Temporal` when asked for the type) and then copy over the logic yourself.
+    It's probably easier just to run `agentex init` to bootstrap the skeleton of a new Agentex agent (choose `Async - Temporal` when asked for the type) and then copy over the logic yourself.
 
-**Guide:** [Migration Guide](../concepts/migration_guide.md#agentic-to-temporal)
+**Guide:** [Migration Guide](../concepts/migration_guide.md#async-to-temporal)
 
 ---

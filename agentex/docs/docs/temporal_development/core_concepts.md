@@ -40,10 +40,12 @@ Workflows use standard Python syntax with Temporal durability guarantees.
 @workflow.signal(name=SignalName.RECEIVE_EVENT)
 async def on_task_event_send(self, params: SendEventParams) -> None:
     # AgentEx ADK functions are automatically retried activities
-    result = await adk.providers.openai.run_agent_streamed_auto_send(
-        task_id=params.task.id,
-        input_list=self._state.input_list  # Can fail, will retry
+    test_agent = Agent(
+        name="Test Agent",
+        instructions="You are a test agent"
     )
+
+    result = await Runner.run(test_agent, self._state.input_list) # Can fail, will retry
 
     await adk.messages.create(
         task_id=params.task.id,
@@ -92,7 +94,8 @@ async def on_task_event_send(self, params: SendEventParams) -> None:
     await adk.messages.create(...)
 
     # Replay: "We already did this step" (skip)
-    result = await adk.providers.openai.run_agent_streamed_auto_send(...)
+    test_agent = Agent(...)
+    result = await Runner.run(...)
 
     # New: "This is where we crashed, continue from here"
     self._state.turn_number += 1  # ← Resumes here with updated state

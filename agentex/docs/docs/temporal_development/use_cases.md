@@ -46,7 +46,7 @@ result = await Runner.run(
 print(result.final_output)
 ```
 
-**Why Temporal is NOT needed:** For simple single-step tools, **Temporal is not necessary**. Base Agentic ACP or even Sync ACP is sufficient for basic operations that complete quickly and don't require durability. Use Base ACP without Temporal for these cases—it's simpler, faster to develop, and has less operational overhead. Temporal only becomes essential when you need the capabilities shown in the scenarios below.
+**Why Temporal is NOT needed:** For simple single-step tools, **Temporal is not necessary**. Base Async ACP or even Sync ACP is sufficient for basic operations that complete quickly and don't require durability. Use Base ACP without Temporal for these cases—it's simpler, faster to develop, and has less operational overhead. Temporal only becomes essential when you need the capabilities shown in the scenarios below.
 
 ---
 

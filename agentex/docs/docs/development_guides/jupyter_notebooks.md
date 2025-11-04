@@ -159,11 +159,11 @@ for agent_rpc_response_chunk in client.agents.send_message_stream(
             print(f"Found non-text {type(task_message)} object in full message.")
 ```
 
-## Agentic ACP Agents
+## Async ACP Agents
 
 ### Lifecycle Overview
 
-Agentic ACP agents work asynchronously:
+Async ACP agents work asynchronously:
 
 - **Send events** → **Agent processes when ready** → **Subscribe to responses**
 - Events are like **mobile phone notifications** - asynchronous and non-blocking
@@ -173,7 +173,7 @@ Agentic ACP agents work asynchronously:
 
 ### What's in the Notebook
 
-Your `dev.ipynb` notebook for Agentic ACP agents contains the following pre-configured cells:
+Your `dev.ipynb` notebook for Async ACP agents contains the following pre-configured cells:
 
 #### Cell 1: Client Setup (Already Configured)
 

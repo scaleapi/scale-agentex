@@ -1,18 +1,18 @@
-# Race Conditions in Agentic ACP
+# Race Conditions in Async ACP
 
 !!! danger "Critical for Production Systems"
-    **All agentic ACP types can experience race conditions that corrupt agent state and cause unpredictable behavior.** Temporal ACP handles these better through singleton workflows and message queuing, but understanding race conditions is crucial for all production systems.
+    **All async ACP types can experience race conditions that corrupt agent state and cause unpredictable behavior.** Temporal ACP handles these better through singleton workflows and message queuing, but understanding race conditions is crucial for all production systems.
 
 ## The Core Problem
 
-In **all agentic ACP types**, multiple events can trigger concurrent processing, leading to race conditions where agents compete for the same resources and corrupt each other's state.
+In **all async ACP types**, multiple events can trigger concurrent processing, leading to race conditions where agents compete for the same resources and corrupt each other's state.
 
 **Temporal ACP** handles this better because workflows are singleton instances with built-in message queuing, while **Base ACP** requires manual race condition handling.
 
-### ❌ What Happens with Race Conditions (All Agentic ACP)
+### ❌ What Happens with Race Conditions (All Async ACP)
 
 ```python
-# Any agentic ACP - Multiple events can trigger simultaneously
+# Any async ACP - Multiple events can trigger simultaneously
 @acp.on_task_event_send
 async def handle_event_send(params: SendEventParams):
     # 🚨 RACE CONDITION: Two events arrive at the same time
@@ -54,6 +54,7 @@ class At010AgentChatWorkflow(BaseWorkflow):
         super().__init__(display_name="Agent Chat")
         self._complete_task = False
         self._state = None
+        self._task_id = None
 
     @workflow.signal(name=SignalName.RECEIVE_EVENT)
     async def on_task_event_send(self, params: SendEventParams) -> None:
@@ -65,6 +66,8 @@ class At010AgentChatWorkflow(BaseWorkflow):
         # Increment turn number - no race condition because only
         # one signal processes at a time
         self._state.turn_number += 1
+        # this will be used by OpenAI Agents SDK/Temporal via context variables
+        self._task_id = params.task.id
         
         # Add message to history - safe because sequential processing
         self._state.input_list.append({
@@ -73,14 +76,13 @@ class At010AgentChatWorkflow(BaseWorkflow):
         })
         
         # Process with LLM - each event gets complete, uninterrupted processing
-        run_result = await adk.providers.openai.run_agent_streamed_auto_send(
-            task_id=params.task.id,
-            input_list=self._state.input_list,
-            # ... other params
-        )
+        test_agent = Agent(
+            name="Test Agent",
+            instructions="You are a test agent")
+        result = await Runner.run(test_agent, self._state.input_list)
         
         # Update state - safe because no concurrent modifications
-        self._state.input_list = run_result.final_input_list
+        self._state.input_list = result.final_output
 
     @workflow.run
     async def on_task_create(self, params: CreateTaskParams) -> str:
@@ -229,7 +231,7 @@ async def on_task_event_send(self, params):
 
 ### Using Agent Task Tracker Cursors for Safe Processing
 
-For Base Agentic ACP, you can use **Agent Task Tracker cursors** to coordinate processing and reduce race conditions:
+For Base Async ACP, you can use **Agent Task Tracker cursors** to coordinate processing and reduce race conditions:
 
 ```python
 @acp.on_task_event_send
@@ -320,7 +322,7 @@ async def cursor_batch_handler(params: SendEventParams):
 ```
 
 !!! warning "Not a Complete Solution"
-    Agent Task Tracker cursors **reduce** race conditions but don't eliminate them entirely. For complete race condition prevention, use **Temporal Agentic ACP** which provides guaranteed sequential processing.
+    Agent Task Tracker cursors **reduce** race conditions but don't eliminate them entirely. For complete race condition prevention, use **Temporal Async ACP** which provides guaranteed sequential processing.
 
 ## Common Race Condition Scenarios
 
@@ -394,7 +396,7 @@ async def on_task_event_send(self, params: SendEventParams) -> None:
 ## Key Takeaway
 
 !!! info "Production Recommendation"
-    - **All agentic ACP**: Can experience race conditions under concurrent load
+    - **All async ACP**: Can experience race conditions under concurrent load
     - **Base ACP**: Requires manual distributed locking/queuing mechanisms
     - **Temporal ACP**: Provides built-in singleton workflows + message queuing for better race condition handling
     - **Best practice**: Use Temporal ACP for production systems to leverage platform-level concurrency protection

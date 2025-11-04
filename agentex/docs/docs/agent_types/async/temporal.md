@@ -1,6 +1,6 @@
-# Temporal Agentic ACP
+# Temporal Async ACP
 
-**Temporal Agentic ACP** provides production-ready agent development with **durable execution**, **fault tolerance**, and **automatic state management**. You don't write the ACP handlers yourself - instead, you implement Temporal workflow methods and Agentex automatically handles the ACP mapping for you.
+**Temporal Async ACP** provides production-ready agent development with **durable execution**, **fault tolerance**, and **automatic state management**. You don't write the ACP handlers yourself - instead, you implement Temporal workflow methods and Agentex automatically handles the ACP mapping for you.
 
 ## Core Characteristics
 
@@ -112,7 +112,7 @@ from agentex.lib.types.fastacp import TemporalACPConfig
 
 # Create the ACP server
 acp = FastACP.create(
-    acp_type="agentic",
+    acp_type="async",
     config=TemporalACPConfig(
         type="temporal",
         temporal_address=os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
