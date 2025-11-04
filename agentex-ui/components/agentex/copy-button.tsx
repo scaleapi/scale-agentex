@@ -33,7 +33,6 @@ export function CopyButton({
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleCopy = useCallback(() => {
-    // Clear any existing timeout
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
     }
@@ -68,10 +67,7 @@ export function CopyButton({
       variant="ghost"
       iconSize="sm"
       onClick={handleCopy}
-      className={cn(
-        'hover:bg-muted hover:text-muted-foreground size-6 transition-colors',
-        className
-      )}
+      className={cn('size-6 transition-colors', className)}
       aria-label={isCopying ? 'Copied' : 'Copy'}
     />
   );

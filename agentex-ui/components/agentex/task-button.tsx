@@ -81,11 +81,10 @@ function TaskButtonImpl({ task }: TaskButtonProps) {
     >
       <Button
         variant="ghost"
-        className={`hover:bg-sidebar-accent hover:text-sidebar-primary-foreground flex h-auto w-full cursor-pointer flex-col items-start justify-start gap-1 px-2 py-2 text-left transition-colors ${
-          taskID === task.id
-            ? 'bg-sidebar-primary text-sidebar-primary-foreground'
-            : 'text-sidebar-foreground'
-        }`}
+        className={cn(
+          'hover:bg-muted hover:text-primary-foreground text-foreground flex h-auto w-full cursor-pointer flex-col items-start justify-start gap-1 px-2 py-2 text-left transition-colors',
+          taskID === task.id && 'bg-primary'
+        )}
         onClick={() => handleTaskSelect(task.id)}
         onKeyDown={e => {
           if (e.key === 'Enter' || e.key === ' ') {

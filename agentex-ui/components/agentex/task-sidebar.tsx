@@ -54,7 +54,6 @@ export function TaskSidebar() {
 
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
-      // Trigger fetch when user is within 100px of the bottom
       const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
 
       if (isNearBottom && hasNextPage && !isFetchingNextPage) {
@@ -88,7 +87,7 @@ export function TaskSidebar() {
     <ResizableSidebar
       side="left"
       storageKey="taskSidebarWidth"
-      className="py-4"
+      className="px-2 py-4"
       isCollapsed={isCollapsed}
       renderCollapsed={() => (
         <div className="flex flex-col items-center gap-4">
@@ -96,13 +95,15 @@ export function TaskSidebar() {
             icon={PanelLeftOpen}
             onClick={toggleCollapse}
             variant="ghost"
-            className="text-sidebar-foreground"
+            className="text-foreground"
+            aria-label="Open Task Sidebar"
           />
           <IconButton
             icon={MessageSquarePlus}
             onClick={handleNewChat}
             variant="ghost"
-            className="text-sidebar-foreground"
+            className="text-foreground"
+            aria-label="New Chat"
           />
         </div>
       )}
@@ -115,7 +116,7 @@ export function TaskSidebar() {
         <Separator />
         <div
           ref={scrollContainerRef}
-          className="flex flex-col gap-1 overflow-y-auto px-2"
+          className="flex flex-col gap-1 overflow-y-auto"
         >
           {isLoadingTasks ? (
             <>
@@ -172,7 +173,7 @@ function SidebarHeader({
           <Image
             src="/scale-logo.svg"
             alt="Scale"
-            className="text-sidebar-foreground dark:invert"
+            className="text-foreground dark:invert"
             width={60}
             height={20}
           />
@@ -181,13 +182,15 @@ function SidebarHeader({
           icon={PanelLeftClose}
           onClick={toggleCollapse}
           variant="ghost"
-          className="text-sidebar-foreground"
+          className="text-foreground"
+          aria-label="Close Task Sidebar"
         />
       </div>
       <Button
         onClick={handleNewChat}
         variant="ghost"
-        className="text-sidebar-foreground flex items-center justify-between gap-2"
+        className="text-foreground flex items-center justify-between gap-2 py-2 pr-2 pl-4"
+        aria-label="New Chat"
       >
         <div className="flex items-center gap-2">
           <SquarePen className="size-5" />

@@ -33,7 +33,13 @@ const noOutlineTheme = EditorView.theme({
     outline: 'none',
   },
   '.cm-content': {
-    backgroundColor: 'transparent',
+    backgroundColor: 'inherit',
+  },
+  '.cm-editor': {
+    backgroundColor: 'inherit',
+  },
+  '.cm-cursor': {
+    borderLeftColor: 'var(--color-foreground)',
   },
 });
 
@@ -150,7 +156,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
   return (
     <div className="flex w-full flex-col gap-2">
       <div
-        className={`border-input dark:bg-input/30 ${isDisabled ? 'bg-muted scale-90 cursor-not-allowed' : 'scale-100'} flex w-full items-center justify-between rounded-4xl border py-2 pr-2 pl-6 transition-transform duration-300 disabled:cursor-not-allowed`}
+        className={`border-input dark:bg-input ${isDisabled ? 'bg-muted scale-90 cursor-not-allowed' : 'scale-100'} flex w-full items-center justify-between rounded-4xl border py-2 pr-2 pl-6 shadow-sm transition-transform duration-300 disabled:cursor-not-allowed`}
       >
         {isSendingJSON ? (
           <DataInput
@@ -174,6 +180,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
           onClick={handleSendPrompt}
           disabled={isDisabled || !prompt.trim()}
           icon={ArrowUp}
+          aria-label="Send Prompt"
         />
       </div>
       <div
@@ -184,7 +191,11 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
         }}
       >
         Send JSON:
-        <Switch checked={isSendingJSON} onCheckedChange={handleSetJson} />
+        <Switch
+          checked={isSendingJSON}
+          onCheckedChange={handleSetJson}
+          aria-label="Send JSON"
+        />
       </div>
     </div>
   );
@@ -264,7 +275,7 @@ const DataInput = ({
 
   return (
     <CodeMirror
-      className="mx-1 w-full rounded-full text-sm"
+      className="dark:bg-input/30 mx-1 w-full rounded-full text-sm"
       value={prompt}
       onChange={(value: string) => setPrompt(value)}
       onCreateEditor={view => {
@@ -279,11 +290,8 @@ const DataInput = ({
         highlightActiveLine: false,
       }}
       editable={!isDisabled}
+      theme="none"
       maxHeight="200px"
-      style={{
-        backgroundColor: 'inherit',
-        cursor: 'inherit',
-      }}
     />
   );
 };

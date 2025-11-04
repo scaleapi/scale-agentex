@@ -50,9 +50,7 @@ export function TaskTopBar({
         <div className="flex items-center gap-2">
           {taskId && (
             <>
-              <span className="text-sm" style={{ color: '#6B7280' }}>
-                Task ID:
-              </span>
+              <span className="text-muted-foreground text-sm">Task ID:</span>
               <span className="text-foreground text-sm">{displayTaskId}</span>
               {taskId && (
                 <CopyButton tooltip="Copy full ID" onClick={copyTaskId} />
@@ -68,9 +66,9 @@ export function TaskTopBar({
                 onAgentChange(value === selectedAgentName ? undefined : value);
               }}
             >
-              <SelectTrigger className="max-w-60">
+              <SelectTrigger className="max-w-60" aria-label="Select Agent">
                 <Bot />
-                <SelectValue placeholder="Select an agent" />
+                <SelectValue placeholder="Select Agent" />
               </SelectTrigger>
               <SelectContent>
                 {agents.map(agent => (

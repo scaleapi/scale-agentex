@@ -18,6 +18,15 @@ type UseSpansState = {
   error: string | null;
 };
 
+/**
+ * Fetches execution spans for observability and debugging of task execution.
+ *
+ * Spans are OpenTelemetry-style trace records that show the execution flow of an agent task.
+ * The query is automatically disabled when no traceId is provided.
+ *
+ * @param traceId - string | null - The trace ID to fetch spans for, or null to disable the query
+ * @returns UseSpansState - Object containing the spans array, loading state, and any error message
+ */
 export function useSpans(traceId: string | null): UseSpansState {
   const { agentexClient } = useAgentexClient();
 

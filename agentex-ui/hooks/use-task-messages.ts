@@ -24,6 +24,17 @@ export const taskMessagesKeys = {
   byTaskId: (taskId: string) => [...taskMessagesKeys.all, taskId] as const,
 };
 
+/**
+ * Fetches the conversation messages for a specific task.
+ *
+ * Returns all messages exchanged between the user and agent during task execution,
+ * along with a delta accumulator for handling partial streaming updates and an RPC
+ * status indicator. Refetching is disabled to prevent interrupting live message streams.
+ *
+ * @param agentexClient - AgentexSDK - The SDK client used to fetch messages
+ * @param taskId - string - The unique ID of the task whose messages to retrieve
+ * @returns UseQueryResult<TaskMessagesData> - Query result containing messages, delta accumulator, and RPC status
+ */
 export function useTaskMessages({
   agentexClient,
   taskId,

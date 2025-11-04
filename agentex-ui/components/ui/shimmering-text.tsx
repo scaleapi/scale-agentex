@@ -26,7 +26,11 @@ export const ShimmeringText = ({
         <motion.span
           key={index}
           animate={{
-            color: ['rgb(55 65 81)', 'rgb(220, 220, 220)', 'rgb(55 65 81)'],
+            color: [
+              'var(--color-foreground)',
+              'var(--color-background)',
+              'var(--color-foreground)',
+            ],
           }}
           transition={{
             delay: index * 0.02,
@@ -35,7 +39,7 @@ export const ShimmeringText = ({
             repeatDelay: characters.length * 0.02 + SHIMMER_DELAY,
             ease: 'easeInOut',
           }}
-          style={{ color: 'rgb(55 65 81)' }}
+          className="text-foreground"
         >
           {char}
         </motion.span>

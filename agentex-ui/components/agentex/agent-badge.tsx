@@ -38,8 +38,8 @@ function AgentBadgeImpl({ agent }: AgentBadgeProps) {
       onClick={handleClick}
       className={`relative cursor-pointer overflow-hidden rounded-full px-4 py-2 text-sm font-medium ${
         isSelected
-          ? 'bg-primary text-primary-foreground border-primary-foreground border'
-          : 'border-border border'
+          ? 'bg-primary text-primary-foreground border-primary-foreground border shadow-md'
+          : 'border-border border shadow-xs'
       } `}
       initial={isSelected ? false : { opacity: 0 }}
       animate={{

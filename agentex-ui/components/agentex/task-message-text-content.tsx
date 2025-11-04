@@ -10,7 +10,7 @@ import type { TextContent } from 'agentex/resources';
 const variants = cva('', {
   variants: {
     author: {
-      user: 'rounded-md bg-muted text-muted-foreground ml-auto w-fit max-w-[80%] p-4',
+      user: 'rounded-md shadow-sm bg-muted text-muted-foreground ml-auto w-fit max-w-[80%] p-4',
       agent: '',
     },
   },
