@@ -20,6 +20,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check if user is maintainer
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: context.actor
+            });
+
+            const allowedRoles = ['admin', 'maintain'];
+            if (!allowedRoles.includes(permission.permission)) {
+              throw new Error(`❌ User ${context.actor} does not have sufficient permissions. Required: ${allowedRoles.join(', ')}. Current: ${permission.permission}`);
+            }
+
       # Checkout repository
       - name: Checkout
         uses: actions/checkout@v4
@@ -83,4 +98,3 @@ jobs:
           echo "Also tagged as: ghcr.io/${{ github.repository }}/${{ env.AGENTEX_SERVER_IMAGE_NAME }}:latest"
           echo "This image is now available as the latest stable version"
           echo "Package set to public visibility"
-
