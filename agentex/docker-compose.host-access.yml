@@ -1,0 +1,8 @@
+# docker-compose.host-access.yml
+# Override file to add host access when needed
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.host-access.yml up
+services:
+  agentex:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
