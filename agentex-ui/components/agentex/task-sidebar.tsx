@@ -141,14 +141,14 @@ export function TaskSidebar() {
             </>
           )}
         </div>
-        <div className="mt-auto px-2 pt-2">
+        <div className="mt-auto pt-2">
           <Separator className="mb-2" />
           <Button
             onClick={handleFeedback}
             variant="ghost"
             className="text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary-foreground flex w-full items-center justify-start gap-2"
           >
-            <MessageSquare className="size-4" />
+            <MessageSquare className="size-5" />
             Give Feedback
           </Button>
         </div>
