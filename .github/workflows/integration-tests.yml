@@ -27,7 +27,7 @@ jobs:
 
       - name: Debug API Permissions
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_READ_PACKAGES_SECRET }}
         run: |
           echo "🔍 Testing API permissions..."
 
