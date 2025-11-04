@@ -20,6 +20,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Validate Main Branch
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "Error: This workflow can only run on main branch"
+            exit 1
+          fi
+
       - name: Check if user is maintainer
         uses: actions/github-script@v7
         with:
@@ -38,6 +45,8 @@ jobs:
       # Checkout repository
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       # Set up Python and uv for documentation building
       - name: Set up Python
