@@ -33,7 +33,6 @@ export function CopyButton({
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleCopy = useCallback(() => {
-    // Clear any existing timeout
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
     }

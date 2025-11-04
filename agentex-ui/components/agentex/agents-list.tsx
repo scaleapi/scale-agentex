@@ -20,7 +20,6 @@ export function AgentsList({ agents, isLoading = false }: AgentsListProps) {
     hasMounted.current = true;
   }, []);
 
-  // Filter agents: show only selected agent if one is selected, otherwise show all
   const displayedAgents = selectedAgentName
     ? agents.filter(agent => agent.name === selectedAgentName)
     : agents;

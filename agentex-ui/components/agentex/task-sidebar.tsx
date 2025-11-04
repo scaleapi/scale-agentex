@@ -54,7 +54,6 @@ export function TaskSidebar() {
 
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
-      // Trigger fetch when user is within 100px of the bottom
       const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
 
       if (isNearBottom && hasNextPage && !isFetchingNextPage) {

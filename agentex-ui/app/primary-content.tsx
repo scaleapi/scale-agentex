@@ -55,7 +55,7 @@ export function PrimaryContent({
       const { scrollTop, scrollHeight, clientHeight } = container;
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
 
-      const scrollThreshold = 100; // pixels from bottom
+      const scrollThreshold = 100;
       const isNearBottom = distanceFromBottom < scrollThreshold;
 
       setShowScrollButton(!isNearBottom);

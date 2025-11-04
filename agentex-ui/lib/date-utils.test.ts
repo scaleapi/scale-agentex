@@ -22,7 +22,7 @@ describe('calculateThinkingTime', () => {
     const nextBlockTimestamp = '2024-01-01T00:00:02.456Z';
 
     const result = calculateThinkingTime(message, nextBlockTimestamp);
-    expect(result).toBe(2.5); // 2.456 rounded to 1 decimal
+    expect(result).toBe(2.5);
   });
 
   it('rounds to nearest second for times 10 seconds or more', () => {
@@ -32,7 +32,7 @@ describe('calculateThinkingTime', () => {
     const nextBlockTimestamp = '2024-01-01T00:00:15.789Z';
 
     const result = calculateThinkingTime(message, nextBlockTimestamp);
-    expect(result).toBe(16); // 15.789 rounded to nearest second
+    expect(result).toBe(16);
   });
 
   it('returns null when message.created_at is null', () => {
@@ -110,6 +110,6 @@ describe('calculateThinkingTime', () => {
     const nextBlockTimestamp = '2024-01-01T00:05:00.000Z';
 
     const result = calculateThinkingTime(message, nextBlockTimestamp);
-    expect(result).toBe(300); // 5 minutes = 300 seconds
+    expect(result).toBe(300);
   });
 });
