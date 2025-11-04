@@ -34,7 +34,7 @@ export function HomeView() {
             updateParams({ [SearchParamKey.AGENT_NAME]: null });
             setLocalAgentName(undefined);
           }}
-          className={`text-muted-foreground cursor-pointer text-xs transition-opacity duration-200 hover:underline ${
+          className={`text-accent-foreground cursor-pointer text-xs transition-opacity duration-200 hover:underline ${
             agentName ? 'opacity-100' : 'pointer-events-none opacity-0'
           }`}
         >

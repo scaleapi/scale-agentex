@@ -42,8 +42,8 @@ export function TracesSidebar({ isOpen }: TracesSidebarProps) {
           >
             <TooltipProvider>
               <div className="flex h-full flex-col">
-                <div className="border-sidebar-border border-b px-4 py-4">
-                  <h2 className="text-sidebar-foreground text-lg font-semibold">
+                <div className="border-border border-b px-4 py-4">
+                  <h2 className="text-foreground text-lg font-semibold">
                     Traces
                   </h2>
                   <p className="text-muted-foreground mt-1 text-sm">
@@ -82,7 +82,7 @@ export function TracesSidebar({ isOpen }: TracesSidebarProps) {
                     return (
                       <div key={span.id}>
                         <div className="mb-2 flex items-baseline gap-2">
-                          <h3 className="text-sidebar-foreground text-sm font-medium">
+                          <h3 className="text-foreground text-sm font-medium">
                             {span.name}
                           </h3>
                           <Tooltip delayDuration={0}>

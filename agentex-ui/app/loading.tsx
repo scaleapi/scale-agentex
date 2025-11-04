@@ -13,9 +13,9 @@ export default function Loading() {
   if (taskID) {
     return (
       <div className="fixed inset-0 flex w-full">
-        <div className="bg-sidebar border-sidebar-border flex h-full w-64 flex-col border-r">
-          <div className="border-sidebar-border border-b pt-4 pr-4 pb-6 pl-2">
-            <div className="flex items-center gap-2 pb-4 pl-2">
+        <div className="bg-background border-border flex h-full w-64 flex-col border-r">
+          <div className="border-border border-b p-4">
+            <div className="flex items-center gap-2 pb-4">
               <Skeleton className="h-6 w-24" />
             </div>
             <Skeleton className="h-10 w-full" />
@@ -77,7 +77,7 @@ export default function Loading() {
         <div className="flex w-full justify-center px-4 py-8 sm:px-6 md:px-8">
           <div className="w-full max-w-3xl">
             <div className="w-full opacity-50">
-              <div className="border-input dark:bg-input/30 disabled:bg-muted flex w-full justify-between rounded-full border bg-transparent py-2 pr-2 pl-6 disabled:cursor-not-allowed">
+              <div className="border-input dark:bg-input/30 disabled:bg-accent flex w-full justify-between rounded-full border bg-transparent py-2 pr-2 pl-6 disabled:cursor-not-allowed">
                 <input
                   type="text"
                   value=""

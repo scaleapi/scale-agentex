@@ -80,7 +80,7 @@ export function ResizableSidebar({
         className={cn(
           'relative flex h-full flex-col',
           borderClass,
-          'border-sidebar-border group overflow-hidden',
+          'border-border group overflow-hidden',
           className
         )}
         initial={false}
@@ -147,7 +147,7 @@ export function ResizableSidebar({
         {!isCollapsed && (
           <div
             className={cn(
-              'hover:bg-sidebar-accent absolute top-0 h-full w-1 transition-all duration-300 hover:w-1',
+              'hover:bg-accent absolute top-0 h-full w-1 transition-all duration-300 hover:w-1',
               dragHandlePosition
             )}
             style={{

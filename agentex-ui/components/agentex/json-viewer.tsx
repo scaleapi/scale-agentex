@@ -105,7 +105,7 @@ function JsonCollapsible({
 
   return (
     <div {...props}>
-      <div className="hover:bg-accent/50 group/line flex items-center gap-2 rounded px-2">
+      <div className="hover:bg-accent/30 group/line flex items-center gap-2 rounded px-2">
         <button
           onClick={() => setIsExpanded(!isExpanded)}
           className="flex flex-1 items-center gap-1 font-mono text-sm"
@@ -126,7 +126,10 @@ function JsonCollapsible({
           {extraButtons}
           {showCopyButton && (
             <div className="opacity-0 transition-opacity group-hover/line:opacity-100">
-              <CopyButton content={copyContent} />
+              <CopyButton
+                content={copyContent}
+                className="hover:bg-accent/50"
+              />
             </div>
           )}
         </div>
@@ -288,7 +291,7 @@ function JsonNode({
   return (
     <div
       className={cn(
-        'hover:bg-accent/50 group/line flex items-center gap-2 rounded px-2',
+        'hover:bg-accent/30 group/line flex items-center gap-2 rounded px-2',
         indentClassName
       )}
     >
@@ -318,7 +321,7 @@ function JsonNode({
       </div>
       <CopyButton
         content={copyContent}
-        className="opacity-0 transition-opacity group-hover/line:opacity-100"
+        className="hover:bg-accent/50 opacity-0 transition-opacity group-hover/line:opacity-100"
       />
     </div>
   );
@@ -356,7 +359,7 @@ export function JsonViewer({
           variant="ghost"
           size="sm"
           onClick={toggleForceExpandState}
-          className="text-muted-foreground hover:text-foreground h-6 gap-1.5 text-xs"
+          className="text-muted-foreground hover:text-foreground hover:bg-accent/30 h-6 gap-1.5 text-xs"
         >
           {shouldShowExpand ? (
             <>
@@ -370,7 +373,10 @@ export function JsonViewer({
             </>
           )}
         </Button>
-        <CopyButton content={JSON.stringify(data, null, 2)} />
+        <CopyButton
+          content={JSON.stringify(data, null, 2)}
+          className="hover:bg-accent/30"
+        />
       </>
     );
   }, [data, shouldShowExpand, toggleForceExpandState]);
