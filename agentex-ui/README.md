@@ -2,7 +2,7 @@
 
 A modern web interface for building, testing, and monitoring intelligent agents. The Agentex UI provides a comprehensive developer experience for interacting with agents, managing tasks, and visualizing execution traces.
 
-![Agentex UI Dashboard](./docs/screenshots/dashboard.png)
+<img src="./docs/images/dashboard.png" alt="Agentex UI Dashboard" width="1280"/>
 
 ## Features
 
@@ -12,7 +12,7 @@ A modern web interface for building, testing, and monitoring intelligent agents.
 - **Agent Details** - View agent configurations, capabilities, and deployment status
 - **Multi-Agent Support** - Work with multiple agents simultaneously
 
-![Agent List](./docs/screenshots/agents-list.png)
+<img src="./docs/images/agents-list.gif" alt="Agents List" width="1280"/>
 
 ### Task Execution
 
@@ -20,7 +20,7 @@ A modern web interface for building, testing, and monitoring intelligent agents.
 - **Task History** - View complete task execution history with filtering by agent
 - **Infinite Scroll** - Efficiently browse through long task lists
 
-![Task List](./docs/screenshots/tasks-list.png)
+<img src="./docs/images/tasks-list.gif" alt="Tasks List" width="1280"/>
 
 ### Interactive Chat
 
@@ -29,7 +29,7 @@ A modern web interface for building, testing, and monitoring intelligent agents.
 - **Message History** - Full conversation history with timestamps
 - **Rich Content Support** - Display text, markdown, code, and structured data
 
-![Chat Interface](./docs/screenshots/chat-interface.png)
+<img src="./docs/images/chat-interface.gif" alt="Chat Interface" width="1280"/>
 
 ### Observability
 
@@ -38,7 +38,7 @@ A modern web interface for building, testing, and monitoring intelligent agents.
 - **Performance Metrics** - Timing and duration information for each execution step
 - **Error Tracking** - Detailed error information when tasks fail
 
-![Execution Traces](./docs/screenshots/execution-traces.png)
+<img src="./docs/images/execution-traces.gif" alt="Execution Traces" width="1280"/>
 
 ### Developer Experience
 
@@ -110,11 +110,13 @@ The application will start on [http://localhost:3000](http://localhost:3000).
 ## Scripts
 
 **Development:**
+
 - `make dev` or `npm run dev` — Start dev server with Turbopack
 - `npm run build` — Create production build
 - `npm start` — Start production server
 
 **Code Quality:**
+
 - `make lint` or `npm run lint` — Run ESLint with zero warnings policy
 - `npm run lint:fix` — Auto-fix linting issues
 - `make typecheck` or `npm run typecheck` — TypeScript type checking
@@ -122,6 +124,7 @@ The application will start on [http://localhost:3000](http://localhost:3000).
 - `npm run format:check` — Check formatting without writing
 
 **Testing:**
+
 - `npm test` — Run tests in watch mode
 - `npm run test:run` — Run tests once (CI mode)
 - `npm run test:ui` — Open Vitest UI for interactive testing
@@ -171,6 +174,7 @@ npm run test:coverage
 ### Test Configuration
 
 The test suite is configured with:
+
 - **Environment**: happy-dom (lightweight DOM simulation)
 - **Globals**: Enabled for describe/it/expect without imports
 - **Coverage**: v8 provider with text, JSON, and HTML reporters
