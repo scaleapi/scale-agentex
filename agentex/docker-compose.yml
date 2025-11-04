@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   agentex-temporal-postgresql:
@@ -83,10 +83,10 @@ services:
     ports:
       - "6379:6379"
     networks:
-      - agentex-network  # Redis should also be on the same network
+      - agentex-network # Redis should also be on the same network
     volumes:
       - agentex-redis-data:/data:cached
-    command: [ "redis-server", "--appendonly", "yes" ]
+    command: ["redis-server", "--appendonly", "yes"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -140,6 +140,8 @@ services:
       context: ..
       dockerfile: agentex/Dockerfile
       target: dev
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - ENVIRONMENT=development
       - UVICORN_PORT=5003
