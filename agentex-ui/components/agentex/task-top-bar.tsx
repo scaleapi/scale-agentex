@@ -3,7 +3,6 @@ import { Activity, Bot } from 'lucide-react';
 import { CopyButton } from '@/components/agentex/copy-button';
 import { IconButton } from '@/components/agentex/icon-button';
 import { InvestigateTracesButton } from '@/components/agentex/investigate-traces-button';
-import { ThemeToggle } from '@/components/agentex/theme-toggle';
 import {
   Select,
   SelectContent,
@@ -83,7 +82,6 @@ export function TaskTopBar({
           )}
         </div>
         <div className="flex items-center gap-2">
-          <ThemeToggle />
           {taskId && (
             <>
               {toggleTracesSidebar && (
