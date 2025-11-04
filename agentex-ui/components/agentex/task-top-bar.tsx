@@ -49,9 +49,7 @@ export function TaskTopBar({
         <div className="flex items-center gap-2">
           {taskId && (
             <>
-              <span className="text-sm" style={{ color: '#6B7280' }}>
-                Task ID:
-              </span>
+              <span className="text-muted-foreground text-sm">Task ID:</span>
               <span className="text-foreground text-sm">{displayTaskId}</span>
               {taskId && (
                 <CopyButton tooltip="Copy full ID" onClick={copyTaskId} />
