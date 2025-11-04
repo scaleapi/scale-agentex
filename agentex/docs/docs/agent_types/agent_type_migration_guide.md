@@ -6,12 +6,12 @@ This guide provides comprehensive, step-by-step instructions for migrating agent
 
 | From | To | When to Migrate | Complexity Increase |
 |------|----|-----------------|--------------------|
-| **Sync** | **Agentic (Base)** | Need to change from a synchronous blocking agent to a session-based asynchronous agent. | Small |
-| **Agentic (Base)** | **Agentic (Temporal)** | Need to build a long-running agent<br>• Handle complex multi-step / transactional tools<br>• Easier state management with just class variables<br>• Better race condition handling<br>• Better batch processing | Medium |
+| **Sync** | **Async (Base)** | Need to change from a synchronous blocking agent to a session-based asynchronous agent. | Small |
+| **Async (Base)** | **Async (Temporal)** | Need to build a long-running agent<br>• Handle complex multi-step / transactional tools<br>• Easier state management with just class variables<br>• Better race condition handling<br>• Better batch processing | Medium |
 
-## Part 1: Sync ACP → Agentic (Base) ACP
+## Part 1: Sync ACP → Async (Base) ACP
 
-Use `agentex init` to create a new project directory (select "Agentic (Base)" when prompted for ACP type), then migrate your code from the single `@acp.on_message_send` handler to the three Agentic (Base) handlers:
+Use `agentex init` to create a new project directory (select "Async (Base)" when prompted for ACP type), then migrate your code from the single `@acp.on_message_send` handler to the three Async (Base) handlers:
 
 - `@acp.on_task_create` - Initialize state or send welcome messages
 - `@acp.on_task_event_send` - Your main message processing logic (migrated from `on_message_send`)
@@ -54,9 +54,9 @@ async def handle_task_cancel(params: CancelTaskParams):
     pass
 ```
 
-## Part 2: Agentic (Base) ACP → Agentic (Temporal) ACP
+## Part 2: Async (Base) ACP → Async (Temporal) ACP
 
-Use `agentex init` to create a new project directory (select "Agentic (Temporal)" when prompted for ACP type), then migrate your three handlers into a Temporal workflow:
+Use `agentex init` to create a new project directory (select "Async (Temporal)" when prompted for ACP type), then migrate your three handlers into a Temporal workflow:
 
 - `@acp.on_task_create` → `@workflow.run` (workflow initialization)
 - `@acp.on_task_event_send` → `@workflow.signal` (event processing)

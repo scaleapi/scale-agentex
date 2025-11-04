@@ -9,7 +9,7 @@ Agentex offers three distinct approaches, each designed for different levels of 
 | Approach | Best For | Complexity | Key Features |
 |----------|----------|------------|--------------|
 | **🚀 Sync Agents** | Chat bots, FAQ systems, quick demos | ~30 lines, 1 file | Immediate responses, auto-scaling, streaming built-in |
-| **💪 Agentic Agents** | Customer support, personalized experiences | ~80 lines, 1 file | Persistent memory, multi-turn conversations, event-driven |
+| **💪 Async Agents** | Customer support, personalized experiences | ~80 lines, 1 file | Persistent memory, multi-turn conversations, event-driven |
 | **⚡ Temporal Agents** | Mission-critical systems, complex workflows | 150+ lines, 4 files | Survives restarts, enterprise reliability, distributed execution |
 
 ### 🚀 Sync Agents - Simple Request-Response
@@ -21,7 +21,7 @@ Agentex offers three distinct approaches, each designed for different levels of 
 
 ---
 
-### 💪 Agentic Agents - Stateful Workflows  
+### 💪 Async Agents - Stateful Workflows  
 
 - **Perfect when you need**: Persistent memory, multi-step processes, event-driven logic
 - **What you get**: Three handler methods, manual message creation, full state control, MongoDB persistence
@@ -51,7 +51,7 @@ Agentex offers three distinct approaches, each designed for different levels of 
 - Minimal development time
 - Traditional Q&A patterns
 
-**✅ Choose Agentic if**:
+**✅ Choose Async if**:
 - Need to remember conversations
 - Multi-step workflows
 - Custom state management
@@ -69,10 +69,10 @@ Agentex offers three distinct approaches, each designed for different levels of 
 
 | Current Situation | Upgrade To | Reason |
 |-------------------|------------|---------|
-| "I wish my agent remembered what users said earlier" | **Sync → Agentic** | Need persistent state |
-| "My agent lost all state when the server restarted" | **Agentic → Temporal** | Need durable execution |
-| "I need workflows that run for days/weeks" | **Agentic → Temporal** | Need enterprise reliability |
-| "I need to coordinate multiple systems" | **Agentic → Temporal** | Need distributed workflows |
+| "I wish my agent remembered what users said earlier" | **Sync → Async** | Need persistent state |
+| "My agent lost all state when the server restarted" | **Async → Temporal** | Need durable execution |
+| "I need workflows that run for days/weeks" | **Async → Temporal** | Need enterprise reliability |
+| "I need to coordinate multiple systems" | **Async → Temporal** | Need distributed workflows |
 
 ### Warning Signs You Need to Upgrade
 
@@ -87,15 +87,15 @@ Agentex offers three distinct approaches, each designed for different levels of 
 
 When you outgrow your current approach, Agentex provides clear upgrade paths:
 
-### Sync → Agentic Migration
+### Sync → Async Migration
 **What changes**: Add state management, implement three handlers instead of one, manually create messages
 
-**👉 Detailed guide**: [Migration Guide](concepts/migration_guide.md#sync-to-agentic)
+**👉 Detailed guide**: [Migration Guide](concepts/migration_guide.md#sync-to-async)
 
-### Agentic → Temporal Migration  
+### Async → Temporal Migration  
 **What changes**: Convert handlers to Temporal workflows, add worker processes, implement durable execution patterns
 
-**👉 Detailed guide**: [Migration Guide](concepts/migration_guide.md#agentic-to-temporal)
+**👉 Detailed guide**: [Migration Guide](concepts/migration_guide.md#async-to-temporal)
 
 ---
 
@@ -105,12 +105,12 @@ When you outgrow your current approach, Agentex provides clear upgrade paths:
 
 1. **Start Simple**: Begin with Sync unless you know you need complexity
 2. **Prototype Fast**: Use Sync to validate your agent logic quickly  
-3. **Add Complexity**: Upgrade to Agentic when you need state or workflows
+3. **Add Complexity**: Upgrade to Async when you need state or workflows
 4. **Go Enterprise**: Move to Temporal for production reliability
 
 ### Rule of Thumb
 
-**Most developers should stop at Agentic.** Only proceed to Temporal if you need:
+**Most developers should stop at Async.** Only proceed to Temporal if you need:
 - Enterprise-grade reliability
 - Multi-day workflows  
 - Guaranteed execution despite failures

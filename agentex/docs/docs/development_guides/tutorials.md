@@ -14,11 +14,11 @@ Basic agent patterns with simple request-response interactions.
 - **[Multiturn](https://github.com/scaleapi/agentex-python/tree/main/examples/tutorials/00_sync/010_multiturn){target="_blank"}**: Conversation history and memory
 - **[Streaming](https://github.com/scaleapi/agentex-python/tree/main/examples/tutorials/00_sync/020_streaming){target="_blank"}**: Real-time response streaming
 
-### Agentic ACP - Base (Learning & Development)
+### Async ACP - Base (Learning & Development)
 
 Stateful workflows with full lifecycle control for development and advanced patterns.
 
-- **[Hello Agentic ACP](https://github.com/scaleapi/agentex-python/tree/main/examples/tutorials/10_agentic/00_base/000_hello_acp){target="_blank"}**: Three-handler pattern fundamentals
+- **[Hello Async ACP](https://github.com/scaleapi/agentex-python/tree/main/examples/tutorials/10_agentic/00_base/000_hello_acp){target="_blank"}**: Three-handler pattern fundamentals
 - **[Multiturn](https://github.com/scaleapi/agentex-python/tree/main/examples/tutorials/10_agentic/00_base/010_multiturn){target="_blank"}**: Stateful conversations
 - **[Streaming](https://github.com/scaleapi/agentex-python/tree/main/examples/tutorials/10_agentic/00_base/020_streaming){target="_blank"}**: Response streaming in complex workflows
 - **[Tracing](https://github.com/scaleapi/agentex-python/tree/main/examples/tutorials/10_agentic/00_base/030_tracing){target="_blank"}**: Observability and debugging
@@ -26,7 +26,7 @@ Stateful workflows with full lifecycle control for development and advanced patt
 - **[Batch Events](https://github.com/scaleapi/agentex-python/tree/main/examples/tutorials/10_agentic/00_base/080_batch_events){target="_blank"}**: Efficient multi-event handling
 - **[Multi-Agent Assembly Line](https://github.com/scaleapi/agentex-python/tree/main/examples/tutorials/10_agentic/00_base/090_multi_agent_non_temporal){target="_blank"}**: Multi-agent coordination without Temporal
 
-### Agentic ACP - Temporal (Production)
+### Async ACP - Temporal (Production)
 
 Enterprise-ready patterns with durable execution for production deployments requiring reliability and fault tolerance.
 

@@ -33,7 +33,8 @@ class AgentORM(BaseORM):
     status = Column(SQLAlchemyEnum(AgentStatus), nullable=False)
     status_reason = Column(Text, nullable=True)
     acp_url = Column(String, nullable=True)  # URL of the agent's ACP server
-    acp_type = Column(String, nullable=False, server_default="agentic")
+    # TODO: make this a SQLAlchemyEnum rather than a string
+    acp_type = Column(String, nullable=False, server_default="async")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

@@ -85,7 +85,8 @@ async def bad_workflow_handler(self, params):
 async def good_workflow_handler(self, params):
     # All external operations go through ADK (activities)
     await adk.messages.create(...)  # Replay-safe
-    await adk.providers.openai.run_agent_streamed_auto_send(...)  # Replay-safe
+    test_agent = Agent(...)
+    result = await Runner.run(...) # Replay-safe
 ```
 
 **Why**: Non-Agentex async operations aren't tracked in event history and break deterministic replay.
