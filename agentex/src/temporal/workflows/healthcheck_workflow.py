@@ -52,9 +52,10 @@ class HealthCheckWorkflow:
         while not self.should_continue_as_new():
             # Wait for the next health check
             await workflow.sleep(30)
+            success = False
             try:
                 # Call the Activity with a retry policy
-                await workflow.execute_activity(
+                success = await workflow.execute_activity(
                     CHECK_STATUS_ACTIVITY,
                     args=[agent_id, acp_url],
                     start_to_close_timeout=timedelta(seconds=15),
@@ -64,28 +65,30 @@ class HealthCheckWorkflow:
                         backoff_coefficient=2.0,
                     ),
                 )
-            except Exception:
+            except Exception as e:
+                logger.error(f"Failed to check status of agent {agent_id}: {e}")
+
+            if not success:
                 # Activity failed after all retries
                 failure_counter += 1
-                if failure_counter >= 5:
-                    # Agent is officially unhealthy
-                    await workflow.execute_activity(
-                        UPDATE_AGENT_STATUS_ACTIVITY,
-                        args=[agent_id, "Unhealthy"],
-                        start_to_close_timeout=timedelta(seconds=30),
-                        retry_policy=RetryPolicy(
-                            maximum_attempts=3,
-                            initial_interval=timedelta(seconds=1),
-                            backoff_coefficient=2.0,
-                        ),
-                    )
-                    # Stop health check workflow until agent registers again
-                    return
-                else:
-                    continue
+            if failure_counter >= 5:
+                # Agent is officially unhealthy
+                await workflow.execute_activity(
+                    UPDATE_AGENT_STATUS_ACTIVITY,
+                    args=[agent_id, "Unhealthy"],
+                    start_to_close_timeout=timedelta(seconds=30),
+                    retry_policy=RetryPolicy(
+                        maximum_attempts=3,
+                        initial_interval=timedelta(seconds=1),
+                        backoff_coefficient=2.0,
+                    ),
+                )
+                # Stop health check workflow until agent registers again
+                return
 
             # If health check succeeds, reset the counter
-            failure_counter = 0
+            if success:
+                failure_counter = 0
 
         workflow_args["failure_counter"] = failure_counter
         workflow.continue_as_new(
