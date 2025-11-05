@@ -14,6 +14,7 @@ import {
   useSafeSearchParams,
   SearchParamKey,
 } from '@/hooks/use-safe-search-params';
+import { useWaitingForHuman } from '@/hooks/use-waiting-for-human';
 
 type ContentAreaProps = {
   isTracesSidebarOpen: boolean;
@@ -31,6 +32,10 @@ export function PrimaryContent({
   const [prompt, setPrompt] = useState<string>('');
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const { isWaiting: isWaitingForHuman } = useWaitingForHuman({
+    agentexClient,
+    taskId: taskID || '',
+  });
 
   const handleSelectAgent = useCallback(
     (agentName: string | undefined) => {
@@ -106,48 +111,50 @@ export function PrimaryContent({
 
       {taskID ? <ChatView taskID={taskID} /> : <HomeView />}
 
-      <motion.div
-        layout="position"
-        className="relative flex w-full justify-center px-4 py-4 sm:px-6 md:px-8"
-        transition={{
-          layout: {
-            type: 'spring',
-            damping: 40,
-            stiffness: 300,
-            mass: 0.8,
-          },
-        }}
-      >
-        {taskID && (
-          <AnimatePresence>
-            {showScrollButton && (
-              <motion.div
-                className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-4 -translate-x-1/2"
-                initial={{ y: 30, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: 30, opacity: 0 }}
-                transition={{
-                  duration: 0.2,
-                  type: 'spring',
-                  stiffness: 300,
-                  damping: 35,
-                  mass: 0.8,
-                }}
-              >
-                <IconButton
-                  className="pointer-events-auto size-10 rounded-full shadow-lg"
-                  onClick={scrollToBottom}
-                  icon={ArrowDown}
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
-        )}
+      {!(agentName === 'example-tutorial' && !taskID) && !isWaitingForHuman && (
+        <motion.div
+          layout="position"
+          className="relative flex w-full justify-center px-4 py-4 sm:px-6 md:px-8"
+          transition={{
+            layout: {
+              type: 'spring',
+              damping: 40,
+              stiffness: 300,
+              mass: 0.8,
+            },
+          }}
+        >
+          {taskID && (
+            <AnimatePresence>
+              {showScrollButton && (
+                <motion.div
+                  className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-4 -translate-x-1/2"
+                  initial={{ y: 30, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={{ y: 30, opacity: 0 }}
+                  transition={{
+                    duration: 0.2,
+                    type: 'spring',
+                    stiffness: 300,
+                    damping: 35,
+                    mass: 0.8,
+                  }}
+                >
+                  <IconButton
+                    className="pointer-events-auto size-10 rounded-full shadow-lg"
+                    onClick={scrollToBottom}
+                    icon={ArrowDown}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          )}
 
-        <div className="w-full max-w-3xl">
-          <PromptInput prompt={prompt} setPrompt={setPrompt} />
-        </div>
-      </motion.div>
+          <div className="w-full max-w-3xl">
+            <PromptInput prompt={prompt} setPrompt={setPrompt} />
+          </div>
+        </motion.div>
+      )}
     </motion.div>
   );
 }

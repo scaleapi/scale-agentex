@@ -2,6 +2,7 @@ import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AnimatePresence, motion } from 'framer-motion';
 
+import { HumanResponseForm } from '@/components/agentex/project/human-response-form';
 import { TaskMessageDataContent } from '@/components/agentex/task-message-data-content';
 import { TaskMessageReasoning } from '@/components/agentex/task-message-reasoning-content';
 import { TaskMessageScrollContainer } from '@/components/agentex/task-message-scroll-container';
@@ -9,6 +10,7 @@ import { TaskMessageTextContent } from '@/components/agentex/task-message-text-c
 import { TaskMessageToolPair } from '@/components/agentex/task-message-tool-pair';
 import { useAgentexClient } from '@/components/providers';
 import { ShimmeringText } from '@/components/ui/shimmering-text';
+import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 import { useTaskMessages } from '@/hooks/use-task-messages';
 
 import type {
@@ -22,7 +24,7 @@ type TaskMessagesProps = {
 };
 type MessagePair = {
   id: string;
-  userMessage: TaskMessage;
+  userMessage: TaskMessage | null;
   agentMessages: TaskMessage[];
 };
 
@@ -32,6 +34,7 @@ function TaskMessagesImpl({ taskId }: TaskMessagesProps) {
   const [containerHeight, setContainerHeight] = useState<number>(0);
 
   const { agentexClient } = useAgentexClient();
+  const { agentName } = useSafeSearchParams();
 
   const { data: queryData } = useTaskMessages({ agentexClient, taskId });
 
@@ -52,6 +55,44 @@ function TaskMessagesImpl({ taskId }: TaskMessagesProps) {
       ),
     [messages]
   );
+
+  // Track which user messages are responses to wait_for_human tools
+  const userResponseToWaitForHumanIds = useMemo(() => {
+    const ids = new Set<string>();
+
+    for (let i = 0; i < messages.length; i++) {
+      const message = messages[i];
+      if (
+        message &&
+        message.content.type === 'tool_request' &&
+        message.content.name === 'wait_for_human'
+      ) {
+        // Look for the next user message
+        for (let j = i + 1; j < messages.length; j++) {
+          const nextMsg = messages[j];
+          if (
+            nextMsg &&
+            nextMsg.content.type === 'text' &&
+            nextMsg.content.author === 'user'
+          ) {
+            ids.add(nextMsg.id!);
+            break;
+          }
+          // Stop if we hit a tool_response
+          if (
+            nextMsg &&
+            nextMsg.content.type === 'tool_response' &&
+            (nextMsg.content as ToolResponseContent).tool_call_id ===
+              message.content.tool_call_id
+          ) {
+            break;
+          }
+        }
+      }
+    }
+
+    return ids;
+  }, [messages]);
 
   const messagePairs = useMemo<MessagePair[]>(() => {
     const pairs: MessagePair[] = [];
@@ -77,8 +118,8 @@ function TaskMessagesImpl({ taskId }: TaskMessagesProps) {
         } else {
           pairs.push({
             id: message.id || `pair-${pairs.length}`,
-            userMessage: message,
-            agentMessages: [],
+            userMessage: null,
+            agentMessages: [message],
           });
         }
       }
@@ -145,6 +186,16 @@ function TaskMessagesImpl({ taskId }: TaskMessagesProps) {
   }, [messagePairs.length]);
 
   const renderMessage = (message: TaskMessage) => {
+    // Skip user messages that are responses to wait_for_human tools
+    if (
+      message.id &&
+      message.content.type === 'text' &&
+      message.content.author === 'user' &&
+      userResponseToWaitForHumanIds.has(message.id)
+    ) {
+      return null;
+    }
+
     switch (message.content.type) {
       case 'text':
         return <TaskMessageTextContent content={message.content} />;
@@ -152,17 +203,64 @@ function TaskMessagesImpl({ taskId }: TaskMessagesProps) {
         return <TaskMessageDataContent content={message.content} />;
       case 'reasoning':
         return <TaskMessageReasoning message={message} />;
-      case 'tool_request':
+      case 'tool_request': {
+        const toolRequestMessage = message as TaskMessage & {
+          content: ToolRequestContent;
+        };
+        const toolResponseMessage = toolCallIdToResponseMap.get(
+          message.content.tool_call_id
+        );
+
+        // Check if this is a wait_for_human tool
+        if (message.content.name === 'wait_for_human' && agentName) {
+          const params = message.content.arguments as { message?: string };
+
+          // Find the user response that comes after this tool request
+          const messageIndex = messages.findIndex(m => m.id === message.id);
+          let userResponse: string | null = null;
+
+          if (messageIndex !== -1) {
+            // Look for the next user message after this tool
+            for (let i = messageIndex + 1; i < messages.length; i++) {
+              const nextMsg = messages[i];
+              if (
+                nextMsg &&
+                nextMsg.content.type === 'text' &&
+                nextMsg.content.author === 'user'
+              ) {
+                userResponse = nextMsg.content.content;
+                break;
+              }
+              // Stop if we hit a tool_response for this tool
+              if (
+                nextMsg &&
+                nextMsg.content.type === 'tool_response' &&
+                (nextMsg.content as ToolResponseContent).tool_call_id ===
+                  message.content.tool_call_id
+              ) {
+                break;
+              }
+            }
+          }
+
+          return (
+            <HumanResponseForm
+              message={params?.message || ''}
+              taskId={taskId}
+              agentName={agentName}
+              userResponse={userResponse}
+              isResponded={userResponse !== null}
+            />
+          );
+        }
+
         return (
           <TaskMessageToolPair
-            toolRequestMessage={
-              message as TaskMessage & { content: ToolRequestContent }
-            }
-            toolResponseMessage={toolCallIdToResponseMap.get(
-              message.content.tool_call_id
-            )}
+            toolRequestMessage={toolRequestMessage}
+            toolResponseMessage={toolResponseMessage}
           />
         );
+      }
       case 'tool_response':
         return null;
       default:
@@ -188,7 +286,7 @@ function TaskMessagesImpl({ taskId }: TaskMessagesProps) {
             containerHeight={containerHeight}
           >
             <AnimatePresence>
-              {renderMessage(pair.userMessage)}
+              {pair.userMessage && renderMessage(pair.userMessage)}
               {pair.agentMessages.map(agentMessage => (
                 <Fragment key={agentMessage.id}>
                   {renderMessage(agentMessage)}

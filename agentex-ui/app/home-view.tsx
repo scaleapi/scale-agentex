@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 
 import { AgentsList } from '@/components/agentex/agents-list';
+import { ProjectCreationForm } from '@/components/agentex/project/project-creation-form';
 import { useAgentexClient } from '@/components/providers/agentex-provider';
 import { useAgents } from '@/hooks/use-agents';
 import { useLocalStorageState } from '@/hooks/use-local-storage-state';
@@ -18,6 +19,8 @@ export function HomeView() {
     undefined
   );
 
+  const showProjectForm = agentName === 'example-tutorial';
+
   return (
     <motion.div
       key="home-view"
@@ -26,7 +29,7 @@ export function HomeView() {
       animate={{ opacity: 1 }}
       transition={{ duration: 0.25, ease: 'easeInOut' }}
     >
-      <div className="flex flex-col items-center justify-center px-4">
+      <div className="flex w-full max-w-4xl flex-col items-center justify-center px-4 sm:px-6 md:px-8">
         <div className="mb-6 text-2xl font-bold">Agentex</div>
         <AgentsList agents={agents} isLoading={isLoading} />
         <button
@@ -40,6 +43,11 @@ export function HomeView() {
         >
           view all agents
         </button>
+        {showProjectForm && (
+          <div className="mt-8 w-full max-w-2xl">
+            <ProjectCreationForm />
+          </div>
+        )}
       </div>
     </motion.div>
   );
