@@ -25,10 +25,9 @@ export function AgentexUIRoot({
 }: AgentexUIRootProps) {
   const { agentName, taskID, updateParams } = useSafeSearchParams();
   const [isTracesSidebarOpen, setIsTracesSidebarOpen] = useState(false);
-  const [localAgentName] = useLocalStorageState<string | undefined>(
-    'lastSelectedAgent',
-    undefined
-  );
+  const [localAgentName, setLocalAgentName] = useLocalStorageState<
+    string | undefined
+  >('lastSelectedAgent', undefined);
 
   useEffect(() => {
     if (!agentName && localAgentName) {
@@ -58,6 +57,7 @@ export function AgentexUIRoot({
         updateParams({
           [SearchParamKey.AGENT_NAME]: null,
         });
+        setLocalAgentName(undefined);
       }
     };
 
@@ -66,7 +66,7 @@ export function AgentexUIRoot({
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [handleSelectTask, agentName, taskID, updateParams]);
+  }, [handleSelectTask, agentName, taskID, updateParams, setLocalAgentName]);
 
   return (
     <>
