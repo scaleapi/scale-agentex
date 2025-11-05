@@ -24,7 +24,12 @@ export function TaskProvider({
     agentexClient,
     taskId,
     agentName: agentName || '',
-    enabled: !!taskId && (agent?.acp_type === 'agentic' || !agentName),
+    enabled:
+      !!taskId &&
+      (agent?.acp_type === 'agentic' ||
+        agent?.acp_type === 'async' ||
+        agent?.acp_type === 'sync' ||
+        !agentName),
   });
 
   return <>{children}</>;
