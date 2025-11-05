@@ -55,12 +55,24 @@ class HealthCheckActivities:
         logger.info(f"Checking status of agent {agent_id} via {acp_url}")
         try:
             response = await self.http_client.get(f"{acp_url}/healthz", timeout=5)
-            if response.status_code == 200:
-                return True
-            else:
+            if response.status_code != 200:
                 logger.error(
                     f"Agent {agent_id} returned non-200 status: {response.status_code}"
                 )
+                return False
+            parsed_response = response.json()
+            if parsed_response["status"] != "healthy":
+                logger.error(
+                    f"Agent {agent_id} returned non-healthy status: {parsed_response['status']}"
+                )
+                return False
+            if "agent_id" in parsed_response:
+                if parsed_response["agent_id"] != agent_id:
+                    logger.error(
+                        f"Agent {agent_id} returned unexpected agent ID: {parsed_response['agent_id']}"
+                    )
+                    return False
+            return True
         except Exception as e:
             logger.error(f"Failed to check status of agent {agent_id}: {e}")
         return False
