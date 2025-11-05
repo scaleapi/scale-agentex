@@ -22,9 +22,9 @@ theme:
 extra_css:
   - stylesheets/extra.css
 extra_javascript:
-  - optionalConfig.js
+  - javascripts/optionalConfig.js
   - https://cdn.jsdelivr.net/npm/mermaid@11.5.0/dist/mermaid.min.js
-  - extra-loader.js
+  - javascripts/extra-loader.js
 markdown_extensions:
   - admonition
   - attr_list
