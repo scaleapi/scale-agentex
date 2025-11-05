@@ -11,9 +11,29 @@ permissions:
   contents: read
 
 jobs:
+  # Detect which files have changed to conditionally run jobs
+  changes:
+    name: "Detect Changes"
+    runs-on: ubuntu-latest
+    outputs:
+      agentex: ${{ steps.filter.outputs.agentex }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Check for agentex changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            agentex:
+              - 'agentex/**'
+
   test:
     name: "Run Unit Tests"
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.agentex == 'true'
 
     steps:
     # Checkout the repository
@@ -98,6 +118,8 @@ jobs:
   docs:
     name: "Build Documentation"
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.agentex == 'true'
 
     steps:
     # Checkout the repository
