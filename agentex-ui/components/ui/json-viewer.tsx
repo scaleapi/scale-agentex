@@ -10,8 +10,8 @@ import {
   ChevronsUpDown,
 } from 'lucide-react';
 
-import { CopyButton } from '@/components/agentex/copy-button';
 import { Button } from '@/components/ui/button';
+import { CopyButton } from '@/components/ui/copy-button';
 import { serializeValue } from '@/lib/json-utils';
 import type { JsonValue } from '@/lib/types';
 import { cn } from '@/lib/utils';

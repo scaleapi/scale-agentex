@@ -3,13 +3,12 @@ import { useEffect, useMemo, useRef } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 
+import { useAgentexClient } from '@/components/providers';
+import { TaskButton } from '@/components/task-sidebar/task-button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 import { useInfiniteTasks } from '@/hooks/use-tasks';
 import { cn } from '@/lib/utils';
-
-import { TaskButton } from './task-button';
-import { useAgentexClient } from '../providers';
-import { Skeleton } from '../ui/skeleton';
 
 export type TaskSidebarBodyProps = {
   className?: string;

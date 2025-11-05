@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { Sun, Moon } from 'lucide-react';
 import { useTheme } from 'next-themes';
 
-import { IconButton } from '@/components/agentex/icon-button';
+import { IconButton } from '@/components/ui/icon-button';
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();

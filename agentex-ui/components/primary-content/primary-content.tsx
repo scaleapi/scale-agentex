@@ -5,10 +5,10 @@ import { ArrowDown } from 'lucide-react';
 
 import { ChatView } from '@/app/chat-view';
 import { HomeView } from '@/app/home-view';
-import { IconButton } from '@/components/agentex/icon-button';
 import { PromptInput } from '@/components/agentex/prompt-input';
-import { TaskTopBar } from '@/components/agentex/task-top-bar';
 import { useAgentexClient } from '@/components/providers';
+import { TaskHeader } from '@/components/task-header/task-header';
+import { IconButton } from '@/components/ui/icon-button';
 import { useAgents } from '@/hooks/use-agents';
 import {
   useSafeSearchParams,
@@ -94,7 +94,7 @@ export function PrimaryContent({
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.25, ease: 'easeInOut' }}
         >
-          <TaskTopBar
+          <TaskHeader
             taskId={taskID}
             isTracesSidebarOpen={isTracesSidebarOpen}
             toggleTracesSidebar={toggleTracesSidebar}

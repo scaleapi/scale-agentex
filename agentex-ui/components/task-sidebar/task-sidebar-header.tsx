@@ -6,8 +6,8 @@ import { PanelLeftClose, MessageSquarePlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-import { IconButton } from '../agentex/icon-button';
-import { ResizableSidebar } from '../agentex/resizable-sidebar';
+import { IconButton } from '../ui/icon-button';
+import { ResizableSidebar } from '../ui/resizable-sidebar';
 
 export type TaskSidebarHeaderProps = {
   toggleCollapse: () => void;

@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 import { Agent } from 'agentex/resources';
 import { AnimatePresence, motion } from 'framer-motion';
 
-import { AgentBadge } from '@/components/agentex/agent-badge';
+import { AgentBadge } from '@/components/agents-list/agent-badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 

@@ -3,7 +3,7 @@ import { memo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { BrainIcon, ChevronDownIcon } from 'lucide-react';
 
-import { MarkdownResponse } from '@/components/agentex/markdown-response';
+import { MarkdownResponse } from '@/components/task-messages/markdown-response';
 import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 import { useTaskMessages } from '@/hooks/use-task-messages';
 import { calculateThinkingTime } from '@/lib/date-utils';

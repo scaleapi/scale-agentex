@@ -6,7 +6,7 @@ import {
 } from 'agentex/lib';
 import { v4 } from 'uuid';
 
-import { toast } from '@/components/agentex/toast';
+import { toast } from '@/components/ui/toast';
 import { agentsKeys } from '@/hooks/use-agents';
 
 import type AgentexSDK from 'agentex';
