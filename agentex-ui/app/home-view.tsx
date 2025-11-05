@@ -29,17 +29,26 @@ export function HomeView() {
       <div className="flex flex-col items-center justify-center px-4">
         <div className="mb-6 text-2xl font-bold">Agentex</div>
         <AgentsList agents={agents} isLoading={isLoading} />
-        <button
-          onClick={() => {
-            updateParams({ [SearchParamKey.AGENT_NAME]: null });
-            setLocalAgentName(undefined);
-          }}
-          className={`text-accent-foreground cursor-pointer text-xs transition-opacity duration-200 hover:underline ${
+        <div
+          className={`flex items-center gap-2 ${
             agentName ? 'opacity-100' : 'pointer-events-none opacity-0'
           }`}
         >
-          view all agents
-        </button>
+          <button
+            onClick={() => {
+              updateParams({ [SearchParamKey.AGENT_NAME]: null });
+              setLocalAgentName(undefined);
+            }}
+            className={`text-accent-foreground cursor-pointer text-xs transition-opacity duration-200 hover:underline`}
+          >
+            view all agents
+          </button>
+          <kbd
+            className={`bg-muted text-muted-foreground pointer-events-none inline-flex h-4 items-center gap-1 rounded border px-1 font-mono text-[10px] font-medium opacity-100 select-none`}
+          >
+            esc
+          </kbd>
+        </div>
       </div>
     </motion.div>
   );
