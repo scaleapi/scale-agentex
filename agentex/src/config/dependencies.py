@@ -20,7 +20,6 @@ from temporalio.client import Client as TemporalClient
 from src.config.environment_variables import Environment, EnvironmentVariables
 from src.utils.database import async_db_engine_creator
 from src.utils.logging import make_logger
-from src.utils.temporal_client import get_temporal_client
 
 logger = make_logger(__name__)
 
@@ -51,23 +50,17 @@ class GlobalDependencies(metaclass=Singleton):
         self._loaded = False
 
     async def create_temporal_client(self):
-        if self.environment_variables.TEMPORAL_ADDRESS in [
-            "false",
-            "False",
-            "null",
-            "None",
-            "",
-            "undefined",
-            False,
-            None,
-        ]:
+        # Import locally to avoid circular dependency
+        from src.adapters.temporal.client_factory import TemporalClientFactory
+
+        if not TemporalClientFactory.is_temporal_configured(self.environment_variables):
             return None
         else:
             logger.info(
                 f"Creating temporal client with address: {self.environment_variables.TEMPORAL_ADDRESS}"
             )
-            return await get_temporal_client(
-                self.environment_variables.TEMPORAL_ADDRESS
+            return await TemporalClientFactory.create_client_from_env(
+                environment_variables=self.environment_variables
             )
 
     async def load(self):
@@ -261,6 +254,10 @@ def DEnvironmentVariable(environment_variable_key: str):
         return resolve_environment_variable_dependency(environment_variable_key)
 
     return Annotated[str, Depends(resolve)]
+
+
+def httpx_client() -> httpx.AsyncClient:
+    return GlobalDependencies().httpx_client
 
 
 def database_async_read_write_engine() -> AsyncEngine:

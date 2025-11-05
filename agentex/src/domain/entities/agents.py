@@ -12,6 +12,7 @@ class AgentStatus(str, Enum):
     FAILED = "Failed"
     UNKNOWN = "Unknown"
     DELETED = "Deleted"
+    UNHEALTHY = "Unhealthy"
 
 
 class ACPType(str, Enum):
@@ -19,6 +20,11 @@ class ACPType(str, Enum):
     ASYNC = "async"
 
     AGENTIC = "agentic"  # deprecated: use ASYNC instead
+
+
+class AgentInputType(str, Enum):
+    TEXT = "text"
+    JSON = "json"
 
 
 class AgentEntity(BaseModel):
@@ -55,4 +61,7 @@ class AgentEntity(BaseModel):
     )
     registered_at: datetime | None = Field(
         None, description="The timestamp when the agent was last registered"
+    )
+    agent_input_type: AgentInputType | None = Field(
+        None, description="The type of input the agent expects."
     )

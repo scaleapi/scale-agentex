@@ -16,6 +16,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
+from src.adapters.temporal.adapter_temporal import TemporalAdapter
 from src.api.app import app
 from src.api.authentication_cache import reset_auth_cache
 from src.config.dependencies import GlobalDependencies
@@ -210,6 +211,14 @@ def isolated_api_key_http_client():
 
 
 @pytest_asyncio.fixture
+async def isolated_temporal_adapter():
+    """
+    Function-scoped fixture that provides a temporal adapter for isolated testing.
+    """
+    return AsyncMock(TemporalAdapter)
+
+
+@pytest_asyncio.fixture
 async def isolated_repositories(isolated_test_schema):
     """
     Function-scoped fixture that creates repository instances using isolated databases.
@@ -287,7 +296,9 @@ async def isolated_repositories(isolated_test_schema):
 
 
 @pytest_asyncio.fixture
-async def isolated_integration_app(isolated_repositories, isolated_api_key_http_client):
+async def isolated_integration_app(
+    isolated_repositories, isolated_api_key_http_client, isolated_temporal_adapter
+):
     """
     Function-scoped fixture that provides FastAPI app with completely isolated dependencies.
     All use cases get repositories that point to isolated test databases.
@@ -325,6 +336,7 @@ async def isolated_integration_app(isolated_repositories, isolated_api_key_http_
     def create_agents_use_case():
         return AgentsUseCase(
             agent_repository=isolated_repositories["agent_repository"],
+            temporal_adapter=isolated_temporal_adapter,
             deployment_history_repository=isolated_repositories[
                 "deployment_history_repository"
             ],

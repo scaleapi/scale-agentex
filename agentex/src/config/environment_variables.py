@@ -18,6 +18,7 @@ class EnvVarKeys(str, Enum):
     OPENAI_API_KEY = "OPENAI_API_KEY"
     DATABASE_URL = "DATABASE_URL"
     TEMPORAL_ADDRESS = "TEMPORAL_ADDRESS"
+    TEMPORAL_NAMESPACE = "TEMPORAL_NAMESPACE"
     REDIS_URL = "REDIS_URL"
     AGENTEX_BASE_URL = "AGENTEX_BASE_URL"
     TEMPORAL_WORKER_ACTIVITY_THREAD_POOL_SIZE = (
@@ -48,6 +49,8 @@ class EnvVarKeys(str, Enum):
     HTTPX_POOL_TIMEOUT = "HTTPX_POOL_TIMEOUT"
     HTTPX_STREAMING_READ_TIMEOUT = "HTTPX_STREAMING_READ_TIMEOUT"
     SSE_KEEPALIVE_PING_INTERVAL = "SSE_KEEPALIVE_PING_INTERVAL"
+    AGENTEX_SERVER_TASK_QUEUE = "AGENTEX_SERVER_TASK_QUEUE"
+    ENABLE_HEALTH_CHECK_WORKFLOW = "ENABLE_HEALTH_CHECK_WORKFLOW"
 
 
 class Environment(str, Enum):
@@ -64,6 +67,7 @@ class EnvironmentVariables(BaseModel):
     OPENAI_API_KEY: str | None
     DATABASE_URL: str | None
     TEMPORAL_ADDRESS: str | None
+    TEMPORAL_NAMESPACE: str | None
     REDIS_URL: str | None
     AGENTEX_BASE_URL: str | None
     TEMPORAL_WORKER_ACTIVITY_THREAD_POOL_SIZE: int = 4  # Default 4 for local dev
@@ -90,6 +94,8 @@ class EnvironmentVariables(BaseModel):
         300.0  # HTTPX streaming read timeout in seconds (5 minutes)
     )
     SSE_KEEPALIVE_PING_INTERVAL: int = 15  # SSE keepalive ping interval in seconds
+    AGENTEX_SERVER_TASK_QUEUE: str | None = None
+    ENABLE_HEALTH_CHECK_WORKFLOW: bool = False
 
     @classmethod
     def refresh(cls, force_refresh: bool = False) -> EnvironmentVariables | None:
@@ -104,6 +110,7 @@ class EnvironmentVariables(BaseModel):
             OPENAI_API_KEY=os.environ.get(EnvVarKeys.OPENAI_API_KEY),
             DATABASE_URL=os.environ.get(EnvVarKeys.DATABASE_URL),
             TEMPORAL_ADDRESS=os.environ.get(EnvVarKeys.TEMPORAL_ADDRESS),
+            TEMPORAL_NAMESPACE=os.environ.get(EnvVarKeys.TEMPORAL_NAMESPACE),
             REDIS_URL=os.environ.get(EnvVarKeys.REDIS_URL),
             AGENTEX_BASE_URL=os.environ.get(EnvVarKeys.AGENTEX_BASE_URL),
             BUILD_REGISTRY_URL=os.environ.get(EnvVarKeys.BUILD_REGISTRY_URL),
@@ -153,6 +160,13 @@ class EnvironmentVariables(BaseModel):
             ),
             SSE_KEEPALIVE_PING_INTERVAL=int(
                 os.environ.get(EnvVarKeys.SSE_KEEPALIVE_PING_INTERVAL, "15")
+            ),
+            AGENTEX_SERVER_TASK_QUEUE=os.environ.get(
+                EnvVarKeys.AGENTEX_SERVER_TASK_QUEUE
+            ),
+            ENABLE_HEALTH_CHECK_WORKFLOW=(
+                os.environ.get(EnvVarKeys.ENABLE_HEALTH_CHECK_WORKFLOW, "false")
+                == "true"
             ),
         )
         refreshed_environment_variables = environment_variables

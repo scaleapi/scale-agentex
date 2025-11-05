@@ -184,6 +184,7 @@ async def register_agent(
             agent_id=request.agent_id,
             acp_type=request.acp_type,
             registration_metadata=request.registration_metadata,
+            agent_input_type=request.agent_input_type,
         )
         await authorization_service.grant(
             AgentexResource.agent(agent_entity.id),
