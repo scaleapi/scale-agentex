@@ -266,6 +266,211 @@ async def streaming_with_override(params: SendMessageParams) -> AsyncGenerator[T
 - **Analysis**: Stream thinking process, then replace with final conclusion
 - **Tool integration**: Stream partial results, then override with tool-enhanced content
 
+## OpenAI Agents SDK Streaming
+
+!!! note "More Modular Approach"
+    The **OpenAI Agents SDK** provides a more modular alternative to `auto_send`. Instead of black-box logic, you write custom **providers** (for sync agents) and/or **hooks + providers** (for agentic ACPs) by inheriting classes and overriding methods. This Pythonic approach gives you full control over streaming behavior while working with **any LiteLLM model** (GPT-4, Claude, Gemini, etc.).
+
+The OpenAI Agents SDK supports [any LiteLLM model](https://openai.github.io/openai-agents-python/models/litellm/) and provides a cleaner architecture than `auto_send`:
+
+**Why This Approach Is Better:**
+
+- **Modular**: Custom providers/hooks instead of monolithic `auto_send` logic
+- **Pythonic**: Override methods in your own classes rather than configure black-box functions
+- **Transparent**: See exactly what happens during streaming in your own code
+- **Flexible**: Different extension patterns for different ACP types (sync vs agentic)
+- **Model-agnostic**: Works with any LiteLLM model (OpenAI, Anthropic, Google, etc.)
+
+Depending on your ACP type, you'll use different approaches:
+
+### Option 1: Sync Agents (FastACP) - Custom Providers
+
+For **sync agents** using FastACP, write a custom **provider** by inheriting from `Model` or using the provided `SyncStreamingProvider`. This gives you full control over how OpenAI SDK events are converted to AgentEx format:
+
+```python
+from agents import Agent, Runner, RunConfig
+from agentex.lib.adk.providers._modules.sync_provider import (
+    SyncStreamingProvider,
+    convert_openai_to_agentex_events
+)
+from agentex.lib import adk
+
+@acp.on_message_send
+async def handle_message_send(params: SendMessageParams) -> AsyncGenerator[TaskMessageUpdate, None]:
+    # Create provider with optional tracing
+    async with adk.tracing.span(
+        trace_id=params.task.id,
+        name="Agent Turn"
+    ) as span:
+        provider = SyncStreamingProvider(
+            trace_id=params.task.id,
+            parent_span_id=span.id
+        )
+
+        # Create and run agent with streaming
+        agent = Agent(name="assistant", instructions="You are helpful", model="gpt-4o")
+        result = Runner.run_streamed(
+            agent,
+            input_list,
+            run_config=RunConfig(model_provider=provider)
+        )
+
+        # Convert OpenAI events to AgentEx events and yield
+        async for agentex_event in convert_openai_to_agentex_events(result.stream_events()):
+            yield agentex_event
+```
+
+**How Custom Providers Work:**
+
+- **Inherit from `Model`**: Override `stream_response()` to control streaming behavior
+- **Direct streaming**: Sync agents yield chunks directly to frontend via async generators
+- **Event conversion**: Your provider converts OpenAI's `ResponseTextDeltaEvent` → AgentEx `StreamTaskMessageDelta`
+- **Tool support**: Handle tool calls as `StreamTaskMessageFull` events
+- **No Redis dependency**: Unlike `auto_send`, this streams directly without Redis pub/sub
+- **Works with any model**: Use `gpt-4o`, `claude-3-5-sonnet`, `gemini-pro`, etc.
+
+**What Gets Streamed:**
+- **Text deltas**: Token-by-token as `StreamTaskMessageDelta`
+- **Tool calls**: Complete as `StreamTaskMessageFull` with `ToolRequestContent`
+- **Tool responses**: Complete as `StreamTaskMessageFull` with `ToolResponseContent`
+
+### Option 2: Agentic ACP - Custom Hooks + Custom Provider
+
+For **agentic ACPs** (Temporal, AgenticBase, etc.), you use a combination of custom **providers** and custom **hooks** to achieve complete streaming:
+
+- **Custom Provider**: Handles streaming LLM tokens and reasoning tokens to Redis
+- **Custom Hooks**: Handles streaming tool calls, handoffs, and other agent events to Redis
+
+This separation of concerns provides a clean architecture where the provider focuses on LLM streaming and hooks focus on agent event streaming.
+
+#### Example: Temporal Implementation
+
+For **Temporal ACP**, this pattern uses Temporal's interceptor mechanism to inject runtime context (`task_id`) into your streaming provider:
+
+```python
+# In run_worker.py
+from temporalio.contrib.openai_agents import OpenAIAgentsPlugin
+from agentex.lib.core.temporal.plugins.openai_agents import (
+    StreamingInterceptor,
+    StreamingModelProvider,
+)
+
+# Create custom hooks (interceptor) - streams tool calls, handoffs, agent events
+interceptor = StreamingInterceptor()
+
+# Use STANDARD plugin with custom provider - streams LLM tokens & reasoning
+plugin = OpenAIAgentsPlugin(
+    model_provider=StreamingModelProvider(),  # Custom provider for LLM streaming
+    model_params=ModelActivityParameters(...)
+)
+
+# Create worker with both hooks and provider
+worker = Worker(
+    client,
+    task_queue="my-task-queue",
+    workflows=[MyWorkflow],
+    interceptors=[interceptor],  # Custom hooks inject task_id context
+)
+```
+
+```python
+# In workflow.py
+@workflow.defn
+class MyWorkflow:
+    @workflow.signal(name=SignalName.RECEIVE_EVENT)
+    async def on_task_event_send(self, params: SendEventParams):
+        # Store task_id in instance variable (interceptor reads this)
+        self._task_id = params.task.id
+
+        # Create agent
+        agent = Agent(
+            name="Assistant",
+            instructions="You are helpful",
+            model="gpt-4o",
+        )
+
+        # Run agent - streaming happens automatically!
+        result = await Runner.run(agent, params.event.content.content)
+```
+
+**How Temporal Streaming Works:**
+
+```mermaid
+graph TB
+    A[Workflow stores task_id] --> B[Custom Hooks: Outbound Interceptor]
+    B --> C[Injects task_id into activity headers]
+    C --> D[Standard Temporal Plugin]
+    D --> E[Custom Hooks: Inbound Interceptor]
+    E --> F[Sets ContextVar with task_id]
+    F --> G[Activity Execution]
+    G --> H[Custom Provider: Streams LLM Tokens]
+    G --> I[Custom Hooks: Stream Tool Calls/Handoffs]
+    H --> J[Redis: LLM Token Stream]
+    I --> K[Redis: Agent Event Stream]
+    J --> L[Returns complete response]
+    K --> L
+```
+
+**How Custom Hooks + Custom Provider Work (Temporal):**
+
+- **Custom Provider**: Override `stream_response()` to stream LLM tokens and reasoning tokens to Redis
+- **Custom Hooks (Interceptors)**: Hook into Temporal's execution flow to stream tool calls, handoffs, and agent events to Redis
+- **Runtime context injection**: Thread `task_id` from workflow → activity headers → ContextVar → provider
+- **No forked plugin**: Uses standard `temporalio.contrib.openai_agents` plugin
+- **Pythonic extension**: Inherit and override methods instead of configuring `auto_send`
+- **Maintains determinism**: Streams to Redis as side-effect, returns complete response to Temporal
+- **Works with any model**: Use `gpt-4o`, `claude-3-5-sonnet`, `gemini-pro`, etc.
+
+**For Other Agentic ACPs:**
+
+The pattern is similar but adapted to each ACP's execution model:
+- **Custom Provider**: Always handles LLM token and reasoning token streaming
+- **Custom Hooks**: Adapt to the ACP's hook/event system to stream tool calls, handoffs, and agent events
+
+**Key Differences from Sync:**
+
+| Aspect | Sync (FastACP) | Agentic (Temporal, etc.) |
+|--------|----------------|--------------------------|
+| Extension Mechanism | Custom Provider | Custom Hooks + Custom Provider |
+| Provider Responsibility | Stream all content | Stream LLM tokens & reasoning |
+| Hooks Responsibility | Not needed | Stream tool calls, handoffs, agent events |
+| Provider Class (Temporal) | `SyncStreamingProvider` | `StreamingModelProvider` |
+| Hooks Class (Temporal) | Not needed | `StreamingInterceptor` |
+| Context Threading | Not needed (direct yield) | Hooks inject via ContextVar |
+| Streaming Destination | Direct to client | Redis pub/sub → SSE |
+| Determinism | Not required | Must return complete response |
+| Setup Complexity | Simple (just provider) | Moderate (hooks + provider) |
+
+### OpenAI SDK Streaming Flow Comparison
+
+**Sync (FastACP) Flow:**
+
+```mermaid
+graph LR
+    A[Agent] --> B[Runner.run_streamed]
+    B --> C[SyncStreamingProvider]
+    C --> D[OpenAI Streaming Events]
+    D --> E[convert_openai_to_agentex_events]
+    E --> F[Yield to Client]
+```
+
+**Agentic (Temporal) Flow:**
+
+```mermaid
+graph TB
+    A[Workflow] --> B[Store task_id]
+    B --> C[Custom Hooks Inject Context]
+    C --> D[Activity Execution]
+    D --> E[Custom Provider: Stream LLM Tokens]
+    D --> F[Custom Hooks: Stream Tool Calls/Handoffs]
+    E --> G[Redis: LLM Token Stream]
+    F --> H[Redis: Agent Event Stream]
+    G --> I[SSE to Client]
+    H --> I
+    E --> J[Return Complete Response]
+    J --> K[Workflow]
+```
+
 ## When to Use Each Pattern
 
 ### Use Sync ACP Streaming When:
@@ -277,10 +482,10 @@ async def streaming_with_override(params: SendMessageParams) -> AsyncGenerator[T
 
 ### Use Async Auto Send When:
 
-- **Production systems** (especially Temporal)
-- **Standard streaming** without custom processing
-- **Temporal workflows** (only option)
+- **Using LiteLLM provider** (not OpenAI SDK)
+- **Standard streaming** without custom processing needs
 - **Simplified development** - let Agentex handle complexity
+- **Don't need modularity** - black-box approach is acceptable
 
 ### Use Async Non-Auto Send When:
 
@@ -288,3 +493,40 @@ async def streaming_with_override(params: SendMessageParams) -> AsyncGenerator[T
 - **Analytics or monitoring** of streaming chunks
 - **Multiple streaming destinations**
 - **NOT directly in Temporal workflows** (wrap in custom activity or use auto send instead)
+
+### Use OpenAI SDK Custom Providers (Sync) When:
+
+- **Using OpenAI Agents SDK** with FastACP (sync agents)
+- **Want modular architecture** instead of `auto_send` black-box
+- **Need custom streaming logic** by overriding provider methods
+- **Direct client streaming** without pub/sub
+- **Any LiteLLM model** (OpenAI, Anthropic, Google, etc.)
+- **Tool calls** that need streaming (SDK handles tool events)
+- **Distributed tracing** (built-in support via provider)
+
+### Use OpenAI SDK Custom Hooks + Custom Provider (Agentic ACP) When:
+
+- **Using OpenAI Agents SDK** with Agentic ACP (Temporal, AgenticBase, etc.)
+- **Want modular architecture** instead of `auto_send` black-box
+- **Need Pythonic control** via inheritance and method overriding (both hooks and provider)
+- **Separation of concerns**: Provider handles LLM streaming, hooks handle agent event streaming
+- **Production agentic workflows** with streaming
+- **Maintaining workflow determinism** while streaming (for workflow-based ACPs like Temporal)
+- **Any LiteLLM model** (OpenAI, Anthropic, Google, etc.)
+
+## Key Takeaway
+
+!!! info "Choose the Right Pattern"
+
+    **Standard LiteLLM Providers (via ADK):**
+    - **Sync ACP**: Manual delta accumulation, full control
+    - **Async Auto Send**: Automatic but black-box (easiest, least flexible)
+    - **Async Non-Auto Send**: Manual control for advanced use cases (requires custom Temporal activity wrapper)
+
+    **OpenAI Agents SDK (Modular & Pythonic):**
+    - **Sync (FastACP)**: Write custom provider by inheriting `Model` and overriding `stream_response()`
+    - **Agentic (Temporal, etc.)**: Write custom hooks + custom provider with method overriding
+        - Provider: Streams LLM tokens & reasoning
+        - Hooks: Streams tool calls, handoffs, agent events
+    - **Benefits**: More modular than `auto_send`, works with any LiteLLM model, transparent code, separation of concerns
+    - **Trade-off**: Slightly more setup, but cleaner architecture and full control
