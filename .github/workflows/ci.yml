@@ -1,0 +1,139 @@
+# .github/workflows/ci.yml
+name: CI - Tests and Documentation
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: "Run Unit Tests"
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checkout the repository
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    # Set up Python and uv
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        version: "0.7.3"
+        enable-cache: true
+
+    # Cache uv dependencies
+    - name: Cache uv dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/uv
+        key: ${{ runner.os }}-uv-${{ hashFiles('**/agentex/uv.lock', '**/agentex/pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-uv-
+
+    # Docker is needed for testcontainers
+    - name: Verify Docker is running
+      run: |
+        docker --version
+        docker info
+
+    # Install dependencies
+    - name: Install test dependencies
+      working-directory: ./agentex
+      run: |
+        echo "📦 Installing test dependencies (pytest, testcontainers, etc.)..."
+        uv sync --group test
+
+    # Run Docker environment setup
+    - name: Setup and validate Docker environment for tests
+      working-directory: ./agentex
+      run: |
+        echo "🐳 Setting up Docker environment for testcontainers..."
+        uv run python scripts/test_setup.py --check-docker
+        echo "✅ Docker environment validated successfully"
+
+    # Run unit tests only (fast, no integration tests)
+    - name: Run unit tests
+      working-directory: ./agentex
+      timeout-minutes: 10
+      run: |
+        echo "🧪 Running unit tests (fast, isolated)..."
+        uv run python scripts/run_tests.py -m unit --cov=src --cov-report=xml --cov-report=term
+
+    # Clean up test containers
+    - name: Clean up test containers
+      if: always()
+      run: |
+        echo "🧹 Cleaning up any remaining test containers..."
+        docker container prune -f || true
+        docker volume prune -f || true
+
+    # Upload coverage reports
+    - name: Upload coverage to Codecov
+      if: always()
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./agentex/coverage.xml
+        flags: unittests
+        name: agentex-public-coverage
+        fail_ci_if_error: false
+
+    # Test summary
+    - name: Test Summary
+      if: always()
+      run: |
+        echo "📊 Unit test execution completed"
+        echo "✅ Fast isolated tests for public contributors"
+
+  docs:
+    name: "Build Documentation"
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checkout the repository
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    # Set up Python and uv
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        version: "0.7.3"
+
+    # Build documentation
+    - name: Build documentation
+      working-directory: ./agentex
+      run: |
+        echo "📚 Building documentation..."
+        # Install docs dependencies
+        uv sync --group docs
+        # Build documentation
+        cd docs && uv run mkdocs build
+        echo "✅ Documentation built successfully"
+
+    # Verify docs were built
+    - name: Verify documentation
+      working-directory: ./agentex
+      run: |
+        if [ -d "docs/site" ]; then
+          echo "✅ Documentation site directory exists"
+          ls -la docs/site
+        else
+          echo "❌ Documentation site directory not found"
+          exit 1
+        fi
