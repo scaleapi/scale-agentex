@@ -5,12 +5,17 @@ import { InfiniteData, useQueryClient } from '@tanstack/react-query';
 
 import { subscribeTaskState } from '@/hooks/custom-subscribe-task-state';
 import { updateTaskInInfiniteQuery } from '@/hooks/use-create-task';
+import { taskDataKeys } from '@/hooks/use-task-data';
 import { taskMessagesKeys } from '@/hooks/use-task-messages';
 import type { TaskMessagesData } from '@/hooks/use-task-messages';
 import { tasksKeys } from '@/hooks/use-tasks';
 
 import type AgentexSDK from 'agentex';
-import type { TaskListResponse, TaskRetrieveResponse } from 'agentex/resources';
+import type {
+  TaskListResponse,
+  TaskRetrieveResponse,
+  TaskMessage,
+} from 'agentex/resources';
 
 /**
  * Subscribes to real-time updates for a task's state, messages, and streaming status.
@@ -71,6 +76,16 @@ export function useTaskSubscription({
               })
             );
             queryClient.invalidateQueries({ queryKey: ['spans', taskId] });
+
+            // Check if any tool calls completed to refresh data tables
+            const hasToolCall = messages.some(
+              (msg: TaskMessage) => msg.content.type === 'tool_request'
+            );
+            if (hasToolCall) {
+              queryClient.invalidateQueries({
+                queryKey: taskDataKeys.byTaskId(taskId),
+              });
+            }
           }
         },
         onAgentsChange() {},

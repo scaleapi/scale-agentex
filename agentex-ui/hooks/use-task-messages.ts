@@ -51,6 +51,7 @@ export function useTaskMessages({
 
       const messages = await agentexClient.messages.list({
         task_id: taskId,
+        limit: 1000,
       });
 
       // API returns messages in descending order (newest first),
@@ -205,6 +206,7 @@ export function useSendMessage({
 
           const finalMessages = await agentexClient.messages.list({
             task_id: taskId,
+            limit: 1000,
           });
 
           // API returns messages in descending order (newest first),

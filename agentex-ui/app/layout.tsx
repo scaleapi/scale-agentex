@@ -1,6 +1,7 @@
 import { Geist, Geist_Mono } from 'next/font/google';
 
 import { QueryProvider, ThemeProvider } from '@/components/providers';
+import { ArtifactPanelProvider } from '@/contexts/artifact-panel-context';
 
 import type { Metadata } from 'next';
 import '@/app/globals.css';
@@ -37,7 +38,7 @@ export default function RootLayout({
             enableSystem={false}
             disableTransitionOnChange
           >
-            {children}
+            <ArtifactPanelProvider>{children}</ArtifactPanelProvider>
           </ThemeProvider>
         </QueryProvider>
       </body>

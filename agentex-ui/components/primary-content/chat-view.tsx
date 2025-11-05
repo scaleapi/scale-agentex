@@ -18,6 +18,7 @@ type ChatViewProps = {
   toggleTracesSidebar: () => void;
   setPrompt: (prompt: string) => void;
   scrollContainerRef: React.RefObject<HTMLDivElement | null>;
+  isArtifactPanelOpen: boolean;
 };
 
 export function ChatView({
@@ -26,6 +27,7 @@ export function ChatView({
   toggleTracesSidebar,
   setPrompt,
   scrollContainerRef,
+  isArtifactPanelOpen,
 }: ChatViewProps) {
   const { agentexClient } = useAgentexClient();
   const { data: agents = [] } = useAgents(agentexClient);
@@ -61,6 +63,7 @@ export function ChatView({
         agents={agents}
         onAgentChange={handleSelectAgent}
         ref={headerRef}
+        isArtifactPanelOpen={isArtifactPanelOpen}
       />
 
       <div className="flex w-full flex-col items-center px-4 sm:px-6 md:px-8">

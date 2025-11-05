@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 
+import { ProjectCreationForm } from '@/components/agentex/project/project-creation-form';
 import { AgentsList } from '@/components/agents-list/agents-list';
 import { useAgentexClient } from '@/components/providers/agentex-provider';
 import { useAgents } from '@/hooks/use-agents';
@@ -26,7 +27,7 @@ export function HomeView() {
       animate={{ opacity: 1 }}
       transition={{ duration: 0.25, ease: 'easeInOut' }}
     >
-      <div className="flex flex-col items-center justify-center px-4">
+      <div className="flex w-full flex-col items-center justify-center px-4">
         <div className="mb-6 text-3xl font-bold">Agentex</div>
         <AgentsList agents={agents} isLoading={isLoading} />
         <div
@@ -48,6 +49,9 @@ export function HomeView() {
           >
             esc
           </kbd>
+        </div>
+        <div className="mt-8 w-full max-w-2xl">
+          <ProjectCreationForm />
         </div>
       </div>
     </motion.div>
