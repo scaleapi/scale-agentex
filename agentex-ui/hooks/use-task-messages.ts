@@ -90,6 +90,7 @@ export function useSendMessage({
       }
 
       switch (agent.acp_type) {
+        case 'async':
         case 'agentic': {
           queryClient.setQueryData<TaskMessagesData>(queryKey, data => ({
             messages: data?.messages || [],
