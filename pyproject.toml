@@ -21,7 +21,7 @@ docs = [
 ]
 
 [tool.uv.workspace]
-members = ["agentex-auth", "agentex"]
+members = ["agentex"]
 
 [tool.ruff]
 target-version = "py311"

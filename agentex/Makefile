@@ -91,34 +91,6 @@ docker-build-with-docs: ## Build production Docker image with docs included
 	docker buildx build --platform=linux/amd64 --load -f Dockerfile --target production -t agentex:latest --build-arg INCLUDE_DOCS=true .
 
 #
-# Deployment Commands
-#
-
-minikube: ## Deploy to Minikube
-	make -f Makefile.minikube dev
-
-staging-deploy: ## Deploy to staging
-	make -f Makefile.staging deploy
-
-staging-setup: ## Setup staging environment
-	make -f Makefile.staging setup
-
-staging-update-backend: ## Update backend in staging
-	make -f Makefile.staging build-and-push-backend
-
-staging-update-backend-tagged: ## Update backend with tags in staging
-	make -f Makefile.staging build-and-push-backend-tagged
-
-staging-update-web: ## Update web in staging
-	make -f Makefile.staging build-and-push-web
-
-staging-update-all: ## Update all services in staging
-	make -f Makefile.staging build-and-push-all
-
-staging-port-forward: ## Port forward staging services
-	make -f Makefile.staging port-forward
-
-#
 # Test Commands
 #
 
