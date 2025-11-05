@@ -197,7 +197,7 @@ OPENAI_API_KEY="..."
 
 Your agent should auto-reload and look like this now:
 
-<img width="1728" height="991" alt="image" src="agentex/docs/docs/images/agentex_web.png" />
+<img width="1728" height="991" alt="image" src="agentex/docs/docs/images/agentex_exec.png" />
 
 At this point, feel free to play around with the UI.
 1. Start a conversation with your agent
