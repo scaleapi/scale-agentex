@@ -86,7 +86,7 @@ function TaskMessageToolPairImpl({
       }}
     >
       <button
-        className="mb-2 flex items-center gap-2"
+        className="mb-4 flex items-center gap-2"
         type="button"
         onClick={() => setIsCollapsed(!isCollapsed)}
       >
@@ -108,7 +108,7 @@ function TaskMessageToolPairImpl({
         />
       </button>
       <Collapsible collapsed={isCollapsed}>
-        <div className="ml-6 flex flex-col gap-4">
+        <div className="mb-4 ml-6 flex flex-col gap-4">
           <TaskMessageToolHeaderAndJson
             title="Parameters"
             data={toolRequestMessage.content.arguments as JsonValue}

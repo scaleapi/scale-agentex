@@ -99,7 +99,7 @@ function TaskMessageReasoningImpl({ message }: TaskMessageReasoningProps) {
       }}
     >
       <button
-        className="mb-2 flex items-center gap-2"
+        className="mb-4 flex items-center gap-2"
         type="button"
         onClick={() => setIsCollapsed(!isCollapsed)}
       >

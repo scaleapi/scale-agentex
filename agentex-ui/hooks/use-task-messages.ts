@@ -51,6 +51,7 @@ export function useTaskMessages({
 
       const messages = await agentexClient.messages.list({
         task_id: taskId,
+        limit: 1000,
       });
 
       return {
@@ -203,6 +204,7 @@ export function useSendMessage({
 
           const finalMessages = await agentexClient.messages.list({
             task_id: taskId,
+            limit: 1000,
           });
 
           queryClient.setQueryData<TaskMessagesData>(queryKey, {
