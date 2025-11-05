@@ -7,7 +7,7 @@ import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 import { useInfiniteTasks } from '@/hooks/use-tasks';
 import { cn } from '@/lib/utils';
 
-import { TaskButton } from '../agentex/task-button';
+import { TaskButton } from './task-button';
 import { useAgentexClient } from '../providers';
 import { Skeleton } from '../ui/skeleton';
 

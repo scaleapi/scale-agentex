@@ -9,7 +9,7 @@ import {
 import { createTaskName } from '@/lib/task-utils';
 import { cn } from '@/lib/utils';
 
-import { ResizableSidebar } from './resizable-sidebar';
+import { ResizableSidebar } from '../agentex/resizable-sidebar';
 
 import type { TaskListResponse } from 'agentex/resources';
 
