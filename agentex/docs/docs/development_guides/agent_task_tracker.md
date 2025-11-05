@@ -14,20 +14,6 @@ Agent Task Trackers are **optional processing coordination records** that track 
 - **Status Management**: Tracks processing state for coordination
 - **Cursor-Based Progress**: Records processing position using `last_processed_event_id` as a cursor
 
-## Agent Task Tracker Structure
-
-```python
-class AgentTaskTracker:
-    id: str                          # Unique tracker identifier
-    agent_id: str                    # Associated agent
-    task_id: str                     # Associated task
-    status: Optional[str]            # Processing status
-    status_reason: Optional[str]     # Description of current status
-    last_processed_event_id: Optional[str]  # CURSOR - tracks processing position
-    created_at: datetime             # When tracker was created
-    updated_at: Optional[datetime]   # Last update timestamp
-```
-
 ## When to Use Agent Task Trackers
 
 Use Agent Task Trackers when you need:
@@ -37,8 +23,8 @@ Use Agent Task Trackers when you need:
 - **Resumable Processing**: Resume from specific event positions after restarts
 - **Long Workflows**: Coordinate multi-phase processing (e.g., research → analysis → response)
 
-!!! warning "Optional Feature"
-    Agent Task Trackers are **not required** for basic agent functionality. Only use them when you need stateful processing coordination.
+!!! info "Async ACP Only"
+    Agent Task Trackers are only used in **Async ACP** agents. **Sync ACP** agents are automatically locked per request - each message is processed sequentially and blocking, so there's no need for manual cursor tracking. If you're using **Temporal workflows**, Temporal provides its own built-in mechanisms for state management, retries, and resumability, making Agent Task Trackers a bit redundant although you're free to use whatever mechanism of race condition handling you're comfortable with.
 
 ## Cursor Behavior (Critical)
 
@@ -52,87 +38,83 @@ The `last_processed_event_id` field acts as a **CURSOR** with strict rules:
 ## Common Processing Patterns
 
 ### Simple Batch Processing
+
 Wait for multiple events, then process together:
+
 ```python
 @acp.on_task_event_send
 async def batch_handler(params: SendEventParams):
-    unprocessed_events = await get_unprocessed_events(params.task.id, params.agent.id)
+    # Get the current tracker to find last processed event
+    tracker = await adk.agent_task_tracker.get_by_task_and_agent(
+        task_id=params.task.id,
+        agent_id=params.agent.id
+    )
+    
+    # Get unprocessed events since last cursor position
+    unprocessed_events = await adk.events.list_events(
+        task_id=params.task.id,
+        agent_id=params.agent.id,
+        last_processed_event_id=tracker.last_processed_event_id,
+        limit=100
+    )
     
     if len(unprocessed_events) >= 5:  # Wait for batch of 5
-        await process_batch(unprocessed_events)
-        await commit_cursor(unprocessed_events[-1].id)
+        # Process all events in the batch
+        for event in unprocessed_events:
+            response = await process_event(event)
+            await adk.messages.create(
+                task_id=params.task.id,
+                content=response
+            )
+        
+        # Update cursor after successful processing
+        await adk.agent_task_tracker.update(
+            tracker_id=tracker.id,
+            request=UpdateAgentTaskTrackerRequest(
+                last_processed_event_id=unprocessed_events[-1].id,
+                status_reason=f"Processed batch of {len(unprocessed_events)} events"
+            )
+        )
 ```
 
 ### State-Based Processing
+
 Ignore events when not ready, process when ready:
+
 ```python
 @acp.on_task_event_send
 async def state_handler(params: SendEventParams):
-    if agent_busy():
+    # Check agent state - don't process if agent is busy
+    state = await adk.state.get_by_task_and_agent(
+        task_id=params.task.id,
+        agent_id=params.agent.id
+    )
+    
+    if state and state.state.get("processing_in_progress"):
         return  # Events accumulate while agent works
     
-    # Agent ready - get accumulated events and decide strategy
-    events = await get_unprocessed_events(params.task.id, params.agent.id)
-    await start_processing_workflow(events)
-```
-
-!!! tip "Lightweight Handlers"
-    Keep event handlers fast - they should check conditions and kick off background processing, not do heavy work directly.
-
-## Basic Usage Pattern
-
-```python
-async def process_with_tracker(task_id: str, agent_id: str):
-    # Get current tracker state
+    # Agent ready - get accumulated events
     tracker = await adk.agent_task_tracker.get_by_task_and_agent(
-        task_id=task_id,
-        agent_id=agent_id
+        task_id=params.task.id,
+        agent_id=params.agent.id
     )
     
-    # Get unprocessed events since last cursor
     events = await adk.events.list_events(
-        task_id=task_id,
-        agent_id=agent_id,
+        task_id=params.task.id,
+        agent_id=params.agent.id,
         last_processed_event_id=tracker.last_processed_event_id,
-        limit=50
+        limit=100
     )
     
-    if not events:
-        return  # No new events to process
-    
-    # Process all events in the batch
-    for event in events:
-        await process_event(event)
-    
-    # Update cursor ONLY after all processing is complete
-    await adk.agent_task_tracker.update(
-        tracker_id=tracker.id,
-        request=UpdateAgentTaskTrackerRequest(
-            last_processed_event_id=events[-1].id,
-            status_reason=f"Processed {len(events)} events"
-        )
+    # Mark agent as busy and start processing
+    await adk.state.update(
+        state_id=state.id,
+        task_id=params.task.id,
+        agent_id=params.agent.id,
+        state={"processing_in_progress": True}
     )
+    
+    # Process events and update cursor when done
+    await process_events_workflow(events, params.task.id, params.agent.id, tracker.id)
 ```
 
-## Querying Agent Task Trackers
-
-```python
-# Get by tracker ID
-tracker = await adk.agent_task_tracker.get(tracker_id="tracker_123")
-
-# Get by agent and task (most common pattern)
-tracker = await adk.agent_task_tracker.get_by_task_and_agent(
-    agent_id="agent_456",
-    task_id="task_789"
-)
-```
-
-## Key Points
-
-- **Optional Feature**: Agent Task Trackers are not required for basic functionality
-- **Cursor-Only Updates**: Only update `last_processed_event_id` after processing completion
-- **Forward Movement**: Cursors cannot move backward - updates that try to rollback will fail
-- **Event Accumulation**: Events naturally accumulate when agents ignore them during busy periods
-- **Lightweight Handlers**: Event handlers should be fast - heavy processing happens asynchronously
-
- 

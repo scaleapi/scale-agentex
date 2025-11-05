@@ -156,59 +156,6 @@ async def batch_processing(params: SendEventParams):
         )
 ```
 
-### Agent Task Tracker for Cursor Coordination
-
-**Agent Task Tracker** provides cursor-based coordination for sophisticated event processing patterns:
-
-```python
-@acp.on_task_event_send
-async def cursor_coordinated_processing(params: SendEventParams):
-    # Agent Task Tracker acts as processing cursor
-    tracker = await adk.agent_task_tracker.get_by_task_and_agent(
-        task_id=params.task.id,
-        agent_id=params.agent.id
-    )
-    
-    # Get unprocessed events since last cursor position
-    unprocessed_events = await adk.events.list_events(
-        task_id=params.task.id,
-        agent_id=params.agent.id,
-        last_processed_event_id=tracker.last_processed_event_id,
-        limit=50
-    )
-    
-    if not unprocessed_events:
-        return  # No new events to process
-    
-    # Process events AND get conversation context from TaskMessages
-    conversation_messages = await adk.messages.list(task_id=params.task.id)
-    
-    # Process with full context from both events and messages
-    for event in unprocessed_events:
-        await process_with_full_context(event, conversation_messages)
-    
-    # Update cursor - forward-only movement after successful processing
-    await adk.agent_task_tracker.update(
-        tracker_id=tracker.id,
-        request=UpdateAgentTaskTrackerRequest(
-            last_processed_event_id=unprocessed_events[-1].id,
-            status_reason=f"Processed {len(unprocessed_events)} events with conversation context"
-        )
-    )
-```
-
-**Key Benefits:**
-
-- **Resumable Processing**: Pick up where you left off after restarts
-- **Forward-Only Progress**: Cursors prevent duplicate processing
-- **Batch Coordination**: Process multiple events atomically
-- **Progress Tracking**: Track processing status across instances
-
-!!! warning "Cursor Rules"
-    - Cursors can only move **forward** - never backward
-    - Update cursor **ONLY** after processing is complete
-    - Use Agent Task Tracker cursors for **coordination** - they're optional for basic processing
-
 ### Database Write Order Guarantees
 
 **Critical**: Events are written to the database **BEFORE** being sent to the agent:
@@ -219,11 +166,3 @@ async def cursor_coordinated_processing(params: SendEventParams):
 4. **Agent processes** → Can query both events and messages tables
 
 This ensures agents can always access the event data, even if there are delivery failures.
-
-## Key Takeaway
-
-!!! info "Remember the Architecture"
-    - **Events**: Persistent processing coordination stored in events table (written BEFORE ACP delivery)
-    - **TaskMessages**: Persistent user conversation stored in messages table  
-    - **Use events for processing coordination**, **TaskMessages for conversation context**
-    - **Both are queryable and persistent** - they serve different purposes 

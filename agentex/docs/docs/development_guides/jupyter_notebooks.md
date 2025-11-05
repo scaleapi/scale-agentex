@@ -1,6 +1,6 @@
 # Jupyter Notebooks for Agent Development
 
-Jupyter Notebooks provide an excellent environment for developing and testing AgentEx agents. Every project created with `agentex init` automatically includes a `dev.ipynb` notebook, pre-configured with your agent name and ready-to-use examples for testing your agent.
+Jupyter Notebooks provide an useful environment for developing and testing AgentEx agents. Every project created with `agentex init` automatically includes a `dev.ipynb` notebook, pre-configured with your agent name and ready-to-use examples for testing your agent.
 
 !!! note "Recommended: Use Agentex UI for Local Development"
     This documentation is primarily for **local development** using notebooks or programmatic access. For most users, we recommend using the **[Agentex UI](https://github.com/scaleapi/scale-agentex/tree/main/agentex-ui){target="_blank"}** instead, as it automatically handles streaming, delta aggregation, and polling for you - so you don't have to manage these complexities yourself.
@@ -27,15 +27,6 @@ When you run `agentex init`, a `dev.ipynb` notebook is automatically created in 
 Simply open the notebook and run the cells to start testing your agent immediately. The examples below explain what's in the notebook and how to customize it for your needs.
 
 ## Sync ACP Agents
-
-### Lifecycle Overview
-
-Sync ACP agents follow a simple request-response pattern:
-
-- **Send messages** → **Receive immediate responses**
-- Messages are grouped by **tasks** (conversation sessions)
-- If you don't create a task explicitly, one will be created automatically
-- Responses are **synchronous** - you get them immediately after sending
 
 ### What's in the Notebook
 
@@ -160,16 +151,6 @@ for agent_rpc_response_chunk in client.agents.send_message_stream(
 ```
 
 ## Async ACP Agents
-
-### Lifecycle Overview
-
-Async ACP agents work asynchronously:
-
-- **Send events** → **Agent processes when ready** → **Subscribe to responses**
-- Events are like **mobile phone notifications** - asynchronous and non-blocking
-- Agents can **accumulate events** or **process immediately** based on their logic
-- You must **subscribe to responses** rather than waiting for immediate replies
-- **Task creation is required** for all agentic interactions
 
 ### What's in the Notebook
 

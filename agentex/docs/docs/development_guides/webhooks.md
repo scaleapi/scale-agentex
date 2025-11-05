@@ -1,12 +1,19 @@
 # Webhook Concepts
 
-An agent can respond to events outside of the Agentex ecosystem, such as code being pushed to a GitHub repository. Read below to learn more about how to integrate agents with webhooks.
+Webhooks allow you to add your own custom routes to your agent to handle external events that are not part of the standard agent lifecycle (like `on_task_create`, `on_message_send`, or `on_task_event_send`). This way, your agent can respond to events outside of the Agentex ecosystem. Read below to learn more about how to integrate agents with webhooks.
+
+**Use webhooks when you need to:**
+
+- Respond to external system events (GitHub pushes, Slack messages, payment notifications, etc.)
+- Integrate with third-party services that send HTTP callbacks
+- Handle custom endpoints that don't fit the standard ACP protocol
 
 ## Agent Changes
 
 For each event type that you would like the agent to handle, decide on a unique URL path that these events will be forwarded to and whether this will be done via a GET or POST request.
 As an example, suppose we decide to handle code change events as POST requests to the `/code_changes` endpoint.
 The code below will allow the agent to receive the POST requests and handle them appropriately:
+
 ```python
 @acp.post("/code_changes")
 async def handle_code_changes(request: Request) -> JSONResponse:
@@ -15,7 +22,41 @@ async def handle_code_changes(request: Request) -> JSONResponse:
     # Return a response if desired
     return JSONResponse(content={"message": "Success"})
 ```
+
 As you can see above, the handler function has access to the full request sent to the agent, including the relevant headers and the payload body if one exists.
+
+**Common Use Case - Routing to ACP:**
+
+A common pattern is to receive the webhook, process the custom JSON payload from the external provider, and then route it to your agent via an ACP-compatible message to the correct task:
+
+```python
+@acp.post("/code_changes")
+async def handle_code_changes(request: Request) -> JSONResponse:
+    # Parse the webhook payload
+    payload = await request.json()
+    
+    # Extract relevant information
+    pr_number = payload.get("pull_request", {}).get("number")
+    commit_message = payload.get("commits", [{}])[0].get("message")
+    
+    # Find or create the appropriate task for this PR
+    task_id = await get_or_create_task_for_pr(pr_number)
+    
+    # Route to your agent via ACP by sending an event
+    await adk.events.send_event(
+        task_id=task_id,
+        agent_id=params.agent.id,
+        content=TextContent(
+            author=MessageAuthor.USER,
+            content=f"Code change detected: {commit_message}"
+        )
+    )
+    
+    return JSONResponse(content={"message": "Success"})
+```
+
+This allows you to bridge external systems with your agent's standard lifecycle handlers.
+
 Once all the desired event handlers are added to the agent implementation, and the agent is (re)deployed, the defined routes will be accessible as described below.
 
 ## Accessing Routes

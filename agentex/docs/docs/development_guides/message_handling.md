@@ -135,11 +135,3 @@ for task_msg in task_messages:
 # CORRECT: Use the provided utility
 llm_messages = convert_task_messages_to_llm_messages(task_messages)
 ```
-
-## Key Takeaway
-
-!!! info "Remember the Rule"
-    - **TaskMessages**: For Agentex operations (storage, retrieval, agent communication)
-    - **LLM Messages**: For language model API calls (OpenAI, Anthropic, etc.)
-    - **Always convert** between formats when crossing the boundary
-    - **Use custom converters** for complex scenarios with metadata 

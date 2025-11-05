@@ -71,7 +71,6 @@ nav:
       - Race Conditions: development_guides/race_conditions.md
       - Message Handling: development_guides/message_handling.md
       - Events vs Messages: development_guides/events_vs_messages.md
-      - State Scoping: development_guides/state_management.md
       - State Machines: development_guides/state_machines.md
       - Agent Task Tracker: development_guides/agent_task_tracker.md
       - Webhooks: development_guides/webhooks.md

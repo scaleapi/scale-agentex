@@ -1,6 +1,6 @@
 # State Machines in Agentex
 
-State machines are a fundamental pattern in Agentex for managing complex workflows with multiple states and transitions. This document explains the core concepts and structure of the state machine SDK.
+State machines are a commonly used pattern in Agentex for managing complex workflows with multiple states and transitions. This document explains the core concepts and structure of the state machine SDK.
 
 ## Overview
 
@@ -54,6 +54,7 @@ class State(BaseModel):
 ```
 
 **Components:**
+
 - `name`: Unique identifier for the state
 - `workflow`: The `StateWorkflow` instance that contains the execution logic
 
@@ -71,6 +72,7 @@ class StateWorkflow(ABC):
 ```
 
 **Key Methods:**
+
 - `execute()`: Runs the workflow logic and returns the name of the next state to transition to
 
 ## State Transitions and Execution
@@ -301,7 +303,3 @@ class DecisionWorkflow(StateWorkflow):
 ```
 
 This foundation provides a robust, type-safe, and traceable framework for building complex workflows in Agentex applications.
-
-## Related Documentation
-
-- **[State Machine Tutorial](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/10_temporal/020_state_machine)**: See how state machines are used in practice with the deep research agent tutorial 

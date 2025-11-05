@@ -7,6 +7,14 @@
 
 In **all async ACP types**, multiple events can trigger concurrent processing, leading to race conditions where agents compete for the same resources and corrupt each other's state.
 
+### Common Race Condition Scenarios
+
+1. **State Corruption** - Last write wins, updates are lost
+2. **Duplicate Processing** - Same event processed multiple times, wasting resources
+3. **Inconsistent Behavior** - Agent loses context, conversation history gets corrupted
+
+These issues appear in production when users send rapid messages or multiple webhooks arrive simultaneously.
+
 **Temporal ACP** handles this better because workflows are singleton instances with built-in message queuing, while **Base ACP** requires manual race condition handling.
 
 ### ❌ What Happens with Race Conditions (All Async ACP)
@@ -300,105 +308,3 @@ async def handle_event_send_with_cursor(params: SendEventParams):
     2. **Update After Success**: Only update cursor after processing is complete
     3. **Atomic Batches**: Process batches atomically to reduce race windows
     4. **Single Source of Truth**: Use cursor as the authoritative processing position
-
-### Comparison: Individual vs Batch Processing
-
-```python
-# ❌ RACE-PRONE: Individual event processing
-@acp.on_task_event_send
-async def race_prone_handler(params: SendEventParams):
-    # Each event triggers a separate handler instance
-    # Multiple handlers can run concurrently
-    # Race conditions likely when updating shared state
-    pass
-
-# ✅ RACE-RESISTANT: Cursor-based batch processing
-@acp.on_task_event_send  
-async def cursor_batch_handler(params: SendEventParams):
-    # Use current event as trigger to check for batch
-    # Process accumulated events in controlled batches
-    # Update cursor after successful batch processing
-    pass
-```
-
-!!! warning "Not a Complete Solution"
-    Agent Task Tracker cursors **reduce** race conditions but don't eliminate them entirely. For complete race condition prevention, use **Temporal Async ACP** which provides guaranteed sequential processing.
-
-## Common Race Condition Scenarios
-
-**1. State Corruption** - Last write wins, updates are lost
-**2. Duplicate Processing** - Same event processed multiple times, wasting resources
-**3. Inconsistent Behavior** - Agent loses context, conversation history gets corrupted
-
-These issues appear in production when users send rapid messages or multiple webhooks arrive simultaneously.
-
-## Base ACP: Manual Race Condition Handling Required
-
-With Base ACP, you must implement your own race condition protection:
-
-### Option 1: Application-Level Locking
-
-```python
-# Use Redis or database locks
-@acp.on_task_event_send
-async def handle_event_send(params: SendEventParams):
-    lock_key = f"task_lock:{params.task.id}:{params.agent.id}"
-    
-    async with custom_lock(lock_key, timeout=30):
-        # Only one execution can run at a time
-        state = await adk.state.get_by_task_and_agent(
-            task_id=params.task.id,
-            agent_id=params.agent.id
-        )
-        # ... process safely ...
-        await adk.state.update(
-            state_id=state.id,
-            task_id=params.task.id,
-            agent_id=params.agent.id,
-            state=state.state
-        )
-```
-
-### Option 2: Event Queuing
-
-Implement your own event queue with separate workers to process events sequentially.
-
-
-## Temporal ACP: Built-in Race Condition Mitigation
-
-Temporal prevents race conditions through:
-
-**1. Singleton Workflow** - One workflow instance per task ID, all events go to same instance
-**2. Sequential Signal Processing** - Signals processed in FIFO order, each completes before next begins
-**3. Workflow-Scoped State** - State in workflow memory (`self._state`), no external database contention
-**4. Built-in Queuing** - Temporal queues events automatically, maintains order
-
-```python
-# Temporal workflow - Race-condition free
-@workflow.signal(name=SignalName.RECEIVE_EVENT)
-async def on_task_event_send(self, params: SendEventParams) -> None:
-    # ✅ Sequential processing guaranteed - no concurrent modifications
-    self._state.conversation_history.append(params.event.content.content)
-    self._state.turn_number += 1
-    # All updates are atomic within signal handler
-```
-
-!!! info "Learn More"
-    See [Temporal Python Message Passing](https://docs.temporal.io/develop/python/message-passing) for advanced concurrency patterns.
-
-## Common Misconceptions
-
-- ❌ **"Careful coding prevents race conditions"** - Race conditions are subtle and only appear under production load
-- ❌ **"Race conditions are rare"** - Common with rapid messages, webhooks, and load-balanced deployments
-- ❌ **"asyncio.Lock solves this"** - Only works within a single process, not across distributed pods
-- ❌ **"Only Base ACP has races"** - All async types can, Temporal just handles them better
-
-## Key Takeaway
-
-!!! info "Production Recommendation"
-    - **All async ACP**: Can experience race conditions under concurrent load
-    - **Base ACP**: Requires manual distributed locking/queuing mechanisms
-    - **Temporal ACP**: Provides built-in singleton workflows + message queuing for better race condition handling
-    - **Best practice**: Use Temporal ACP for production systems to leverage platform-level concurrency protection
-    
-    Learn more about Temporal's message handling: **[Temporal Python Message Passing](https://docs.temporal.io/develop/python/message-passing)** 
