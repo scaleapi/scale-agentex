@@ -23,7 +23,7 @@ export function AgentexUIRoot({
   sgpAppURL,
   agentexAPIBaseURL,
 }: AgentexUIRootProps) {
-  const { agentName, updateParams } = useSafeSearchParams();
+  const { agentName, taskID, updateParams } = useSafeSearchParams();
   const [isTracesSidebarOpen, setIsTracesSidebarOpen] = useState(false);
   const [localAgentName] = useLocalStorageState<string | undefined>(
     'lastSelectedAgent',
@@ -46,12 +46,18 @@ export function AgentexUIRoot({
     [updateParams]
   );
 
-  // Global keyboard shortcut: cmd + k for new chat
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      // Global cmd + k to trigger a new chat
       if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
         event.preventDefault();
         handleSelectTask(null);
+      }
+      // Escape to clear the selected agent on the home page
+      if (event.key === 'Escape' && !!agentName && !taskID) {
+        updateParams({
+          [SearchParamKey.AGENT_NAME]: null,
+        });
       }
     };
 
@@ -60,7 +66,7 @@ export function AgentexUIRoot({
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [handleSelectTask]);
+  }, [handleSelectTask, agentName, taskID, updateParams]);
 
   return (
     <>
