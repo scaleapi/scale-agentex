@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 
 import { motion, AnimatePresence } from 'framer-motion';
 
+import { Button } from '@/components/ui/button';
 import { useLocalStorageState } from '@/hooks/use-local-storage-state';
 import useResizable from '@/hooks/use-resizable';
 import { cn } from '@/lib/utils';
@@ -24,7 +25,21 @@ type ResizableSidebarProps = React.HTMLAttributes<HTMLDivElement> & {
   renderCollapsed?: () => React.ReactNode;
 };
 
-export function ResizableSidebar({
+type ResizableSidebarButtonProps = {
+  onClick: () => void;
+  isSelected?: boolean;
+  className?: string;
+  children: React.ReactNode;
+  ariaLabel?: string;
+  disableAnimation?: boolean;
+};
+
+type ResizableSidebarComponent = {
+  (props: ResizableSidebarProps): React.ReactElement;
+  Button: (props: ResizableSidebarButtonProps) => React.ReactElement;
+};
+
+function ResizableSidebarBase({
   children,
   side,
   storageKey,
@@ -73,100 +88,136 @@ export function ResizableSidebar({
   const contentOpacity = shouldFadeContent && isCollapsed ? 0 : 1;
 
   return (
-    <AnimatePresence mode="wait">
-      <motion.div
-        ref={resizableContainerRef}
-        key={`resizable-sidebar-${storageKey}`}
-        className={cn(
-          'relative flex h-full flex-col',
-          borderClass,
-          'border-border group overflow-hidden',
-          className
-        )}
-        initial={false}
-        animate={{
-          width: animatedWidth,
-        }}
-        suppressHydrationWarning
-        transition={
-          isManuallyResizing
-            ? { duration: 0 }
-            : {
-                width: {
-                  type: 'spring',
-                  damping: 30,
-                  stiffness: 300,
-                  duration: 0.3,
-                },
-              }
-        }
-      >
+    <motion.div
+      ref={resizableContainerRef}
+      className={cn(
+        'relative flex h-full flex-col',
+        borderClass,
+        'border-border group overflow-hidden'
+      )}
+      initial={false}
+      animate={{ width: animatedWidth, opacity: contentOpacity }}
+      suppressHydrationWarning
+      transition={{
+        width: isManuallyResizing
+          ? { duration: 0 }
+          : { type: 'spring', damping: 30, stiffness: 200 },
+        opacity: isManuallyResizing
+          ? { duration: 0 }
+          : {
+              duration: 0.15,
+              ease: 'easeInOut' as const,
+            },
+      }}
+    >
+      <AnimatePresence mode="wait">
         <motion.div
-          className="flex h-full flex-col"
-          animate={{ opacity: contentOpacity }}
-          transition={
-            isManuallyResizing
-              ? { duration: 0 }
-              : {
-                  duration: 0.15,
-                  ease: 'easeInOut',
-                  delay: isCollapsed ? 0 : 0.1,
-                }
-          }
+          key={isCollapsed ? 'collapsed' : 'expanded'}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className={cn('flex h-full flex-col', className)}
         >
-          <AnimatePresence mode="wait">
-            {isCollapsed ? (
-              <motion.div
-                key={`collapsed-${storageKey}`}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                className="flex h-full flex-col"
-              >
-                {renderCollapsed ? (
-                  renderCollapsed()
-                ) : (
-                  <div className="h-full w-full" />
-                )}
-              </motion.div>
-            ) : (
-              <motion.div
-                key={`expanded-${storageKey}`}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                className="flex h-full flex-col"
-              >
-                {children}
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {isCollapsed
+            ? (renderCollapsed?.() ?? <div className="h-full w-full" />)
+            : children}
         </motion.div>
-        {!isCollapsed && (
-          <div
-            className={cn(
-              'hover:bg-accent absolute top-0 h-full w-1 transition-all duration-300 hover:w-1',
-              dragHandlePosition
-            )}
-            style={{
-              cursor:
-                size === minWidth
+      </AnimatePresence>
+      {!isCollapsed && (
+        <div
+          className={cn(
+            'hover:bg-accent absolute top-0 h-full w-1 transition-all duration-300 hover:w-1',
+            dragHandlePosition
+          )}
+          style={{
+            cursor:
+              size === minWidth
+                ? isLeftSide
+                  ? 'e-resize'
+                  : 'w-resize'
+                : size === maxWidth
                   ? isLeftSide
-                    ? 'e-resize'
-                    : 'w-resize'
-                  : size === maxWidth
-                    ? isLeftSide
-                      ? 'w-resize'
-                      : 'e-resize'
-                    : 'col-resize',
-            }}
-            onMouseDown={handleStartResize}
-            onDoubleClick={resetSidebarWidth}
-          />
-        )}
-      </motion.div>
-    </AnimatePresence>
+                    ? 'w-resize'
+                    : 'e-resize'
+                  : 'col-resize',
+          }}
+          onMouseDown={handleStartResize}
+          onDoubleClick={resetSidebarWidth}
+        />
+      )}
+    </motion.div>
   );
 }
+
+function ResizableSidebarButton({
+  onClick,
+  isSelected = false,
+  className,
+  children,
+  ariaLabel,
+  disableAnimation = false,
+}: ResizableSidebarButtonProps) {
+  if (disableAnimation) {
+    return (
+      <Button
+        variant="ghost"
+        className={cn(
+          'hover:bg-muted hover:text-primary-foreground text-foreground flex h-auto w-full cursor-pointer items-start justify-start p-2 text-left transition-colors active:opacity-80',
+          isSelected && 'bg-primary',
+          className
+        )}
+        onClick={onClick}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onClick();
+          }
+        }}
+        aria-label={ariaLabel}
+      >
+        {children}
+      </Button>
+    );
+  }
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, x: -50 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: -50 }}
+      whileTap={{ scale: 0.98 }}
+      transition={{
+        layout: { duration: 0.3, ease: 'easeInOut' },
+        opacity: { duration: 0.2, delay: 0.2 },
+        x: { delay: 0.2, type: 'spring', damping: 30, stiffness: 300 },
+      }}
+    >
+      <Button
+        variant="ghost"
+        className={cn(
+          'hover:bg-muted hover:text-primary-foreground text-foreground flex h-auto w-full cursor-pointer items-start justify-start p-2 text-left transition-colors active:opacity-80',
+          isSelected && 'bg-primary',
+          className
+        )}
+        onClick={onClick}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onClick();
+          }
+        }}
+        aria-label={ariaLabel}
+      >
+        {children}
+      </Button>
+    </motion.div>
+  );
+}
+
+// Create compound component
+const ResizableSidebar = ResizableSidebarBase as ResizableSidebarComponent;
+ResizableSidebar.Button = ResizableSidebarButton;
+
+export { ResizableSidebar };

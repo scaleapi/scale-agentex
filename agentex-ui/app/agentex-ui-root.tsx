@@ -5,9 +5,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { ToastContainer } from 'react-toastify';
 
 import { PrimaryContent } from '@/app/primary-content';
-import { TaskSidebar } from '@/components/agentex/task-sidebar';
 import { TracesSidebar } from '@/components/agentex/traces-sidebar';
 import { AgentexProvider } from '@/components/providers';
+import { TaskSidebar } from '@/components/task-sidebar/task-sidebar';
 import { useLocalStorageState } from '@/hooks/use-local-storage-state';
 import {
   SearchParamKey,
