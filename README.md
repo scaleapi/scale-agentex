@@ -25,7 +25,8 @@
 
 AI agent capabilities can be understood in five levels, from simple chatbots to fully autonomous, self-driving agentic systems:
 
-<img width="960" height="417" alt="Levels of AI" src="agentex/docs/docs/images/levels_of_ai.png" />
+<img width="960" height="417" alt="image" src="https://github.com/user-attachments/assets/68beed69-9737-4ae5-96fc-47f3477dd1f3" />
+
 
 Today, most AI applications are limited to Level 3 (L3) and below, relying on synchronous request/response patterns. This restricts their ability to handle complex, long-running, or autonomous workflows.
 
@@ -106,7 +107,8 @@ lzd
 
 This gives a terminal for you to ensure all of the backend servers are healthy and you can review logs for each individual server in isolation. You know your Agent Server is fully running if all of the services from the docker compose are marked `(healthy)` in the top left panel of lazydocker.
 
-<img width="863" height="729" alt="image" src="agentex/docs/docs/images/lazydocker.png" />
+<img width="863" height="729" alt="image" src="https://github.com/user-attachments/assets/64e2e8cf-7559-43e8-a641-3e56f799225e" />
+
 
 
 ### Terminal 2 - Frontend Server
@@ -138,7 +140,7 @@ agentex init
 
 Here is an example of the CLI flow you should follow with some example responses. You can change the responses if you'd like.
 
-<img width="573" height="759" alt="image" src="agentex/docs/docs/images/agentex_init.png" />
+<img width="573" height="759" alt="image" src="https://github.com/user-attachments/assets/7b3b97da-d3d2-499f-b8e8-9facfeb20791" />
 
 
 
@@ -170,7 +172,8 @@ agentex agents run --manifest manifest.yaml
 
 You should see your agent appear in the developer UI when you visit http://localhost:3000 in your browser. As you can see, this agent just responds with a "Hello World" message. It's main purpose is to show how simple the agent's standard entrypoint is.
 
-<img width="1728" height="992" alt="image" src="agentex/docs/docs/images/agentex_web.png" />
+<img width="1728" height="992" alt="image" src="https://github.com/user-attachments/assets/4d0da048-ee0f-4a69-b95e-a90855816e3e" />
+
 
 Let's make it slightly more interesting by allowing an AI to respond in a streaming fashion.
 
@@ -197,7 +200,8 @@ OPENAI_API_KEY="..."
 
 Your agent should auto-reload and look like this now:
 
-<img width="1728" height="991" alt="image" src="agentex/docs/docs/images/agentex_exec.png" />
+<img width="1728" height="991" alt="image" src="https://github.com/user-attachments/assets/63105a1e-3a33-43df-8680-b66403321d96" />
+
 
 At this point, feel free to play around with the UI.
 1. Start a conversation with your agent
