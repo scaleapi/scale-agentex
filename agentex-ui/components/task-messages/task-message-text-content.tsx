@@ -3,6 +3,8 @@ import { memo } from 'react';
 import { cva } from 'class-variance-authority';
 
 import { MarkdownResponse } from '@/components/task-messages/markdown-response';
+import { TaskMessageExternalEvent } from '@/components/task-messages/task-message-external-event';
+import { parseProcurementEventFromText } from '@/lib/procurement-utils';
 import { cn } from '@/lib/utils';
 
 import type { TextContent } from 'agentex/resources';
@@ -25,6 +27,13 @@ function TaskMessageTextContentImpl({
   content,
   key,
 }: TaskMessageTextContentProps) {
+  if (content.author === 'user') {
+    const eventData = parseProcurementEventFromText(content.content);
+    if (eventData) {
+      return <TaskMessageExternalEvent key={key} event={eventData} />;
+    }
+  }
+
   return (
     <div className={cn(variants({ author: content.author }))}>
       <MarkdownResponse key={key}>{content.content}</MarkdownResponse>

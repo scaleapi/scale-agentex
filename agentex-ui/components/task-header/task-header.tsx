@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Activity, Bot } from 'lucide-react';
+import { Activity, Bot, Database } from 'lucide-react';
 
 import { InvestigateTracesButton } from '@/components/task-header/investigate-traces-button';
 import { ThemeToggle } from '@/components/task-header/theme-toggle';
@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useArtifactPanel } from '@/contexts/artifact-panel-context';
 import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 
 import type { Agent } from 'agentex/resources';
@@ -24,6 +25,7 @@ type TaskHeaderProps = {
   selectedAgentName?: string;
   onAgentChange?: (agentName: string | undefined) => void;
   ref?: React.RefObject<HTMLDivElement | null>;
+  isArtifactPanelOpen?: boolean;
 };
 
 export function TaskHeader({
@@ -33,9 +35,16 @@ export function TaskHeader({
   agents = [],
   onAgentChange,
   ref,
+  isArtifactPanelOpen,
 }: TaskHeaderProps) {
   const displayTaskId = taskId ? taskId.split('-')[0] : '';
   const { agentName: selectedAgentName } = useSafeSearchParams();
+  const {
+    openDataTables,
+    isOpen,
+    taskId: openTaskId,
+    closeArtifact,
+  } = useArtifactPanel();
 
   const copyTaskId = async () => {
     if (taskId) {
@@ -43,6 +52,16 @@ export function TaskHeader({
         await navigator.clipboard.writeText(taskId);
       } catch (err) {
         console.error('Failed to copy task ID:', err);
+      }
+    }
+  };
+
+  const handleViewTables = () => {
+    if (taskId) {
+      if (isOpen && openTaskId === taskId) {
+        closeArtifact();
+      } else {
+        openDataTables(taskId, 'Database Tables');
       }
     }
   };
@@ -97,10 +116,19 @@ export function TaskHeader({
           className={`flex items-center gap-2 ${!taskId && 'pointer-events-none invisible'}`}
         >
           <ThemeToggle />
+          {taskId && (
+            <IconButton
+              variant="ghost"
+              onClick={handleViewTables}
+              aria-label="View database tables"
+              icon={Database}
+            />
+          )}
           {toggleTracesSidebar && (
             <IconButton
               variant="ghost"
               onClick={toggleTracesSidebar}
+              disabled={isArtifactPanelOpen}
               aria-label={
                 isTracesSidebarOpen
                   ? 'Close traces sidebar'

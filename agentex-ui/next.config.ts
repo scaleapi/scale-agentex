@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next';
+import path from 'path';
 
 const nextConfig: NextConfig = {
   async redirects() {
@@ -11,6 +12,8 @@ const nextConfig: NextConfig = {
     ];
   },
   devIndicators: false,
+  serverExternalPackages: ['better-sqlite3'],
+  outputFileTracingRoot: path.join(__dirname, '../../'),
 };
 
 export default nextConfig;

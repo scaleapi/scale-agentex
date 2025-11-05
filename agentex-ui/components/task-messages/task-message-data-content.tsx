@@ -2,7 +2,9 @@ import { memo } from 'react';
 
 import { cva } from 'class-variance-authority';
 
+import { TaskMessageExternalEvent } from '@/components/task-messages/task-message-external-event';
 import { JsonViewer } from '@/components/ui/json-viewer';
+import { isProcurementEventData } from '@/lib/procurement-utils';
 import type { JsonValue } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
@@ -12,6 +14,7 @@ const variants = cva('', {
   variants: {
     author: {
       user: 'ml-auto w-fit max-w-[80%]',
+      procurement_event: '',
       agent: '',
     },
   },
@@ -27,12 +30,24 @@ function TaskMessageDataContentImpl({
   key,
 }: TaskMessageDataContentProps) {
   return (
-    <div className={cn(variants({ author: content.author }))}>
-      <JsonViewer
-        key={key}
-        data={content.data as JsonValue}
-        defaultOpenDepth={1}
-      />
+    <div
+      className={cn(
+        variants({
+          author: isProcurementEventData(content.data)
+            ? 'procurement_event'
+            : content.author,
+        })
+      )}
+    >
+      {isProcurementEventData(content.data) ? (
+        <TaskMessageExternalEvent key={key} event={content.data} />
+      ) : (
+        <JsonViewer
+          key={key}
+          data={content.data as JsonValue}
+          defaultOpenDepth={1}
+        />
+      )}
     </div>
   );
 }
