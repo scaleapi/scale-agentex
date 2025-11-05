@@ -64,11 +64,6 @@ export function ProjectCreationForm() {
 
       updateParams({ [SearchParamKey.TASK_ID]: task.id });
 
-      toast.success({
-        title: 'Project created',
-        message: `Successfully created project "${values.projectName}"`,
-      });
-
       form.reset();
     } catch (error) {
       // Error handling is done in the useCreateTask hook

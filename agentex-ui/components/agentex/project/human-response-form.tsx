@@ -88,6 +88,14 @@ export function HumanResponseForm({
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Submit on Command+Enter (Mac) or Ctrl+Enter (Windows/Linux)
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      form.handleSubmit(handleSubmit)();
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: -10 }}
@@ -139,6 +147,7 @@ export function HumanResponseForm({
                         sendMessageMutation.isPending || effectiveIsResponded
                       }
                       readOnly={effectiveIsResponded}
+                      onKeyDown={handleKeyDown}
                     />
                   </FormControl>
                   <FormMessage />
