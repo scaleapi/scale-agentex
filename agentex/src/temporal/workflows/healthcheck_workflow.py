@@ -69,7 +69,7 @@ class HealthCheckWorkflow:
                 logger.error(f"Failed to check status of agent {agent_id}: {e}")
 
             if not success:
-                # Activity failed after all retries
+                # Activity failed or agent unreachable
                 failure_counter += 1
             if failure_counter >= 5:
                 # Agent is officially unhealthy
