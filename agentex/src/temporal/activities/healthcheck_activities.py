@@ -63,7 +63,7 @@ class HealthCheckActivities:
                 )
         except Exception as e:
             logger.error(f"Failed to check status of agent {agent_id}: {e}")
-        raise HealthCheckException(f"Failed to check status of agent {agent_id}")
+        return False
 
     @activity.defn(name=UPDATE_AGENT_STATUS_ACTIVITY)
     async def update_agent_status_activity(self, agent_id: str, status: str) -> None:
