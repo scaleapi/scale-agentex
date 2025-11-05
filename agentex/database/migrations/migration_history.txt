@@ -1,4 +1,6 @@
-d7addd4229e8 -> 329fbafa4ff9 (head), change_default_acp_to_async
+a5d67f2d7356 -> 24429f13b8bd (head), add agent input type
+329fbafa4ff9 -> a5d67f2d7356, add unhealthy status
+d7addd4229e8 -> 329fbafa4ff9, change_default_acp_to_async
 09368a02d6cc -> d7addd4229e8, soft delete status
 739800d3e1ce -> 09368a02d6cc, deployment history
 dbac39ab82c3 -> 739800d3e1ce, registration metadata

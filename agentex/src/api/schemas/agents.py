@@ -12,6 +12,7 @@ class AgentStatus(str, Enum):
     FAILED = "Failed"
     UNKNOWN = "Unknown"
     DELETED = "Deleted"
+    UNHEALTHY = "Unhealthy"
 
 
 class ACPType(str, Enum):
@@ -26,6 +27,11 @@ class AgentRPCMethod(str, Enum):
     TASK_CREATE = "task/create"
     MESSAGE_SEND = "message/send"
     TASK_CANCEL = "task/cancel"
+
+
+class AgentInputType(str, Enum):
+    TEXT = "text"
+    JSON = "json"
 
 
 class Agent(BaseModel):
@@ -57,6 +63,9 @@ class Agent(BaseModel):
         default=None,
         description="The timestamp when the agent was last registered",
     )
+    agent_input_type: AgentInputType | None = Field(
+        default=None, description="The type of input the agent expects."
+    )
 
     class Config:
         orm_mode = True
@@ -79,6 +88,9 @@ class RegisterAgentRequest(BaseModel):
     registration_metadata: dict[str, Any] | None = Field(
         default=None,
         description="The metadata for the agent's registration.",
+    )
+    agent_input_type: AgentInputType | None = Field(
+        default=None, description="The type of input the agent expects."
     )
 
 

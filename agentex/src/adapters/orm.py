@@ -17,7 +17,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
 from src.domain.entities.agent_api_keys import AgentAPIKeyType
-from src.domain.entities.agents import AgentStatus
+from src.domain.entities.agents import AgentInputType, AgentStatus
 from src.domain.entities.tasks import TaskStatus
 from src.utils.ids import orm_id
 
@@ -41,6 +41,7 @@ class AgentORM(BaseORM):
     )
     registration_metadata = Column(JSONB, nullable=True)
     registered_at = Column(DateTime(timezone=True), nullable=True)
+    agent_input_type = Column(SQLAlchemyEnum(AgentInputType), nullable=True)
 
     # Many-to-Many relationship with tasks
     tasks = relationship("TaskORM", secondary="task_agents", back_populates="agents")

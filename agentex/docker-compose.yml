@@ -149,6 +149,8 @@ services:
       - MONGODB_URI=mongodb://agentex-mongodb:27017
       - MONGODB_DATABASE_NAME=agentex
       - WATCHFILES_FORCE_POLLING=true
+      - ENABLE_HEALTH_CHECK_WORKFLOW=true
+      - AGENTEX_SERVER_TASK_QUEUE=agentex-server
     ports:
       - "5003:5003"
     volumes:
@@ -186,6 +188,45 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+
+  agentex-temporal-worker:
+    container_name: agentex-temporal-worker
+    build:
+      context: ..
+      dockerfile: agentex/Dockerfile
+      target: dev
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql://postgres:postgres@agentex-postgres:5432/agentex
+      - TEMPORAL_ADDRESS=agentex-temporal:7233
+      - TEMPORAL_HOST=agentex-temporal
+      - REDIS_URL=redis://agentex-redis:6379
+      - MONGODB_URI=mongodb://agentex-mongodb:27017
+      - MONGODB_DATABASE_NAME=agentex
+      - AGENTEX_SERVER_TASK_QUEUE=agentex-server
+    volumes:
+      - .:/app:cached
+    depends_on:
+      agentex-temporal:
+        condition: service_healthy
+      agentex-redis:
+        condition: service_healthy
+      agentex-postgres:
+        condition: service_healthy
+      agentex-mongodb:
+        condition: service_healthy
+    networks:
+      - agentex-network
+    command: |
+      bash -c "
+        echo 'Starting Temporal Worker...' &&
+        export TEMPORAL_ADDRESS=agentex-temporal:7233 &&
+        export TEMPORAL_HOST=agentex-temporal &&
+        export MONGODB_URI=mongodb://agentex-mongodb:27017 &&
+        python src/temporal/run_worker.py
+      "
+    user: root
+    restart: unless-stopped
 
 volumes:
   agentex-temporal-postgres-data:

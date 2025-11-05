@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
+from src.adapters.temporal.adapter_temporal import TemporalAdapter
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
 from src.domain.entities.agents_rpc import (
     ACP_TYPE_TO_ALLOWED_RPC_METHODS,
@@ -241,6 +242,8 @@ class TestACPTypeBackwardsCompatibility:
         agents_use_case = AgentsUseCase(
             agent_repository=agent_repo,
             deployment_history_repository=deployment_history_repo,
+            # Not testing temporal adapter in this test
+            temporal_adapter=TemporalAdapter(),
         )
 
         # Mock repository to return a new agent
@@ -279,6 +282,8 @@ class TestACPTypeBackwardsCompatibility:
         agents_use_case = AgentsUseCase(
             agent_repository=agent_repo,
             deployment_history_repository=deployment_history_repo,
+            # Not testing temporal adapter in this test
+            temporal_adapter=TemporalAdapter(),
         )
 
         # Mock repository to return an AGENTIC agent
