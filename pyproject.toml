@@ -2,7 +2,7 @@
 name = "agentex"
 version = "0.1.0"
 description = "agentex workspace"
-authors = [{ name = "Anish Agrawal", email = "anish.agrawal@scale.com" }]
+authors = [{ name = "Felix Su", email = "felix.su@scale.com" }]
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
