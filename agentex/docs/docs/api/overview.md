@@ -133,8 +133,8 @@ except ValidationError as e:
 
 - **New to Agentex?** Start with [Concepts](../concepts/task.md) to understand core concepts, then check [Types](types.md) for API details
 - **Looking for specific functions?** Check the [Agent Development Kit](adk.md) reference
-- **Need examples?** See the [Tutorials](../tutorials.md) section
-- **Advanced patterns?** Explore [Advanced Concepts](../concepts/callouts/overview.md) like race conditions and state management
+- **Need examples?** See the [Tutorials](../development_guides/tutorials.md) section
+- **Advanced patterns?** Explore advanced guides in [Development Guides](../development_guides/race_conditions.md) like race conditions and state management
 
 ## Common Patterns
 

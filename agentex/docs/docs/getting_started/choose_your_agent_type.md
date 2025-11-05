@@ -17,7 +17,7 @@ Agentex supports three agent types with different execution models and capabilit
 | **Example Use Cases** | FAQ bots, translation services, data lookups | Interactive applications, multi-step analysis, complex business logic | Enterprise integrations, multi-day processes, distributed coordination |
 | **Typical Complexity** | ~30 lines, 1 file | ~80 lines, 1 file | 150+ lines, 4 files |
 
-**Learn more:** [Sync ACP](../agent_types/sync.md) \| [Async ACP](../agent_types/async/overview.md) \| [Temporal Guide](../development_guides/temporal_guide.md) \| [Tutorials](../development_guides/tutorials.md)
+**Learn more:** [Sync ACP](../agent_types/sync.md) \| [Async ACP](../agent_types/async/overview.md) \| [Temporal Use Cases](../temporal_development/use_cases.md) \| [Tutorials](../development_guides/tutorials.md)
 
 ---
 
