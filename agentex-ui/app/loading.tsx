@@ -1,12 +1,14 @@
 'use client';
 
+import { Suspense } from 'react';
+
 import { ArrowUp } from 'lucide-react';
 
 import { IconButton } from '@/components/agentex/icon-button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 
-export default function Loading() {
+function LoadingContent() {
   const { taskID } = useSafeSearchParams();
 
   // If there's a task ID, show the task/chat loading state
@@ -97,5 +99,19 @@ export default function Loading() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function Loading() {
+  return (
+    <Suspense
+      fallback={
+        <div className="fixed inset-0 flex items-center justify-center">
+          <Skeleton className="h-8 w-32" />
+        </div>
+      }
+    >
+      <LoadingContent />
+    </Suspense>
   );
 }
