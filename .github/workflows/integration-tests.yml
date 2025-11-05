@@ -1,6 +1,14 @@
 name: Run Agentex Integration Tests
 
 on:
+  pull_request:
+    paths:
+      - 'agentex/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'agentex/**'
   workflow_dispatch:
     inputs:
       commit-sha:
