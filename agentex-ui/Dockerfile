@@ -1,6 +1,7 @@
 # Use the official Node.js 20 Debian image
 FROM node:20
 
+
 # Update package lists and install Sharp dependencies
 RUN apt-get update && apt-get install -y \
     libvips-dev \
