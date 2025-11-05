@@ -52,6 +52,16 @@
   --ring: #19202f;
   --secondary-foreground: #ffffff;
   --secondary: #45464f;
+  --toastify-icon-color-success: var(--color-green-700);
+  --toastify-color-progress-success: var(--color-green-700);
+  --toastify-icon-color-error: var(--color-red-700);
+  --toastify-color-progress-error: var(--color-red-700);
+  --toastify-icon-color-warning: var(--color-yellow-700);
+  --toastify-color-progress-warning: var(--color-yellow-700);
+  --toastify-icon-color-info: var(--color-blue-700);
+  --toastify-color-progress-info: var(--color-blue-700);
+  --toastify-icon-color-default: var(--color-gray-700);
+  --toastify-color-progress-default: var(--color-gray-700);
 }
 
 .dark {
