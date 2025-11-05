@@ -1,0 +1,10 @@
+# docker-compose.host-access.yml
+# Override file to add host access when needed
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.host-access.yml up
+# docker-compose.host-access.yml
+services:
+  agentex:
+    networks:
+      agentex-network:
+        aliases:
+          - localhost # Make agentex reachable as localhost

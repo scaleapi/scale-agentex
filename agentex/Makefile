@@ -53,6 +53,14 @@ dev-wipe: ## Stop dev server and wipe DB
 	@echo "Stopping dev server and wiping DB"
 	docker compose down -v
 
+dev-test: install-dev ## Start development server with host access for testing
+	@echo "🚀 Starting development server with host access for testing..."
+	docker compose -f docker-compose.yml -f docker-compose.host-access.yml up --build
+
+dev-test-stop: ## Stop development server with host access configuration
+	@echo "Stopping dev test server with host access configuration"
+	docker compose -f docker-compose.yml -f docker-compose.host-access.yml down
+
 # Database Commands
 #
 

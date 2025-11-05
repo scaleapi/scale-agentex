@@ -4,20 +4,24 @@ on:
   workflow_dispatch:
     inputs:
       commit-sha:
-        description: "Commit SHA to test against (defaults to main)"
+        description: "Commit SHA to test against (defaults to current branch)"
         required: false
         type: string
-        default: main
 
 permissions:
   contents: read
   packages: write
 
 jobs:
-  pull-agent-images:
-    name: "Pull AgentEx Images"
+  run-integration-tests:
+    name: "Run Integration Tests - s000-hello-acp"
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit-sha || github.ref }}
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -25,89 +29,118 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Debug API Permissions
-        env:
-          GH_TOKEN: ${{ secrets.GH_READ_PACKAGES_SECRET }}
+      - name: Pull agent image
         run: |
-          echo "🔍 Testing API permissions..."
+          echo "🐳 Pulling agent image..."
+          docker pull ghcr.io/scaleapi/scale-agentex-python/tutorial-agents/00_sync-000_hello_acp:latest
+          echo "✅ Agent image pulled successfully"
 
-          # Test basic user access
-          echo "👤 Current user:"
-          gh api user --jq '.login' || echo "❌ User API failed"
-
-          # Test organization access
-          echo "🏢 Organization access:"
-          gh api orgs/scaleapi --jq '.login' || echo "❌ Org API failed"
-
-          # Test different package API endpoints
-          echo "📦 Testing package API endpoints:"
-
-          echo "1. Basic packages endpoint:"
-          gh api "orgs/scaleapi/packages" --jq 'length' || echo "❌ Basic packages API failed"
-
-          echo "2. Container packages endpoint:"
-          gh api "orgs/scaleapi/packages?package_type=container" --jq 'length' || echo "❌ Container packages API failed"
-
-          echo "3. Public packages endpoint:"
-          gh api "orgs/scaleapi/packages?package_type=container&visibility=public" --jq 'length' || echo "❌ Public packages API failed"
-
-      - name: Discover and pull scale-agentex-python packages
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Start AgentEx services with host access
+        working-directory: ./agentex
         run: |
-          echo "🔍 Discovering packages from scale-agentex-python repo..."
+          echo "🚀 Starting AgentEx services with host access override..."
+          docker compose -f docker-compose.yml -f docker-compose.host-access.yml up -d
+          echo "⏳ Waiting for services to be ready..."
+          sleep 30
+          docker compose ps
 
-          # First get all packages and save to temp file to avoid shell issues
-          gh api "orgs/scaleapi/packages?package_type=container" > /tmp/packages.json
+      - name: Run agent integration test
+        run: |
+          echo "🧪 Running integration test for agent: s000-hello-acp"
+          echo "🐳 Using image: ghcr.io/scaleapi/scale-agentex-python/tutorial-agents/00_sync-000_hello_acp:latest"
 
-          # Extract packages from scale-agentex-python repo
-          PACKAGES=$(cat /tmp/packages.json | jq -r '.[] | select(.repository.name == "scale-agentex-python") | .name')
+          # Start the agent container
+          docker run -d --name agent-test-s000-hello-acp \
+            -e AGENT_NAME=s000-hello-acp \
+            -e ACP_URL=http://localhost \
+            -e ACP_PORT=8000 \
+            -e ACP_TYPE=sync \
+            -e AGENTEX_BASE_URL=http://agentex:5003 \
+            -e AGENTEX_API_BASE_URL=http://agentex:5003 \
+            -p 8000:8000 \
+            --network agentex-network \
+            ghcr.io/scaleapi/scale-agentex-python/tutorial-agents/00_sync-000_hello_acp:latest
 
-          if [ -z "$PACKAGES" ]; then
-            echo "❌ No packages found in scale-agentex-python repo"
-            echo "🔍 Available packages and their repos:"
-            cat /tmp/packages.json | jq -r '.[] | "\(.name) -> \(.repository.name // "null")"'
-            exit 0
-          fi
+          echo "⏳ Waiting for agent to start..."
+          sleep 10
 
-          echo "📦 Found packages:"
-          echo "$PACKAGES"
+          # Check for "Application startup complete" log message
+          echo "🔍 Waiting for 'Application startup complete' log message..."
+          TIMEOUT=60
+          ELAPSED=0
 
-          # Pull each package
-          for package in $PACKAGES; do
-            echo "🐳 Pulling ghcr.io/scaleapi/$package:latest"
-            docker pull "ghcr.io/scaleapi/$package:latest" || echo "⚠️ Failed to pull $package:latest"
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            if docker logs agent-test-s000-hello-acp 2>&1 | grep -q "Application startup complete"; then
+              echo "✅ Agent application has started successfully"
+              break
+            fi
+
+            echo "⏳ Still waiting for startup... (${ELAPSED}s/${TIMEOUT}s)"
+            sleep 2
+            ELAPSED=$((ELAPSED + 2))
           done
 
-      - name: Show pulled images
-        run: |
-          echo "🐳 Successfully pulled images:"
-          docker images | grep "ghcr.io/scaleapi" || echo "No scaleapi images found"
+          if [ $ELAPSED -ge $TIMEOUT ]; then
+            echo "❌ Timeout waiting for 'Application startup complete' message"
+            echo "📋 Container logs:"
+            docker logs agent-test-s000-hello-acp
+            exit 1
+          fi
 
-  # run-integration-tests:
-  #   name: "Run Integration Tests"
-  #   needs: pull-agent-images
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@v4
-  #       with:
-  #         ref: ${{ inputs.commit-sha || 'main' }}
-  #
-  #     - name: Login to GitHub Container Registry
-  #       uses: docker/login-action@v3
-  #       with:
-  #         registry: ghcr.io
-  #         username: ${{ github.repository_owner }}
-  #         password: ${{ secrets.GITHUB_TOKEN }}
-  #
-  #     - name: Verify available images
-  #       run: |
-  #         echo "🐳 Available Docker images for testing:"
-  #         docker images | grep "ghcr.io/scaleapi" || echo "No scaleapi images available"
-  #
-  #     - name: Placeholder - Integration Tests
-  #       run: |
-  #         echo "🧪 Integration tests will run here"
-  #         echo "📦 AgentEx Python dependency images are available for testing"
-  #         echo "🔄 This is where actual integration test commands should be added"
+      - name: Run agent tests with retry
+        run: |
+          echo "🧪 Running pytest tests against the agent..."
+          MAX_ATTEMPTS=2
+          ATTEMPT=1
+          SUCCESS=false
+
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ] && [ "$SUCCESS" = false ]; do
+            echo "📝 Test attempt $ATTEMPT/$MAX_ATTEMPTS"
+
+            if docker exec agent-test-s000-hello-acp pytest tests/test_agent.py -v; then
+              echo "✅ Tests passed on attempt $ATTEMPT!"
+              SUCCESS=true
+            else
+              echo "❌ Tests failed on attempt $ATTEMPT"
+              if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+                echo "⏳ Waiting 5 seconds before retry..."
+                sleep 5
+              fi
+            fi
+
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+
+          if [ "$SUCCESS" = false ]; then
+            echo "❌ All $MAX_ATTEMPTS test attempts failed"
+            exit 1
+          fi
+
+          echo "🎉 Agent tests completed successfully!"
+
+      - name: Show agent logs
+        if: always()
+        run: |
+          echo "📋 Agent logs for s000-hello-acp:"
+          docker logs agent-test-s000-hello-acp || echo "No logs available"
+
+      - name: Show AgentEx server logs
+        if: always()
+        run: |
+          echo "📋 AgentEx server logs:"
+          docker logs agentex || echo "No AgentEx server logs available"
+
+      - name: Cleanup agent container
+        if: always()
+        run: |
+          echo "🧹 Cleaning up agent container..."
+          docker stop agent-test-s000-hello-acp || true
+          docker rm agent-test-s000-hello-acp || true
+
+      - name: Cleanup services
+        if: always()
+        working-directory: ./agentex
+        run: |
+          echo "🧹 Cleaning up services..."
+          docker compose -f docker-compose.yml -f docker-compose.host-access.yml down
+          docker system prune -f

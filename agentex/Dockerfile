@@ -32,6 +32,8 @@ FROM base AS dev
 RUN uv sync --group dev
 
 COPY agentex/src/ ./src/
+COPY agentex/tests/ ./tests/
+COPY agentex/pyproject.toml ./pyproject.toml
 EXPOSE 5003
 ENV PYTHONPATH=/app
 CMD ["ddtrace-run", "uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "5003", "--reload"]
