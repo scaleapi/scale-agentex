@@ -304,4 +304,4 @@ This foundation provides a robust, type-safe, and traceable framework for buildi
 
 ## Related Documentation
 
-- **[State Machine Tutorial](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic/10_temporal/020_state_machine)**: See how state machines are used in practice with the deep research agent tutorial 
+- **[State Machine Tutorial](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/10_temporal/020_state_machine)**: See how state machines are used in practice with the deep research agent tutorial 

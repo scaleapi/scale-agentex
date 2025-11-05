@@ -237,7 +237,7 @@ Learn how to use signals and child workflows for approval workflows that survive
 ## Complete Examples
 
 **Full working examples on GitHub:**
-- [Hello World](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic/010_temporal/060_open_ai_agents_sdk_hello_world)
-- [Tools Integration](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic/010_temporal/070_open_ai_agents_sdk_tools)
-- [Human-in-the-Loop](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic/010_temporal/080_open_ai_agents_sdk_human_in_the_loop)
+- [Hello World](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/010_temporal/060_open_ai_agents_sdk_hello_world)
+- [Tools Integration](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/010_temporal/070_open_ai_agents_sdk_tools)
+- [Human-in-the-Loop](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/010_temporal/080_open_ai_agents_sdk_human_in_the_loop)
 

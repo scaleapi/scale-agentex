@@ -24,7 +24,7 @@ This section provides comprehensive reference documentation for all Agentex type
 
 ### Configuration Objects
 
-- **ACP Configurations** - Settings for different ACP types (Sync, Agentic Base, Temporal)
+- **ACP Configurations** - Settings for different ACP types (Sync, Async Base, Temporal)
 - **LLM Configurations** - Settings for language model integrations
 - **Agent Configurations** - Agent deployment and runtime settings
 

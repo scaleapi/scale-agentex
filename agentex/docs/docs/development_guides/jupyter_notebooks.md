@@ -21,7 +21,7 @@ When you run `agentex init`, a `dev.ipynb` notebook is automatically created in 
 
 - **Client initialization** to connect to your local AgentEx server
 - **Your agent name** already set (no need to manually configure)
-- **Working examples** tailored to your agent type (Sync or Agentic)
+- **Working examples** tailored to your agent type (Sync or Async)
 - **Code snippets** demonstrating both streaming and non-streaming patterns
 
 Simply open the notebook and run the cells to start testing your agent immediately. The examples below explain what's in the notebook and how to customize it for your needs.
@@ -192,10 +192,10 @@ AGENT_NAME = "your-agent-name"  # This is pre-filled with your actual agent name
 
 #### Cell 3: Create a Task (Required)
 
-For agentic agents, task creation is **required** before sending any events:
+For async agents, task creation is **required** before sending any events:
 
 ```python
-# (REQUIRED) Create a new task. For Agentic agents,
+# (REQUIRED) Create a new task. For async agents,
 # you must create a task for messages to be associated with.
 import uuid
 
@@ -239,7 +239,7 @@ print(event)
 
 #### Cell 5: Subscribe to Async Responses
 
-Since agentic agents work asynchronously, use the `subscribe_to_async_task_messages` utility to wait for and display responses:
+Since async agents work asynchronously, use the `subscribe_to_async_task_messages` utility to wait for and display responses:
 
 ```python
 # Subscribe to the async task messages produced by the agent

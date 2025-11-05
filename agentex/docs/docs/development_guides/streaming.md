@@ -144,7 +144,7 @@ graph LR
 4. **Server persists** complete content on `StreamTaskMessageDone`
 5. **Client displays** streaming updates in real-time
 
-### Agentic Auto Send Flow
+### Async Auto Send Flow
 
 ```mermaid
 graph LR
@@ -159,7 +159,7 @@ graph LR
 3. **Agentex accumulates** chunks internally
 4. **Agent receives** complete `TaskMessage` when done
 
-### Agentic Non-Auto Send Flow
+### Async Non-Auto Send Flow
 
 ```mermaid
 graph LR
@@ -275,14 +275,14 @@ async def streaming_with_override(params: SendMessageParams) -> AsyncGenerator[T
 - Prototyping or development
 - Custom client-side accumulation logic
 
-### Use Agentic Auto Send When:
+### Use Async Auto Send When:
 
 - **Production systems** (especially Temporal)
 - **Standard streaming** without custom processing
 - **Temporal workflows** (only option)
 - **Simplified development** - let Agentex handle complexity
 
-### Use Agentic Non-Auto Send When:
+### Use Async Non-Auto Send When:
 
 - **Custom chunk processing** before sending to client
 - **Analytics or monitoring** of streaming chunks
@@ -294,8 +294,8 @@ async def streaming_with_override(params: SendMessageParams) -> AsyncGenerator[T
 !!! info "Choose the Right Pattern"
     
     - **Sync ACP**: Manual delta accumulation, full control
-    - **Agentic Auto Send**: Automatic everything, works everywhere (easiest option for Temporal)  
-    - **Agentic Non-Auto Send**: Manual control for advanced use cases (requires custom Temporal activity wrapper)
+    - **Async Auto Send**: Automatic everything, works everywhere (easiest option for Temporal)  
+    - **Async Non-Auto Send**: Manual control for advanced use cases (requires custom Temporal activity wrapper)
 
 
  

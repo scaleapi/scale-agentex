@@ -6,11 +6,11 @@ This guide provides comprehensive, step-by-step instructions for migrating agent
 
 | From | To | When to Migrate | Complexity Increase |
 |------|----|-----------------|--------------------|
-| **Sync ACP** (~30 lines) | **Base Agentic ACP** (~80 lines) | Need state management, lifecycle control | Medium |
-| **Base Agentic ACP** (~80 lines) | **Temporal Agentic ACP** (~150+ lines) | Production reliability, enterprise scale | High |
-| **Sync ACP** (~30 lines) | **Temporal Agentic ACP** (~150+ lines) | Direct to production (skip intermediate) | Very High |
+| **Sync ACP** (~30 lines) | **Base Async ACP** (~80 lines) | Need state management, lifecycle control | Medium |
+| **Base Async ACP** (~80 lines) | **Temporal Async ACP** (~150+ lines) | Production reliability, enterprise scale | High |
+| **Sync ACP** (~30 lines) | **Temporal Async ACP** (~150+ lines) | Direct to production (skip intermediate) | Very High |
 
-## Part 1: Sync ACP → Base Agentic ACP
+## Part 1: Sync ACP → Base Async ACP
 
 ### When to Migrate
 
@@ -49,7 +49,7 @@ async def handle_message_send(params: SendMessageParams):
     return TextContent(author=MessageAuthor.AGENT, content=response)
 ```
 
-**After (Base Agentic ACP)**:
+**After (Base Async ACP)**:
 ```python
 from agentex.sdk.fastacp.fastacp import FastACP
 from agentex.types.acp import CreateTaskParams, SendEventParams, CancelTaskParams
@@ -57,13 +57,13 @@ from agentex.types.task_messages import TextContent, MessageAuthor
 from agentex import adk
 
 acp = FastACP.create(
-    acp_type="agentic",
-    acp_config=AgenticACPConfig(acp_type="base")
+    acp_type="async",
+    acp_config=AsyncACPConfig(acp_type="base")
 )
 
 @acp.on_task_create
 async def handle_task_create(params: CreateTaskParams):
-    # Initialize state (new in Agentic)
+    # Initialize state (new in Async)
     await adk.state.create(
         task_id=params.task.id,
         agent_id=params.agent.id,
@@ -84,7 +84,7 @@ async def handle_event_send(params: SendEventParams):
 
 @acp.on_task_cancel
 async def handle_task_cancel(params: CancelTaskParams):
-    # Cleanup logic (new in Agentic)
+    # Cleanup logic (new in Async)
     await cleanup_resources(params.task.id)
 ```
 
@@ -136,17 +136,17 @@ async def generate_ai_response(user_input, context):
     return f"You said: {user_input}. Context: {len(context)} previous messages"
 ```
 
-**Migrated Base Agentic ACP (85 lines)**:
+**Migrated Base Async ACP (85 lines)**:
 ```python
 from agentex.sdk.fastacp.fastacp import FastACP
 from agentex.types.acp import CreateTaskParams, SendEventParams, CancelTaskParams
 from agentex.types.task_messages import TextContent, MessageAuthor
-from agentex.types.fastacp import AgenticACPConfig
+from agentex.types.fastacp import AsyncACPConfig
 from agentex import adk
 
 acp = FastACP.create(
-    acp_type="agentic",
-    acp_config=AgenticACPConfig(acp_type="base")
+    acp_type="async",
+    acp_config=AsyncACPConfig(acp_type="base")
 )
 
 @acp.on_task_create
@@ -236,7 +236,7 @@ async def generate_ai_response(user_input, context, state=None):
 4. **Lifecycle Control**: None → Explicit create/cancel handlers
 5. **Enhanced Capabilities**: Can now track conversation state, send welcome messages, cleanup resources
 
-## Part 2: Base Agentic ACP → Temporal Agentic ACP
+## Part 2: Base Async ACP → Temporal Async ACP
 
 ### When to Migrate
 
@@ -248,7 +248,7 @@ async def generate_ai_response(user_input, context, state=None):
 - ✅ **Complex state coordination** across multiple activities
 - ✅ **Guaranteed execution** with distributed processing
 
-**Warning Signs** in your Base Agentic ACP:
+**Warning Signs** in your Base Async ACP:
 
 - Manual retry logic becoming complex
 - State coordination across multiple async operations
@@ -260,11 +260,11 @@ async def generate_ai_response(user_input, context, state=None):
 
 #### Step 1: Create Temporal Workflow Structure
 
-**Before (Base Agentic ACP)**:
+**Before (Base Async ACP)**:
 ```python
 acp = FastACP.create(
-    acp_type="agentic",
-    acp_config=AgenticACPConfig(acp_type="base")
+    acp_type="async",
+    acp_config=AsyncACPConfig(acp_type="base")
 )
 
 @acp.on_task_create
@@ -278,14 +278,14 @@ async def handle_event_send(params: SendEventParams):
     await adk.messages.create(task_id=params.task.id, content=result)
 ```
 
-**After (Temporal Agentic ACP)**:
+**After (Temporal Async ACP)**:
 ```python
 from temporalio import workflow, activity
 from agentex.core.temporal.workflow import AgentexWorkflow
 
 acp = FastACP.create(
-    acp_type="agentic",
-    acp_config=AgenticACPConfig(acp_type="temporal")
+    acp_type="async",
+    acp_config=AsyncACPConfig(acp_type="temporal")
 )
 
 @workflow.defn
@@ -381,8 +381,8 @@ await workflow.execute_activity(
 ```python
 # Migration helper
 async def migrate_state(task_id: str, from_type: str, to_type: str):
-    if from_type == "sync" and to_type == "agentic":
-        # Sync uses automatic state, Agentic needs explicit creation
+    if from_type == "sync" and to_type == "async":
+        # Sync uses automatic state, Async needs explicit creation
         existing_messages = await adk.messages.list(task_id=task_id)
         initial_state = {"migrated_message_count": len(existing_messages)}
         await adk.state.create(task_id=task_id, state=initial_state)
@@ -390,7 +390,7 @@ async def migrate_state(task_id: str, from_type: str, to_type: str):
 
 ### Challenge 2: Message Creation Differences
 
-**Problem**: Sync auto-creates messages, Agentic requires manual creation
+**Problem**: Sync auto-creates messages, Async requires manual creation
 
 **Solution**: Create message creation helpers:
 ```python

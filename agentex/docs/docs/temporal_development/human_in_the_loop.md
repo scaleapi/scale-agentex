@@ -244,4 +244,4 @@ This pattern enables **true transactional agent behavior:**
 - **[OpenAI SDK Integration Guide](openai_integration.md)** - Setup and configuration
 - **[Multi-Activity Tools Pattern](multi_activity_tools.md)** - Combine with multi-step operations
 - **[Temporal Signals](https://docs.temporal.io/develop/python/message-passing)** - Deep dive into signals
-- **[GitHub Example](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic/010_temporal/080_open_ai_agents_sdk_human_in_the_loop)** - Full working code
+- **[GitHub Example](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/010_temporal/080_open_ai_agents_sdk_human_in_the_loop)** - Full working code

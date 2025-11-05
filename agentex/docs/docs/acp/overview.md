@@ -19,7 +19,7 @@ Think of ACP as the "language" that agents and clients use to understand each ot
 
 Agentex supports two distinct ACP types, each designed for different use cases:
 
-| Feature | Sync ACP | Agentic ACP |
+| Feature | Sync ACP | Async ACP |
 |---------|----------|-------------|
 | **Best for** | Chat bots, simple Q&A | Complex workflows, stateful apps |
 | **Handlers** | 1 method (`on_message_send`) | 3 methods (`on_task_create`, `on_task_event_send`, `on_task_cancel`) |
@@ -37,7 +37,7 @@ Agentex supports two distinct ACP types, each designed for different use cases:
 - ✅ Quick responses - Fast, lightweight operations
 - ✅ Chat-like interfaces - Traditional conversational AI
 
-**Use Agentic ACP when:**
+**Use Async ACP when:**
 
 - ✅ Complex workflows - Multi-step processes with state
 - ✅ Persistent memory - Need to remember context across interactions
@@ -55,7 +55,7 @@ Perfect for simple chat bots and Q&A agents. Get started with the easiest approa
 
 **[→ Read Sync ACP Guide](../agent_types/sync.md)**
 
-### Agentic ACP
+### Async ACP
 
 Powerful event-driven approach for complex agents. Choose between Base (learning/development) or Temporal (production).
 
@@ -65,7 +65,7 @@ Powerful event-driven approach for complex agents. Choose between Base (learning
 
 ## Additional Resources
 
-- **[Migration Guide](../concepts/migration_guide.md)** - Upgrade from Sync to Agentic, or Base to Temporal
+- **[Migration Guide](../concepts/migration_guide.md)** - Upgrade from Sync to Async, or Base to Temporal
 
 ---
 

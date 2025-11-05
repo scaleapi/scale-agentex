@@ -1,6 +1,6 @@
-# Base Agentic ACP
+# Base Async ACP
 
-**Base Agentic ACP** is the foundational implementation designed for learning and development environments. It provides complete control over task lifecycle while using Agentex's built-in state management.
+**Base Async ACP** is the foundational implementation designed for learning and development environments. It provides complete control over task lifecycle while using Agentex's built-in state management.
 
 ## When to Use
 
@@ -8,7 +8,7 @@
 
 ✅ **Learning and Development**
 
-- Understanding Agentic patterns
+- Understanding Async patterns
 - Practicing state management concepts
 - Learning multi-step workflow design
 
@@ -25,14 +25,14 @@
 
 ### Not Ideal For:
 
-❌ **Production Critical Systems** - Use Temporal Agentic ACP
+❌ **Production Critical Systems** - Use Temporal Async ACP
 ❌ **Very Large State Requirements** - Consider external storage
 ❌ **Enterprise Durability** - No advanced fault tolerance
 ❌ **High-Scale Operations** - Better suited for development
 
 ## State Management
 
-Base Agentic ACP requires using Agentex's state management system:
+Base Async ACP requires using Agentex's state management system:
 
 ```python
 @acp.on_task_create
@@ -187,7 +187,7 @@ Used in `@acp.on_task_cancel` for cleanup:
 
 ## Next Steps
 
-- **Ready for production?** Learn about [Temporal Agentic ACP](temporal.md)
+- **Ready for production?** Learn about [Temporal Async ACP](temporal.md)
 - **Need to upgrade?** See the [Migration Guide](../../concepts/migration_guide.md)
 - **New to Agentex?** Follow the [Quick Start Guide on GitHub](https://github.com/scaleapi/scale-agentex#quick-start)
-- **Ready to build?** Check out [Base Agentic Tutorials on GitHub](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_agentic/000_base)
+- **Ready to build?** Check out [Base Async Tutorials on GitHub](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/000_base)
