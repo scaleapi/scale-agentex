@@ -87,4 +87,4 @@ Each agent has a **mailbox** where events are delivered and queued:
 
 ### Handling Concurrent Events
 
-Unlike Sync ACP, Async ACP doesn't lock or block past requests. If you expect to receive many concurrent requests, you'll need to handle async events yourself. You can use the Agent Task Tracker with Base ACP or asyncio Queues with Temporal to manage event processing. For more information, see [Events vs Messages](../../concepts/callouts/events_vs_messages.md).
+Unlike Sync ACP, Async ACP doesn't lock or block past requests. If you expect to receive many concurrent requests, you'll need to handle async events yourself. You can use the Agent Task Tracker with Base ACP or asyncio Queues with Temporal to manage event processing. For more information, see [Events vs Messages](../../development_guides/events_vs_messages.md).

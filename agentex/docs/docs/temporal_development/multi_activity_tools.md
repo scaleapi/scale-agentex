@@ -18,7 +18,7 @@ You need a tool that performs multiple external operations that must complete to
 ## Prerequisites
 
 Before using this pattern, ensure you have:
-- OpenAI SDK plugin configured (see [OpenAI SDK Integration Guide](../guides/openai_temporal_integration.md))
+- OpenAI SDK plugin configured (see [OpenAI SDK Integration Guide](openai_integration.md))
 - Basic understanding of Temporal activities
 
 ---
@@ -185,6 +185,6 @@ Temporal UI shows both activities, execution times, and parameters - full observ
 
 ## See Also
 
-- **[OpenAI SDK Integration Guide](../guides/openai_temporal_integration.md)** - Setup and basic usage
+- **[OpenAI SDK Integration Guide](openai_integration.md)** - Setup and basic usage
 - **[Human-in-the-Loop Pattern](human_in_the_loop.md)** - Add approval to multi-activity operations
 - **[Temporal Activities Docs](https://docs.temporal.io/activities)** - Deep dive into Temporal activities

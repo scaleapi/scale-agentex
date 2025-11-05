@@ -67,5 +67,5 @@ To interact with Agentex, clients only need to know three things:
 
 To respond to client requests, agent developers only need to implement a fixed set of routes defined by the **Agent to Client Protocol (ACP)**. This keeps agent development simple and consistent, regardless of workflow complexity.
 
-**👉 Read [Developing Agentex Agents](../developing_agentex_agents.md) to understand your options and choose the right approach for your use case.**
+**👉 Read [Choose Your Agent Type](../getting_started/choose_your_agent_type.md) to understand your options and choose the right approach for your use case.**
 

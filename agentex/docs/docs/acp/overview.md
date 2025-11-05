@@ -53,20 +53,19 @@ Agentex supports two distinct ACP types, each designed for different use cases:
 
 Perfect for simple chat bots and Q&A agents. Get started with the easiest approach.
 
-**[→ Read Sync ACP Guide](sync.md)**
+**[→ Read Sync ACP Guide](../agent_types/sync.md)**
 
 ### Agentic ACP
 
 Powerful event-driven approach for complex agents. Choose between Base (learning/development) or Temporal (production).
 
-**[→ Read Agentic ACP Overview](agentic/overview.md)**
+**[→ Read Async ACP Overview](../agent_types/async/overview.md)**
 
 ---
 
 ## Additional Resources
 
 - **[Migration Guide](../concepts/migration_guide.md)** - Upgrade from Sync to Agentic, or Base to Temporal
-- **[Best Practices](best-practices.md)** - Guidelines for performance, security, and maintainability
 
 ---
 
@@ -74,4 +73,4 @@ Powerful event-driven approach for complex agents. Choose between Base (learning
 
 - **New to Agentex?** Follow the [Quick Start Guide on GitHub](https://github.com/scaleapi/scale-agentex#quick-start)
 - **Ready to build?** Check out [Tutorials on GitHub](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials)
-- **Need help choosing?** Read [Developing Agentex Agents](../developing_agentex_agents.md)
+- **Need help choosing?** Read [Choose Your Agent Type](../getting_started/choose_your_agent_type.md)

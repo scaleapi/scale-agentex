@@ -221,14 +221,14 @@ For production scenarios, check out these design patterns:
 ### Multi-Activity Tools
 When a single tool needs multiple sequential operations (e.g., withdraw + deposit for money transfer):
 
-**→ See [Multi-Activity Tools Pattern](../design_patterns/multi_activity_tools.md)**
+**→ See [Multi-Activity Tools Pattern](multi_activity_tools.md)**
 
 Learn how to create atomic multi-step tools with transactional guarantees.
 
 ### Human-in-the-Loop
 When agents need human approval before taking action:
 
-**→ See [Human-in-the-Loop Pattern](../design_patterns/human_in_the_loop.md)**
+**→ See [Human-in-the-Loop Pattern](human_in_the_loop.md)**
 
 Learn how to use signals and child workflows for approval workflows that survive system failures.
 
