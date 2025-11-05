@@ -1,130 +1,76 @@
-# Events
+# Event Concepts
 
-Events are persistent database records that coordinate agent processing workflows in **Async ACP only**. They represent activity within tasks and enable event-driven architectures for building sophisticated, distributed agents.
+Events are notifications that trigger agent processing in Async Agents. They're fundamentally different from messages and only exist in the async world.
 
-!!! warning "Async ACP Only"
-    Events are **only available in Async ACP**, not Sync ACP. Sync ACP uses direct request/response patterns without events.
+## What is an Event?
 
-## What Are Events?
+An **Event** is a notification that something happened - a user sent a message, a webhook fired, a scheduled task triggered. Events tell your agent "there's work to do" without prescribing what message (if any) should be saved to conversation history.
 
-Events are **processing coordination objects** stored in the events database table. They serve as work items for agents to process, distinct from TaskMessages which represent user-facing conversation history.
+Think of events like email notifications: they alert you that something happened, but you decide whether to archive them, reply, or ignore them.
 
-**Key Characteristics:**
+!!! note "Async Agents Only"
+    Events only exist for [Async Agents](../agent_types/async/overview.md). [Sync Agents](../agent_types/sync.md) don't use events - they work directly with messages that are automatically persisted.
 
-- **Async ACP Only**: Not available in Sync ACP
-- **Persistent**: Stored permanently in the events database table
-- **Sequential**: Ordered by `sequence_id` for predictable processing
-- **Pre-saved**: Written to database **BEFORE** being delivered to agents via ACP
-- **Agent-scoped**: Associated with specific task/agent combinations
+## Why Events Are Separate from Messages
 
-## Event Structure
+**Events are ephemeral notifications. Messages are persistent conversation history.**
 
-```python
-class Event:
-    id: str                    # Unique event identifier
-    sequence_id: int           # Sequential ordering within task/agent
-    task_id: str              # Associated task
-    agent_id: str             # Target agent
-    created_at: datetime      # When event was created
-    content: TaskMessageContent  # Optional processing content
-```
+This separation exists because in Async Agents, you control what gets saved to conversation history. Not every notification should become a message:
 
-## When to Use Events
-
-Use events in Async ACP when you need:
-
-- **Batch Processing**: Accumulate multiple events and process together
-- **Progress Tracking**: Track which events have been processed
-- **Resumable Processing**: Resume from specific event positions after failures
-- **Event-Driven Architecture**: React to events rather than direct messages
+- **Webhook events** might need preprocessing before becoming user-visible messages
+- **System events** (timeouts, scheduled tasks) might trigger actions without creating messages
+- **Multiple events** might be combined into a single summary message
+- **Transient events** (typing indicators, presence updates) shouldn't clutter conversation history
 
 ## Event Processing Flow
 
-The event processing flow in Async ACP:
+When a client interacts with an Async Agent:
 
-1. **User Action**: User sends message or performs action  
-2. **Event Created**: Event written to events table **BEFORE** ACP delivery
-3. **Event Delivered**: Agent receives event via `on_task_event_send`
-4. **Agent Processing**: Agent processes event and creates TaskMessages as needed
-5. **Agent Response**: Agent creates TaskMessages for user-facing responses
+1. **Client action** triggers an event (sends message, webhook fires, etc.)
+2. **Agentex creates event** and persists it to the database
+3. **Event delivered** to your `@acp.on_task_event_send` handler
+4. **You process event** and decide what to do
+5. **You create messages** (if needed) using `adk.messages.create()`
+6. **Client receives** any messages you created (via task subscription)
 
 ```mermaid
 sequenceDiagram
-    participant U as User/Client
-    participant A as Agentex Service
-    participant D as Database
-    participant G as Agent
+    participant Client
+    participant Agentex
+    participant Database
+    participant Agent
 
-    U->>A: Send Message/Action
-    A->>D: Store Event (events table)
-    A->>G: Deliver Event (ACP)
-    G->>D: Query Events for Processing
-    G->>D: Create TaskMessage (agent's response)
+    Client->>Agentex: Send event
+    Agentex->>Database: Store Event
+    Agentex->>Agent: Deliver Event (on_task_event_send)
+    Agent->>Agent: Process Event
+    Agent->>Database: Create Message (if needed)
+    Client->>Agentex: Subscribe to task
+    Agentex->>Client: Emit Task Message
 ```
 
-## Database Write Guarantees
+## Event Lifecycle
 
-**Critical**: Events are written to the database **BEFORE** being sent to agents, ensuring durability and queryability even if delivery fails.
-
-## Basic Event Usage
+How events flow through your Async Agent:
 
 ```python
-# Get specific event
-event = await adk.events.get(event_id="event_123")
-
-# List events for task/agent
-events = await adk.events.list_events(
-    task_id="task_123",
-    agent_id="agent_456"
-)
-
-# Get events since last processed position (cursor-based)
-unprocessed_events = await adk.events.list_events(
-    task_id="task_123",
-    agent_id="agent_456", 
-    last_processed_event_id="last_processed_event_id",
-    limit=50
-)
-```
-
-## Events vs TaskMessages
-
-| **Events** | **TaskMessages** |
-|------------|------------------|
-| **Processing coordination** | **User conversation** |
-| Stored in events table | Stored in messages table |
-| Agent processing workflow | User-facing chat history |
-| Written before ACP delivery | Created by users/agents directly |
-| Sequential by `sequence_id` | Chronological by `created_at` |
-
-**Use Both Together:**
-```python
+# 1. Event arrives - Delivered to your handler
 @acp.on_task_event_send
-async def handle_with_context(params: SendEventParams):
-    # Get processing context from events
-    events = await adk.events.list_events(
-        task_id=params.task.id,
-        agent_id=params.agent.id
-    )
+async def handle_event_send(params: SendEventParams):
+    event = params.event  # Access the event notification
     
-    # Get conversation context from messages
-    messages = await adk.messages.list(task_id=params.task.id)
-    
-    # Process with full context and create user-facing response
-    response = await process_with_context(events, messages)
-    
-    # Agent creates TaskMessage (not the server)
-    await adk.messages.create(
-        task_id=params.task.id,
-        content=response
-    )
+    # 2. Process event - Decide what to do
+    if event.content and event.content.type == TaskMessageContentType.TEXT:
+        user_input = event.content.content
+        response = await process_input(user_input)
+        
+        # 3. Create message (optional) - Save to conversation history
+        await adk.messages.create(
+            task_id=params.task.id,
+            content=TextContent(
+                author=MessageAuthor.AGENT,
+                content=response
+            )
+        )
+    # If you don't create a message, the event is processed but nothing is saved
 ```
-
-## Key Points
-
-- **Async ACP Only**: Events are not available in Sync ACP
-- **Pre-stored**: Events written to database before ACP delivery
-- **Agent Creates Messages**: Agent developers create TaskMessages, not the server
-- **Cursor-Based**: Use with Agent Task Tracker for progress tracking
-
- 

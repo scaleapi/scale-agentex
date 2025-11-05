@@ -18,57 +18,6 @@ Think of an agent like a **web server endpoint** - it receives requests, process
 !!! note "Agents Are Not LLMs"
     An agent is **your application code**, not an LLM. While agents often call LLMs (like OpenAI's API), the agent itself is the Python code you write to orchestrate the conversation, manage state, and implement your business logic.
 
-## Development Principles
-
-Agentex was built around five core development principles that shape how you build and deploy agents:
-
-### 1. Agents are just code
-Your agents are simply Python functions - no vendor lock-in, no proprietary frameworks, just code you control.
-
-### 2. Code is unopinionated and usable with any library  
-Use any Python library, any LLM provider, any database, any framework. Agentex doesn't constrain your technology choices.
-
-### 3. Local Development is fast and easy
-Develop and test your agents locally with minimal setup. No complex infrastructure required for development.
-
-### 4. Both simple sync and complex async use cases are supported
-Whether you need simple request-response patterns or complex multi-step workflows, Agentex supports your use case.
-
-### 5. All agents can be called with a unified communication protocol
-Regardless of complexity, all agents use the same client interface. Simple agents and complex workflows look identical to clients.
-
-### Focus on Business Logic Only
-
-**The primary tenet of Agentex is that agent developers should focus exclusively on business logic.** Everything else is handled automatically:
-
-#### What Agentex Handles for You:
-
-- **Containerization**: Automatically package agents with your custom dependencies
-- **Hosting**: Host agents on any cloud provider (calleable by unique name)
-- **Scaling**: Scale up or down based on demand and usage patterns
-- **Secrets Management**: Credentials are securely injected as environment variables
-- **Streaming**: Stream real-time messages to clients even in asynchronous environments
-- **Data Persistence**: Message history, state management, and conversation storage
-- **Distributed Work**: Distributed work asynchronously using natively-supported Temporal
-- **Reliability**: Error handling, retries, and fault tolerance with Temporal
-
-#### What You Focus On:
-
-- **Business Logic**: Your core agent functionality and workflows
-- **Integration Code**: Connecting to your APIs, databases, and services
-- **User Experience**: Designing conversation flows and responses
-- **Domain Expertise**: Implementing your specific use case requirements
-
-The Agentex service, along with its Agent Development Kit (ADK) and SDK, was built on carefully selected software and infrastructure that abstracts away these operational complexities. This allows you to deploy production-ready agents without becoming an infrastructure expert.
-
-## Agent Implementation by ACP Type
-
-The way you implement agents depends on which ACP (Agent-to-Client Protocol) type you choose. Read more about the ACP types in the [ACP](../acp/overview.md) section. Here is a quick overview of the two ACP types:
-
-**Sync ACP** agents are the simplest form - just a single function that processes messages and returns responses.
-
-**Async ACP** agents have multiple handler functions that manage the complete interaction lifecycle.
-
 ## Agent Relationships
 
 !!! info "For Detailed Implementation"
@@ -228,43 +177,46 @@ async def handle_message_send(params: SendMessageParams):
 
 All credentials and secrets are securely provided as environment variables by Agentex. For more details on secrets management, see the [Deployment Commands](../deployment/commands.md#agentex-secrets-sync) reference.
 
-## Core Principles
+## Development Principles
 
-### 1. Agents Are Stateless Functions (By Default)
+Agentex was built around five core development principles that shape how you build and deploy agents:
 
-```python
-# Good: Stateless agent function
-@acp.on_message_send
-async def handle_message_send(params: SendMessageParams):
-    # No global variables, no shared state
-    response = await process_message(params.content.content)
-    return TextContent(author=MessageAuthor.AGENT, content=response)
+### 1. Agents are just code
+Your agents are simply Python functions - no vendor lock-in, no proprietary frameworks, just code you control.
 
-# Avoid: Global state that persists across calls
-conversation_history = []  # Don't do this!
+### 2. Code is unopinionated and usable with any library  
+Use any Python library, any LLM provider, any database, any framework. Agentex doesn't constrain your technology choices.
 
-@acp.on_message_send
-async def handle_message_send(params: SendMessageParams):
-    conversation_history.append(params.content)  # Problematic!
-```
+### 3. Local Development is fast and easy
+Develop and test your agents locally with minimal setup. No complex infrastructure required for development.
 
-### 2. Use Agentex State for Persistence
+### 4. Both simple sync and complex async use cases are supported
+Whether you need simple request-response patterns or complex multi-step workflows, Agentex supports your use case.
 
-```python
-# Good: Use Agentex state management
-@acp.on_message_send
-async def handle_message_send(params: SendMessageParams):
-    # Get state from Agentex
-    state = await adk.state.get_by_task_and_agent(
-        task_id=params.task.id,
-        agent_id=params.agent.id
-    )
-    
-    # Update state
-    new_state = {"last_message": params.content.content}
-    await adk.state.update(state_id=state.id, state=new_state)
-```
+### 5. All agents can be called with a unified communication protocol
+Regardless of complexity, all agents use the same client interface. Simple agents and complex workflows look identical to clients.
 
-## API Reference
+### Focus on Business Logic Only
 
-For complete type definitions, see the [API - Types Reference](../api/types.md) 
+**The primary tenet of Agentex is that agent developers should focus exclusively on business logic.** Everything else is handled automatically:
+
+#### What Agentex Handles for You:
+
+- **Containerization**: Automatically package agents with your custom dependencies
+- **Hosting**: Host agents on any cloud provider (calleable by unique name)
+- **Scaling**: Scale up or down based on demand and usage patterns
+- **Secrets Management**: Credentials are securely injected as environment variables
+- **Streaming**: Stream real-time messages to clients even in asynchronous environments
+- **Data Persistence**: Message history, state management, and conversation storage
+- **Distributed Work**: Distributed work asynchronously using natively-supported Temporal
+- **Reliability**: Error handling, retries, and fault tolerance with Temporal
+
+#### What You Focus On:
+
+- **Business Logic**: Your core agent functionality and workflows
+- **Integration Code**: Connecting to your APIs, databases, and services
+- **User Experience**: Designing conversation flows and responses
+- **Domain Expertise**: Implementing your specific use case requirements
+
+The Agentex service, along with its Agent Development Kit (ADK) and SDK, was built on carefully selected software and infrastructure that abstracts away these operational complexities. This allows you to deploy production-ready agents without becoming an infrastructure expert.
+

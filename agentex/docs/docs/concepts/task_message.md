@@ -250,7 +250,3 @@ Handle different content types:
             show_root_heading: true
             show_root_toc_entry: false
 
-
-## API Reference
-
-For complete type definitions, see the [API - Types Reference](../api/types.md)

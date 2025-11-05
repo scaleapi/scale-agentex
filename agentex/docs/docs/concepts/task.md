@@ -13,131 +13,6 @@ A **Task** represents a stateful conversation or workflow session. It's the top-
 
 Think of a task like a chat session, customer support ticket, or workflow execution that can span multiple interactions over time.
 
-## Task Handling by ACP Type
-
-The way you work with tasks depends heavily on which ACP (Agent-to-Client Protocol) type you're using:
-
-### Sync ACP - Simple Request-Response
-
-**Sync ACP** treats tasks as lightweight conversation containers. The agent only handles incoming messages and doesn't manage task lifecycle directly.
-
-**Key Characteristics:**
-
-- One handler: `@acp.on_message_send`
-- Tasks are managed automatically by Agentex
-- Focus on processing individual messages
-- Stateless by default (though you can add state)
-
-**Task Interaction Pattern:**
-```python
-@acp.on_message_send
-async def handle_message_send(params: SendMessageParams):
-    """Only handler needed for Sync ACP"""
-    
-    task = params.task          # Task context provided automatically
-    user_message = params.content.content
-    
-    # Process the message and return response
-    response = await process_user_message(user_message)
-    
-    return TextContent(
-        author=MessageAuthor.AGENT,
-        content=response
-    )
-```
-
-### Async ACP - Full Lifecycle Management
-
-**Async ACP** gives you complete control over task lifecycle with event-driven handlers. This is for complex workflows and stateful interactions.
-
-**Key Characteristics:**
-
-- Three handlers: `@acp.on_task_create`, `@acp.on_task_event_send`, `@acp.on_task_cancel`
-- You manage task initialization and cleanup
-- Event-driven architecture
-- Built for complex, stateful workflows
-
-**Task Interaction Pattern:**
-```python
-@acp.on_task_create
-async def handle_task_create(params: CreateTaskParams):
-    """Initialize when task is created"""
-    # Set up initial state, send welcome messages
-    pass
-
-@acp.on_task_event_send
-async def handle_event_send(params: SendEventParams):
-    """Process events during task lifetime"""
-    # Handle user interactions, update state, send responses
-    pass
-
-@acp.on_task_cancel
-async def handle_task_cancel(params: CancelTaskParams):
-    """Clean up when task ends"""
-    # Archive data, cleanup resources
-    pass
-```
-
-## Task Lifecycle
-
-### Sync ACP Lifecycle
-
-In Sync ACP, task lifecycle is largely managed automatically:
-
-```python
-# 1. Task Creation - Handled automatically by Agentex
-
-# 2. Message Processing - Your responsibility
-@acp.on_message_send
-async def handle_message_send(params: SendMessageParams):
-    pass
-
-# 3. Task Completion - Unnecessary in Sync ACP
-```
-
-### Async ACP Lifecycle
-
-In Async ACP, you control the entire task lifecycle:
-
-```python
-# 1. Task Creation - Initialize whatever you need
-@acp.on_task_create
-async def handle_task_create(params: CreateTaskParams):
-    pass
-
-# 2. Task Processing - Handle ongoing interactions
-@acp.on_task_event_send
-async def handle_event_send(params: SendEventParams):
-    pass
-
-"""3. Task Completion - Clean up and archive"""
-@acp.on_task_cancel
-async def handle_task_cancel(params: CancelTaskParams):
-    pass
-```
-
-## Task Identification
-
-### Task IDs
-
-Task IDs work the same way in both ACP types - they're globally unique identifiers:
-
-```python
-# Sync ACP
-@acp.on_message_send
-async def handle_message_send(params: SendMessageParams):
-    task_id = params.task.id  # Available in message params
-    
-# Async ACP  
-@acp.on_task_create
-async def handle_task_create(params: CreateTaskParams):
-    task_id = params.task.id  # Available in all handlers
-
-@acp.on_task_event_send
-async def handle_event_send(params: SendEventParams):
-    task_id = params.task.id  # Same task ID throughout lifecycle
-```
-
 ## Task Relationships
 
 !!! info "For Detailed Implementation"
@@ -177,7 +52,7 @@ This flat structure allows:
 - **Notification System**: Events signal that new messages have arrived, like "new mail in your mailbox"
 - **Content Wrapper**: Events contain `TaskMessageContent` but are not the source of truth
 - **Ephemeral**: Events are notifications, not stored entities you query later
-- **Triggering Mechanism**: In Async ACP, events trigger your `@acp.on_task_event_send` handlers
+- **Triggering Mechanism**: In Async Agents, events trigger your `@acp.on_task_event_send` handlers
 
 #### Processing Strategies:
 
@@ -298,9 +173,119 @@ This design enables:
 - **Code maintainability**: Agent logic remains focused and doesn't need to understand other agents
 - **System reliability**: One agent's state issues don't affect other agents
 
+## Task Handling by Agent Type
+
+The way you work with tasks depends heavily on which agent type you choose. Agentex supports three agent types: [Sync Agents](../agent_types/sync.md), [Async Agents (Base)](../agent_types/async/base.md), and [Async Agents (Temporal)](../agent_types/async/temporal.md).
+
+!!! info "Choosing Your Agent Type"
+    Not sure which agent type is right for you? See the [Choose Your Agent Type](../getting_started/choose_your_agent_type.md) guide for a detailed comparison and decision matrix.
+
+### Sync Agents - Simple Request-Response
+
+**Sync Agents** treat tasks as lightweight conversation containers where the Agentex service handles all task and message lifecycle management automatically.
+
+**What Agentex Handles (Automatic):**
+
+- Creates or retrieves tasks (auto-created for single-turn interactions, or reused if you pass a `task_id` for multi-turn conversations)
+- Saves all incoming messages to conversation history
+- Routes requests to your handler
+- Persists all your response messages to conversation history
+- Returns responses to clients
+
+**What You Implement (Your Code):**
+
+- Process the incoming message from the `TaskMessageContent` payload.
+- Return or yield your agent's response (return for blocking responses, yield for streaming)
+
+**Why This Works:**
+
+Because Agentex persists both the inputs and outputs, you can focus entirely on business logic - just transform inputs into outputs. No need to manage tasks, save messages, or handle lifecycle. You write pure processing code: receive message → generate response → return or yield.
+
+**Key Characteristics:**
+
+- One handler: `@acp.on_message_send`
+- Tasks and messages managed automatically
+- Stateless by default (though you can add state via `adk.state` API)
+- Blocking, synchronous execution
+
+**Task Interaction Pattern:**
+```python
+@acp.on_message_send
+async def handle_message_send(params: SendMessageParams):
+    """Only handler needed for Sync Agents"""
+    
+    task = params.task          # Task context provided automatically
+    user_message = params.content.content
+    
+    # Process the message and return response
+    response = await process_user_message(user_message)
+    
+    return TextContent(
+        author=MessageAuthor.AGENT,
+        content=response
+    )
+```
+
+**Lifecycle Overview:**
+```python
+# 1. Task Creation - Handled automatically by Agentex
+
+# 2. Message Processing - Your responsibility
+@acp.on_message_send
+async def handle_message_send(params: SendMessageParams):
+    pass
+
+# 3. Task Completion - Unnecessary in Sync Agents
+```
+
+### Async Agents - Full Lifecycle Management
+
+**Async Agents** (both Base and Temporal) give you complete control over task lifecycle with event-driven handlers. Unlike Sync Agents, you explicitly manage when tasks start, how they process events, and when they clean up.
+
+**What Agentex Handles (Automatic):**
+
+- Routes lifecycle events to your three handlers (`on_task_create`, `on_task_event_send`, `on_task_cancel`)
+- Delivers events asynchronously (events are notifications, not persisted messages - you decide what to persist)
+- Returns responses to clients
+
+**What You Implement (Your Code):**
+
+- Initialize tasks in `@acp.on_task_create` (send welcome messages, set up state)
+- Process events in `@acp.on_task_event_send` (handle user messages, business logic)
+- Clean up in `@acp.on_task_cancel` (archive data, release resources)
+- Explicitly persist ALL messages using `adk.messages.create()` - including incoming user messages (this gives you control to preprocess or filter ephemeral events like webhooks before saving them)
+- Manage your own state using `adk.state` API (Base) or workflow variables (Temporal)
+
+**Why This Works:**
+
+You have full control over the task lifecycle, allowing complex workflows like multi-step processes, conditional logic, and long-running operations. The trade-off is you must explicitly manage message creation and state - Agentex provides the infrastructure but you orchestrate the flow.
+
+**Lifecycle Overview:**
+```python
+# 1. Task Creation - Initialize whatever you need
+@acp.on_task_create
+async def handle_task_create(params: CreateTaskParams):
+    # Set up initial state, send welcome messages
+    pass
+
+# 2. Task Processing - Handle ongoing interactions
+@acp.on_task_event_send
+async def handle_event_send(params: SendEventParams):
+    # Handle user messages, business logic, update state, send responses
+    pass
+
+# 3. Task Completion - Clean up and archive
+@acp.on_task_cancel
+async def handle_task_cancel(params: CancelTaskParams):
+    # Archive data, release resources
+    pass
+```
+
+!!! note "Base vs Temporal: State Persistence"
+    **With Temporal:** Your workflow state (class variables) persists automatically across restarts and failures. No manual state management needed.
+    
+    **With Base:** You must manually persist state using the `adk.state` API.
+    
+    Learn more in the [Temporal Development Overview](../temporal_development/overview.md).
 
 
-
-## API Reference
-
-For complete type definitions, see the [API - Types Reference](../api/types.md)

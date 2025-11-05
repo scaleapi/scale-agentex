@@ -8,19 +8,74 @@ State provides persistent, task-scoped storage for agents, enabling memory acros
 
 - **Remember context** across multiple interactions
 - **Track workflow progress** through multi-step processes  
-- **Store user preferences** and personalization data
 - **Maintain session data** for complex conversations
 
 State persists even if the agent process restarts.
 
-## State Identity
+## State Relationships
 
-State is uniquely identified by `(task_id, agent_id)`:
+!!! info "For Detailed Implementation"
+    This section explains how state relates to tasks and agents architecturally. For specific state management patterns, refer to the [State Management Guide](../development_guides/state_management.md).
+
+### State ↔ (Task, Agent) - One-to-One
+
+**Each unique `(task_id, agent_id)` combination has exactly one state object.**
+
+State is not shared - it's scoped to the specific combination of a task and an agent working on that task. This means:
+
+- Different agents on the same task have separate states
+- The same agent on different tasks has separate states
+- Each state is completely isolated from others
+
+#### Fetching Agent State
 
 ```python
-# Each (task_id, agent_id) pair has exactly one state
-task_123_agent_a = ("task-123", "agent-a")  # Agent A's state for task 123
-task_123_agent_b = ("task-123", "agent-b")  # Agent B's state for task 123
+@acp.on_message_send
+async def handle_message_send(params: SendMessageParams):
+    # Fetch state for this specific (task, agent) combination
+    state_record = await adk.state.get_by_task_and_agent(
+        task_id=params.task.id,      # Which task
+        agent_id=params.agent.id      # Which agent
+    )
+    
+    if state_record:
+        # State exists - access the data
+        current_state = state_record.state
+        interaction_count = current_state.get("interaction_count", 0)
+    else:
+        # No state yet - first interaction
+        interaction_count = 0
+```
+
+#### Why This Design?
+
+The `(task_id, agent_id)` scoping exists because:
+
+1. **Agent Isolation**: Each agent needs its own workspace without interfering with others
+2. **Task Isolation**: The same agent handles multiple tasks - each needs independent state
+3. **Simple Reasoning**: Agents only manage their own state, not coordinating with others
+4. **Parallel Safety**: Multiple agents can work on the same task simultaneously without conflicts
+
+#### State Isolation Example
+
+```python
+# Task "task_123" with two agents working on it:
+
+# Agent A (analyst) maintains its own state
+analyst_state = await adk.state.get_by_task_and_agent(
+    task_id="task_123",
+    agent_id="analyst-agent"
+)
+# analyst_state.state = {"analysis_progress": 75, "findings": [...]}
+
+# Agent B (reporter) maintains separate state
+reporter_state = await adk.state.get_by_task_and_agent(
+    task_id="task_123", 
+    agent_id="reporter-agent"
+)
+# reporter_state.state = {"report_sections": ["intro", "body"], "format": "pdf"}
+
+# Both work on task_123 but have completely independent state
 ```
 
 ## Basic State Operations
@@ -169,7 +224,3 @@ async def decompress_state_field(compressed_data: str) -> dict:
     return json.loads(json_str)
 ```
 
-
-## API Reference
-
-For complete type definitions, see the [API - Types Reference](../api/types.md)

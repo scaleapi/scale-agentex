@@ -1,203 +1,223 @@
 # Streaming Concepts
 
-Streaming enables real-time delivery of messages as they're being generated, providing responsive user experiences for long-running operations like LLM text generation, data processing, or multi-step workflows.
+Streaming enables real-time delivery of messages as they're being generated, providing responsive user experiences for long-running operations.
 
 ## What is Streaming?
 
-**Streaming** in Agentex allows agents to send partial message updates while processing, rather than waiting to send a complete response. This creates fluid, responsive interactions similar to ChatGPT's typing experience.
+**Streaming** in Agentex allows agents to send partial message updates while processing, rather than waiting to send a complete response. This creates fluid, responsive interactions where users see progress in real-time.
 
-Key benefits:
+Agentex decouples streaming from LLM provider streaming. You're not limited to streaming LLM responses - you can stream any content: progress updates, status messages, multi-step workflows, or custom notifications.
 
-- **Immediate feedback** - Users see progress instantly
-- **Better UX** - No waiting for long operations to complete
-- **Progressive disclosure** - Information appears as it's generated
-- **Cancellation support** - Users can interrupt long operations
 
-## Streaming Types
 
-### TaskMessageUpdate
+## Streaming by Agent Type
 
-The base type for all streaming updates:
+The way you work with streaming depends on which agent type you're using: [Sync Agents](../agent_types/sync.md) or [Async Agents](../agent_types/async/overview.md).
 
-```python
-from agentex.lib.types.task_message_updates import (
-    TaskMessageUpdate,
-    TaskMessageUpdateType,
-    StreamTaskMessageStart,
-    StreamTaskMessageDelta,
-    StreamTaskMessageFull,
-    StreamTaskMessageDone
-)
+### Sync Agent Streaming
 
-# Streaming follows this sequence:
-# 1. START - Begin streaming message
-# 2. DELTA - Incremental content updates (multiple)
-# 3. FULL - Complete message content (optional)
-# 4. DONE - Streaming complete
-```
+In Sync Agents, you yield `TaskMessageUpdate` objects from your handler, and Agentex automatically persists the streamed message.
 
-### Streaming Lifecycle
+**Enabling streaming is simple:** Switch from returning `TaskMessageContent` to yielding `TaskMessageUpdate` objects. That's it - your agent automatically becomes a streaming agent.
 
 ```python
-async def stream_response() -> AsyncGenerator[TaskMessageUpdate, None]:
-    """Example streaming response generator"""
-    
-    # 1. Start streaming
-    yield StreamTaskMessageStart(
-        index=0,
-        content=TextContent(
-            author=MessageAuthor.AGENT,
-            content="",  # Start with empty content
-            format=TextFormat.PLAIN
-        )
-    )
-    
-    # 2. Send incremental updates
-    response_parts = ["Hello", " there!", " How can I help you today?"]
-    
-    for part in response_parts:
-        yield StreamTaskMessageDelta(
-            index=0,
-            delta=TextDelta(text_delta=part)
-        )
-        await asyncio.sleep(0.1)  # Simulate processing time
-    
-    # 3. Mark as complete
+# Non-streaming (return)
+@acp.on_message_send
+async def handle_message_send(params: SendMessageParams):
+    return TextContent(author=MessageAuthor.AGENT, content="Response")
+
+# Streaming (yield)
+@acp.on_message_send
+async def handle_message_send(params: SendMessageParams):
+    yield StreamTaskMessageStart(index=0, content=TextContent(...))
+    yield StreamTaskMessageDelta(index=0, delta=TextDelta(text_delta="Response"))
     yield StreamTaskMessageDone(index=0)
 ```
 
-## Stream Implementation Patterns
+**How it works:**
 
-### Sync ACP Streaming
+1. **You yield updates**: Your `@acp.on_message_send` handler yields `StreamTaskMessageStart`, `StreamTaskMessageDelta`, and `StreamTaskMessageDone` objects
+2. **Agentex streams to client**: Updates are sent to the client in real-time as you yield them
+3. **Agentex persists automatically**: When streaming completes, Agentex saves the final accumulated message to conversation history
 
-For simple request-response patterns:
+You control what to stream (LLM output, progress updates, custom content), but Agentex handles delivery and persistence.
+
+**Using `index` to Create Multiple Messages:**
+
+The `index` parameter controls which message a stream update belongs to. Since Agentex creates messages on your behalf, you use `index` to separate multiple messages. Increment the index each time you want to create a distinct message:
 
 ```python
 @acp.on_message_send
-async def handle_message_send(params: SendMessageParams) -> AsyncGenerator[TaskMessageUpdate, None]:
-    """Streaming response in Sync ACP"""
-    
-    user_input = params.content.content
-    
-    # Start streaming
-    yield StreamTaskMessageStart(
-        index=0,
-        content=TextContent(
-            author=MessageAuthor.AGENT,
-            content="",
-            format=TextFormat.MARKDOWN
-        )
-    )
-    
-    # Generate response with streaming
-    async for chunk in generate_streaming_response(user_input):
-        yield StreamTaskMessageDelta(
-            index=0,
-            delta=TextDelta(text_delta=chunk)
-        )
-    
-    # Complete the stream
+async def handle_message_send(params: SendMessageParams):
+    # First message (index=0)
+    yield StreamTaskMessageStart(index=0, content=TextContent(...))
+    yield StreamTaskMessageDelta(index=0, delta=TextDelta(text_delta="Message 1"))
     yield StreamTaskMessageDone(index=0)
-
-async def generate_streaming_response(input_text: str) -> AsyncGenerator[str, None]:
-    """Example LLM streaming integration"""
     
-    # OpenAI streaming example
-    response = await openai.chat.completions.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": input_text}],
-        stream=True
-    )
+    # Second message (index=1) - separate message
+    yield StreamTaskMessageStart(index=1, content=TextContent(...))
+    yield StreamTaskMessageDelta(index=1, delta=TextDelta(text_delta="Message 2"))
+    yield StreamTaskMessageDone(index=1)
     
-    async for chunk in response:
-        if chunk.choices[0].delta.content:
-            yield chunk.choices[0].delta.content
+    # Result: Agentex creates 2 separate messages in conversation history
 ```
 
-### Async ACP Streaming
+**Lifecycle:**
 
-For event-driven workflows:
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Agentex
+    participant Handler as @on_message_send
+    participant DB as Database
+
+    Client->>Agentex: Send message
+    Agentex->>Handler: Route to handler
+    
+    Handler->>Agentex: yield START
+    Agentex->>Client: Stream START
+    
+    loop Multiple updates
+        Handler->>Agentex: yield DELTA
+        Agentex->>Client: Stream DELTA
+    end
+    
+    Handler->>Agentex: yield DONE
+    Agentex->>Client: Stream DONE
+    Agentex->>DB: Auto-save accumulated message
+    
+    Note over Client,DB: If client refreshes
+    Client->>DB: Load messages
+    DB->>Client: Return fully streamed messages
+```
+
+### Async Agent Streaming
+
+In Async Agents, you use the `adk.streaming` API with a context manager pattern to control streaming, and messages are automatically persisted when the context closes.
+
+**How it works:**
+
+1. **Create and open a streaming context**: Use `async with adk.streaming.streaming_task_message_context()` to create the message and send START (or call `await context.open()` for manual control)
+2. **Stream updates**: Call `await context.stream_update()` to send DELTA or FULL updates to the client
+3. **Close the context**: Call `await context.close()` to persist the accumulated message and send DONE (not needed if you use `async with` - it closes automatically)
+
+The context manager handles message creation, streaming delivery, and automatic persistence.
+
+!!! warning "Temporal Workflows and Streaming"
+    Streaming contexts cannot span across multiple Temporal activities because they maintain state through a generator pattern. When using Temporal workflows, you must wrap the entire streaming operation (create, open, stream updates, close) inside a single activity. For detailed guidance on handling streaming in Temporal workflows, see the [Temporal Development Overview](../temporal_development/overview.md).
+
+**Lifecycle:**
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Agentex
+    participant Handler as @on_task_event_send
+    participant Context as StreamingContext
+    participant DB as Database
+
+    Client->>Agentex: Send event
+    Agentex->>Handler: Route to handler
+    
+    Handler->>Context: async with streaming_task_message_context()
+    Context->>DB: Create message (empty at first)
+    Context->>Agentex: Stream START
+    Agentex->>Client: Stream START
+    
+    loop Multiple updates
+        Handler->>Context: stream_update(DELTA)
+        Context->>Agentex: Stream DELTA
+        Agentex->>Client: Stream DELTA
+    end
+    
+    Handler->>Context: close() or context exit
+    Context->>Agentex: Stream DONE
+    Agentex->>Client: Stream DONE
+    Context->>DB: Update message (DONE)
+    
+    Note over Client,DB: If client refreshes
+    Client->>DB: Load messages
+    DB->>Client: Return fully streamed messages
+```
+
+## Async Streaming Example
+
+Here's a complete example showing how to stream content in an Async Agent:
 
 ```python
+from agentex.lib import adk
+from agentex.lib.types.acp import SendEventParams
+from agentex.types.text_content import TextContent
+from agentex.types.task_message_delta import TextDelta
+from agentex.types.task_message_update import (
+    StreamTaskMessageDelta,
+    StreamTaskMessageFull,
+)
+
 @acp.on_task_event_send
 async def handle_event_send(params: SendEventParams):
-    """Streaming in Async ACP"""
-    
-    # Use ADK streaming module for manual control
-    stream = adk.streaming.create_stream(
-        task_id=params.task.id,
-        index=0
-    )
-    
-    # Start streaming
-    await stream.start(
-        content=TextContent(
-            author=MessageAuthor.AGENT,
-            content="Processing your request...",
-            format=TextFormat.MARKDOWN
+    # Echo the user's message
+    if params.event.content:
+        await adk.messages.create(
+            task_id=params.task.id,
+            content=params.event.content,
         )
+    
+    # Example 1: Complete message streaming using context manager
+    # Best for messages where you know the full content upfront
+    async with adk.streaming.streaming_task_message_context(
+        task_id=params.task.id,
+        initial_content=TextContent(
+            author="agent",
+            content="Analyzing your request...",
+        ),
+    ) as streaming_context:
+        # Stream a full message update
+        await streaming_context.stream_update(
+            StreamTaskMessageFull(
+                parent_task_message=streaming_context.task_message,
+                content=TextContent(
+                    author="agent",
+                    content="Analysis complete!",
+                ),
+                type="full",
+            )
+        )
+    # Context automatically closes, sends DONE, and persists the message
+    
+    # Example 2: Delta-based streaming for incremental updates
+    # Best for streaming LLM responses or progress updates
+    streaming_context = adk.streaming.streaming_task_message_context(
+        task_id=params.task.id,
+        initial_content=TextContent(
+            author="agent",
+            content="",  # Start with empty content
+        ),
     )
+    
+    # Open manually (without async with)
+    await streaming_context.open()
     
     try:
-        # Process in steps with updates
-        await stream.update(delta=TextDelta(text_delta="\n\n## Step 1: Analyzing data..."))
-        analysis_result = await analyze_data(params.event.content)
-        
-        await stream.update(delta=TextDelta(text_delta="\n✅ Analysis complete"))
-        await stream.update(delta=TextDelta(text_delta="\n\n## Step 2: Generating recommendations..."))
-        
-        recommendations = await generate_recommendations(analysis_result)
-        await stream.update(delta=TextDelta(text_delta="\n✅ Recommendations ready"))
-        
-        # Send final results
-        await stream.update(delta=TextDelta(
-            text_delta=f"\n\n## Results\n\n{format_results(recommendations)}"
-        ))
-        
+        # Stream text deltas incrementally
+        async for chunk in generate_response():
+            await streaming_context.stream_update(
+                StreamTaskMessageDelta(
+                    parent_task_message=streaming_context.task_message,
+                    delta=TextDelta(text_delta=chunk, type="text"),
+                    type="delta",
+                )
+            )
     finally:
-        # Always complete the stream
-        await stream.complete()
+        # Always close to persist the accumulated message
+        await streaming_context.close()
+
+async def generate_response():
+    """Example generator that yields text chunks"""
+    chunks = ["Hello ", "from ", "the ", "agent!"]
+    for chunk in chunks:
+        yield chunk
 ```
 
-## Advanced Streaming Patterns
-
-**Multi-Stage Processing** - Stream progress updates for complex workflows with multiple steps
-**Parallel Streaming** - Combine results from concurrent operations (weather, news, stocks) and stream as they complete
-**Streaming with State** - Update agent state while streaming responses to maintain conversation context
-
-## Error Handling in Streaming
-
-Always wrap streaming operations in try/finally blocks to ensure streams complete properly:
-
-```python
-stream = adk.streaming.create_stream(task_id=params.task.id, index=0)
-
-try:
-    await stream.start(content=TextContent(...))
-    result = await risky_operation()
-    await stream.update(delta=TextDelta(text_delta=f"✅ {result}"))
-except Exception as e:
-    await stream.update(delta=TextDelta(text_delta=f"❌ Error: {str(e)}"))
-finally:
-    await stream.complete()  # Always complete
-```
-
-## Performance & Best Practices
-
-**Batch updates** - Buffer small chunks instead of streaming every character
-**Memory management** - Process large datasets in chunks, avoid loading everything
-**Always complete streams** - Use try/finally to ensure `stream.complete()` is called
-**Clear progress** - Show step numbers and estimated completion time
-**Graceful errors** - Stream error messages instead of silent failures
-
-## API Reference
-
-For complete type definitions, see:
-
-::: agentex.types.task_message_update.TaskMessageUpdate
-
-::: agentex.types.task_message_update.StreamTaskMessageDelta
-
-::: agentex.types.text_delta.TextDelta
-
- 
+!!! tip "Use the SDK for Streaming"
+    We highly recommend using the SDK's `adk.streaming` API to handle the streaming lifecycle because it also handles message persistence, which can be complicated. If you need low-level control over the streaming internals, you can read the source code for the streaming implementation.
