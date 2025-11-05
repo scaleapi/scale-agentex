@@ -159,3 +159,34 @@ jobs:
           echo "❌ Documentation site directory not found"
           exit 1
         fi
+
+  # This job is used as a required status check for branch protection
+  # It will pass if the conditional jobs either passed or were skipped
+  ci-status:
+    name: "CI Status Check"
+    runs-on: ubuntu-latest
+    needs: [changes, test, docs]
+    if: always()
+    steps:
+      - name: Check CI status
+        run: |
+          # Check if agentex changes were detected
+          if [ "${{ needs.changes.outputs.agentex }}" == "true" ]; then
+            echo "Agentex changes detected - checking test and docs results"
+            
+            # Both test and docs must succeed
+            if [ "${{ needs.test.result }}" != "success" ]; then
+              echo "❌ Unit tests failed"
+              exit 1
+            fi
+            
+            if [ "${{ needs.docs.result }}" != "success" ]; then
+              echo "❌ Documentation build failed"
+              exit 1
+            fi
+            
+            echo "✅ All checks passed"
+          else
+            echo "No agentex changes detected - skipping tests and docs"
+            echo "✅ CI status check passed"
+          fi
