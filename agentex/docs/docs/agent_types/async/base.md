@@ -38,14 +38,14 @@ sequenceDiagram
 
 ```python
 from agentex.lib.sdk.fastacp.fastacp import FastACP
-from agentex.lib.types.fastacp import AgenticACPConfig
+from agentex.lib.types.fastacp import AsyncACPConfig
 from agentex.lib.types.acp import CreateTaskParams, SendEventParams, CancelTaskParams
 from agentex.lib import adk
 
 # Create Base Async ACP server
 acp = FastACP.create(
     acp_type="async",
-    config=AgenticACPConfig(type="base")
+    config=AsyncACPConfig(type="base")
 )
 
 @acp.on_task_create

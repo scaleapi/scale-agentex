@@ -40,7 +40,7 @@ async def handle_event_send(params: SendEventParams):
 Here's how the actual Temporal workflow from our tutorials handles events and prevents race conditions:
 
 ```python
-# From tutorials/10_agentic/10_temporal/010_agent_chat/project/workflow.py
+# From tutorials/10_async/10_temporal/010_agent_chat/project/workflow.py
 from temporalio import workflow
 from agentex.core.temporal.workflows.workflow import BaseWorkflow
 from agentex.core.temporal.types.workflow import SignalName
@@ -391,7 +391,7 @@ async def on_task_event_send(self, params: SendEventParams) -> None:
 - ❌ **"Careful coding prevents race conditions"** - Race conditions are subtle and only appear under production load
 - ❌ **"Race conditions are rare"** - Common with rapid messages, webhooks, and load-balanced deployments
 - ❌ **"asyncio.Lock solves this"** - Only works within a single process, not across distributed pods
-- ❌ **"Only Base ACP has races"** - All agentic types can, Temporal just handles them better
+- ❌ **"Only Base ACP has races"** - All async types can, Temporal just handles them better
 
 ## Key Takeaway
 

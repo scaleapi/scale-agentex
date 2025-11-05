@@ -42,7 +42,7 @@ Agentex supports three agent types with different execution models and capabilit
 
 2. Change from returning content to explicitly calling `adk.messages.create()` for all messages
 
-3. Update ACP configuration from `acp_type="sync"` to `acp_type="async"` with `AgenticACPConfig(type="base")`
+3. Update ACP configuration from `acp_type="sync"` to `acp_type="async"` with `AsyncACPConfig(type="base")`
 
 !!! tip
     It's probably easier just to run `agentex init` to bootstrap the skeleton of a new Agentex agent (choose `Async - ACP Only` when asked for the type) and then copy over the logic yourself.
@@ -59,7 +59,7 @@ Agentex supports three agent types with different execution models and capabilit
     - `activities.py` - Contains custom Temporal activities (if needed)
     - `run_worker.py` - Runs the Temporal worker process
 
-2. Update `acp.py` - Change config from `AgenticACPConfig(type="base")` to `TemporalACPConfig(type="temporal")`
+2. Update `acp.py` - Change config from `AsyncACPConfig(type="base")` to `TemporalACPConfig(type="temporal")`
 
 3. Move handler logic from `@acp.on_task_create`, `@acp.on_task_event_send`, `@acp.on_task_cancel` to corresponding workflow methods
 

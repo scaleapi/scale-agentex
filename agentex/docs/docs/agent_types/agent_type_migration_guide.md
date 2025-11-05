@@ -29,7 +29,7 @@ async def handle_message_send(params: SendMessageParams):
     return TextContent(author=MessageAuthor.AGENT, content=response)
 ```
 
-### After (Agentic Base)
+### After (Async Base)
 
 ```python
 @acp.on_task_create
@@ -67,7 +67,7 @@ Use `agentex init` to create a new project directory (select "Async (Temporal)" 
 - Wrap API calls and side effects in Temporal activities for automatic retries
 - Workflow state persists across server restarts
 
-### Before (Agentic Base)
+### Before (Async Base)
 
 ```python
 @acp.on_task_create
@@ -86,7 +86,7 @@ async def handle_task_cancel(params: CancelTaskParams):
     pass
 ```
 
-### After (Agentic Temporal)
+### After (Async Temporal)
 
 ```python
 @workflow.defn
