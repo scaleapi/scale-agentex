@@ -50,9 +50,10 @@ jobs:
           echo "🐳 Using image: ghcr.io/scaleapi/scale-agentex-python/tutorial-agents/00_sync-000_hello_acp:latest"
 
           # Start the agent container
+
           docker run -d --name agent-test-s000-hello-acp \
             -e AGENT_NAME=s000-hello-acp \
-            -e ACP_URL=http://localhost \
+            -e ACP_URL=http://agent-test-s000-hello-acp:8000 \
             -e ACP_PORT=8000 \
             -e ACP_TYPE=sync \
             -e AGENTEX_BASE_URL=http://agentex:5003 \
@@ -90,6 +91,24 @@ jobs:
       - name: Run agent tests with retry
         run: |
           echo "🧪 Running pytest tests against the agent..."
+
+          echo "🔗 Testing connectivity from agentex container to agent..."
+          echo "📡 From agentex container, try to reach agent:"
+          docker exec agentex curl -v http://agent-test-s000-hello-acp:8000
+          echo "🏥 From agentex container, try to reach agent health endpoint:"
+          docker exec agentex curl -v http://agent-test-s000-hello-acp:8000/health
+
+          echo "🔗 Testing connectivity from agent container to agentex..."
+          echo "📡 From agent container, try to reach agentex:"
+          docker exec agent-test-s000-hello-acp curl -v http://agentex:5003
+          echo "🏥 From agent container, try to reach agentex health endpoint:"
+          docker exec agent-test-s000-hello-acp curl -v http://agentex:5003/health
+
+          echo "🔗 Testing basic network connectivity (ping)..."
+          echo "📍 Ping from agentex to agent:"
+          docker exec agentex ping -c 3 agent-test-s000-hello-acp
+          echo "📍 Ping from agent to agentex:"
+          docker exec agent-test-s000-hello-acp ping -c 3 agentex
           MAX_ATTEMPTS=2
           ATTEMPT=1
           SUCCESS=false
