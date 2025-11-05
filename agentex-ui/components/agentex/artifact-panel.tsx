@@ -62,11 +62,11 @@ export function ArtifactPanel() {
             )}
 
             {/* Header */}
-            <div className="border-border bg-muted/30 flex items-center justify-between border-b px-4 py-3">
+            <div className="flex items-center justify-between border-b border-orange-300 bg-gradient-to-r from-orange-50 to-yellow-50 px-4 py-3 dark:border-orange-700 dark:from-orange-950 dark:to-yellow-950">
               <div className="flex min-w-0 flex-1 items-center gap-2">
-                <ExternalLink className="text-muted-foreground h-4 w-4 flex-shrink-0" />
+                <ExternalLink className="h-4 w-4 flex-shrink-0 text-orange-600 dark:text-orange-400" />
                 <h2
-                  className="truncate text-sm font-medium"
+                  className="truncate text-sm font-medium text-orange-900 dark:text-orange-100"
                   title={eventTitle || ''}
                 >
                   {eventTitle || 'External Content'}
