@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense } from 'react';
+
 import { ArrowUp } from 'lucide-react';
 
 import { IconButton } from '@/components/agentex/icon-button';
@@ -103,9 +104,13 @@ function LoadingContent() {
 
 export default function Loading() {
   return (
-    <Suspense fallback={<div className="fixed inset-0 flex items-center justify-center">
-      <Skeleton className="h-8 w-32" />
-    </div>}>
+    <Suspense
+      fallback={
+        <div className="fixed inset-0 flex items-center justify-center">
+          <Skeleton className="h-8 w-32" />
+        </div>
+      }
+    >
       <LoadingContent />
     </Suspense>
   );
