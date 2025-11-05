@@ -40,7 +40,7 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
         agent_id: str | None = None,
         agent_name: str | None = None,
         order_by: str | None = None,
-        order_direction: Literal["asc", "desc"] = "asc",
+        order_direction: Literal["asc", "desc"] = "desc",
         limit: int | None = None,
         page_number: int | None = None,
         relationships: list[TaskRelationships] | None = None,
