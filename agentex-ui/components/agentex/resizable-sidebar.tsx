@@ -22,6 +22,7 @@ type ResizableSidebarProps = React.HTMLAttributes<HTMLDivElement> & {
   isCollapsed?: boolean;
   collapsedWidth?: number;
   renderCollapsed?: () => React.ReactNode;
+  onResizingChange?: (isResizing: boolean) => void;
 };
 
 export function ResizableSidebar({
@@ -35,6 +36,7 @@ export function ResizableSidebar({
   isCollapsed = false,
   collapsedWidth = DEFAULT_COLLAPSED_WIDTH,
   renderCollapsed,
+  onResizingChange,
 }: ResizableSidebarProps) {
   const resizableContainerRef = useRef<HTMLDivElement>(null);
   const [sidebarWidth, setSidebarWidth] = useLocalStorageState(
@@ -55,11 +57,13 @@ export function ResizableSidebar({
     invertDragDirection: side === 'right',
     onResizeStart: () => {
       setIsManuallyResizing(true);
+      onResizingChange?.(true);
     },
     onResizeEnd: newWidth => {
       setSidebarWidth(newWidth);
       setTimeout(() => {
         setIsManuallyResizing(false);
+        onResizingChange?.(false);
       }, 50);
     },
   });

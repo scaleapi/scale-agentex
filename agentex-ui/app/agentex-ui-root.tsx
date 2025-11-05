@@ -5,9 +5,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { ToastContainer } from 'react-toastify';
 
 import { PrimaryContent } from '@/app/primary-content';
+import { ArtifactPanel } from '@/components/agentex/artifact-panel';
 import { TaskSidebar } from '@/components/agentex/task-sidebar';
 import { TracesSidebar } from '@/components/agentex/traces-sidebar';
 import { AgentexProvider } from '@/components/providers';
+import { useArtifactPanel } from '@/contexts/artifact-panel-context';
 import { useLocalStorageState } from '@/hooks/use-local-storage-state';
 import {
   SearchParamKey,
@@ -25,6 +27,7 @@ export function AgentexUIRoot({
 }: AgentexUIRootProps) {
   const { agentName, taskID, updateParams } = useSafeSearchParams();
   const [isTracesSidebarOpen, setIsTracesSidebarOpen] = useState(false);
+  const { isOpen: isArtifactPanelOpen, closeArtifact } = useArtifactPanel();
   const [localAgentName] = useLocalStorageState<string | undefined>(
     'lastSelectedAgent',
     undefined
@@ -36,6 +39,21 @@ export function AgentexUIRoot({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Close artifact when task or agent changes
+  useEffect(() => {
+    if (isArtifactPanelOpen) {
+      closeArtifact();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskID, agentName]);
+
+  // Close traces sidebar when artifact opens
+  useEffect(() => {
+    if (isArtifactPanelOpen && isTracesSidebarOpen) {
+      setIsTracesSidebarOpen(false);
+    }
+  }, [isArtifactPanelOpen, isTracesSidebarOpen]);
 
   const handleSelectTask = useCallback(
     (taskId: string | null) => {
@@ -81,8 +99,10 @@ export function AgentexUIRoot({
             toggleTracesSidebar={() =>
               setIsTracesSidebarOpen(!isTracesSidebarOpen)
             }
+            isArtifactPanelOpen={isArtifactPanelOpen}
           />
           <TracesSidebar isOpen={isTracesSidebarOpen} />
+          <ArtifactPanel />
         </div>
       </AgentexProvider>
       <ToastContainer />

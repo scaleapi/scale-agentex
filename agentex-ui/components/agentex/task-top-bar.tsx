@@ -22,6 +22,7 @@ type TaskTopBarProps = {
   agents?: Agent[];
   selectedAgentName?: string;
   onAgentChange?: (agentName: string | undefined) => void;
+  isArtifactPanelOpen?: boolean;
 };
 
 export function TaskTopBar({
@@ -30,6 +31,7 @@ export function TaskTopBar({
   toggleTracesSidebar,
   agents = [],
   onAgentChange,
+  isArtifactPanelOpen,
 }: TaskTopBarProps) {
   const displayTaskId = taskId ? taskId.split('-')[0] : '';
   const { agentName: selectedAgentName } = useSafeSearchParams();
@@ -88,6 +90,7 @@ export function TaskTopBar({
                 <IconButton
                   variant="ghost"
                   onClick={toggleTracesSidebar}
+                  disabled={isArtifactPanelOpen}
                   aria-label={
                     isTracesSidebarOpen
                       ? 'Close traces sidebar'

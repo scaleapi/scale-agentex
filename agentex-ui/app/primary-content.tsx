@@ -19,11 +19,13 @@ import { useWaitingForHuman } from '@/hooks/use-waiting-for-human';
 type ContentAreaProps = {
   isTracesSidebarOpen: boolean;
   toggleTracesSidebar: () => void;
+  isArtifactPanelOpen: boolean;
 };
 
 export function PrimaryContent({
   isTracesSidebarOpen,
   toggleTracesSidebar,
+  isArtifactPanelOpen,
 }: ContentAreaProps) {
   const { taskID } = useSafeSearchParams();
   const { agentexClient } = useAgentexClient();
@@ -105,6 +107,7 @@ export function PrimaryContent({
             toggleTracesSidebar={toggleTracesSidebar}
             agents={agents}
             onAgentChange={handleSelectAgent}
+            isArtifactPanelOpen={isArtifactPanelOpen}
           />
         </motion.div>
       )}
