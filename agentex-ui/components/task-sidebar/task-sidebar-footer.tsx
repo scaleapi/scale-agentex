@@ -2,7 +2,6 @@ import { useCallback } from 'react';
 
 import { MessageSquare } from 'lucide-react';
 
-import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 
 import { ResizableSidebar } from '../agentex/resizable-sidebar';
@@ -21,14 +20,15 @@ export function TaskSidebarFooter({ className }: TaskSidebarFooterProps) {
   }, []);
 
   return (
-    <div className={cn('flex flex-col gap-2', className)}>
-      <Separator />
-      <div className="mx-2">
-        <ResizableSidebar.Button onClick={handleFeedback} className="mb-2 p-3">
-          <MessageSquare className="size-5" />
-          Give Feedback
-        </ResizableSidebar.Button>
-      </div>
+    <div className={cn('mx-2 flex flex-col gap-2', className)}>
+      <ResizableSidebar.Button
+        onClick={handleFeedback}
+        className="mb-2 p-3"
+        disableAnimation
+      >
+        <MessageSquare className="size-5" />
+        Give Feedback
+      </ResizableSidebar.Button>
     </div>
   );
 }

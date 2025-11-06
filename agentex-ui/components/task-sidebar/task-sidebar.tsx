@@ -59,6 +59,7 @@ export function TaskSidebar() {
       />
       <Separator />
       <TaskSidebarBody className="flex-1" />
+      <Separator />
       <TaskSidebarFooter />
     </ResizableSidebar>
   );
