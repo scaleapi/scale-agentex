@@ -2,8 +2,8 @@ import { useRef } from 'react';
 
 import { motion } from 'framer-motion';
 
-import { TaskMessages } from '@/components/agentex/task-messages';
 import { TaskProvider } from '@/components/providers';
+import { TaskMessages } from '@/components/task-messages/task-messages';
 
 export function ChatView({ taskID }: { taskID: string }) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);

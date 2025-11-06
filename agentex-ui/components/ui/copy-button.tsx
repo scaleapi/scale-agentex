@@ -4,8 +4,8 @@ import { useCallback, useRef, useState } from 'react';
 
 import { Check, Copy } from 'lucide-react';
 
-import { IconButton } from '@/components/agentex/icon-button';
-import { toast } from '@/components/agentex/toast';
+import { IconButton } from '@/components/ui/icon-button';
+import { toast } from '@/components/ui/toast';
 import {
   Tooltip,
   TooltipContent,

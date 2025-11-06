@@ -67,7 +67,7 @@ nav:
   - Development Guides:
       - Tutorials: development_guides/tutorials.md
       - Jupyter Notebooks (dev.ipynb): development_guides/jupyter_notebooks.md
-      - Streaming: development_guides/streaming.md
+      - Streaming Patterns: development_guides/streaming_patterns.md
       - Race Conditions: development_guides/race_conditions.md
       - Message Handling: development_guides/message_handling.md
       - Events vs Messages: development_guides/events_vs_messages.md

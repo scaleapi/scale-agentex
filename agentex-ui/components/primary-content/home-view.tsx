@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 
-import { AgentsList } from '@/components/agentex/agents-list';
+import { AgentsList } from '@/components/agents-list/agents-list';
 import { useAgentexClient } from '@/components/providers/agentex-provider';
 import { useAgents } from '@/hooks/use-agents';
 import { useLocalStorageState } from '@/hooks/use-local-storage-state';

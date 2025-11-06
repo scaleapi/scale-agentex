@@ -7,7 +7,7 @@ import {
 } from '@tanstack/react-query';
 import { agentRPCNonStreaming } from 'agentex/lib';
 
-import { toast } from '@/components/agentex/toast';
+import { toast } from '@/components/ui/toast';
 import { tasksKeys } from '@/hooks/use-tasks';
 
 import type AgentexSDK from 'agentex';

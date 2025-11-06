@@ -3,8 +3,8 @@ import { memo, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { ChevronDownIcon, Wrench, XCircleIcon } from 'lucide-react';
 
-import { JsonViewer } from '@/components/agentex/json-viewer';
 import { Collapsible } from '@/components/ui/collapsible';
+import { JsonViewer } from '@/components/ui/json-viewer';
 import { ShimmeringText } from '@/components/ui/shimmering-text';
 import type { JsonValue } from '@/lib/types';
 import { cn } from '@/lib/utils';

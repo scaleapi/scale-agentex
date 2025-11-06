@@ -4,8 +4,8 @@
 (function() {
   'use strict';
 
-  // Wait for DOM to fully load
-  document.addEventListener("DOMContentLoaded", function() {
+  // Function to render all mermaid diagrams
+  function renderMermaidDiagrams() {
     // Check if Mermaid is loaded
     if (typeof mermaid === 'undefined') {
       console.error('Mermaid library not loaded');
@@ -68,5 +68,14 @@
         console.error(`Error processing Mermaid diagram ${index}:`, error);
       }
     });
-  });
+  }
+
+  // Check if DOM is already loaded (scripts loaded at end of body)
+  if (document.readyState === 'loading') {
+    // DOM is still loading, wait for DOMContentLoaded
+    document.addEventListener("DOMContentLoaded", renderMermaidDiagrams);
+  } else {
+    // DOM is already loaded, render immediately
+    renderMermaidDiagrams();
+  }
 })();

@@ -2,7 +2,7 @@ import { memo } from 'react';
 
 import { cva } from 'class-variance-authority';
 
-import { JsonViewer } from '@/components/agentex/json-viewer';
+import { JsonViewer } from '@/components/ui/json-viewer';
 import type { JsonValue } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
