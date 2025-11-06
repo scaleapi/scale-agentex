@@ -47,7 +47,6 @@ export const TaskSidebarBody = ({ className }: TaskSidebarBodyProps) => {
         fetchNextPage();
       }
     };
-
     scrollContainer.addEventListener('scroll', handleScroll);
     return () => scrollContainer.removeEventListener('scroll', handleScroll);
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
