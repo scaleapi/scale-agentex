@@ -4,7 +4,7 @@ import { Suspense } from 'react';
 
 import { ArrowUp } from 'lucide-react';
 
-import { IconButton } from '@/components/agentex/icon-button';
+import { IconButton } from '@/components/ui/icon-button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 

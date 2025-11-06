@@ -2,14 +2,13 @@ import { memo, useCallback, useMemo } from 'react';
 
 import { formatDistanceToNow } from 'date-fns';
 
+import { ResizableSidebar } from '@/components/ui/resizable-sidebar';
 import {
   SearchParamKey,
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
 import { createTaskName } from '@/lib/task-utils';
 import { cn } from '@/lib/utils';
-
-import { ResizableSidebar } from '../agentex/resizable-sidebar';
 
 import type { TaskListResponse } from 'agentex/resources';
 

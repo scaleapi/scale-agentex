@@ -1,9 +1,9 @@
 import { Activity, Bot } from 'lucide-react';
 
-import { CopyButton } from '@/components/agentex/copy-button';
-import { IconButton } from '@/components/agentex/icon-button';
-import { InvestigateTracesButton } from '@/components/agentex/investigate-traces-button';
-import { ThemeToggle } from '@/components/agentex/theme-toggle';
+import { InvestigateTracesButton } from '@/components/task-header/investigate-traces-button';
+import { ThemeToggle } from '@/components/task-header/theme-toggle';
+import { CopyButton } from '@/components/ui/copy-button';
+import { IconButton } from '@/components/ui/icon-button';
 import {
   Select,
   SelectContent,
@@ -15,7 +15,7 @@ import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 
 import type { Agent } from 'agentex/resources';
 
-type TaskTopBarProps = {
+type TaskHeaderProps = {
   taskId: string | null;
   isTracesSidebarOpen?: boolean;
   toggleTracesSidebar?: () => void;
@@ -24,13 +24,13 @@ type TaskTopBarProps = {
   onAgentChange?: (agentName: string | undefined) => void;
 };
 
-export function TaskTopBar({
+export function TaskHeader({
   taskId,
   isTracesSidebarOpen,
   toggleTracesSidebar,
   agents = [],
   onAgentChange,
-}: TaskTopBarProps) {
+}: TaskHeaderProps) {
   const displayTaskId = taskId ? taskId.split('-')[0] : '';
   const { agentName: selectedAgentName } = useSafeSearchParams();
 

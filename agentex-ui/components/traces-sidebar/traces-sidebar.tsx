@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 
-import { JsonViewer } from '@/components/agentex/json-viewer';
-import { ResizableSidebar } from '@/components/agentex/resizable-sidebar';
+import { JsonViewer } from '@/components/ui/json-viewer';
+import { ResizableSidebar } from '@/components/ui/resizable-sidebar';
 import {
   Tooltip,
   TooltipContent,

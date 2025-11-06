@@ -2,9 +2,8 @@ import { useCallback } from 'react';
 
 import { MessageSquare } from 'lucide-react';
 
+import { ResizableSidebar } from '@/components/ui/resizable-sidebar';
 import { cn } from '@/lib/utils';
-
-import { ResizableSidebar } from '../agentex/resizable-sidebar';
 
 export type TaskSidebarFooterProps = {
   className?: string;

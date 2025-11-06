@@ -2,12 +2,12 @@ import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AnimatePresence, motion } from 'framer-motion';
 
-import { TaskMessageDataContent } from '@/components/agentex/task-message-data-content';
-import { TaskMessageReasoning } from '@/components/agentex/task-message-reasoning-content';
-import { TaskMessageScrollContainer } from '@/components/agentex/task-message-scroll-container';
-import { TaskMessageTextContent } from '@/components/agentex/task-message-text-content';
-import { TaskMessageToolPair } from '@/components/agentex/task-message-tool-pair';
 import { useAgentexClient } from '@/components/providers';
+import { TaskMessageDataContent } from '@/components/task-messages/task-message-data-content';
+import { TaskMessageReasoning } from '@/components/task-messages/task-message-reasoning-content';
+import { TaskMessageScrollContainer } from '@/components/task-messages/task-message-scroll-container';
+import { TaskMessageTextContent } from '@/components/task-messages/task-message-text-content';
+import { TaskMessageToolPair } from '@/components/task-messages/task-message-tool-pair';
 import { ShimmeringText } from '@/components/ui/shimmering-text';
 import { useTaskMessages } from '@/hooks/use-task-messages';
 

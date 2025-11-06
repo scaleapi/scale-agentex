@@ -2,7 +2,7 @@
 
 import { AlertCircle } from 'lucide-react';
 
-import { TaskTopBar } from '@/components/agentex/task-top-bar';
+import { TaskHeader } from '@/components/task-header/task-header';
 import { Button } from '@/components/ui/button';
 
 export default function Error({
@@ -15,7 +15,7 @@ export default function Error({
   return (
     <div className="fixed inset-0 flex">
       <div className="bg-task-background flex h-full flex-1 flex-col">
-        <TaskTopBar taskId={null} />
+        <TaskHeader taskId={null} />
         <div className="flex flex-1 flex-col items-center justify-center p-8">
           <div className="w-full max-w-md space-y-6 text-center">
             <div className="flex justify-center">

@@ -2,17 +2,16 @@ import { useCallback, useState } from 'react';
 
 import { MessageSquarePlus, PanelLeftOpen } from 'lucide-react';
 
-import { IconButton } from '@/components/agentex/icon-button';
-import { ResizableSidebar } from '@/components/agentex/resizable-sidebar';
+import { TaskSidebarBody } from '@/components/task-sidebar/task-sidebar-body';
+import { TaskSidebarFooter } from '@/components/task-sidebar/task-sidebar-footer';
+import { TaskSidebarHeader } from '@/components/task-sidebar/task-sidebar-header';
+import { IconButton } from '@/components/ui/icon-button';
+import { ResizableSidebar } from '@/components/ui/resizable-sidebar';
 import { Separator } from '@/components/ui/separator';
 import {
   SearchParamKey,
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
-
-import { TaskSidebarBody } from './task-sidebar-body';
-import { TaskSidebarFooter } from './task-sidebar-footer';
-import { TaskSidebarHeader } from './task-sidebar-header';
 
 export function TaskSidebar() {
   const { updateParams } = useSafeSearchParams();

@@ -2,7 +2,7 @@ import { memo } from 'react';
 
 import { cva } from 'class-variance-authority';
 
-import { MarkdownResponse } from '@/components/agentex/markdown-response';
+import { MarkdownResponse } from '@/components/task-messages/markdown-response';
 import { cn } from '@/lib/utils';
 
 import type { TextContent } from 'agentex/resources';

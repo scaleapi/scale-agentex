@@ -10,10 +10,10 @@ import CodeMirror from '@uiw/react-codemirror';
 import { DataContent, TextContent } from 'agentex/resources';
 import { ArrowUp } from 'lucide-react';
 
-import { IconButton } from '@/components/agentex/icon-button';
-import { toast } from '@/components/agentex/toast';
 import { useAgentexClient } from '@/components/providers';
+import { IconButton } from '@/components/ui/icon-button';
 import { Switch } from '@/components/ui/switch';
+import { toast } from '@/components/ui/toast';
 import { useCreateTask } from '@/hooks/use-create-task';
 import {
   SearchParamKey,
