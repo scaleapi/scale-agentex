@@ -12,7 +12,6 @@ permissions:
 
 env:
   AGENTEX_SERVER_IMAGE_NAME: agentex
-  AGENTEX_AUTH_IMAGE_NAME: agentex-auth
 
 jobs:
   build-stable-image:
@@ -28,6 +27,7 @@ jobs:
           fi
 
       - name: Check if user is maintainer
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/github-script@v7
         with:
           script: |
