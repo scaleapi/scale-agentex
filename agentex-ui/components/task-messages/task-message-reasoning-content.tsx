@@ -1,15 +1,12 @@
-import { memo, useState } from 'react';
+import { memo, useState, useMemo } from 'react';
 
 import { motion } from 'framer-motion';
 import { BrainIcon, ChevronDownIcon } from 'lucide-react';
 
 import { MarkdownResponse } from '@/components/task-messages/markdown-response';
-import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
-import { useTaskMessages } from '@/hooks/use-task-messages';
 import { calculateThinkingTime } from '@/lib/date-utils';
 import { cn } from '@/lib/utils';
 
-import { useAgentexClient } from '../providers';
 import { Collapsible } from '../ui/collapsible';
 import { ShimmeringText } from '../ui/shimmering-text';
 
@@ -21,26 +18,29 @@ type TaskMessageReasoningProps = {
 
 function TaskMessageReasoningImpl({ message }: TaskMessageReasoningProps) {
   const [isCollapsed, setIsCollapsed] = useState(true);
+  const reasoningInProgress = useMemo(() => {
+    return message.streaming_status === 'IN_PROGRESS';
+  }, [message.streaming_status]);
+  const reasoningHeaderText = useMemo(() => {
+    if (reasoningInProgress) {
+      return `Planning next steps...`;
+    }
+    const reasoningTime = calculateThinkingTime(message, message.updated_at);
+    if (reasoningTime) {
+      return `Planned for ${reasoningTime} seconds`;
+    }
+    return `Planned for some time`;
+  }, [reasoningInProgress, message]);
 
-  const { taskID } = useSafeSearchParams();
-  const { agentexClient } = useAgentexClient();
-
-  const { data: queryData } = useTaskMessages({
-    agentexClient,
-    taskId: taskID ?? '',
-  });
-  const messages = queryData?.messages ?? [];
-  const messageIndex = messages.findIndex(m => m.id === message.id);
-  const nextMessage = messageIndex !== -1 ? messages[messageIndex + 1] : null;
-
-  if (message.content.type !== 'reasoning') {
-    throw new Error('Message content is not a ReasoningContent');
-  }
-
-  const reasoningText = [
-    ...(message.content.content ?? []),
-    ...(message.content.summary ?? []),
-  ].join('\n');
+  const reasoningText = useMemo(() => {
+    if (message.content.type !== 'reasoning') {
+      throw new Error('Message content is not a ReasoningContent');
+    }
+    return [
+      ...(message.content.content ?? []),
+      ...(message.content.summary ?? []),
+    ].join('\n');
+  }, [message.content]);
 
   return (
     <motion.div
@@ -59,12 +59,8 @@ function TaskMessageReasoningImpl({ message }: TaskMessageReasoningProps) {
       >
         <BrainIcon className="size-4" />
         <ShimmeringText
-          enabled={!nextMessage}
-          text={
-            nextMessage
-              ? `Planned for ${calculateThinkingTime(message, nextMessage.created_at)} seconds`
-              : `Planning next steps...`
-          }
+          enabled={reasoningInProgress}
+          text={reasoningHeaderText}
         />
 
         <ChevronDownIcon
