@@ -61,9 +61,10 @@ class HealthCheckActivities:
                 )
                 return False
             parsed_response = response.json()
-            if parsed_response["status"] != "healthy":
+            status = parsed_response.get("status")
+            if status != "healthy":
                 logger.error(
-                    f"Agent {agent_id} returned non-healthy status: {parsed_response['status']}"
+                    f"Agent {agent_id} returned non-healthy status: {status}"
                 )
                 return False
             if "agent_id" in parsed_response:
