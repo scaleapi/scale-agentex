@@ -58,7 +58,7 @@ function TaskMessageReasoningImpl({ message }: TaskMessageReasoningProps) {
     return [
       ...(message.content.content ?? []),
       ...(message.content.summary ?? []),
-    ].join('\n');
+    ].join('\n\n');
   }, [message.content]);
 
   return (
