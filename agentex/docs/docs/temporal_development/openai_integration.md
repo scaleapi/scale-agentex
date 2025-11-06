@@ -72,7 +72,7 @@ acp = FastACP.create(
         plugins=[OpenAIAgentsPlugin()]  # Add the plugin
     )
 )
-```
+
 # ============================================================================
 # STREAMING SETUP: Interceptor + Model Provider
 # ============================================================================
