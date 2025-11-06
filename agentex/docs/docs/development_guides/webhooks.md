@@ -79,19 +79,11 @@ The way the signature is calculated differs from product to product - we have im
 
 For now, API key management needs to be done by sending the right requests - cURL examples are given below.
 For configuring API keys in the local environment, it is sufficient to access `localhost:5003` without any authentication.
-To configure the API keys in a deployed environment like `https://chat.sgp.scale.com/`, you will need to make requests to `https://agentex.sgp.scale.com/` with your SGP credentials.
-To get your SGP credentials, you can navigate to `https://app.sgp.scale.com/admin/api-key`, view the SGP API Key shown there and pick the appropriate Account ID from the Accounts tab.
-
 
 ### Viewing API Keys
 You can always check to see all of the existing API keys that have been configured for a given agent by running the following command:
 ```bash
-# local 
 curl http://localhost:5003/agent_api_keys?agent_name=AGENT_NAME
-# remote
-curl https://agentex.sgp.scale.com/agent_api_keys?agent_name=AGENT_NAME \
-  -H "x-api-key: <SGP API KEY>" \
-  -H "x-selected-account-id: <SGP ACCOUNT ID>"
 ```
 
 Note that this will not show you the values of the configured API keys (by design).
@@ -163,3 +155,15 @@ Once you have it, just send the following command:
 curl -X DELETE $HOST/agent_api_keys/API_KEY_ID
 ```
 and the key will be removed, allowing you to make a new one with the same name if desired.
+
+## Enterprise
+
+To configure the API keys in a deployed environment like `https://chat.sgp.scale.com/`, you will need to make requests to `https://agentex.sgp.scale.com/` with your SGP credentials.
+To get your SGP credentials, you can navigate to `https://app.sgp.scale.com/admin/api-key`, view the SGP API Key shown there and pick the appropriate Account ID from the Accounts tab.
+As an example, to view the API keys in a deployed environment with your SGP API Key, use the following command:
+
+```bash
+curl https://agentex.sgp.scale.com/agent_api_keys?agent_name=AGENT_NAME \
+  -H "x-api-key: <SGP API KEY>" \
+  -H "x-selected-account-id: <SGP ACCOUNT ID>"
+```
