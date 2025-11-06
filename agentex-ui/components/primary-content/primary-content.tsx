@@ -3,9 +3,9 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowDown } from 'lucide-react';
 
-import { ChatView } from '@/app/chat-view';
-import { HomeView } from '@/app/home-view';
-import { PromptInput } from '@/components/agentex/prompt-input';
+import { ChatView } from '@/components/primary-content/chat-view';
+import { HomeView } from '@/components/primary-content/home-view';
+import { PromptInput } from '@/components/primary-content/prompt-input';
 import { useAgentexClient } from '@/components/providers';
 import { TaskHeader } from '@/components/task-header/task-header';
 import { IconButton } from '@/components/ui/icon-button';

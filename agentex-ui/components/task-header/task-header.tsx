@@ -1,7 +1,7 @@
 import { Activity, Bot } from 'lucide-react';
 
-import { ThemeToggle } from '@/components/agentex/theme-toggle';
 import { InvestigateTracesButton } from '@/components/task-header/investigate-traces-button';
+import { ThemeToggle } from '@/components/task-header/theme-toggle';
 import { CopyButton } from '@/components/ui/copy-button';
 import { IconButton } from '@/components/ui/icon-button';
 import {
