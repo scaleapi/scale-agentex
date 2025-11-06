@@ -350,17 +350,15 @@ For **Temporal ACP**, this pattern uses Temporal's interceptor mechanism to inje
 ```python
 # In run_worker.py
 from temporalio.contrib.openai_agents import OpenAIAgentsPlugin
-from agentex.lib.core.temporal.plugins.openai_agents import (
-    StreamingInterceptor,
-    StreamingModelProvider,
-)
+from agentex.lib.core.temporal.plugins.openai_agents.interceptors.context_interceptor import ContextInterceptor
+from agentex.lib.core.temporal.plugins.openai_agents.models.temporal_streaming_model import TemporalStreamingModelProvider
 
 # Create custom hooks (interceptor) - streams tool calls, handoffs, agent events
-interceptor = StreamingInterceptor()
+interceptor = ContextInterceptor()
 
 # Use STANDARD plugin with custom provider - streams LLM tokens & reasoning
 plugin = OpenAIAgentsPlugin(
-    model_provider=StreamingModelProvider(),  # Custom provider for LLM streaming
+    model_provider=TemporalStreamingModelProvider(),  # Custom provider for LLM streaming
     model_params=ModelActivityParameters(...)
 )
 
@@ -434,8 +432,8 @@ The pattern is similar but adapted to each ACP's execution model:
 | Extension Mechanism | Custom Provider | Custom Hooks + Custom Provider |
 | Provider Responsibility | Stream all content | Stream LLM tokens & reasoning |
 | Hooks Responsibility | Not needed | Stream tool calls, handoffs, agent events |
-| Provider Class (Temporal) | `SyncStreamingProvider` | `StreamingModelProvider` |
-| Hooks Class (Temporal) | Not needed | `StreamingInterceptor` |
+| Provider Class (Temporal) | `SyncStreamingProvider` | `TemporalStreamingModelProvider` |
+| Hooks Class (Temporal) | Not needed | `ContextInterceptor` |
 | Context Threading | Not needed (direct yield) | Hooks inject via ContextVar |
 | Streaming Destination | Direct to client | Redis pub/sub → SSE |
 | Determinism | Not required | Must return complete response |

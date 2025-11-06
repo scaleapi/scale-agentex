@@ -78,7 +78,7 @@ acp = FastACP.create(
 # ============================================================================
 # Two key components enable real-time streaming while maintaining Temporal durability:
 #
-# 1. ContextInterceptor (StreamingInterceptor)
+# 1. ContextInterceptor
 #    - Threads task_id through activity headers using Temporal's interceptor pattern
 #    - Outbound: Reads _task_id from workflow instance, injects into activity headers
 #    - Inbound: Extracts task_id from headers, sets streaming_task_id ContextVar
