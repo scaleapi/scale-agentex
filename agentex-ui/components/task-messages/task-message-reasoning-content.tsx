@@ -4,9 +4,12 @@ import { motion } from 'framer-motion';
 import { BrainIcon, ChevronDownIcon } from 'lucide-react';
 
 import { MarkdownResponse } from '@/components/task-messages/markdown-response';
+import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
+import { useTaskMessages } from '@/hooks/use-task-messages';
 import { calculateThinkingTime } from '@/lib/date-utils';
 import { cn } from '@/lib/utils';
 
+import { useAgentexClient } from '../providers/agentex-provider';
 import { Collapsible } from '../ui/collapsible';
 import { ShimmeringText } from '../ui/shimmering-text';
 
@@ -18,19 +21,35 @@ type TaskMessageReasoningProps = {
 
 function TaskMessageReasoningImpl({ message }: TaskMessageReasoningProps) {
   const [isCollapsed, setIsCollapsed] = useState(true);
+
+  const { taskID } = useSafeSearchParams();
+  const { agentexClient } = useAgentexClient();
+
+  const { data: queryData } = useTaskMessages({
+    agentexClient,
+    taskId: taskID ?? '',
+  });
+  const messages = queryData?.messages ?? [];
+  const messageIndex = messages.findIndex(m => m.id === message.id);
+  const nextMessage = messageIndex !== -1 ? messages[messageIndex + 1] : null;
+
   const reasoningInProgress = useMemo(() => {
-    return message.streaming_status === 'IN_PROGRESS';
-  }, [message.streaming_status]);
+    return message.streaming_status === 'IN_PROGRESS' && !nextMessage;
+  }, [message.streaming_status, nextMessage]);
+
   const reasoningHeaderText = useMemo(() => {
     if (reasoningInProgress) {
       return `Planning next steps...`;
     }
-    const reasoningTime = calculateThinkingTime(message, message.updated_at);
+    const reasoningTime = calculateThinkingTime(
+      message,
+      nextMessage?.created_at ?? message.updated_at
+    );
     if (reasoningTime) {
       return `Planned for ${reasoningTime} seconds`;
     }
     return `Planned for some time`;
-  }, [reasoningInProgress, message]);
+  }, [reasoningInProgress, message, nextMessage]);
 
   const reasoningText = useMemo(() => {
     if (message.content.type !== 'reasoning') {
