@@ -6,6 +6,8 @@ Each activity has a single responsibility, allowing the workflow to orchestrate
 the status checks and the database updates.
 """
 
+import json
+
 import httpx
 from src.domain.entities.agents import AgentStatus
 from src.domain.repositories.agent_repository import AgentRepository
@@ -60,19 +62,19 @@ class HealthCheckActivities:
                     f"Agent {agent_id} returned non-200 status: {response.status_code}"
                 )
                 return False
-            parsed_response = response.json()
-            status = parsed_response.get("status")
-            if status != "healthy":
-                logger.error(
-                    f"Agent {agent_id} returned non-healthy status: {status}"
-                )
-                return False
-            if "agent_id" in parsed_response:
-                if parsed_response["agent_id"] != agent_id:
+            try:
+                parsed_response = response.json()
+                status = parsed_response.get("status")
+                if status != "healthy":
                     logger.error(
-                        f"Agent {agent_id} returned unexpected agent ID: {parsed_response['agent_id']}"
+                        f"Agent {agent_id} returned non-healthy status: {status}"
                     )
                     return False
+            except json.JSONDecodeError:
+                logger.error(
+                    f"Agent {agent_id} returned non-JSON response: {response.text}"
+                )
+                return False
             return True
         except Exception as e:
             logger.error(f"Failed to check status of agent {agent_id}: {e}")
