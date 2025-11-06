@@ -1,15 +1,15 @@
 import { memo, useCallback, useMemo } from 'react';
 
 import { formatDistanceToNow } from 'date-fns';
-import { motion } from 'framer-motion';
 
-import { Button } from '@/components/ui/button';
 import {
   SearchParamKey,
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
 import { createTaskName } from '@/lib/task-utils';
 import { cn } from '@/lib/utils';
+
+import { ResizableSidebar } from '../agentex/resizable-sidebar';
 
 import type { TaskListResponse } from 'agentex/resources';
 
@@ -59,54 +59,25 @@ function TaskButtonImpl({ task }: TaskButtonProps) {
   }, [task.agents]);
 
   return (
-    <motion.div
-      className=""
-      layout
-      initial={{ opacity: 0, x: -50 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -50 }}
-      transition={{
-        layout: { duration: 0.3, ease: 'easeInOut' },
-        opacity: {
-          duration: 0.2,
-          delay: 0.2,
-        },
-        x: {
-          delay: 0.2,
-          type: 'spring',
-          damping: 30,
-          stiffness: 300,
-        },
-      }}
+    <ResizableSidebar.Button
+      onClick={() => handleTaskSelect(task.id)}
+      isSelected={taskID === task.id}
+      className={cn('flex flex-col gap-1 text-left')}
     >
-      <Button
-        variant="ghost"
+      <span className="w-full truncate text-sm">{taskName}</span>
+      <div
         className={cn(
-          'hover:bg-muted hover:text-primary-foreground text-foreground flex h-auto w-full cursor-pointer flex-col items-start justify-start gap-1 px-2 py-2 text-left transition-colors',
-          taskID === task.id && 'bg-primary'
+          'text-muted-foreground w-full truncate text-xs',
+          (task.agents && task.agents.length > 0) || task.created_at
+            ? 'block'
+            : 'invisible'
         )}
-        onClick={() => handleTaskSelect(task.id)}
-        onKeyDown={e => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            handleTaskSelect(task.id);
-          }
-        }}
       >
-        <span className="w-full truncate text-sm">{taskName}</span>
-        <div
-          className={cn(
-            'text-muted-foreground w-full truncate text-xs',
-            (task.agents && task.agents.length > 0) || task.created_at
-              ? 'block'
-              : 'invisible'
-          )}
-        >
-          {createdAtString}
-          {task.agents && task.agents.length > 0 && task.created_at && ' • '}
-          {agentsString}
-        </div>
-      </Button>
-    </motion.div>
+        {createdAtString}
+        {task.agents && task.agents.length > 0 && task.created_at && ' • '}
+        {agentsString}
+      </div>
+    </ResizableSidebar.Button>
   );
 }
 
