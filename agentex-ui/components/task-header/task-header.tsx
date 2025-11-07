@@ -1,3 +1,4 @@
+import { motion } from 'framer-motion';
 import { Activity, Bot } from 'lucide-react';
 
 import { InvestigateTracesButton } from '@/components/task-header/investigate-traces-button';
@@ -22,6 +23,7 @@ type TaskHeaderProps = {
   agents?: Agent[];
   selectedAgentName?: string;
   onAgentChange?: (agentName: string | undefined) => void;
+  ref?: React.RefObject<HTMLDivElement | null>;
 };
 
 export function TaskHeader({
@@ -30,6 +32,7 @@ export function TaskHeader({
   toggleTracesSidebar,
   agents = [],
   onAgentChange,
+  ref,
 }: TaskHeaderProps) {
   const displayTaskId = taskId ? taskId.split('-')[0] : '';
   const { agentName: selectedAgentName } = useSafeSearchParams();
@@ -45,7 +48,14 @@ export function TaskHeader({
   };
 
   return (
-    <div className="bg-background sticky top-0 z-10 h-16 w-full">
+    <motion.div
+      ref={ref}
+      className="bg-background sticky top-0 z-10 h-16 w-full"
+      key="topbar"
+      initial={{ opacity: 0, y: -20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25, ease: 'easeInOut' }}
+    >
       <div className="relative flex h-full items-center justify-between px-4">
         <div className="flex items-center gap-2">
           {taskId && (
@@ -101,6 +111,6 @@ export function TaskHeader({
           )}
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

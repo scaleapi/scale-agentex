@@ -6,14 +6,8 @@ import { ArrowDown } from 'lucide-react';
 import { ChatView } from '@/components/primary-content/chat-view';
 import { HomeView } from '@/components/primary-content/home-view';
 import { PromptInput } from '@/components/primary-content/prompt-input';
-import { useAgentexClient } from '@/components/providers';
-import { TaskHeader } from '@/components/task-header/task-header';
 import { IconButton } from '@/components/ui/icon-button';
-import { useAgents } from '@/hooks/use-agents';
-import {
-  useSafeSearchParams,
-  SearchParamKey,
-} from '@/hooks/use-safe-search-params';
+import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 
 type ContentAreaProps = {
   isTracesSidebarOpen: boolean;
@@ -25,23 +19,11 @@ export function PrimaryContent({
   toggleTracesSidebar,
 }: ContentAreaProps) {
   const { taskID } = useSafeSearchParams();
-  const { agentexClient } = useAgentexClient();
-  const { data: agents = [] } = useAgents(agentexClient);
-  const { agentName, updateParams } = useSafeSearchParams();
+
   const [prompt, setPrompt] = useState<string>('');
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
 
-  const handleSelectAgent = useCallback(
-    (agentName: string | undefined) => {
-      updateParams({
-        [SearchParamKey.AGENT_NAME]: agentName ?? null,
-        [SearchParamKey.TASK_ID]: null,
-      });
-      setPrompt('');
-    },
-    [updateParams, setPrompt]
-  );
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Scroll detection - track if user is near bottom
   useEffect(() => {
@@ -87,24 +69,17 @@ export function PrimaryContent({
       className={`relative flex h-full flex-1 flex-col ${!taskID ? 'justify-center' : 'justify-between'}`}
       transition={{ duration: 0.25, ease: 'easeInOut' }}
     >
-      {taskID && agentName && (
-        <motion.div
-          key="topbar"
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.25, ease: 'easeInOut' }}
-        >
-          <TaskHeader
-            taskId={taskID}
-            isTracesSidebarOpen={isTracesSidebarOpen}
-            toggleTracesSidebar={toggleTracesSidebar}
-            agents={agents}
-            onAgentChange={handleSelectAgent}
-          />
-        </motion.div>
+      {taskID ? (
+        <ChatView
+          taskID={taskID}
+          isTracesSidebarOpen={isTracesSidebarOpen}
+          toggleTracesSidebar={toggleTracesSidebar}
+          scrollContainerRef={scrollContainerRef}
+          setPrompt={setPrompt}
+        />
+      ) : (
+        <HomeView />
       )}
-
-      {taskID ? <ChatView taskID={taskID} /> : <HomeView />}
 
       <motion.div
         layout="position"
@@ -118,36 +93,42 @@ export function PrimaryContent({
           },
         }}
       >
-        {taskID && (
-          <AnimatePresence>
-            {showScrollButton && (
-              <motion.div
-                className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-4 -translate-x-1/2"
-                initial={{ y: 30, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: 30, opacity: 0 }}
-                transition={{
-                  duration: 0.2,
-                  type: 'spring',
-                  stiffness: 300,
-                  damping: 35,
-                  mass: 0.8,
-                }}
-              >
-                <IconButton
-                  className="pointer-events-auto size-10 rounded-full shadow-lg"
-                  onClick={scrollToBottom}
-                  icon={ArrowDown}
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
-        )}
+        <AnimatePresence>
+          {taskID && showScrollButton && (
+            <ScrollToBottomButton scrollToBottom={scrollToBottom} />
+          )}
+        </AnimatePresence>
 
-        <div className="w-full max-w-3xl">
-          <PromptInput prompt={prompt} setPrompt={setPrompt} />
-        </div>
+        <PromptInput prompt={prompt} setPrompt={setPrompt} />
       </motion.div>
+    </motion.div>
+  );
+}
+
+function ScrollToBottomButton({
+  scrollToBottom,
+}: {
+  scrollToBottom: () => void;
+}) {
+  return (
+    <motion.div
+      className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-4 -translate-x-1/2"
+      initial={{ y: 30, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      exit={{ y: 30, opacity: 0 }}
+      transition={{
+        duration: 0.2,
+        type: 'spring',
+        stiffness: 300,
+        damping: 35,
+        mass: 0.8,
+      }}
+    >
+      <IconButton
+        className="pointer-events-auto size-10 rounded-full shadow-lg"
+        onClick={scrollToBottom}
+        icon={ArrowDown}
+      />
     </motion.div>
   );
 }
