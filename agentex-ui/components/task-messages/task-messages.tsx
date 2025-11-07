@@ -19,6 +19,7 @@ import type {
 
 type TaskMessagesProps = {
   taskId: string;
+  headerRef: React.RefObject<HTMLDivElement | null>;
 };
 type MessagePair = {
   id: string;
@@ -26,7 +27,7 @@ type MessagePair = {
   agentMessages: TaskMessage[];
 };
 
-function TaskMessagesImpl({ taskId }: TaskMessagesProps) {
+function TaskMessagesImpl({ taskId, headerRef }: TaskMessagesProps) {
   const lastPairRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerHeight, setContainerHeight] = useState<number>(0);
@@ -114,7 +115,9 @@ function TaskMessagesImpl({ taskId }: TaskMessagesProps) {
         while (element) {
           const overflowY = window.getComputedStyle(element).overflowY;
           if (overflowY === 'auto' || overflowY === 'scroll') {
-            setContainerHeight(element.clientHeight);
+            setContainerHeight(
+              element.clientHeight - (headerRef.current?.clientHeight ?? 0)
+            );
             return;
           }
           element = element.parentElement;
@@ -126,7 +129,7 @@ function TaskMessagesImpl({ taskId }: TaskMessagesProps) {
 
     window.addEventListener('resize', measureHeight);
     return () => window.removeEventListener('resize', measureHeight);
-  }, [messages]);
+  }, [headerRef, messages]);
 
   useEffect(() => {
     const previousCount = previousMessageCountRef.current;

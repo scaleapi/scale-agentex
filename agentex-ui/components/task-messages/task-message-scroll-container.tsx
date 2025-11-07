@@ -17,7 +17,10 @@ const TaskMessageScrollContainer = forwardRef<
   return (
     <div
       ref={ref}
-      className={cn('flex w-full flex-col gap-4 px-4 pt-4', className)}
+      className={cn(
+        'flex w-full flex-col gap-4 overflow-y-auto px-4 pt-4',
+        className
+      )}
       style={
         isLastPair && containerHeight > 0
           ? {

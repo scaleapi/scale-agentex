@@ -154,7 +154,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
   ]);
 
   return (
-    <div className="flex w-full flex-col gap-2">
+    <div className="flex w-full max-w-3xl flex-col gap-2">
       <div
         className={`border-input dark:bg-input ${isDisabled ? 'bg-muted scale-90 cursor-not-allowed' : 'scale-100'} flex w-full items-center justify-between rounded-4xl border py-2 pr-2 pl-6 shadow-sm transition-transform duration-300 disabled:cursor-not-allowed`}
       >
