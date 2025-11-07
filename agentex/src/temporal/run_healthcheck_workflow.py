@@ -11,6 +11,7 @@ from src.config.dependencies import (
     database_async_read_write_session_maker,
 )
 from src.config.environment_variables import EnvironmentVariables
+from src.domain.entities.agents import AgentStatus
 from src.domain.repositories.agent_repository import AgentRepository
 from src.temporal.workflows.healthcheck_workflow import HealthCheckWorkflow
 from src.utils.logging import make_logger
@@ -53,6 +54,11 @@ async def main() -> None:
     logger.info(f"Adding Health Check workflows to task queue: {task_queue}")
     # Try to add health check workflows to task queue for each agent
     for agent in agents:
+        if agent.status != AgentStatus.READY:
+            logger.info(
+                f"Agent {agent.id} is not ready, skipping health check workflow"
+            )
+            continue
         try:
             await adapter.start_workflow(
                 workflow_id=f"healthcheck_workflow_{agent.id}",
