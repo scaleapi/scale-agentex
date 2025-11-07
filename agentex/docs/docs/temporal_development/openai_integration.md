@@ -124,40 +124,6 @@ That's it! The plugin automatically handles activity creation for all OpenAI SDK
 
 The new streaming implementation uses Temporal's interceptor pattern to enable real-time token streaming while maintaining workflow determinism. Here's how task_id flows through the system:
 
-### The Task ID Threading Flow
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                         WORKFLOW EXECUTION                        │
-│  self._task_id = params.task.id  <-- Store in instance variable  │
-└────────────────────────────┬─────────────────────────────────────┘
-                             ↓ workflow.instance()
-┌──────────────────────────────────────────────────────────────────┐
-│          StreamingWorkflowOutboundInterceptor                     │
-│  • Reads _task_id from workflow.instance()                       │
-│  • Injects into activity headers                                 │
-└────────────────────────────┬─────────────────────────────────────┘
-                             ↓ headers["streaming-task-id"]
-┌──────────────────────────────────────────────────────────────────┐
-│              STANDARD Temporal Plugin (no fork!)                  │
-│  • Uses standard TemporalRunner                                   │
-│  • Creates standard invoke_model_activity                         │
-└────────────────────────────┬─────────────────────────────────────┘
-                             ↓ activity with headers
-┌──────────────────────────────────────────────────────────────────┐
-│         StreamingActivityInboundInterceptor                       │
-│  • Extracts task_id from headers                                 │
-│  • Sets streaming_task_id ContextVar                             │
-└────────────────────────────┬─────────────────────────────────────┘
-                             ↓ streaming_task_id.set()
-┌──────────────────────────────────────────────────────────────────┐
-│              StreamingModel.get_response()                        │
-│  • Reads task_id from streaming_task_id.get()                    │
-│  • Streams chunks to Redis: "stream:{task_id}"                   │
-│  • Returns complete response for Temporal determinism            │
-└──────────────────────────────────────────────────────────────────┘
-```
-
 ### Key Benefits
 
 **No Forked Components**: Uses the standard `temporalio.contrib.openai_agents.OpenAIAgentsPlugin` - no need to maintain custom plugin versions.
@@ -237,9 +203,40 @@ class ExampleWorkflow:
 
 The OpenAI SDK plugin automatically wraps `Runner.run()` calls in Temporal activities. You get durability without manual activity creation!
 
-### Adding Lifecycle Hooks
+### Lifecycle Hooks: Streaming Beyond LLM Responses
 
-Hooks integrate with OpenAI Agents SDK lifecycle events to create messages in the database for tool calls, reasoning, and other agent actions:
+#### What Hooks Stream
+
+The `TemporalStreamingModelProvider` automatically handles streaming **LLM responses** (text tokens and reasoning tokens from thinking models like o1).
+
+**Hooks handle everything else** - they stream agent lifecycle events to the UI:
+
+| Event | What It Captures | When to Use |
+|-------|------------------|-------------|
+| `on_agent_start` | Agent begins execution | Track multi-agent handoffs |
+| `on_agent_end` | Agent produces final output | Mark completion |
+| `on_tool_start` | Tool called with arguments | Show tool execution in UI |
+| `on_tool_end` | Tool returned result | Display tool results in UI |
+| `on_handoff` | Agent transfers to another agent | Visualize agent collaboration |
+| `on_llm_start` | LLM called with prompt | Debug prompts (development) |
+| `on_llm_end` | LLM response complete | Debug responses (development) |
+
+**→ Full event reference:** [OpenAI SDK Lifecycle Documentation](https://openai.github.io/openai-agents-python/ref/lifecycle/)
+
+#### When Do I Use Hooks?
+
+**Use hooks to stream non-LLM events** to the UI or logs. The most common use case is **tool call visibility** - showing users when tools execute and what they return.
+
+**Why hooks are useful:**
+
+✅ **Debugging**: Log prompts, tool calls, and agent transitions during development
+✅ **UI Visibility**: Stream tool executions to frontend for better UX
+✅ **Observability**: Track agent behavior beyond just the final response
+✅ **Customization**: Control what events appear in UI vs. what stays hidden
+
+#### Using Default Hooks (Recommended)
+
+Our `TemporalStreamingHooks` class handles tool calls out of the box - **tool requests and responses automatically appear in the UI**:
 
 ```python
 from agentex.lib.core.temporal.plugins.openai_agents.hooks.hooks import TemporalStreamingHooks
@@ -247,18 +244,59 @@ from agentex.lib.core.temporal.plugins.openai_agents.hooks.hooks import Temporal
 # Create hooks instance with task_id
 hooks = TemporalStreamingHooks(task_id=params.task.id)
 
-# Pass hooks to Runner.run()
+# Pass hooks to Runner.run() - tool calls now stream to UI automatically
 result = await Runner.run(agent, params.event.content.content, hooks=hooks)
 ```
 
-**What hooks do:**
+**Default behavior:**
 
-- `on_tool_call_start()`: Creates tool_request message with arguments
-- `on_tool_call_done()`: Creates tool_response message with result
-- `on_model_stream_part()`: Called for each streaming chunk (handled by StreamingModel)
-- `on_run_done()`: Marks the final response as complete
+- `on_tool_start()`: Creates `tool_request` message in database → streams to frontend
+- `on_tool_end()`: Creates `tool_response` message in database → streams to frontend
+- Frontend automatically renders these as tool call cards (works out of the box!)
 
-These hooks work alongside the interceptor/model streaming to provide a complete view of the agent's execution in the UI.
+#### Customizing Hooks (Advanced)
+
+Inherit from `TemporalStreamingHooks` and override any methods to customize behavior:
+
+```python
+from agentex.lib.core.temporal.plugins.openai_agents.hooks.hooks import TemporalStreamingHooks
+from agentex import adk
+from agentex.types.text_content import TextContent
+
+class CustomHooks(TemporalStreamingHooks):
+    """Override specific lifecycle events for custom streaming behavior"""
+
+    async def on_tool_start(self, tool_call):
+        """Customize what shows when tool starts"""
+        # Example: Hide internal tools, show user-facing ones
+        if tool_call.tool_name.startswith("internal_"):
+            return  # Skip - don't stream to UI
+
+        # Call parent implementation or create custom message
+        await super().on_tool_start(tool_call)
+
+    async def on_agent_start(self, agent, context):
+        """Stream agent handoffs to UI"""
+        await adk.messages.create(
+            task_id=self.task_id,
+            content=TextContent(
+                author="system",
+                content=f"🤖 Agent '{agent.name}' is now active"
+            )
+        )
+
+    async def on_llm_start(self, context):
+        """Log prompts for debugging (don't stream to UI)"""
+        # Log to Temporal, not to UI messages
+        print(f"LLM prompt: {context.messages}")
+
+# Use your custom hooks
+hooks = CustomHooks(task_id=params.task.id)
+result = await Runner.run(agent, params.event.content.content, hooks=hooks)
+```
+
+**Key Takeaway:**
+Hooks provide **flexible streaming** for agent events beyond LLM responses. Use the default class for tool call visibility out of the box, or inherit and override for custom behavior. This gives you fine-grained control over what users see in the UI.
 
 ### What You'll See
 
@@ -347,23 +385,52 @@ result = await Runner.run(weather_agent, params.event.content.content, hooks=hoo
 
 ### Pattern 2: Multiple Activities Within Tools
 
-Use this pattern when you need multiple sequential operations with guaranteed ordering:
+Use this pattern when you need multiple sequential operations that must complete together - like transferring money (withdraw + deposit) or processing an order (validate + charge + ship).
+
+**The Challenge:** Relying on the LLM to make separate tool calls is unreliable:
+- LLM might only call withdraw, never deposit (money lost!)
+- No guarantee of execution order
+- Can't recover from partial completion
+
+**The Solution:** Create one tool with multiple activities executed sequentially with guaranteed ordering.
 
 **Creating Activity Functions:**
 
 ```python
 # activities.py
 from temporalio import activity
+import asyncio
 
 @activity.defn
-async def withdraw_money(account: str, amount: float) -> str:
+async def withdraw_money(from_account: str, amount: float) -> str:
     """Withdraw money from an account"""
-    return f"Withdrew ${amount} from {account}"
+    # Simulates API call (in production: actual banking API)
+    await asyncio.sleep(5)
+    print(f"Withdrew ${amount} from {from_account}")
+    return f"Successfully withdrew ${amount} from {from_account}"
 
 @activity.defn
-async def deposit_money(account: str, amount: float) -> str:
-    """Deposit money to an account"""
-    return f"Deposited ${amount} to {account}"
+async def deposit_money(to_account: str, amount: float) -> str:
+    """Deposit money into an account"""
+    # Simulates API call (in production: actual banking API)
+    await asyncio.sleep(10)
+    print(f"Deposited ${amount} into {to_account}")
+    return f"Successfully deposited ${amount} into {to_account}"
+```
+
+**Register Activities:**
+
+```python
+# run_worker.py
+from agentex.lib.core.temporal.activities import get_all_activities
+from project.activities import withdraw_money, deposit_money
+
+all_activities = get_all_activities() + [withdraw_money, deposit_money]
+
+await worker.run(
+    activities=all_activities,
+    workflow=YourWorkflow,
+)
 ```
 
 **Creating the Composite Tool:**
@@ -373,28 +440,30 @@ async def deposit_money(account: str, amount: float) -> str:
 from agents import function_tool
 from temporalio import workflow
 from datetime import timedelta
-from project.activities import withdraw_money, deposit_money
 
 @function_tool
 async def move_money(from_account: str, to_account: str, amount: float) -> str:
-    """Move money from one account to another atomically.
+    """Move money from one account to another atomically"""
 
-    This guarantees withdraw happens before deposit.
-    """
-    # STEP 1: Withdraw (creates first activity)
-    withdraw_handle = workflow.start_activity_method(
+    # STEP 1: Start the withdrawal activity
+    # This creates a Temporal activity that will be retried if it fails
+    withdraw_result = await workflow.execute_activity(
         withdraw_money,
-        start_to_close_timeout=timedelta(days=1)
+        args=[from_account, amount],
+        start_to_close_timeout=timedelta(days=1)  # Long timeout for banking operations
     )
-    await withdraw_handle.result()
 
-    # STEP 2: Deposit (creates second activity, only after withdraw succeeds)
-    deposit_handle = workflow.start_activity_method(
+    # STEP 2: Only after successful withdrawal, start the deposit activity
+    # This guarantees the sequence: withdraw THEN deposit
+    deposit_result = await workflow.execute_activity(
         deposit_money,
+        args=[to_account, amount],
         start_to_close_timeout=timedelta(days=1)
     )
-    await deposit_handle.result()
 
+    # PATTERN 2 BENEFIT: From the agent's perspective, this was ONE tool call
+    # But in Temporal UI, you'll see TWO activities executed in sequence
+    # Each activity gets its own retry logic and durability guarantees
     return f"Successfully moved ${amount} from {from_account} to {to_account}"
 ```
 
@@ -402,11 +471,13 @@ async def move_money(from_account: str, to_account: str, amount: float) -> str:
 
 ```python
 # workflow.py
+from agents import Agent, Runner
 from project.tools import move_money
+from agentex.lib.core.temporal.plugins.openai_agents.hooks.hooks import TemporalStreamingHooks
 
 money_agent = Agent(
-    name="Money Mover",
-    instructions="Use the move_money tool to transfer money between accounts.",
+    name="Money Transfer Agent",
+    instructions="Use the move_money tool to transfer funds between accounts.",
     tools=[move_money],
 )
 
@@ -419,6 +490,65 @@ hooks = TemporalStreamingHooks(task_id=params.task.id)
 # Run agent - this will create TWO activities when move_money is called
 result = await Runner.run(money_agent, params.event.content.content, hooks=hooks)
 ```
+
+**Why This Works - Guaranteed Sequential Execution:**
+
+```
+1. LLM decides to call move_money tool
+2. Activity: withdraw_money executes
+   → If fails: Temporal retries automatically
+   → If succeeds: Proceeds to next step
+3. Activity: deposit_money executes
+   → If fails: Temporal retries automatically
+   → Withdraw already completed (durable state)
+4. Tool returns success
+5. LLM continues with confirmation
+```
+
+**Transactional Guarantees:**
+- **Atomic operations**: Both complete or workflow handles partial state
+- **Exact resumption**: If system crashes, resumes at exact activity
+- **No lost updates**: Temporal's event sourcing ensures no data loss
+- **Automatic retries**: Failed activities retry without manual intervention
+
+**When to Use Pattern 2:**
+
+✅ **Use when:**
+- Multiple external API calls must complete together
+- Order of operations matters
+- Partial completion is dangerous (e.g., money withdrawn but not deposited)
+- Need guaranteed execution with retries
+- Operations can take minutes/hours to complete
+
+❌ **Don't use when:**
+- Single operation is sufficient (use Pattern 1 instead)
+- Operations are independent (use separate tools)
+- Operations are deterministic (no need for activities)
+
+**Real-World Applications:**
+
+**Financial Operations:**
+- Transfer money (withdraw + deposit)
+- Process payment (authorize + capture)
+- Refund transaction (cancel charge + return funds)
+
+**E-Commerce:**
+- Process order (validate + charge + create shipment)
+- Cancel order (refund + cancel shipment + update inventory)
+
+**Data Processing:**
+- ETL pipeline (extract + transform + load)
+- Multi-stage analysis (fetch + process + store)
+
+**What You'll See:**
+
+![Money Transfer Response](../images/openai_sdk/move_money_response.png)
+
+The agent successfully transfers money with full context.
+
+![Temporal UI Showing Both Activities](../images/openai_sdk/move_money_temporal.png)
+
+Temporal UI shows both activities, execution times, and parameters - full observability into the transactional operation.
 
 ### Pattern Comparison
 
@@ -453,19 +583,10 @@ The model invokes the tool, the tool executes as an activity, then the model is 
 
 ## Advanced Patterns
 
-For production scenarios, check out these design patterns:
-
-### Multi-Activity Tools
-When a single tool needs multiple sequential operations (e.g., withdraw + deposit for money transfer):
-
-**→ See [Multi-Activity Tools Pattern](../design_patterns/multi_activity_tools.md)**
-
-Learn how to create atomic multi-step tools with transactional guarantees.
-
 ### Human-in-the-Loop
 When agents need human approval before taking action:
 
-**→ See [Human-in-the-Loop Pattern](../design_patterns/human_in_the_loop.md)**
+**→ See [Human-in-the-Loop Pattern](human_in_the_loop.md)**
 
 Learn how to use signals and child workflows for approval workflows that survive system failures.
 
