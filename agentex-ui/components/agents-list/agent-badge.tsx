@@ -2,6 +2,11 @@ import { memo } from 'react';
 
 import { motion } from 'framer-motion';
 
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { useLocalStorageState } from '@/hooks/use-local-storage-state';
 import {
   SearchParamKey,
@@ -22,7 +27,11 @@ function AgentBadgeImpl({ agent }: AgentBadgeProps) {
   );
   const isSelected = agentName === agent.name;
 
+  const isDisabled = agent.status !== 'Ready';
+
   const handleClick = () => {
+    if (isDisabled) return;
+
     if (isSelected) {
       updateParams({ [SearchParamKey.AGENT_NAME]: null });
       setLocalAgentName(undefined);
@@ -32,26 +41,29 @@ function AgentBadgeImpl({ agent }: AgentBadgeProps) {
     }
   };
 
-  return (
+  const button = (
     <motion.button
       layout
       onClick={handleClick}
-      className={`relative cursor-pointer overflow-hidden rounded-full px-4 py-2 text-sm font-medium ${
-        isSelected
-          ? 'bg-primary text-primary-foreground border-primary-foreground border shadow-md'
-          : 'border-border border shadow-xs'
+      disabled={isDisabled}
+      className={`relative overflow-hidden rounded-full px-4 py-2 text-sm font-medium ${
+        isDisabled
+          ? 'bg-muted scale-95 cursor-not-allowed border opacity-50 shadow-xs'
+          : isSelected
+            ? 'border-primary-foreground bg-primary text-primary-foreground cursor-pointer border shadow-md'
+            : 'cursor-pointer border shadow-xs'
       } `}
       initial={isSelected ? false : { opacity: 0 }}
       animate={{
-        opacity: 1,
+        opacity: isDisabled ? 0.5 : 1,
         scale: 1,
         transition: {
           delay: isSelected ? 0 : 0.2,
         },
       }}
       exit={{ opacity: 0, transition: { duration: 0.2 } }}
-      whileHover={{ scale: 1.05 }}
-      whileTap={{ scale: 0.95 }}
+      {...(!isDisabled && { whileHover: { scale: 1.05 } })}
+      {...(!isDisabled && { whileTap: { scale: 0.95 } })}
       transition={{
         type: 'spring',
         stiffness: 500,
@@ -61,6 +73,21 @@ function AgentBadgeImpl({ agent }: AgentBadgeProps) {
       {agent.name}
     </motion.button>
   );
+
+  if (isDisabled) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipContent>
+          <p>
+            Agent status is <span className="font-bold">{agent.status}</span>
+          </p>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return button;
 }
 
 const AgentBadge = memo(AgentBadgeImpl);
