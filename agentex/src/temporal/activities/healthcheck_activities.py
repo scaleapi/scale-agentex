@@ -70,6 +70,12 @@ class HealthCheckActivities:
                         f"Agent {agent_id} returned non-healthy status: {status}"
                     )
                     return False
+                response_agent_id = parsed_response.get("agent_id")
+                if response_agent_id and response_agent_id != agent_id:
+                    logger.error(
+                        f"Agent {agent_id} returned unexpected agent ID: {response_agent_id}"
+                    )
+                    return False
             except json.JSONDecodeError:
                 logger.error(
                     f"Agent {agent_id} returned non-JSON response: {response.text}"
