@@ -1,4 +1,4 @@
-import { memo, useState } from 'react';
+import { memo, useState, useMemo } from 'react';
 
 import { motion } from 'framer-motion';
 import { BrainIcon, ChevronDownIcon } from 'lucide-react';
@@ -9,7 +9,7 @@ import { useTaskMessages } from '@/hooks/use-task-messages';
 import { calculateThinkingTime } from '@/lib/date-utils';
 import { cn } from '@/lib/utils';
 
-import { useAgentexClient } from '../providers';
+import { useAgentexClient } from '../providers/agentex-provider';
 import { Collapsible } from '../ui/collapsible';
 import { ShimmeringText } from '../ui/shimmering-text';
 
@@ -33,14 +33,33 @@ function TaskMessageReasoningImpl({ message }: TaskMessageReasoningProps) {
   const messageIndex = messages.findIndex(m => m.id === message.id);
   const nextMessage = messageIndex !== -1 ? messages[messageIndex + 1] : null;
 
-  if (message.content.type !== 'reasoning') {
-    throw new Error('Message content is not a ReasoningContent');
-  }
+  const reasoningInProgress = useMemo(() => {
+    return message.streaming_status === 'IN_PROGRESS' && !nextMessage;
+  }, [message.streaming_status, nextMessage]);
 
-  const reasoningText = [
-    ...(message.content.content ?? []),
-    ...(message.content.summary ?? []),
-  ].join('\n');
+  const reasoningHeaderText = useMemo(() => {
+    if (reasoningInProgress) {
+      return `Planning next steps...`;
+    }
+    const reasoningTime = calculateThinkingTime(
+      message,
+      nextMessage?.created_at ?? message.updated_at
+    );
+    if (reasoningTime) {
+      return `Planned for ${reasoningTime} seconds`;
+    }
+    return `Planned for some time`;
+  }, [reasoningInProgress, message, nextMessage]);
+
+  const reasoningText = useMemo(() => {
+    if (message.content.type !== 'reasoning') {
+      throw new Error('Message content is not a ReasoningContent');
+    }
+    return [
+      ...(message.content.content ?? []),
+      ...(message.content.summary ?? []),
+    ].join('\n\n');
+  }, [message.content]);
 
   return (
     <motion.div
@@ -59,12 +78,8 @@ function TaskMessageReasoningImpl({ message }: TaskMessageReasoningProps) {
       >
         <BrainIcon className="size-4" />
         <ShimmeringText
-          enabled={!nextMessage}
-          text={
-            nextMessage
-              ? `Planned for ${calculateThinkingTime(message, nextMessage.created_at)} seconds`
-              : `Planning next steps...`
-          }
+          enabled={reasoningInProgress}
+          text={reasoningHeaderText}
         />
 
         <ChevronDownIcon

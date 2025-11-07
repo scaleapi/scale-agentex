@@ -31,7 +31,9 @@ export const TaskSidebarBody = ({ className }: TaskSidebarBodyProps) => {
   );
 
   const tasks = useMemo(() => {
-    return data?.pages?.flatMap(page => page) ?? [];
+    const allTasks = data?.pages?.flatMap(page => page) ?? [];
+    const taskMap = new Map(allTasks.map(task => [task.id, task]));
+    return Array.from(taskMap.values());
   }, [data]);
 
   useEffect(() => {

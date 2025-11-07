@@ -2,47 +2,48 @@
 
 Enable agents to wait indefinitely for human approval without losing context, using Temporal signals and child workflows.
 
-## The Problem
+## Why Human-in-the-Loop?
 
-Your agent needs human approval before taking action, but:
-- Waiting blocks the agent
-- System might crash while waiting
-- Context/state could be lost
-- Can't resume after interruption
+Agents often need human approval before taking high-stakes actions like financial transactions, legal document signing, or compliance-sensitive decisions. Traditional approaches fail because waiting blocks the agent, system crashes lose context, and interrupted workflows can't resume.
 
-**Example scenarios:** Financial transactions, legal document signing, high-stakes decisions requiring compliance approval.
+**Temporal's signals and child workflows** solve this by enabling agents to wait indefinitely without consuming resources. If the system crashes, the workflow resumes exactly where it left off with full context preserved.
 
----
 
-## Prerequisites
+**Without Temporal:**
 
-Before implementing this pattern:
-- OpenAI SDK plugin configured (see [OpenAI SDK Integration Guide](openai_integration.md))
-- Understanding of Temporal workflows and signals
+- Agent blocks resources while waiting for approval
+- System crashes lose approval context entirely
+- Must restart the entire process after interruption
+- Can't handle multi-day approval workflows
 
----
+**With Temporal:**
 
-## Key Concepts
+- Agent waits without consuming resources
+- System crashes don't matter - workflow resumes automatically
+- Full context preserved indefinitely (hours, days, or weeks)
+- Approval state is durable and survives any failure
 
-### Signals
-External systems can send messages to running workflows. Think of them as secure, durable event triggers.
 
-**Use cases:** User approvals, webhook notifications, live data feeds, external system updates
+## Real-World Applications
 
-**Learn more:** [Temporal Message Passing](https://docs.temporal.io/develop/python/message-passing#send-signal-from-client)
+**Common approval workflows that benefit from this pattern:**
 
-### Child Workflows
-Spawn independent workflows managed by a parent. They inherit all Temporal durability guarantees.
-
-**Use cases:** Long-running sub-processes, parallel operations, approval workflows
-
-**Learn more:** [Temporal Child Workflows](https://docs.temporal.io/develop/python/child-workflows)
+- **Financial transactions** - Manager approval before wire transfer execution
+- **Fraud holds** - Agent pauses suspicious activity, waits for security team review
+- **Contract execution** - Legal team signs off before document is finalized
+- **Data access** - Compliance approval before granting sensitive information
+- **Procurement** - Multi-stage approvals (manager → director → CFO) for large purchases
+- **Treatment plans** - Doctor authorization before prescription fulfillment
 
 ---
 
 ## The Pattern
 
 ### Step 1: Create the Confirmation Tool
+
+The key technique here is using **child workflows** - independent workflows spawned by a parent that inherit all of Temporal's durability guarantees. This allows the approval process to run as a separate, long-running workflow that can wait indefinitely without blocking the parent.
+
+Use child workflows when you need long-running sub-processes like approvals, parallel operations, or any workflow that needs to outlive a single operation. [Learn more about Temporal child workflows](https://docs.temporal.io/develop/python/child-workflows).
 
 ```python
 # tools.py
@@ -69,6 +70,10 @@ async def wait_for_confirmation(action: str) -> str:
 ```
 
 ### Step 2: Create Child Workflow for Approval
+
+The child workflow uses **signals** - a Temporal technique that lets external systems send messages to running workflows. Think of signals as secure, durable event triggers that can wake up a waiting workflow from anywhere (CLI, API, webhook, etc.).
+
+Use signals when you need external systems to communicate with long-running workflows, like user approvals, webhook notifications, or live data feeds. [Learn more about Temporal signals](https://docs.temporal.io/develop/python/message-passing#send-signal-from-client).
 
 ```python
 # child_workflow.py
@@ -150,11 +155,13 @@ await handle.signal("approve", True)
 ### Durable Waiting
 
 **Without Temporal:**
+
 - Agent blocks resources while waiting
 - If system crashes, approval context is lost
 - Have to restart the entire process
 
 **With Temporal:**
+
 - Agent waits without consuming resources
 - System crashes don't matter - workflow resumes
 - Full context preserved indefinitely
@@ -174,74 +181,6 @@ The parent workflow waits for the child to complete, which happens when the sign
 
 The child workflow runs until the `approve` signal is triggered, then completes.
 
----
 
-## When to Use This Pattern
 
-**✅ Use when:**
-- High-stakes decisions requiring human oversight
-- Compliance/audit requirements mandate approval
-- Financial transactions need authorization
-- Legal or regulatory approval workflows
-- Multi-day approval processes
 
-**❌ Don't use when:**
-- Immediate response required
-- Fully automated agents (no human needed)
-- Simple validation (use synchronous checks instead)
-
----
-
-## Real-World Applications
-
-### Financial Services
-- Large transaction approvals
-- Fraud investigation holds
-- Credit limit increases
-- Account closures
-
-### Healthcare
-- Treatment plan approvals
-- Prescription authorizations
-- Medical record updates
-
-### Enterprise
-- Contract signing workflows
-- Procurement approvals
-- Data access requests
-- Security incident responses
-
----
-
-## Advanced: Multiple Approval Stages
-
-For workflows requiring multiple approvals:
-
-```python
-# Sequential approvals
-manager_approval = await wait_for_approval("manager")
-if manager_approval == "Approved":
-    director_approval = await wait_for_approval("director")
-```
-
----
-
-## Game-Changing Benefits
-
-This pattern enables **true transactional agent behavior:**
-
-- **Guaranteed execution** - Workflow will complete even through failures
-- **Exact resumption** - Picks up exactly where it left off
-- **Context preservation** - All state maintained during wait
-- **Indefinite waiting** - Can wait for human input without resource consumption
-
-**Without this foundation, agents remain fragile. With Temporal, they become production-ready systems that seamlessly integrate human oversight.**
-
----
-
-## See Also
-
-- **[OpenAI SDK Integration Guide](openai_integration.md)** - Setup and configuration
-- **[Multi-Activity Tools Pattern](multi_activity_tools.md)** - Combine with multi-step operations
-- **[Temporal Signals](https://docs.temporal.io/develop/python/message-passing)** - Deep dive into signals
-- **[GitHub Example](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/010_temporal/080_open_ai_agents_sdk_human_in_the_loop)** - Full working code

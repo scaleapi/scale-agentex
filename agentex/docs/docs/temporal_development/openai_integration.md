@@ -5,15 +5,6 @@ Learn how to integrate the OpenAI Agents SDK with Temporal workflows in Agentex 
 !!! note "Temporal Required"
     The OpenAI Agents SDK integration is **only available with Temporal ACP**. This integration uses Temporal's durability features to make OpenAI SDK calls reliable.
 
-## What You'll Learn
-
-- How to set up the OpenAI Agents SDK plugin with Temporal
-- How to enable **real-time streaming** using interceptors and context variables
-- How to create agents that automatically benefit from Temporal's durability
-- How to add tools that execute as Temporal activities
-- How to use **lifecycle hooks** for complete UI visibility
-- How Temporal provides observability through the Temporal UI
-
 ## Why OpenAI SDK + Temporal?
 
 **OpenAI Agents SDK** makes building agents simple - focus on what your agent does, not the infrastructure.
@@ -25,11 +16,13 @@ Learn how to integrate the OpenAI Agents SDK with Temporal workflows in Agentex 
 ### The Value
 
 **Without Temporal + Streaming:**
+
 - Agent crashes = lost context and state
 - Users wait 10-30 seconds for complete responses
 - No visibility into agent's thinking process
 
 **With Temporal + Streaming:**
+
 - Agent resumes exactly where it stopped, maintaining full conversation context and state
 - Users see tokens as they're generated in real-time
 - Complete visibility into tool calls, reasoning, and agent actions
@@ -56,22 +49,29 @@ cd your-project-name
 
 ### Add the OpenAI Plugin with Streaming Support
 
-**Configure Worker (`run_worker.py`) with Streaming:**
+**Step 1: Configure ACP (`acp.py`):**
 
 ```python
-from temporalio.contrib.openai_agents import OpenAIAgentsPlugin
-from agentex.lib.core.temporal.workers.worker import AgentexWorker
-from agentex.lib.core.temporal.plugins.openai_agents.interceptors.context_interceptor import ContextInterceptor
-from agentex.lib.core.temporal.plugins.openai_agents.models.temporal_streaming_model import TemporalStreamingModelProvider
+from agentex.lib.sdk.fastacp.fastacp import FastACP
+from agentex.lib.types.fastacp import TemporalACPConfig
+import os
 
 acp = FastACP.create(
     acp_type="async",
     config=TemporalACPConfig(
         type="temporal",
         temporal_address=os.getenv("TEMPORAL_ADDRESS", "localhost:7233"),
-        plugins=[OpenAIAgentsPlugin()]  # Add the plugin
     )
 )
+```
+
+**Step 2: Configure Worker (`run_worker.py`) with Streaming:**
+
+```python
+from temporalio.contrib.openai_agents import OpenAIAgentsPlugin
+from agentex.lib.core.temporal.workers.worker import AgentexWorker
+from agentex.lib.core.temporal.plugins.openai_agents.interceptors.context_interceptor import ContextInterceptor
+from agentex.lib.core.temporal.plugins.openai_agents.models.temporal_streaming_model import TemporalStreamingModelProvider
 
 # ============================================================================
 # STREAMING SETUP: Interceptor + Model Provider
@@ -105,7 +105,9 @@ worker = AgentexWorker(
 )
 ```
 
-**3. Add OpenAI API Key:**
+**Step 3: Add OpenAI API Key**
+
+For production deployments, configure the API key in your manifest:
 
 ```yaml
 # In manifest.yaml
@@ -116,6 +118,16 @@ agent:
       secret_key: "api-key"
 ```
 
+!!! tip "Local Development"
+    For local development, create a `.env` file at the same level as your `manifest.yaml` to load your environment variables:
+    
+    ```bash
+    # .env
+    OPENAI_API_KEY=sk-your-api-key-here
+    ```
+    
+    The `.env` file will be automatically loaded when you run `agentex run` locally.
+
 That's it! The plugin automatically handles activity creation for all OpenAI SDK calls.
 
 ---
@@ -123,50 +135,6 @@ That's it! The plugin automatically handles activity creation for all OpenAI SDK
 ## How Streaming Works: Interceptors + Context Variables
 
 The new streaming implementation uses Temporal's interceptor pattern to enable real-time token streaming while maintaining workflow determinism. Here's how task_id flows through the system:
-
-### The Task ID Threading Flow
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                         WORKFLOW EXECUTION                        │
-│  self._task_id = params.task.id  <-- Store in instance variable  │
-└────────────────────────────┬─────────────────────────────────────┘
-                             ↓ workflow.instance()
-┌──────────────────────────────────────────────────────────────────┐
-│          StreamingWorkflowOutboundInterceptor                     │
-│  • Reads _task_id from workflow.instance()                       │
-│  • Injects into activity headers                                 │
-└────────────────────────────┬─────────────────────────────────────┘
-                             ↓ headers["streaming-task-id"]
-┌──────────────────────────────────────────────────────────────────┐
-│              STANDARD Temporal Plugin (no fork!)                  │
-│  • Uses standard TemporalRunner                                   │
-│  • Creates standard invoke_model_activity                         │
-└────────────────────────────┬─────────────────────────────────────┘
-                             ↓ activity with headers
-┌──────────────────────────────────────────────────────────────────┐
-│         StreamingActivityInboundInterceptor                       │
-│  • Extracts task_id from headers                                 │
-│  • Sets streaming_task_id ContextVar                             │
-└────────────────────────────┬─────────────────────────────────────┘
-                             ↓ streaming_task_id.set()
-┌──────────────────────────────────────────────────────────────────┐
-│              StreamingModel.get_response()                        │
-│  • Reads task_id from streaming_task_id.get()                    │
-│  • Streams chunks to Redis: "stream:{task_id}"                   │
-│  • Returns complete response for Temporal determinism            │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-### Key Benefits
-
-**No Forked Components**: Uses the standard `temporalio.contrib.openai_agents.OpenAIAgentsPlugin` - no need to maintain custom plugin versions.
-
-**Temporal Durability**: Complete responses are still returned to Temporal for determinism and replay safety.
-
-**Real-Time Streaming**: Users see tokens as they're generated via Redis streams.
-
-**Clean Architecture**: Interceptors are Temporal's official extension mechanism - clear separation between streaming logic and core plugin.
 
 ---
 
@@ -237,28 +205,101 @@ class ExampleWorkflow:
 
 The OpenAI SDK plugin automatically wraps `Runner.run()` calls in Temporal activities. You get durability without manual activity creation!
 
-### Adding Lifecycle Hooks
+### Lifecycle Hooks: Streaming Beyond LLM Responses
 
-Hooks integrate with OpenAI Agents SDK lifecycle events to create messages in the database for tool calls, reasoning, and other agent actions:
+#### What Hooks Stream
+
+The `TemporalStreamingModelProvider` automatically handles streaming **LLM responses** (text tokens and reasoning tokens from thinking models like o1).
+
+**Hooks handle everything else** - they stream agent lifecycle events to the UI:
+
+| Event | What It Captures | When to Use |
+|-------|------------------|-------------|
+| `on_agent_start` | Agent begins execution | Track multi-agent handoffs |
+| `on_agent_end` | Agent produces final output | Mark completion |
+| `on_tool_start` | Tool called with arguments | Show tool execution in UI |
+| `on_tool_end` | Tool returned result | Display tool results in UI |
+| `on_handoff` | Agent transfers to another agent | Visualize agent collaboration |
+| `on_llm_start` | LLM called with prompt | Debug prompts (development) |
+| `on_llm_end` | LLM response complete | Debug responses (development) |
+
+**→ Full event reference:** [OpenAI SDK Lifecycle Documentation](https://openai.github.io/openai-agents-python/ref/lifecycle/)
+
+#### When Do I Use Hooks?
+
+**Use hooks to stream non-LLM events** to the UI or logs. The most common use case is **tool call visibility** - showing users when tools execute and what they return.
+
+**Why hooks are useful:**
+
+✅ **Debugging**: Log prompts, tool calls, and agent transitions during development
+✅ **UI Visibility**: Stream tool executions to frontend for better UX
+✅ **Observability**: Track agent behavior beyond just the final response
+✅ **Customization**: Control what events appear in UI vs. what stays hidden
+
+#### Using Default Hooks (Recommended)
+
+Our `TemporalStreamingHooks` class handles tool calls out of the box - **tool requests and responses automatically appear in the UI**:
 
 ```python
-from agentex.lib.core.temporal.plugins.openai_agents.hooks.hooks import TemporalStreamingHooks
+# No special setup needed - just run your agent!
+result = await Runner.run(agent, params.event.content.content)
 
 # Create hooks instance with task_id
 hooks = TemporalStreamingHooks(task_id=params.task.id)
 
-# Pass hooks to Runner.run()
+# Pass hooks to Runner.run() - tool calls now stream to UI automatically
 result = await Runner.run(agent, params.event.content.content, hooks=hooks)
 ```
 
-**What hooks do:**
+**Default behavior:**
 
-- `on_tool_call_start()`: Creates tool_request message with arguments
-- `on_tool_call_done()`: Creates tool_response message with result
-- `on_model_stream_part()`: Called for each streaming chunk (handled by StreamingModel)
-- `on_run_done()`: Marks the final response as complete
+- `on_tool_start()`: Creates `tool_request` message in database → streams to frontend
+- `on_tool_end()`: Creates `tool_response` message in database → streams to frontend
+- Frontend automatically renders these as tool call cards (works out of the box!)
 
-These hooks work alongside the interceptor/model streaming to provide a complete view of the agent's execution in the UI.
+#### Customizing Hooks (Advanced)
+
+Inherit from `TemporalStreamingHooks` and override any methods to customize behavior:
+
+```python
+from agentex.lib.core.temporal.plugins.openai_agents.hooks.hooks import TemporalStreamingHooks
+from agentex import adk
+from agentex.types.text_content import TextContent
+
+class CustomHooks(TemporalStreamingHooks):
+    """Override specific lifecycle events for custom streaming behavior"""
+
+    async def on_tool_start(self, tool_call):
+        """Customize what shows when tool starts"""
+        # Example: Hide internal tools, show user-facing ones
+        if tool_call.tool_name.startswith("internal_"):
+            return  # Skip - don't stream to UI
+
+        # Call parent implementation or create custom message
+        await super().on_tool_start(tool_call)
+
+    async def on_agent_start(self, agent, context):
+        """Stream agent handoffs to UI"""
+        await adk.messages.create(
+            task_id=self.task_id,
+            content=TextContent(
+                author="system",
+                content=f"🤖 Agent '{agent.name}' is now active"
+            )
+        )
+
+    async def on_llm_start(self, context):
+        """Log prompts for debugging (don't stream to UI)"""
+        # Log to Temporal, not to UI messages
+        print(f"LLM prompt: {context.messages}")
+
+# Use your custom hooks
+hooks = CustomHooks(task_id=params.task.id)
+result = await Runner.run(agent, params.event.content.content, hooks=hooks)
+```
+
+**Key Takeaway:**
+Hooks provide **flexible streaming** for agent events beyond LLM responses. Use the default class for tool call visibility out of the box, or inherit and override for custom behavior. This gives you fine-grained control over what users see in the UI.
 
 ### What You'll See
 
@@ -271,210 +312,3 @@ These hooks work alongside the interceptor/model streaming to provide a complete
 ![Hello World Temporal UI](../images/openai_sdk/hello_world_temporal.png)
 
 The `invoke_model_activity` is created automatically by the plugin, providing full observability.
-
----
-
-## Tools as Activities
-
-Real agents need tools to interact with external systems. There are **two key patterns** for integrating tools with Temporal:
-
-### Pattern 1: Simple External Tools as Activities
-
-Use this pattern when you have a single non-deterministic operation (API call, DB query, etc.).
-
-**Creating a Tool Activity:**
-
-```python
-# activities.py
-from temporalio import activity
-
-@activity.defn
-async def get_weather(city: str) -> str:
-    """Get weather for a city (simulates API call)"""
-    if city == "New York City":
-        return "The weather in New York City is 22 degrees Celsius"
-    return "Weather unknown"
-```
-
-**Registering the Activity:**
-
-```python
-# run_worker.py
-from agentex.lib.core.temporal.activities import get_all_activities
-from project.activities import get_weather
-from agentex.lib.core.temporal.plugins.openai_agents.hooks.activities import stream_lifecycle_content
-
-all_activities = get_all_activities() + [get_weather, stream_lifecycle_content]
-
-await worker.run(
-    activities=all_activities,
-    workflow=YourWorkflow,
-)
-```
-
-**Using the Tool with Streaming and Hooks:**
-
-```python
-# workflow.py
-from agents import Agent, Runner
-from temporalio.contrib import openai_agents
-from datetime import timedelta
-from project.activities import get_weather
-from agentex.lib.core.temporal.plugins.openai_agents.hooks.hooks import TemporalStreamingHooks
-
-# Store task_id for streaming interceptor
-self._task_id = params.task.id
-self._trace_id = params.task.id
-self._parent_span_id = params.task.id
-
-weather_agent = Agent(
-    name="Weather Assistant",
-    instructions="Use the get_weather tool to answer weather questions.",
-    tools=[
-        openai_agents.workflow.activity_as_tool(
-            get_weather,
-            start_to_close_timeout=timedelta(seconds=10)
-        ),
-    ],
-)
-
-# Create hooks for lifecycle events
-hooks = TemporalStreamingHooks(task_id=params.task.id)
-
-# Run agent with hooks - streaming happens automatically via interceptor
-result = await Runner.run(weather_agent, params.event.content.content, hooks=hooks)
-```
-
-### Pattern 2: Multiple Activities Within Tools
-
-Use this pattern when you need multiple sequential operations with guaranteed ordering:
-
-**Creating Activity Functions:**
-
-```python
-# activities.py
-from temporalio import activity
-
-@activity.defn
-async def withdraw_money(account: str, amount: float) -> str:
-    """Withdraw money from an account"""
-    return f"Withdrew ${amount} from {account}"
-
-@activity.defn
-async def deposit_money(account: str, amount: float) -> str:
-    """Deposit money to an account"""
-    return f"Deposited ${amount} to {account}"
-```
-
-**Creating the Composite Tool:**
-
-```python
-# tools.py
-from agents import function_tool
-from temporalio import workflow
-from datetime import timedelta
-from project.activities import withdraw_money, deposit_money
-
-@function_tool
-async def move_money(from_account: str, to_account: str, amount: float) -> str:
-    """Move money from one account to another atomically.
-
-    This guarantees withdraw happens before deposit.
-    """
-    # STEP 1: Withdraw (creates first activity)
-    withdraw_handle = workflow.start_activity_method(
-        withdraw_money,
-        start_to_close_timeout=timedelta(days=1)
-    )
-    await withdraw_handle.result()
-
-    # STEP 2: Deposit (creates second activity, only after withdraw succeeds)
-    deposit_handle = workflow.start_activity_method(
-        deposit_money,
-        start_to_close_timeout=timedelta(days=1)
-    )
-    await deposit_handle.result()
-
-    return f"Successfully moved ${amount} from {from_account} to {to_account}"
-```
-
-**Using the Composite Tool:**
-
-```python
-# workflow.py
-from project.tools import move_money
-
-money_agent = Agent(
-    name="Money Mover",
-    instructions="Use the move_money tool to transfer money between accounts.",
-    tools=[move_money],
-)
-
-# Store task_id for streaming
-self._task_id = params.task.id
-
-# Create hooks
-hooks = TemporalStreamingHooks(task_id=params.task.id)
-
-# Run agent - this will create TWO activities when move_money is called
-result = await Runner.run(money_agent, params.event.content.content, hooks=hooks)
-```
-
-### Pattern Comparison
-
-| Pattern 1 (activity_as_tool) | Pattern 2 (function_tool) |
-|-------------------------------|---------------------------|
-| Single activity per tool call | Multiple activities per tool call |
-| 1:1 tool to activity mapping | 1:many tool to activity mapping |
-| Simple non-deterministic ops | Complex multi-step operations |
-| Let LLM sequence multiple tools | Code controls activity sequencing |
-| Example: get_weather, db_lookup | Example: money_transfer, multi_step_workflow |
-
-**Both patterns provide:**
-- Automatic retries and failure recovery
-- Full observability in Temporal UI
-- Durable execution guarantees
-- Real-time streaming via interceptors
-- Lifecycle hooks for UI messages
-
-### Results
-
-**Agent uses the tool:**
-
-![Weather Response](../images/openai_sdk/weather_response.png)
-
-**Temporal UI shows tool execution:**
-
-![Weather Activity](../images/openai_sdk/weather_activity_tool.png)
-
-The model invokes the tool, the tool executes as an activity, then the model is called again with the result. All steps are durable.
-
----
-
-## Advanced Patterns
-
-For production scenarios, check out these design patterns:
-
-### Multi-Activity Tools
-When a single tool needs multiple sequential operations (e.g., withdraw + deposit for money transfer):
-
-**→ See [Multi-Activity Tools Pattern](../design_patterns/multi_activity_tools.md)**
-
-Learn how to create atomic multi-step tools with transactional guarantees.
-
-### Human-in-the-Loop
-When agents need human approval before taking action:
-
-**→ See [Human-in-the-Loop Pattern](../design_patterns/human_in_the_loop.md)**
-
-Learn how to use signals and child workflows for approval workflows that survive system failures.
-
----
-
-## Complete Examples
-
-**Full working examples on GitHub:**
-- [Hello World](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/010_temporal/060_open_ai_agents_sdk_hello_world)
-- [Tools Integration](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/010_temporal/070_open_ai_agents_sdk_tools)
-- [Human-in-the-Loop](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/010_temporal/080_open_ai_agents_sdk_human_in_the_loop)
-

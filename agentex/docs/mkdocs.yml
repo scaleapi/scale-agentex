@@ -78,9 +78,9 @@ nav:
       - Overview: temporal_development/overview.md
       - Use Cases: temporal_development/use_cases.md
       - Core Concepts: temporal_development/core_concepts.md
-      - Multi-Activity Tools: temporal_development/multi_activity_tools.md
+      - OpenAI Agents Integration: temporal_development/openai_integration.md
+      - Tool Design Patterns: temporal_development/tool_patterns.md
       - Human-in-the-Loop: temporal_development/human_in_the_loop.md
-      - OpenAI Integration: temporal_development/openai_integration.md
       - Troubleshooting: temporal_development/troubleshooting.md
   - Deployment:
       - Overview: deployment/overview.md

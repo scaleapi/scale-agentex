@@ -77,13 +77,15 @@ graph LR
 
 Think of Async ACP like a **postal system for agents** - each agent has its own mailbox where events are delivered asynchronously, and agents decide when and how to process their mail.
 
-### Every Agent Has a Mailbox
+### Think of It Like a Mailbox (Conceptual Analogy)
 
-Each agent has a **mailbox** where events are delivered and queued:
+Each agent has a conceptual "mailbox" where events are delivered and queued:
 
-    - Events arrive from other agents, external clients, scheduled tasks, or webhooks
-    - Events pile up whether the agent is ready or not
-    - Agents decide when to process accumulated events
+- Events arrive from other agents, external clients, scheduled tasks, or webhooks
+- Events pile up whether the agent is ready or not
+- Agents decide when to process accumulated events
+
+This mailbox is a conceptual metaphor - technically, events are queued and delivered asynchronously through the Agentex backend to your agent's event handlers.
 
 ### Handling Concurrent Events
 

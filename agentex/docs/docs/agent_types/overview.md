@@ -25,7 +25,7 @@ Agentex supports three agent types with different execution models and capabilit
 - Blocking, synchronous execution is acceptable
 - Processing one request at a time is sufficient
 
-**Use Async Agents (Base) when:**
+**Use Async Agents when:**
 
 - Asynchronous workflows and stateful applications needed
 - Must handle multiple concurrent requests
