@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 
 import { AgentBadge } from '@/components/agents-list/agent-badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 
 type AgentsListProps = {
@@ -25,23 +26,25 @@ export function AgentsList({ agents, isLoading = false }: AgentsListProps) {
     : agents;
 
   return (
-    <motion.div
-      className="mb-2 flex max-w-4xl flex-wrap items-center justify-center gap-2"
-      layout={hasMounted.current}
-    >
-      {isLoading ? (
-        <>
-          {[...Array(6)].map((_, i) => (
-            <Skeleton key={i} className="h-9.5 w-32 rounded-full" />
-          ))}
-        </>
-      ) : (
-        <AnimatePresence mode="sync">
-          {displayedAgents?.map(agent => (
-            <AgentBadge key={agent.name} agent={agent} />
-          ))}
-        </AnimatePresence>
-      )}
-    </motion.div>
+    <TooltipProvider delayDuration={200}>
+      <motion.div
+        className="mb-2 flex max-w-4xl flex-wrap items-center justify-center gap-2"
+        layout={hasMounted.current}
+      >
+        {isLoading ? (
+          <>
+            {[...Array(6)].map((_, i) => (
+              <Skeleton key={i} className="h-9.5 w-32 rounded-full" />
+            ))}
+          </>
+        ) : (
+          <AnimatePresence mode="sync">
+            {displayedAgents?.map(agent => (
+              <AgentBadge key={agent.name} agent={agent} />
+            ))}
+          </AnimatePresence>
+        )}
+      </motion.div>
+    </TooltipProvider>
   );
 }
