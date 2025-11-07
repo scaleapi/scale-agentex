@@ -21,7 +21,7 @@ Think of an agent like a **web server endpoint** - it receives requests, process
 ## Agent Relationships
 
 !!! info "For Detailed Implementation"
-    This section explains the architectural relationships between agents and other Agentex entities. For specific implementation patterns, refer to the [Agent Client Protocol guides](../acp/overview.md).
+    This section explains the architectural relationships between agents and other Agentex entities. For specific implementation patterns, refer to the [Agent Client Protocol guides](../agent_types/overview.md).
 
 ### Agent ↔ Tasks (Many-to-Many)
 

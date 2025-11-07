@@ -16,7 +16,7 @@ Think of a task like a chat session, customer support ticket, or workflow execut
 ## Task Relationships
 
 !!! info "For Detailed Implementation"
-    This section explains the architectural relationships between core Agentex entities. For specific implementation patterns, refer to the [Agent Client Protocol guides](../acp/overview.md).
+    This section explains the architectural relationships between core Agentex entities. For specific implementation patterns, refer to the [Agent Client Protocol guides](../agent_types/overview.md).
 
 ### Task ↔ Messages (One-to-Many)
 
