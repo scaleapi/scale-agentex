@@ -50,25 +50,23 @@ export function TaskHeader({
   return (
     <motion.div
       ref={ref}
-      className="bg-background sticky top-0 z-10 h-16 w-full"
+      className="sticky top-0 h-16 w-full"
       key="topbar"
       initial={{ opacity: 0, y: -20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, ease: 'easeInOut' }}
     >
-      <div className="relative flex h-full items-center justify-between px-4">
-        <div className="flex items-center gap-2">
-          {taskId && (
-            <>
-              <span className="text-muted-foreground text-sm">Task ID:</span>
-              <span className="text-foreground text-sm">{displayTaskId}</span>
-              {taskId && (
-                <CopyButton tooltip="Copy full ID" onClick={copyTaskId} />
-              )}
-            </>
-          )}
+      <BlurredGradientBackground />
+      <div className="relative flex h-full w-full items-center justify-between px-4">
+        <div
+          className={`flex items-center gap-2 ${!taskId && 'pointer-events-none invisible'}`}
+        >
+          <span className="text-muted-foreground text-sm">Task ID:</span>
+          <span className="text-foreground text-sm">{displayTaskId}</span>
+          <CopyButton tooltip="Copy full ID" onClick={copyTaskId} />
         </div>
-        <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-2">
+
+        <div className="bg-background flex items-center gap-2 rounded-full shadow-sm">
           {agents.length > 0 && onAgentChange && (
             <Select
               value={selectedAgentName ?? ''}
@@ -90,27 +88,40 @@ export function TaskHeader({
             </Select>
           )}
         </div>
-        <div className="flex items-center gap-2">
+
+        <div
+          className={`flex items-center gap-2 ${!taskId && 'pointer-events-none invisible'}`}
+        >
           <ThemeToggle />
-          {taskId && (
-            <>
-              {toggleTracesSidebar && (
-                <IconButton
-                  variant="ghost"
-                  onClick={toggleTracesSidebar}
-                  aria-label={
-                    isTracesSidebarOpen
-                      ? 'Close traces sidebar'
-                      : 'Open traces sidebar'
-                  }
-                  icon={Activity}
-                />
-              )}
-              <InvestigateTracesButton taskId={taskId} />
-            </>
+          {toggleTracesSidebar && (
+            <IconButton
+              variant="ghost"
+              onClick={toggleTracesSidebar}
+              aria-label={
+                isTracesSidebarOpen
+                  ? 'Close traces sidebar'
+                  : 'Open traces sidebar'
+              }
+              icon={Activity}
+            />
           )}
+          {taskId && <InvestigateTracesButton taskId={taskId} />}
         </div>
       </div>
     </motion.div>
+  );
+}
+
+function BlurredGradientBackground() {
+  return (
+    <div
+      className="from-background/80 absolute inset-0 bg-gradient-to-b to-transparent backdrop-blur-xs"
+      style={{
+        maskImage:
+          'linear-gradient(to bottom, black 0%, black 50%, transparent 100%)',
+        WebkitMaskImage:
+          'linear-gradient(to bottom, black 0%, black 50%, transparent 100%)',
+      }}
+    />
   );
 }

@@ -27,7 +27,7 @@ export function HomeView() {
       transition={{ duration: 0.25, ease: 'easeInOut' }}
     >
       <div className="flex flex-col items-center justify-center px-4">
-        <div className="mb-6 text-2xl font-bold">Agentex</div>
+        <div className="mb-6 text-3xl font-bold">Agentex</div>
         <AgentsList agents={agents} isLoading={isLoading} />
         <div
           className={`flex items-center gap-2 ${
