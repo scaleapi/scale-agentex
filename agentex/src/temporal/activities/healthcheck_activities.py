@@ -6,6 +6,8 @@ Each activity has a single responsibility, allowing the workflow to orchestrate
 the status checks and the database updates.
 """
 
+import json
+
 import httpx
 from src.domain.entities.agents import AgentStatus
 from src.domain.repositories.agent_repository import AgentRepository
@@ -55,12 +57,31 @@ class HealthCheckActivities:
         logger.info(f"Checking status of agent {agent_id} via {acp_url}")
         try:
             response = await self.http_client.get(f"{acp_url}/healthz", timeout=5)
-            if response.status_code == 200:
-                return True
-            else:
+            if response.status_code != 200:
                 logger.error(
                     f"Agent {agent_id} returned non-200 status: {response.status_code}"
                 )
+                return False
+            try:
+                parsed_response = response.json()
+                status = parsed_response.get("status")
+                if status != "healthy":
+                    logger.error(
+                        f"Agent {agent_id} returned non-healthy status: {status}"
+                    )
+                    return False
+                response_agent_id = parsed_response.get("agent_id")
+                if response_agent_id and response_agent_id != agent_id:
+                    logger.error(
+                        f"Agent {agent_id} returned unexpected agent ID: {response_agent_id}"
+                    )
+                    return False
+            except json.JSONDecodeError:
+                logger.error(
+                    f"Agent {agent_id} returned non-JSON response: {response.text}"
+                )
+                return False
+            return True
         except Exception as e:
             logger.error(f"Failed to check status of agent {agent_id}: {e}")
         return False
