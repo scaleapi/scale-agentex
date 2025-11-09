@@ -102,6 +102,11 @@ make dev
 It's hard to see if everything is healthy when you just run docker compose in a single terminal since all the logs are jumbled up. Instead, we recommend installing [lazydocker](https://github.com/jesseduffield/lazydocker) and running the following shortcut in a separate terminal.
 
 ```bash
+lazydocker
+
+# pro-tip, add this to your ~/.zshrc
+# alias lzd=lazydocker
+# then do
 lzd
 ```
 
