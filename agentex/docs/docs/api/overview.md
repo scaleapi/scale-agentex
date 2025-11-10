@@ -2,9 +2,34 @@
 
 This section provides comprehensive reference documentation for all Agentex types, classes, and interfaces. Use this as your definitive guide to understanding the objects and APIs you'll work with when building agents.
 
+## Documentation Types
+
+Agentex provides three types of API documentation, each serving a different purpose:
+
+### Agentex REST API Reference
+**[View API Reference →](https://docs.gp.scale.com/reference/agentex/)**
+
+Complete REST API documentation for the Agentex server. Use this to understand the HTTP endpoints, request/response schemas, and authentication for interacting with Agentex from any programming language or external system.
+
+### Agentex SDK (Python Client)
+**[View SDK Client Docs →](https://agentex-sdk.stldocs.app/api/python)**
+
+Python client library for making requests to the Agentex server. Use this when you need to interact with Agentex via its REST API (create tasks, send messages, manage agents, etc.). The SDK wraps the REST API with convenient Python methods.
+
+**When to use:** Building applications or services that need to make requests to the Agentex server.
+
+### Agentex ADK (Agent Development Kit)
+**[View ADK Reference →](adk.md)**
+
+Python library for use **WITHIN** your agent code. The ADK provides high-level abstractions for streaming, tracing, tool calling, state management, and communicating with clients through Agentex's agentic infrastructure. It's specifically designed for agent development, not for making requests to the Agentex server.
+
+**When to use:** Building the internal logic of your agents.
+
+---
+
 ## What You'll Find
 
-- **[Agent Development Kit](adk.md)** - SDK reference specifically for agent development functionswith detailed function signatures
+- **[Agent Development Kit](adk.md)** - SDK reference specifically for agent development functions with detailed function signatures
 - **[Types](types.md)** - Complete API reference for all core data types (Task, TaskMessage, Event, ACP params, etc.)
 
 ## Core Object Categories
