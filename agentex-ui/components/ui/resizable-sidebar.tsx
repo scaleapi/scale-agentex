@@ -9,7 +9,7 @@ import { useLocalStorageState } from '@/hooks/use-local-storage-state';
 import useResizable from '@/hooks/use-resizable';
 import { cn } from '@/lib/utils';
 
-export const DEFAULT_SIDEBAR_WIDTH = 150;
+export const DEFAULT_SIDEBAR_WIDTH = 250;
 export const MIN_SIDEBAR_WIDTH = 120;
 export const MAX_SIDEBAR_WIDTH = 500;
 export const DEFAULT_COLLAPSED_WIDTH = 60;
