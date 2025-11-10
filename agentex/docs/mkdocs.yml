@@ -49,6 +49,7 @@ nav:
   - Getting Started:
       - Architecture Overview: getting_started/agentex_overview.md
       - Choose Your Agent Type: getting_started/choose_your_agent_type.md
+      - Project Structure: getting_started/project_structure.md
   - Agent Types:
       - Agent to Client Protocol (ACP): agent_types/overview.md
       - Sync ACP: agent_types/sync.md
