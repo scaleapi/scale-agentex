@@ -20,6 +20,8 @@ The GitHub README will you how to scaffold an L1 example just to learn the ropes
 | Resource | Description |
 |----------|-------------|
 | **[Agentex README](https://github.com/scaleapi/scale-agentex#getting-started)** | **Getting Started**: Spin up a simple agent on your local computer from scratch in minutes. This comes with a full development UI and agent server. |
-| **[Python SDK](https://github.com/scaleapi/scale-agentex-python)** | **Examples**: Agent-building tutorials that work out of the box. These show how to build up from simple to more complex agents using Agentex. |
+| **[Python SDK Examples](https://github.com/scaleapi/scale-agentex-python)** | **Examples**: Agent-building tutorials that work out of the box. These show how to build up from simple to more complex agents using Agentex. |
+| **[API Reference](https://docs.gp.scale.com/reference/agentex/)** | **REST API**: Complete HTTP endpoint documentation for interacting with the Agentex server from any language or external system. |
+| **[SDK Client Docs](https://agentex-sdk.stldocs.app/api/python)** | **Python Client**: Python library for making requests to the Agentex server (create tasks, send messages, manage agents, etc.). |
 | **[Docs Site](https://agentex.sgp.scale.com/docs)** | **Concepts**: More in depth details on the what, why, and how of building L1-L5 agents.<br><br>**Enterprise Support**: Description of how our zero-ops deployment works. Learn how to share hundreds of agents with the rest of your company. Each agent is hosted and scaled independently on cloud-agnostic infrastructure. |
 

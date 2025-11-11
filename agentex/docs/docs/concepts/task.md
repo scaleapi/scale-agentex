@@ -22,8 +22,6 @@ Think of a task like a chat session, customer support ticket, or workflow execut
 
 **Tasks maintain a flat ledger of messages.** This flat design is an intentional architectural decision that enables flexible multi-actor communication patterns.
 
-#### Why This Design?
-
 ```python
 # A single task's message ledger might include:
 messages = [
@@ -35,6 +33,8 @@ messages = [
     {"author": "AGENT", "content": "Data is valid"},                      # Secondary agent result
 ]
 ```
+
+#### Why This Design?
 
 This flat structure allows:
 
