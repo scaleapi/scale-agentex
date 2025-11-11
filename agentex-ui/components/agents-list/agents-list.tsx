@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 import { Agent } from 'agentex/resources';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 import { AgentBadge } from '@/components/agents-list/agent-badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -38,11 +38,11 @@ export function AgentsList({ agents, isLoading = false }: AgentsListProps) {
             ))}
           </>
         ) : (
-          <AnimatePresence mode="sync">
+          <>
             {displayedAgents?.map(agent => (
               <AgentBadge key={agent.name} agent={agent} />
             ))}
-          </AnimatePresence>
+          </>
         )}
       </motion.div>
     </TooltipProvider>
