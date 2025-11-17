@@ -5,36 +5,41 @@ import { useCallback, useEffect, useState } from 'react';
 import { ToastContainer } from 'react-toastify';
 
 import { PrimaryContent } from '@/components/primary-content/primary-content';
-import { AgentexProvider } from '@/components/providers';
+import { useAgentexClient } from '@/components/providers';
 import { TaskSidebar } from '@/components/task-sidebar/task-sidebar';
 import { TracesSidebar } from '@/components/traces-sidebar/traces-sidebar';
+import { useAgents } from '@/hooks/use-agents';
 import { useLocalStorageState } from '@/hooks/use-local-storage-state';
 import {
   SearchParamKey,
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
 
-type AgentexUIRootProps = {
-  sgpAppURL: string;
-  agentexAPIBaseURL: string;
-};
-
-export function AgentexUIRoot({
-  sgpAppURL,
-  agentexAPIBaseURL,
-}: AgentexUIRootProps) {
+export function AgentexUIRoot() {
   const { agentName, taskID, updateParams } = useSafeSearchParams();
   const [isTracesSidebarOpen, setIsTracesSidebarOpen] = useState(false);
+  const { agentexClient } = useAgentexClient();
+  const { data: agents = [], isLoading } = useAgents(agentexClient);
   const [localAgentName, setLocalAgentName] = useLocalStorageState<
     string | undefined
   >('lastSelectedAgent', undefined);
 
   useEffect(() => {
+    if (isLoading) return;
+
+    const selectedAgent = agents.find(agent => agent.name === agentName);
+    const isAgentValid = selectedAgent && selectedAgent.status === 'Ready';
+
+    if (!isAgentValid) {
+      updateParams({ [SearchParamKey.AGENT_NAME]: null });
+      setLocalAgentName(undefined);
+    }
+
     if (!agentName && localAgentName) {
       updateParams({ [SearchParamKey.AGENT_NAME]: localAgentName });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isLoading]);
 
   const handleSelectTask = useCallback(
     (taskId: string | null) => {
@@ -70,21 +75,16 @@ export function AgentexUIRoot({
 
   return (
     <>
-      <AgentexProvider
-        sgpAppURL={sgpAppURL ?? ''}
-        agentexAPIBaseURL={agentexAPIBaseURL}
-      >
-        <div className="fixed inset-0 flex w-full">
-          <TaskSidebar />
-          <PrimaryContent
-            isTracesSidebarOpen={isTracesSidebarOpen}
-            toggleTracesSidebar={() =>
-              setIsTracesSidebarOpen(!isTracesSidebarOpen)
-            }
-          />
-          <TracesSidebar isOpen={isTracesSidebarOpen} />
-        </div>
-      </AgentexProvider>
+      <div className="fixed inset-0 flex w-full">
+        <TaskSidebar />
+        <PrimaryContent
+          isTracesSidebarOpen={isTracesSidebarOpen}
+          toggleTracesSidebar={() =>
+            setIsTracesSidebarOpen(!isTracesSidebarOpen)
+          }
+        />
+        <TracesSidebar isOpen={isTracesSidebarOpen} />
+      </div>
       <ToastContainer />
     </>
   );

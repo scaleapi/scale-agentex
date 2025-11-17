@@ -1,6 +1,7 @@
 import { connection } from 'next/server';
 
 import { AgentexUIRoot } from '@/components/agentex-ui-root';
+import { AgentexProvider } from '@/components/providers';
 
 export default async function RootPage() {
   await connection();
@@ -19,9 +20,11 @@ export default async function RootPage() {
   }
 
   return (
-    <AgentexUIRoot
+    <AgentexProvider
       sgpAppURL={sgpAppURL}
       agentexAPIBaseURL={agentexAPIBaseURL}
-    />
+    >
+      <AgentexUIRoot />
+    </AgentexProvider>
   );
 }
