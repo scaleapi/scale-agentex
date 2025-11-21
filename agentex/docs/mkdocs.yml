@@ -75,6 +75,7 @@ nav:
       - State Machines: development_guides/state_machines.md
       - Agent Task Tracker: development_guides/agent_task_tracker.md
       - Webhooks: development_guides/webhooks.md
+      - Enterprise Edition: development_guides/enterprise_edition.md
   - Temporal Development:
       - Overview: temporal_development/overview.md
       - Use Cases: temporal_development/use_cases.md
