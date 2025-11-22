@@ -1,5 +1,6 @@
 import asyncio
 import json
+import random
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
@@ -231,21 +232,20 @@ class AgentsACPUseCase(TaskMessageMixin):
             await self.task_service.fail_task(task, str(e))
             raise e
 
-    async def grant_with_retry(self, task: TaskEntity, max_retries: int = 3) -> None:
+    async def grant_with_retry(self, task: TaskEntity, attempts: int = 0) -> None:
         """Grant authorization for a task with retry"""
         try:
             await self.authorization_service.grant(
                 resource=AgentexResource.task(task.id),
             )
         except AuthenticationServiceUnavailableError as e:
-            logger.error(f"Authentication service unavailable: {e}")
-            if max_retries > 0:
-                delay = 0.2 * (2 ** (max_retries - 1))
+            if attempts < 3:
+                delay = 0.2 * (2**attempts) + random.uniform(0, 0.1)
                 logger.error(
                     f"Authentication service unavailable: {e}. Retrying in {delay}s..."
                 )
                 await asyncio.sleep(delay)
-                return await self.grant_with_retry(task, max_retries - 1)
+                return await self.grant_with_retry(task, attempts + 1)
             else:
                 logger.error(
                     f"Authentication service unavailable: {e}. Max retries reached."
