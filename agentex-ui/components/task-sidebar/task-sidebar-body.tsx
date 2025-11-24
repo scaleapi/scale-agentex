@@ -70,13 +70,24 @@ export const TaskSidebarBody = ({ className }: TaskSidebarBodyProps) => {
 
   return (
     <div ref={scrollContainerRef} className={bodyClassName}>
-      <AnimatePresence initial={false}>
-        {tasks.length > 0 &&
-          tasks.map(task => <TaskButton key={task.id} task={task} />)}
-      </AnimatePresence>
-      {isFetchingNextPage && (
+      {tasks.length > 0 ? (
+        <>
+          <AnimatePresence initial={false}>
+            {tasks.map(task => (
+              <TaskButton key={task.id} task={task} />
+            ))}
+          </AnimatePresence>
+          {isFetchingNextPage && (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="text-muted-foreground size-5 animate-spin" />
+            </div>
+          )}
+        </>
+      ) : (
         <div className="flex items-center justify-center py-4">
-          <Loader2 className="text-muted-foreground size-5 animate-spin" />
+          <p className="text-muted-foreground text-xs">
+            No tasks. Start a chat to create one.
+          </p>
         </div>
       )}
     </div>
