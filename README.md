@@ -46,10 +46,14 @@ Here is what we will build together in this README. We'll start with a Hello Wor
 
 https://github.com/user-attachments/assets/9badad0d-f939-4243-ba39-68cafdae0078
 
+> **Windows Users**: Please see [WINDOWS.md](WINDOWS.md) for a complete Windows-specific guide with PowerShell commands and troubleshooting tips.
+
 
 ### Prerequisites
 
 - **Install Python 3.12+ (Required)**: https://www.python.org/downloads/
+
+#### macOS/Linux
 
 ```bash
 # Install uv (fast Python package manager) https://docs.astral.sh/uv/getting-started/installation/
@@ -60,6 +64,22 @@ brew install docker docker-compose node
 
 # Stop redis - On Mac the default redis will conflict with the redis that is started up by our docker compose file
 brew services stop redis
+```
+
+#### Windows
+
+```powershell
+# Install uv (fast Python package manager) https://docs.astral.sh/uv/getting-started/installation/
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Install Docker Desktop for Windows
+# Download from: https://www.docker.com/products/docker-desktop/
+
+# Install Node.js
+# Download from: https://nodejs.org/
+
+# Note: Windows users should use PowerShell scripts (build.ps1) instead of Makefiles
+# All make commands have equivalent PowerShell commands
 ```
 
 #### Install the Agentex SDK
@@ -89,12 +109,26 @@ First, open up a terminal. Then run the following commands.
 
 *Note: you should run these commands at the root of this repository.*
 
+#### macOS/Linux
+
 ```bash
 cd agentex/
 # Install dependencies in a virtual environment
 uv venv && source .venv/bin/activate && uv sync 
 # Start backend services via docker compose (see Makefile for details)
 make dev
+```
+
+#### Windows (PowerShell)
+
+```powershell
+cd agentex/
+# Install dependencies in a virtual environment
+uv venv
+.venv\Scripts\Activate.ps1
+uv sync
+# Start backend services via docker compose (see build.ps1 for details)
+.\build.ps1 dev
 ```
 
 ### (Optional) Terminal 1.5 - LazyDocker
@@ -122,12 +156,24 @@ Then, open up a second terminal. Then run the following commands.
 
 *Note: you should run these commands at the root of this repository.*
 
+#### macOS/Linux
+
 ```bash
 cd agentex-ui/
 # Install dependencies (see Makefile for details)
 make install
 # Starts web interface on localhost (default port 3000)
 make dev
+```
+
+#### Windows (PowerShell)
+
+```powershell
+cd agentex-ui/
+# Install dependencies (see build.ps1 for details)
+.\build.ps1 install
+# Starts web interface on localhost (default port 3000)
+.\build.ps1 dev
 ```
 
 ## Create Your First Agent
@@ -153,12 +199,23 @@ Here is an example of the CLI flow you should follow with some example responses
 
 Set up your virtual environment, install dependencies, and enter your virtual environment
 
+#### macOS/Linux
+
 ```bash
 cd your-agent-name/
 uv venv && source .venv/bin/activate && uv sync 
 ```
 
-> Note: If you are using an IDE, we recommend you setting your virtual environment path to `.venv/bin/python` to get linting
+#### Windows (PowerShell)
+
+```powershell
+cd your-agent-name/
+uv venv
+.venv\Scripts\Activate.ps1
+uv sync
+```
+
+> Note: If you are using an IDE, we recommend you setting your virtual environment path to `.venv/bin/python` (macOS/Linux) or `.venv\Scripts\python.exe` (Windows) to get linting
 
 ### Your Agent Server
 
@@ -273,13 +330,27 @@ Here are the differences between Open Source vs Enterprise to meet different org
 ## Troubleshooting
 
 #### Redis Port Conflict
-If you have Redis running locally, it may conflict with Docker Redis:
-```bash
-# Stop local Redis (macOS)
-brew services stop redis
 
-# Stop local Redis (Linux)
+If you have Redis running locally, it may conflict with Docker Redis:
+
+**macOS:**
+```bash
+# Stop local Redis
+brew services stop redis
+```
+
+**Linux:**
+```bash
+# Stop local Redis
 sudo systemctl stop redis-server
+```
+
+**Windows:**
+```powershell
+# If you have Redis service installed, stop it
+Stop-Service redis
+# Or if running manually, find and kill the process
+Get-Process redis-server | Stop-Process
 ```
 
 #### Port or Address Already in Use
@@ -287,11 +358,19 @@ sudo systemctl stop redis-server
 - If you are running multiple agents at the same time and see `ACP: ERROR:    [Errno 48] Address already in use`, modify the `local_development.agent.port` field in your `manifest.yaml` to use a different port for each agent or just Ctrl-C any agents you're not currently working on. Don't wory your messages will still persist.
 - If you are running processes that conflict witht he ports in the docker compose, either kill those conflicting processes (if you don't need them) or modify the docker compose to use different ports.
 
-Use this command to find and kill processes on conflicting ports (if you don't need those processes).
+**macOS/Linux:**
 ```bash
 # Kill process on specific port (replace <port> and <PID> accordingly)
 lsof -i TCP:<port>
 kill -9 <PID>
+```
+
+**Windows (PowerShell):**
+```powershell
+# Find process on specific port (replace <port>)
+netstat -ano | findstr :<port>
+# Kill process by PID (replace <PID>)
+Stop-Process -Id <PID> -Force
 ```
 
 #### `agentex` Command Not Found
