@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { IDeltaAccumulator } from 'agentex/lib';
 import { aggregateMessageEvents } from 'agentex/lib/aggregate-message-events';
 import { compareDateStrings } from 'agentex/lib/compare-date-strings';
@@ -106,8 +105,8 @@ export async function subscribeTaskState(
     taskStreamReconnectPolicy?.exponentialBackoffBase ?? 2;
 
   // current subscription state
-  let task: Task | null = null;
-  let agents: Agent[] | null = null;
+  let _task: Task | null = null;
+  let _agents: Agent[] | null = null;
   let messages: TaskMessage[] | null = null;
   let deltaAccumulator: IDeltaAccumulator | null = null;
   let continuousAPIErrorCount = 0;
@@ -133,7 +132,7 @@ export async function subscribeTaskState(
               continuousAPIErrorCount = 0;
 
               // pause reading from stream until we initialize state
-              [task, agents, messages] = await Promise.all([
+              [_task, _agents, messages] = await Promise.all([
                 client.tasks.retrieve(taskID, null, { signal }).then(res => {
                   eventListener.onTaskChange(res);
                   return res;
