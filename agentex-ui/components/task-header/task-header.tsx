@@ -80,7 +80,11 @@ export function TaskHeader({
               </SelectTrigger>
               <SelectContent>
                 {agents.map(agent => (
-                  <SelectItem key={agent.name} value={agent.name}>
+                  <SelectItem
+                    key={agent.name}
+                    value={agent.name}
+                    disabled={agent.status !== 'Ready'}
+                  >
                     {agent.name}
                   </SelectItem>
                 ))}
