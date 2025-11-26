@@ -16,14 +16,22 @@ class SpanRepository(PostgresCRUDRepository[SpanORM, SpanEntity]):
     ):
         super().__init__(async_read_write_session_maker, SpanORM, SpanEntity)
 
-    def list(
+    async def list(
         self,
         filters: dict[str, Any] | None = None,
         limit: int | None = None,
         page_number: int | None = None,
+        order_by: str | None = None,
+        order_direction: str | None = None,
     ) -> list[SpanEntity]:
-        return super().list(
-            filters, order_by="start_time", limit=limit, page_number=page_number
+        # Default to start_time if no order_by specified
+        effective_order_by = order_by or "start_time"
+        return await super().list(
+            filters=filters,
+            order_by=effective_order_by,
+            order_direction=order_direction,
+            limit=limit,
+            page_number=page_number,
         )
 
 

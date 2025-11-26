@@ -175,6 +175,89 @@ class TestDeploymentHistoryIntegration:
             (d.id, d.commit_hash) for d in test_pagination_deployments
         }
 
+    async def test_list_deployments_with_order_by(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test GET /deployment-history/ endpoint with order_by parameter."""
+        # Given - Create an agent and multiple deployments
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="order-by-deployment-agent",
+            description="Agent for order_by deployment testing",
+            acp_type=ACPType.SYNC,
+            acp_url="http://test-acp:8000",
+            registration_metadata=None,
+            registered_at=None,
+        )
+        await agent_repo.create(agent)
+
+        deployment_repo = isolated_repositories.get("deployment_history_repository")
+        if not deployment_repo:
+            pytest.skip("Deployment history repository not available in test setup")
+
+        deployments = []
+        for i in range(3):
+            deployment = DeploymentHistoryEntity(
+                id=orm_id(),
+                agent_id=agent.id,
+                author_name="Test Author",
+                author_email="test@example.com",
+                branch_name="test-branch",
+                build_timestamp=datetime(2025, 10, 1, 12, i, 0, tzinfo=UTC),
+                deployment_timestamp=datetime(2025, 10, 1, 12, 5, i, tzinfo=UTC),
+                commit_hash=f"order-test-commit-{i}",
+            )
+            deployments.append(await deployment_repo.create(deployment))
+
+        # When - Request deployments with order_by=deployment_timestamp and order_direction=asc
+        response_asc = await isolated_client.get(
+            "/deployment-history",
+            params={
+                "agent_id": agent.id,
+                "order_by": "deployment_timestamp",
+                "order_direction": "asc",
+            },
+        )
+
+        # Then - Should return deployments in ascending order
+        assert response_asc.status_code == 200
+        deployments_asc = response_asc.json()
+        assert len(deployments_asc) == 3
+
+        # Verify ascending order
+        for i in range(len(deployments_asc) - 1):
+            assert (
+                deployments_asc[i]["deployment_timestamp"]
+                <= deployments_asc[i + 1]["deployment_timestamp"]
+            )
+
+        # When - Request deployments with order_by=deployment_timestamp and order_direction=desc
+        response_desc = await isolated_client.get(
+            "/deployment-history",
+            params={
+                "agent_id": agent.id,
+                "order_by": "deployment_timestamp",
+                "order_direction": "desc",
+            },
+        )
+
+        # Then - Should return deployments in descending order
+        assert response_desc.status_code == 200
+        deployments_desc = response_desc.json()
+        assert len(deployments_desc) == 3
+
+        # Verify descending order
+        for i in range(len(deployments_desc) - 1):
+            assert (
+                deployments_desc[i]["deployment_timestamp"]
+                >= deployments_desc[i + 1]["deployment_timestamp"]
+            )
+
+        # Verify the order is actually reversed
+        assert deployments_asc[0]["id"] == deployments_desc[-1]["id"]
+        assert deployments_asc[-1]["id"] == deployments_desc[0]["id"]
+
     async def test_invalid_list_deployments(
         self, isolated_client, test_deployment, test_agent
     ):

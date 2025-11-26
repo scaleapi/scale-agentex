@@ -28,6 +28,8 @@ class AgentRepository(PostgresCRUDRepository[AgentORM, AgentEntity]):
         filters: dict | None = None,
         limit: int | None = None,
         page_number: int | None = None,
+        order_by: str | None = None,
+        order_direction: str | None = None,
     ) -> list[AgentEntity]:
         """
         List agents with optional filtering.
@@ -35,6 +37,8 @@ class AgentRepository(PostgresCRUDRepository[AgentORM, AgentEntity]):
         Args:
             filters: Dictionary of filters to apply. Currently supports:
                     - task_id: Filter agents by task ID using the join table
+            order_by: Field to order by
+            order_direction: Direction to order by (asc or desc)
         """
         query = select(AgentORM)
         if filters and "task_id" in filters:
@@ -43,7 +47,12 @@ class AgentRepository(PostgresCRUDRepository[AgentORM, AgentEntity]):
             ).where(TaskAgentORM.task_id == filters["task_id"])
         query = query.where(AgentORM.status != AgentStatus.DELETED)
         return await super().list(
-            filters=filters, query=query, limit=limit, page_number=page_number
+            filters=filters,
+            query=query,
+            limit=limit,
+            page_number=page_number,
+            order_by=order_by,
+            order_direction=order_direction,
         )
 
     @asynccontextmanager

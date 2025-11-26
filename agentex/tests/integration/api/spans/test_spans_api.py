@@ -208,3 +208,52 @@ class TestSpansAPIIntegration:
         assert {(d["id"], d["name"]) for d in paginated_spans} == {
             (d.id, d.name) for d in test_pagination_spans
         }
+
+    async def test_list_spans_with_order_by(self, isolated_client):
+        """Test that list spans endpoint supports order_by parameter"""
+        # Given - Create multiple spans with different start times
+        trace_id = "order-by-trace"
+        spans_data = [
+            {
+                "trace_id": trace_id,
+                "name": f"order-span-{i}",
+                "start_time": f"2024-01-01T10:0{i}:00Z",
+            }
+            for i in range(3)
+        ]
+
+        for span_data in spans_data:
+            response = await isolated_client.post("/spans", json=span_data)
+            assert response.status_code == 200
+
+        # When - Request spans with order_by=start_time and order_direction=asc
+        response_asc = await isolated_client.get(
+            f"/spans?trace_id={trace_id}&order_by=start_time&order_direction=asc"
+        )
+
+        # Then - Should return spans in ascending order
+        assert response_asc.status_code == 200
+        spans_asc = response_asc.json()
+        assert len(spans_asc) == 3
+
+        # Verify ascending order
+        for i in range(len(spans_asc) - 1):
+            assert spans_asc[i]["start_time"] <= spans_asc[i + 1]["start_time"]
+
+        # When - Request spans with order_by=start_time and order_direction=desc
+        response_desc = await isolated_client.get(
+            f"/spans?trace_id={trace_id}&order_by=start_time&order_direction=desc"
+        )
+
+        # Then - Should return spans in descending order
+        assert response_desc.status_code == 200
+        spans_desc = response_desc.json()
+        assert len(spans_desc) == 3
+
+        # Verify descending order
+        for i in range(len(spans_desc) - 1):
+            assert spans_desc[i]["start_time"] >= spans_desc[i + 1]["start_time"]
+
+        # Verify the order is actually reversed
+        assert spans_asc[0]["id"] == spans_desc[-1]["id"]
+        assert spans_asc[-1]["id"] == spans_desc[0]["id"]

@@ -69,6 +69,8 @@ class TasksUseCase:
         id: str | list[str] | None = None,
         agent_id: str | None = None,
         agent_name: str | None = None,
+        order_by: str | None = None,
+        order_direction: str = "desc",
         relationships: list[TaskRelationships] | None = None,
     ) -> list[TaskEntity]:
         """List all tasks from repository"""
@@ -78,6 +80,8 @@ class TasksUseCase:
             agent_name=agent_name,
             limit=limit,
             page_number=page_number,
+            order_by=order_by,
+            order_direction=order_direction,
             relationships=relationships,
         )
 
