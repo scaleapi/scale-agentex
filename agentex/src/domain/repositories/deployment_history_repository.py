@@ -34,6 +34,8 @@ class DeploymentHistoryRepository(
         filters: dict | None = None,
         limit: int | None = None,
         page_number: int | None = None,
+        order_by: str | None = None,
+        order_direction: str | None = None,
     ) -> list[DeploymentHistoryEntity]:
         """
         List deployment history with optional filtering.
@@ -41,6 +43,8 @@ class DeploymentHistoryRepository(
         Args:
             filters: Dictionary of filters to apply. Currently supports:
                     - agent_id: Filter agents by agent ID using the join table
+            order_by: Field to order by
+            order_direction: Order direction (asc or desc)
         """
         query = select(DeploymentHistoryORM)
         if filters and "agent_id" in filters:
@@ -48,7 +52,12 @@ class DeploymentHistoryRepository(
                 AgentORM, AgentORM.id == DeploymentHistoryORM.agent_id
             ).where(AgentORM.id == filters["agent_id"])
         return await super().list(
-            filters=filters, query=query, limit=limit, page_number=page_number
+            filters=filters,
+            query=query,
+            limit=limit,
+            page_number=page_number,
+            order_by=order_by,
+            order_direction=order_direction,
         )
 
     async def get_last_deployment_for_agent(

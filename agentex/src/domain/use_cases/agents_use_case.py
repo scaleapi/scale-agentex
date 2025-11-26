@@ -192,13 +192,19 @@ class AgentsUseCase:
         limit: int,
         page_number: int,
         task_id: str | None = None,
+        order_by: str | None = None,
+        order_direction: str = "desc",
         **filters,
     ) -> list[AgentEntity]:
         if task_id is not None:
             filters["task_id"] = task_id
 
         return await self.agent_repo.list(
-            filters=filters, limit=limit, page_number=page_number
+            filters=filters,
+            limit=limit,
+            page_number=page_number,
+            order_by=order_by,
+            order_direction=order_direction,
         )
 
 

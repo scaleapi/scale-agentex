@@ -52,12 +52,19 @@ async def filter_agent_task_tracker(
     task_id: str | None = Query(None, description="Task ID"),
     limit: int = Query(50, description="Limit", ge=1),
     page_number: int = Query(1, description="Page number", ge=1),
+    order_by: str | None = Query(None, description="Field to order by"),
+    order_direction: str = Query("desc", description="Order direction (asc or desc)"),
 ) -> list[AgentTaskTracker]:
     """
     Filter agent task tracker by query parameters.
     """
     agent_task_tracker_entities = await agent_task_tracker_use_case.list(
-        agent_id=agent_id, task_id=task_id, limit=limit, page_number=page_number
+        agent_id=agent_id,
+        task_id=task_id,
+        limit=limit,
+        page_number=page_number,
+        order_by=order_by,
+        order_direction=order_direction,
     )
     return [
         AgentTaskTracker.model_validate(entity)

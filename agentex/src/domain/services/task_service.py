@@ -181,6 +181,8 @@ class AgentTaskService:
         id: str | list[str] | None = None,
         agent_id: str | None = None,
         agent_name: str | None = None,
+        order_by: str | None = None,
+        order_direction: str = "desc",
         relationships: list[TaskRelationships] | None = None,
     ) -> list[TaskEntity]:
         """
@@ -191,6 +193,8 @@ class AgentTaskService:
             task_filters={"id": id} if id is not None else None,
             agent_id=agent_id,
             agent_name=agent_name,
+            order_by=order_by,
+            order_direction=order_direction,
             limit=limit,
             page_number=page_number,
             relationships=relationships,

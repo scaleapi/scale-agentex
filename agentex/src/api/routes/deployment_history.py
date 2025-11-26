@@ -49,6 +49,8 @@ async def list_deployments(
     agent_name: str | None = None,
     limit: int = 50,
     page_number: int = 1,
+    order_by: str | None = None,
+    order_direction: str = "desc",
 ) -> list[DeploymentHistory]:
     """List deployment history"""
     if not agent_id and not agent_name:
@@ -63,7 +65,11 @@ async def list_deployments(
         )
     agent = await agent_use_case.get(id=agent_id, name=agent_name)
     deployments = await deployment_history_use_case.list_deployments(
-        agent_id=agent.id, limit=limit, page_number=page_number
+        agent_id=agent.id,
+        limit=limit,
+        page_number=page_number,
+        order_by=order_by,
+        order_direction=order_direction,
     )
 
     # Convert entities to API schemas
