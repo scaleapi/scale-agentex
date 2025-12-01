@@ -82,12 +82,18 @@ async def list_spans(
     trace_id: str | None = None,
     limit: int = 50,
     page_number: int = 1,
+    order_by: str | None = None,
+    order_direction: str = "desc",
 ) -> list[Span]:
     """
     List all spans for a given trace ID
     """
     logger.info(f"Listing spans for trace ID: {trace_id}")
     spans = await span_use_case.list(
-        trace_id=trace_id, limit=limit, page_number=page_number
+        trace_id=trace_id,
+        limit=limit,
+        page_number=page_number,
+        order_by=order_by,
+        order_direction=order_direction,
     )
     return [Span.model_validate(span) for span in spans]

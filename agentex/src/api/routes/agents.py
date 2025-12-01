@@ -95,12 +95,16 @@ async def list_agents(
     task_id: str | None = Query(None, description="Task ID"),
     limit: int = Query(50, description="Limit", ge=1),
     page_number: int = Query(1, description="Page number", ge=1),
+    order_by: str | None = Query(None, description="Field to order by"),
+    order_direction: str = Query("desc", description="Order direction (asc or desc)"),
 ):
     """List all registered agents."""
     agent_entities = await agents_use_case.list(
         task_id=task_id,
         limit=limit,
         page_number=page_number,
+        order_by=order_by,
+        order_direction=order_direction,
         **{"id": _authorized_ids} if _authorized_ids is not None else {},
     )
     return [Agent.model_validate(agent_entity) for agent_entity in agent_entities]

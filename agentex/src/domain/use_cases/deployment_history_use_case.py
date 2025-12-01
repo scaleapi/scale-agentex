@@ -35,6 +35,8 @@ class DeploymentHistoryUseCase:
         self,
         limit: int,
         page_number: int,
+        order_by: str | None = None,
+        order_direction: str = "desc",
         **filters,
     ) -> list[DeploymentHistoryEntity]:
         """
@@ -48,13 +50,19 @@ class DeploymentHistoryUseCase:
             offset: Number of results to skip
             start_date: Filter deployments built after this date
             end_date: Filter deployments built before this date
+            order_by: Field to order by
+            order_direction: Order direction (asc or desc)
 
         Returns:
             List of deployment history entities
         """
         # Use the basic list method from the repository
         return await self.deployment_history_repository.list(
-            filters=filters, limit=limit, page_number=page_number
+            filters=filters,
+            limit=limit,
+            page_number=page_number,
+            order_by=order_by,
+            order_direction=order_direction,
         )
 
     async def get_last_deployment_for_agent(
