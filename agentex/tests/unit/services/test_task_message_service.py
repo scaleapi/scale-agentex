@@ -62,7 +62,7 @@ def sample_task_messages(sample_task_id):
         message = TaskMessageEntity(
             id=str(uuid4()),
             task_id=sample_task_id,
-            content=TextContent(content=f"Message {i+1}", author=MessageAuthor.USER),
+            content=TextContent(content=f"Message {i + 1}", author=MessageAuthor.USER),
             streaming_status="DONE",
             created_at=base_time + timedelta(seconds=i),
             updated_at=base_time + timedelta(seconds=i),
@@ -130,7 +130,7 @@ class TestTaskMessageService:
 
         # When
         result = await task_message_service.get_messages(
-            sample_task_id, limit=100, page_number=1
+            sample_task_id, limit=100, page_number=1, order_direction="asc"
         )
 
         # Then
@@ -156,7 +156,7 @@ class TestTaskMessageService:
 
         # When
         result = await task_message_service.get_messages(
-            sample_task_id, limit=2, page_number=1
+            sample_task_id, limit=2, page_number=1, order_direction="asc"
         )
 
         # Then

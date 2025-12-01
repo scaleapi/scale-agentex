@@ -43,7 +43,12 @@ class TaskMessageService:
         return await self.repository.get(id=message_id)
 
     async def get_messages(
-        self, task_id: str, limit: int, page_number: int
+        self,
+        task_id: str,
+        limit: int,
+        page_number: int,
+        order_by: str | None = None,
+        order_direction: str = "desc",
     ) -> list[TaskMessageEntity]:
         """
         Get all messages for a specific task.
@@ -51,18 +56,22 @@ class TaskMessageService:
         Args:
             task_id: The task ID
             limit: Optional limit on the number of messages to return
+            order_by: Optional field name to order by (defaults to created_at)
+            order_direction: Optional direction to order by ("asc" or "desc", defaults to "desc")
 
         Returns:
             List of TaskMessageEntity objects for the task
         """
-        # Sort by created_at in ascending order (oldest first)
-        # This is typically what we want for conversation history
+        # Default to created_at descending (newest first)
+        sort_field = order_by or "created_at"
+        sort_direction = 1 if order_direction.lower() == "asc" else -1
+
         return await self.repository.find_by_field(
             "task_id",
             task_id,
             limit=limit,
             page_number=page_number,
-            sort_by={"created_at": 1},
+            sort_by={sort_field: sort_direction},
         )
 
     async def append_message(
