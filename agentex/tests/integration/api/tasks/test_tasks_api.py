@@ -1228,6 +1228,103 @@ class TestTasksAPIIntegration:
         # agents field should be None or not present
         assert found_task.get("agents") is None
 
+    async def test_list_tasks_with_order_by(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test that list tasks endpoint supports order_by parameter"""
+        # Given - Create multiple tasks with different names (which affects created_at order)
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="order-by-test-agent",
+            description="Agent for order_by testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        tasks = []
+        for i in range(3):
+            task = TaskEntity(
+                id=orm_id(),
+                name=f"order-test-task-{i}",
+                status=TaskStatus.RUNNING,
+                status_reason=f"Task {i} for order_by testing",
+            )
+            tasks.append(await task_repo.create(agent_id=agent.id, task=task))
+
+        # When - Request tasks with order_by=created_at and order_direction=asc
+        response_asc = await isolated_client.get(
+            f"/tasks?agent_id={agent.id}&order_by=created_at&order_direction=asc"
+        )
+
+        # Then - Should return tasks in ascending order
+        assert response_asc.status_code == 200
+        tasks_asc = response_asc.json()
+        assert len(tasks_asc) == 3
+
+        # Verify ascending order (first created should be first)
+        for i in range(len(tasks_asc) - 1):
+            assert tasks_asc[i]["created_at"] <= tasks_asc[i + 1]["created_at"]
+
+        # When - Request tasks with order_by=created_at and order_direction=desc
+        response_desc = await isolated_client.get(
+            f"/tasks?agent_id={agent.id}&order_by=created_at&order_direction=desc"
+        )
+
+        # Then - Should return tasks in descending order
+        assert response_desc.status_code == 200
+        tasks_desc = response_desc.json()
+        assert len(tasks_desc) == 3
+
+        # Verify descending order (last created should be first)
+        for i in range(len(tasks_desc) - 1):
+            assert tasks_desc[i]["created_at"] >= tasks_desc[i + 1]["created_at"]
+
+        # Verify the order is actually reversed
+        assert tasks_asc[0]["id"] == tasks_desc[-1]["id"]
+        assert tasks_asc[-1]["id"] == tasks_desc[0]["id"]
+
+    async def test_list_tasks_order_by_defaults_to_desc(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test that order_direction defaults to desc when not specified"""
+        # Given - Create tasks
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="order-default-test-agent",
+            description="Agent for order default testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        for i in range(3):
+            task = TaskEntity(
+                id=orm_id(),
+                name=f"order-default-task-{i}",
+                status=TaskStatus.RUNNING,
+                status_reason=f"Task {i}",
+            )
+            await task_repo.create(agent_id=agent.id, task=task)
+
+        # When - Request tasks with order_by but no order_direction
+        response = await isolated_client.get(
+            f"/tasks?agent_id={agent.id}&order_by=created_at"
+        )
+
+        # Then - Should return tasks in descending order (default)
+        assert response.status_code == 200
+        tasks = response.json()
+        assert len(tasks) == 3
+
+        # Verify descending order
+        for i in range(len(tasks) - 1):
+            assert tasks[i]["created_at"] >= tasks[i + 1]["created_at"]
+
     async def test_list_tasks_filters_work_with_views(
         self, isolated_client, isolated_repositories
     ):

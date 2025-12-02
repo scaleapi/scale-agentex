@@ -79,6 +79,8 @@ async def list_tasks(
     agent_name: str | None = None,
     limit: int = 50,
     page_number: int = 1,
+    order_by: str | None = None,
+    order_direction: str = "desc",
     relationships: Annotated[list[TaskRelationships], Query()] = None,
 ):
     """List all tasks."""
@@ -89,6 +91,8 @@ async def list_tasks(
         agent_name=agent_name,
         limit=limit,
         page_number=page_number,
+        order_by=order_by,
+        order_direction=order_direction,
         relationships=relationships,
     )
     return [TaskResponse.model_validate(task_entity) for task_entity in task_entities]

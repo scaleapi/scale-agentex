@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
 
 import { InfiniteData, useQueryClient } from '@tanstack/react-query';
-import { subscribeTaskState } from 'agentex/lib';
+// import { subscribeTaskState } from 'agentex/lib';
 
+import { subscribeTaskState } from '@/hooks/custom-subscribe-task-state';
 import { updateTaskInInfiniteQuery } from '@/hooks/use-create-task';
 import { taskMessagesKeys } from '@/hooks/use-task-messages';
 import type { TaskMessagesData } from '@/hooks/use-task-messages';

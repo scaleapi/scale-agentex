@@ -108,6 +108,8 @@ class SpanUseCase:
         limit: int,
         page_number: int,
         trace_id: str | None = None,
+        order_by: str | None = None,
+        order_direction: str = "desc",
     ) -> list[SpanEntity]:
         """
         List all spans for a given trace ID
@@ -120,7 +122,11 @@ class SpanUseCase:
         else:
             filters = None
         return await self.span_repo.list(
-            filters=filters, limit=limit, page_number=page_number
+            filters=filters,
+            limit=limit,
+            page_number=page_number,
+            order_by=order_by,
+            order_direction=order_direction,
         )
 
 

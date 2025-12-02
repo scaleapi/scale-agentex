@@ -115,9 +115,15 @@ async def list_messages(
     message_use_case: DMessageUseCase,
     limit: int = 50,
     page_number: int = 1,
+    order_by: str | None = None,
+    order_direction: str = "desc",
 ) -> list[TaskMessage]:
     task_message_entities = await message_use_case.list_messages(
-        task_id=task_id, limit=limit, page_number=page_number
+        task_id=task_id,
+        limit=limit,
+        page_number=page_number,
+        order_by=order_by,
+        order_direction=order_direction,
     )
 
     return [
