@@ -105,7 +105,12 @@ class MessagesUseCase:
         return await self.task_message_service.get_message(message_id=message_id)
 
     async def list_messages(
-        self, task_id: str, limit: int, page_number: int
+        self,
+        task_id: str,
+        limit: int,
+        page_number: int,
+        order_by: str | None = None,
+        order_direction: str = "desc",
     ) -> list[TaskMessageEntity]:
         """
         Get all messages for a task.
@@ -113,12 +118,18 @@ class MessagesUseCase:
         Args:
             task_id: The task ID
             limit: Optional limit on the number of messages to return
+            order_by: Optional field name to order by (defaults to created_at)
+            order_direction: Optional direction to order by ("asc" or "desc", defaults to "desc")
 
         Returns:
             List of TaskMessageEntity objects for the task
         """
         return await self.task_message_service.get_messages(
-            task_id=task_id, limit=limit, page_number=page_number
+            task_id=task_id,
+            limit=limit,
+            page_number=page_number,
+            order_by=order_by,
+            order_direction=order_direction,
         )
 
 

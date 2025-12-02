@@ -510,6 +510,8 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
         filters: dict[str, Any] | None = None,
         limit: int | None = None,
         page_number: int | None = None,
+        order_by: str | None = None,
+        order_direction: str | None = None,
     ) -> list[T]:
         """
         List all documents in the collection.
@@ -525,8 +527,20 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
         else:
             cursor = self.collection.find()
         cursor = cursor.skip(skip).limit(limit)
-        # Consistent sorting so that pagination works correctly
-        cursor = cursor.sort([("_id", 1)])
+
+        sort_list = []
+        if order_by:
+            direction = (
+                pymongo.DESCENDING
+                if order_direction and order_direction.lower() == "desc"
+                else pymongo.ASCENDING
+            )
+            sort_list.append((order_by, direction))
+
+        # Always use _id as tiebreaker
+        sort_list.append(("_id", pymongo.ASCENDING))
+        cursor = cursor.sort(sort_list)
+
         try:
             return [self._deserialize(doc) for doc in cursor]
         except Exception as e:

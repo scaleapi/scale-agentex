@@ -289,3 +289,138 @@ class TestMessagesAPIIntegration:
         assert {(d["id"], d["content"]["content"]) for d in paginated_messages} == {
             (d.id, d.content.content) for d in test_pagination_messages
         }
+
+    async def test_list_messages_with_order_by(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test that list messages endpoint supports order_by parameter"""
+        # Given - Create an agent and task
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="order-by-message-agent",
+            description="Agent for order_by message testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="order-by-message-task",
+            status=TaskStatus.RUNNING,
+            status_reason="Task for order_by message testing",
+        )
+        await task_repo.create(agent_id=agent.id, task=task)
+
+        # Create multiple messages
+        message_repo = isolated_repositories["task_message_repository"]
+        messages = []
+        for i in range(3):
+            message = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=TextContentEntity(
+                    type="text", author="user", content=f"Order test message {i}"
+                ),
+                streaming_status="DONE",
+            )
+            messages.append(await message_repo.create(message))
+
+        # When - Request messages with order_by=created_at and order_direction=asc
+        response_asc = await isolated_client.get(
+            "/messages",
+            params={
+                "task_id": task.id,
+                "order_by": "created_at",
+                "order_direction": "asc",
+            },
+        )
+
+        # Then - Should return messages in ascending order
+        assert response_asc.status_code == 200
+        messages_asc = response_asc.json()
+        assert len(messages_asc) == 3
+
+        # Verify ascending order
+        for i in range(len(messages_asc) - 1):
+            assert messages_asc[i]["created_at"] <= messages_asc[i + 1]["created_at"]
+
+        # When - Request messages with order_by=created_at and order_direction=desc
+        response_desc = await isolated_client.get(
+            "/messages",
+            params={
+                "task_id": task.id,
+                "order_by": "created_at",
+                "order_direction": "desc",
+            },
+        )
+
+        # Then - Should return messages in descending order
+        assert response_desc.status_code == 200
+        messages_desc = response_desc.json()
+        assert len(messages_desc) == 3
+
+        # Verify descending order
+        for i in range(len(messages_desc) - 1):
+            assert messages_desc[i]["created_at"] >= messages_desc[i + 1]["created_at"]
+
+        # Verify asc and desc return different orderings (first element of asc should be in last position of desc)
+        # Note: We only check the first element reversal since items with identical timestamps
+        # may have unpredictable relative ordering
+        assert messages_asc[0]["id"] == messages_desc[-1]["id"]
+
+    async def test_list_messages_order_by_defaults_to_desc(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test that order_direction defaults to desc for messages (newest first)"""
+        # Given - Create an agent and task
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="order-default-message-agent",
+            description="Agent for order default message testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="order-default-message-task",
+            status=TaskStatus.RUNNING,
+            status_reason="Task for order default message testing",
+        )
+        await task_repo.create(agent_id=agent.id, task=task)
+
+        # Create multiple messages
+        message_repo = isolated_repositories["task_message_repository"]
+        for i in range(3):
+            message = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=TextContentEntity(
+                    type="text", author="user", content=f"Default order message {i}"
+                ),
+                streaming_status="DONE",
+            )
+            await message_repo.create(message)
+
+        # When - Request messages without specifying order_direction
+        response = await isolated_client.get(
+            "/messages",
+            params={"task_id": task.id},
+        )
+
+        # Then - Should return messages successfully
+        assert response.status_code == 200
+        messages = response.json()
+        assert len(messages) == 3
+
+        # Verify descending order - items with same timestamp may have any relative order,
+        # so we only check that timestamps are non-increasing (allowing equal timestamps)
+        timestamps = [m["created_at"] for m in messages]
+        # Sort timestamps descending and verify the returned order matches a valid descending order
+        assert timestamps == sorted(timestamps, reverse=True)
