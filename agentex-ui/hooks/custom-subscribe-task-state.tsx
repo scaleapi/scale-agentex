@@ -142,9 +142,10 @@ export async function subscribeTaskState(
                     return res;
                   }),
                 client.messages
-                  .list({ task_id: taskID, limit: 1000 }, { signal })
+                  .list({ task_id: taskID }, { signal })
                   .then(res => {
-                    eventListener.onMessagesChange(res);
+                    const chronologicalMessages = res.slice().reverse();
+                    eventListener.onMessagesChange(chronologicalMessages);
                     return res;
                   }),
               ]);
