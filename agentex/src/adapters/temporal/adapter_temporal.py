@@ -396,7 +396,7 @@ class TemporalAdapter(TemporalGateway):
 
             action = ScheduleActionStartWorkflow(
                 workflow,
-                args if args else [],
+                *(args if args else []),
                 **action_kwargs,
             )
 
