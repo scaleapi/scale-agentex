@@ -4,13 +4,19 @@ from typing import Annotated, Any
 from fastapi import Depends
 from temporalio.client import (
     Client,
+    Schedule,
+    ScheduleActionStartWorkflow,
+    ScheduleAlreadyRunningError,
+    ScheduleDescription,
+    ScheduleHandle,
+    ScheduleIntervalSpec,
+    ScheduleSpec,
+    ScheduleState,
     WorkflowExecution,
     WorkflowHandle,
 )
 from temporalio.common import RetryPolicy, WorkflowIDReusePolicy
-from temporalio.exceptions import (
-    WorkflowAlreadyStartedError,
-)
+from temporalio.exceptions import WorkflowAlreadyStartedError
 
 from src.adapters.temporal.exceptions import (
     TemporalCancelError,
@@ -18,6 +24,9 @@ from src.adapters.temporal.exceptions import (
     TemporalError,
     TemporalInvalidArgumentError,
     TemporalQueryError,
+    TemporalScheduleAlreadyExistsError,
+    TemporalScheduleError,
+    TemporalScheduleNotFoundError,
     TemporalSignalError,
     TemporalTerminateError,
     TemporalWorkflowAlreadyExistsError,
@@ -334,6 +343,272 @@ class TemporalAdapter(TemporalGateway):
         except Exception as e:
             logger.warning(f"Temporal connectivity check failed: {e}")
             return False
+
+    # ==================== Schedule Operations ====================
+
+    async def create_schedule(
+        self,
+        schedule_id: str,
+        workflow: str | type,
+        workflow_id: str,
+        args: list[Any] | None = None,
+        task_queue: str | None = None,
+        cron_expressions: list[str] | None = None,
+        interval_seconds: int | None = None,
+        execution_timeout: timedelta | None = None,
+        start_at: Any | None = None,
+        end_at: Any | None = None,
+        paused: bool = False,
+    ) -> ScheduleHandle:
+        """
+        Create a new schedule for recurring workflow execution.
+        """
+        if not self.client:
+            raise TemporalConnectionError("Temporal client is not connected")
+
+        if not cron_expressions and not interval_seconds:
+            raise TemporalInvalidArgumentError(
+                message="Either cron_expressions or interval_seconds must be provided",
+                detail="A schedule requires at least one scheduling specification",
+            )
+
+        try:
+            # Build schedule spec
+            spec = ScheduleSpec(
+                cron_expressions=cron_expressions or [],
+                intervals=[
+                    ScheduleIntervalSpec(every=timedelta(seconds=interval_seconds))
+                ]
+                if interval_seconds
+                else [],
+                start_at=start_at,
+                end_at=end_at,
+            )
+
+            # Build workflow action
+            action_kwargs: dict[str, Any] = {
+                "id": workflow_id,
+            }
+            if task_queue:
+                action_kwargs["task_queue"] = task_queue
+            if execution_timeout:
+                action_kwargs["execution_timeout"] = execution_timeout
+
+            action = ScheduleActionStartWorkflow(
+                workflow,
+                args if args else [],
+                **action_kwargs,
+            )
+
+            # Build schedule state
+            state = ScheduleState(
+                paused=paused,
+            )
+
+            # Create the schedule
+            handle = await self.client.create_schedule(
+                schedule_id,
+                Schedule(
+                    action=action,
+                    spec=spec,
+                    state=state,
+                ),
+            )
+
+            logger.info(f"Created schedule {schedule_id} successfully")
+            return handle
+
+        except ScheduleAlreadyRunningError as e:
+            logger.error(f"Schedule {schedule_id} already exists: {e}")
+            raise TemporalScheduleAlreadyExistsError(
+                message=f"Schedule with ID '{schedule_id}' already exists",
+                detail=str(e),
+            ) from e
+        except ValueError as e:
+            logger.error(f"Invalid arguments for schedule {schedule_id}: {e}")
+            raise TemporalInvalidArgumentError(
+                message=f"Invalid arguments provided for schedule '{schedule_id}'",
+                detail=str(e),
+            ) from e
+        except Exception as e:
+            logger.error(f"Failed to create schedule {schedule_id}: {e}")
+            raise TemporalScheduleError(
+                message=f"Failed to create schedule '{schedule_id}'",
+                detail=str(e),
+            ) from e
+
+    async def get_schedule(self, schedule_id: str) -> ScheduleHandle:
+        """
+        Get a handle to an existing schedule.
+        """
+        if not self.client:
+            raise TemporalConnectionError("Temporal client is not connected")
+
+        try:
+            handle = self.client.get_schedule_handle(schedule_id)
+            # Verify the schedule exists by describing it
+            await handle.describe()
+            return handle
+        except Exception as e:
+            if "not found" in str(e).lower():
+                logger.error(f"Schedule {schedule_id} not found: {e}")
+                raise TemporalScheduleNotFoundError(
+                    message=f"Schedule '{schedule_id}' not found",
+                    detail=str(e),
+                ) from e
+            logger.error(f"Failed to get schedule {schedule_id}: {e}")
+            raise TemporalScheduleError(
+                message=f"Failed to get schedule '{schedule_id}'",
+                detail=str(e),
+            ) from e
+
+    async def describe_schedule(self, schedule_id: str) -> ScheduleDescription:
+        """
+        Get detailed information about a schedule.
+        """
+        if not self.client:
+            raise TemporalConnectionError("Temporal client is not connected")
+
+        try:
+            handle = self.client.get_schedule_handle(schedule_id)
+            description = await handle.describe()
+            logger.info(f"Retrieved description for schedule {schedule_id}")
+            return description
+        except Exception as e:
+            if "not found" in str(e).lower():
+                logger.error(f"Schedule {schedule_id} not found: {e}")
+                raise TemporalScheduleNotFoundError(
+                    message=f"Schedule '{schedule_id}' not found",
+                    detail=str(e),
+                ) from e
+            logger.error(f"Failed to describe schedule {schedule_id}: {e}")
+            raise TemporalScheduleError(
+                message=f"Failed to describe schedule '{schedule_id}'",
+                detail=str(e),
+            ) from e
+
+    async def list_schedules(
+        self,
+        page_size: int = 100,
+    ) -> list[Any]:
+        """
+        List all schedules.
+        """
+        if not self.client:
+            raise TemporalConnectionError("Temporal client is not connected")
+
+        try:
+            schedules = []
+            # list_schedules() returns a coroutine that yields an async iterator
+            async for schedule in await self.client.list_schedules(page_size=page_size):  # type: ignore[union-attr]
+                schedules.append(schedule)
+                if len(schedules) >= page_size:
+                    break
+
+            logger.info(f"Listed {len(schedules)} schedules")
+            return schedules
+        except Exception as e:
+            logger.error(f"Failed to list schedules: {e}")
+            raise TemporalError(
+                message="Failed to list schedules",
+                detail=str(e),
+            ) from e
+
+    async def pause_schedule(self, schedule_id: str, note: str | None = None) -> None:
+        """
+        Pause a schedule.
+        """
+        if not self.client:
+            raise TemporalConnectionError("Temporal client is not connected")
+
+        try:
+            handle = self.client.get_schedule_handle(schedule_id)
+            await handle.pause(note=note or "Paused via API")
+            logger.info(f"Paused schedule {schedule_id}")
+        except Exception as e:
+            if "not found" in str(e).lower():
+                logger.error(f"Schedule {schedule_id} not found: {e}")
+                raise TemporalScheduleNotFoundError(
+                    message=f"Schedule '{schedule_id}' not found",
+                    detail=str(e),
+                ) from e
+            logger.error(f"Failed to pause schedule {schedule_id}: {e}")
+            raise TemporalScheduleError(
+                message=f"Failed to pause schedule '{schedule_id}'",
+                detail=str(e),
+            ) from e
+
+    async def unpause_schedule(self, schedule_id: str, note: str | None = None) -> None:
+        """
+        Unpause/resume a schedule.
+        """
+        if not self.client:
+            raise TemporalConnectionError("Temporal client is not connected")
+
+        try:
+            handle = self.client.get_schedule_handle(schedule_id)
+            await handle.unpause(note=note or "Unpaused via API")
+            logger.info(f"Unpaused schedule {schedule_id}")
+        except Exception as e:
+            if "not found" in str(e).lower():
+                logger.error(f"Schedule {schedule_id} not found: {e}")
+                raise TemporalScheduleNotFoundError(
+                    message=f"Schedule '{schedule_id}' not found",
+                    detail=str(e),
+                ) from e
+            logger.error(f"Failed to unpause schedule {schedule_id}: {e}")
+            raise TemporalScheduleError(
+                message=f"Failed to unpause schedule '{schedule_id}'",
+                detail=str(e),
+            ) from e
+
+    async def trigger_schedule(self, schedule_id: str) -> None:
+        """
+        Trigger a schedule to run immediately.
+        """
+        if not self.client:
+            raise TemporalConnectionError("Temporal client is not connected")
+
+        try:
+            handle = self.client.get_schedule_handle(schedule_id)
+            await handle.trigger()
+            logger.info(f"Triggered schedule {schedule_id}")
+        except Exception as e:
+            if "not found" in str(e).lower():
+                logger.error(f"Schedule {schedule_id} not found: {e}")
+                raise TemporalScheduleNotFoundError(
+                    message=f"Schedule '{schedule_id}' not found",
+                    detail=str(e),
+                ) from e
+            logger.error(f"Failed to trigger schedule {schedule_id}: {e}")
+            raise TemporalScheduleError(
+                message=f"Failed to trigger schedule '{schedule_id}'",
+                detail=str(e),
+            ) from e
+
+    async def delete_schedule(self, schedule_id: str) -> None:
+        """
+        Delete a schedule.
+        """
+        if not self.client:
+            raise TemporalConnectionError("Temporal client is not connected")
+
+        try:
+            handle = self.client.get_schedule_handle(schedule_id)
+            await handle.delete()
+            logger.info(f"Deleted schedule {schedule_id}")
+        except Exception as e:
+            if "not found" in str(e).lower():
+                logger.error(f"Schedule {schedule_id} not found: {e}")
+                raise TemporalScheduleNotFoundError(
+                    message=f"Schedule '{schedule_id}' not found",
+                    detail=str(e),
+                ) from e
+            logger.error(f"Failed to delete schedule {schedule_id}: {e}")
+            raise TemporalScheduleError(
+                message=f"Failed to delete schedule '{schedule_id}'",
+                detail=str(e),
+            ) from e
 
 
 # Dependency injection annotation for FastAPI
