@@ -12,9 +12,10 @@ on:
   workflow_dispatch:
     inputs:
       commit-sha:
-        description: "Commit SHA to test against"
+        description: "Commit SHA or branch to test against"
         required: true
         type: string
+        default: main
 
 jobs:
   run-integration-tests:
@@ -46,7 +47,30 @@ jobs:
           docker compose -f docker-compose.yml up -d
           echo "⏳ Waiting for services to be ready..."
           sleep 30
+
+          echo "📋 Service status:"
           docker compose ps
+
+          echo "🔍 Checking AgentEx service health..."
+          HEALTH_TIMEOUT=60
+          HEALTH_ELAPSED=0
+
+          while [ $HEALTH_ELAPSED -lt $HEALTH_TIMEOUT ]; do
+            if curl -s http://localhost:5003/health > /dev/null 2>&1; then
+              echo "✅ AgentEx service is healthy"
+              break
+            fi
+            echo "⏳ Waiting for AgentEx health check... (${HEALTH_ELAPSED}s/${HEALTH_TIMEOUT}s)"
+            sleep 5
+            HEALTH_ELAPSED=$((HEALTH_ELAPSED + 5))
+          done
+
+          if [ $HEALTH_ELAPSED -ge $HEALTH_TIMEOUT ]; then
+            echo "❌ AgentEx service health check failed"
+            echo "📋 AgentEx service logs:"
+            docker compose logs agentex
+            exit 1
+          fi
 
       - name: Run agent integration test
         run: |
@@ -91,14 +115,55 @@ jobs:
             exit 1
           fi
 
-          # Run the test inside the container
+          # Test connectivity before running main tests
+          echo "🔍 Testing connectivity to agent..."
+          if ! docker exec agent-test-s000-hello-acp curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "⚠️ Agent health endpoint not responding, checking if agent is listening..."
+            docker exec agent-test-s000-hello-acp netstat -tlnp 2>/dev/null || echo "netstat not available"
+          fi
+
+          echo "🔍 Testing connectivity to AgentEx from agent container..."
+          if ! docker exec agent-test-s000-hello-acp curl -s http://agentex:5003/health > /dev/null 2>&1; then
+            echo "❌ Cannot reach AgentEx from agent container"
+            echo "📋 AgentEx service logs:"
+            cd agentex && docker compose logs --tail=50 agentex
+            cd ..
+          else
+            echo "✅ Agent can reach AgentEx services"
+          fi
+
+          # Show pre-test logs
+          echo "📋 Agent logs before testing:"
+          docker logs --tail=20 agent-test-s000-hello-acp
+
+          echo "📋 AgentEx logs before testing:"
+          cd agentex && docker compose logs --tail=20 agentex
+          cd ..
+
+          # Run the test inside the container with explicit exit code handling
           echo "🧪 Running tests inside the agent container..."
-          if docker exec agent-test-s000-hello-acp python tests/test_agent.py; then
+          set +e  # Don't exit on error immediately
+          docker exec agent-test-s000-hello-acp python tests/test_agent.py
+          TEST_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+
+          # Show post-test logs regardless of outcome
+          echo "📋 Agent logs after testing:"
+          docker logs --tail=50 agent-test-s000-hello-acp
+
+          echo "📋 AgentEx logs after testing:"
+          cd agentex && docker compose logs --tail=50 agentex
+          cd ..
+
+          if [ $TEST_EXIT_CODE -eq 0 ]; then
             echo "✅ Tests passed successfully"
           else
-            echo "❌ Tests failed"
-            echo "📋 Container logs:"
+            echo "❌ Tests failed with exit code $TEST_EXIT_CODE"
+            echo "📋 Full agent logs:"
             docker logs agent-test-s000-hello-acp
+            echo "📋 Full AgentEx logs:"
+            cd agentex && docker compose logs agentex
+            cd ..
             exit 1
           fi
 
