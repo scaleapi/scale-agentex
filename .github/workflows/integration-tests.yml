@@ -38,26 +38,26 @@ jobs:
       - name: Discover tutorial agent images
         id: discover
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
         run: |
-          echo "🔍 Discovering tutorial agent images from GHCR using gh CLI..."
+          echo "🔍 Discovering tutorial agent images from GHCR..."
 
-          # Debug: Test basic API access first
-          echo "Testing basic API access..."
-          gh api user --jq '.login' || echo "Basic API failed"
+          # Validate token access
+          if ! gh api user --jq '.login' >/dev/null 2>&1; then
+            echo "❌ PACKAGE_TOKEN not configured or lacks permissions"
+            echo "Please ensure PACKAGE_TOKEN secret is set with:"
+            echo "  - read:packages scope"
+            echo "  - Access to scaleapi organization packages"
+            exit 1
+          fi
 
-          # Try repository-level packages first (more likely to work)
-          echo "Fetching packages from scale-agentex-python repository..."
-          gh api repos/scaleapi/scale-agentex-python/packages \
+          # Get all packages from the organization using your working command
+          echo "Fetching packages from scaleapi organization..."
+          gh api orgs/scaleapi/packages \
+            --method GET \
             --field package_type=container \
-            --jq '.[] | select(.name | contains("tutorial-agents")) | .name' > packages.txt 2>/dev/null || {
-            echo "Repository packages failed, trying organization packages..."
-
-            # Fallback to org packages with simpler query
-            gh api orgs/scaleapi/packages \
-              --field package_type=container \
-              --jq '.[] | select(.name | startswith("scale-agentex-python/tutorial-agents/")) | .name' > packages.txt 2>/dev/null || {
-              echo "Organization packages also failed, using fallback list..."
+            --field per_page=100 \
+            --jq '.[] | select(.name | startswith("scale-agentex-python/tutorial-agents/")) | .name' > packages.txt
 
           echo "📋 Found tutorial agent packages:"
           cat packages.txt
@@ -70,7 +70,7 @@ jobs:
             if [[ -n "$package_name" ]]; then
               echo "Processing package: $package_name"
 
-              # Extract agent name from package (e.g., "00_sync-000_hello_acp")
+              # Extract agent directory name (e.g., "00_sync-000_hello_acp")
               agent_dir=$(basename "$package_name")
 
               # Convert to agent name format (e.g., "s000-hello-acp")
@@ -85,7 +85,7 @@ jobs:
                 AGENT_IMAGES+=","
               fi
 
-              AGENT_IMAGES+='{"name":"'$agent_dir'","image":"ghcr.io/scaleapi/'$package_name':latest","agent_name":"'$agent_name'"}'
+              AGENT_IMAGES+='{"name":"'$agent_dir'","image":"ghcr.io/'$package_name':latest","agent_name":"'$agent_name'"}'
             fi
           done < packages.txt
 
