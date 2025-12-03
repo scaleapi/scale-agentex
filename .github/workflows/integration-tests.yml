@@ -43,21 +43,22 @@ jobs:
       - name: Start AgentEx services with host access
         working-directory: ./agentex
         run: |
-          echo "🚀 Starting AgentEx services with host access override..."
+          echo "🚀 Starting AgentEx services..."
           docker compose -f docker-compose.yml up -d
-          echo "⏳ Waiting for services to be ready..."
-          sleep 30
 
-          echo "📋 Service status:"
+          echo "📋 Initial service status:"
           docker compose ps
 
+          echo "⏳ Waiting for database migrations and service initialization..."
+          sleep 45  # AgentEx has 30s start_period + time for migrations
+
           echo "🔍 Checking AgentEx service health..."
-          HEALTH_TIMEOUT=60
+          HEALTH_TIMEOUT=90
           HEALTH_ELAPSED=0
 
           while [ $HEALTH_ELAPSED -lt $HEALTH_TIMEOUT ]; do
             if curl -s http://localhost:5003/health > /dev/null 2>&1; then
-              echo "✅ AgentEx service is healthy"
+              echo "✅ AgentEx health endpoint is responding"
               break
             fi
             echo "⏳ Waiting for AgentEx health check... (${HEALTH_ELAPSED}s/${HEALTH_TIMEOUT}s)"
@@ -72,6 +73,19 @@ jobs:
             exit 1
           fi
 
+          echo "🔍 Verifying AgentEx API endpoints..."
+          if curl -s http://localhost:5003/api > /dev/null 2>&1; then
+            echo "✅ AgentEx API endpoints are accessible"
+          else
+            echo "❌ AgentEx API endpoints not responding"
+            echo "📋 AgentEx service logs:"
+            docker compose logs agentex
+            exit 1
+          fi
+
+          echo "📋 Final service status after health checks:"
+          docker compose ps
+
       - name: Run agent integration test
         run: |
           echo "🧪 Running integration test for agent: s000-hello-acp"
@@ -81,7 +95,8 @@ jobs:
 
           docker run -d --name agent-test-s000-hello-acp \
             -e AGENT_NAME=s000-hello-acp \
-            -e ACP_URL=http://agent-test-s000-hello-acp:8000 \
+            -e ACP_URL=http://agent-test-s000-hello-acp \
+            -e ACP_PORT=8000 \
             -e ACP_TYPE=sync \
             -e AGENTEX_BASE_URL=http://agentex:5003 \
             -e AGENTEX_API_BASE_URL=http://agentex:5003 \
@@ -115,6 +130,37 @@ jobs:
             exit 1
           fi
 
+          echo "🔍 Verifying agent registration with AgentEx..."
+          REGISTRATION_TIMEOUT=30
+          REGISTRATION_ELAPSED=0
+
+          while [ $REGISTRATION_ELAPSED -lt $REGISTRATION_TIMEOUT ]; do
+            AGENT_DATA=$(curl -s http://localhost:5003/api/agents)
+            if echo "$AGENT_DATA" | grep -q "s000-hello-acp"; then
+              echo "✅ Agent successfully registered with AgentEx"
+
+              # Verify the ACP URL doesn't have double port
+              if echo "$AGENT_DATA" | grep -q ":8000:8000"; then
+                echo "❌ Double port detected in agent registration!"
+                echo "📋 Agent data:"
+                echo "$AGENT_DATA" | jq '.' || echo "$AGENT_DATA"
+                exit 1
+              else
+                echo "✅ ACP URL correctly formatted (no double port)"
+              fi
+              break
+            fi
+            echo "⏳ Waiting for agent registration... (${REGISTRATION_ELAPSED}s/${REGISTRATION_TIMEOUT}s)"
+            sleep 5
+            REGISTRATION_ELAPSED=$((REGISTRATION_ELAPSED + 5))
+          done
+
+          if [ $REGISTRATION_ELAPSED -ge $REGISTRATION_TIMEOUT ]; then
+            echo "⚠️ Agent registration check timeout, proceeding with tests anyway"
+            echo "📋 Current agents registered:"
+            curl -s http://localhost:5003/api/agents || echo "Failed to query agents"
+          fi
+
           # Test connectivity before running main tests
           echo "🔍 Testing connectivity to agent..."
           if ! docker exec agent-test-s000-hello-acp curl -s http://localhost:8000/health > /dev/null 2>&1; then
@@ -143,9 +189,11 @@ jobs:
           # Run the test inside the container with explicit exit code handling
           echo "🧪 Running tests inside the agent container..."
           set +e  # Don't exit on error immediately
-          docker exec agent-test-s000-hello-acp python tests/test_agent.py
+          docker exec agent-test-s000-hello-acp pytest tests/test_agent.py -v
           TEST_EXIT_CODE=$?
           set -e  # Re-enable exit on error
+
+          echo "🔍 Test exit code: $TEST_EXIT_CODE"
 
           # Show post-test logs regardless of outcome
           echo "📋 Agent logs after testing:"
