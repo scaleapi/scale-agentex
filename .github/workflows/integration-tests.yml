@@ -3,15 +3,104 @@ name: Run Agentex Integration Tests
 on:
   pull_request:
     paths:
-      - 'agentex/**'
+      - "agentex/**"
   push:
     branches:
       - main
     paths:
-      - 'agentex/**'
+      - "agentex/**"
   workflow_dispatch:
     inputs:
       commit-sha:
         description: "Commit SHA to test against"
         required: true
         type: string
+
+jobs:
+  run-integration-tests:
+    name: "Run Integration Tests - s000-hello-acp"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit-sha || github.ref }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull agent image
+        run: |
+          echo "🐳 Pulling agent image..."
+          docker pull ghcr.io/scaleapi/scale-agentex-python/tutorial-agents/00_sync-000_hello_acp:latest
+          echo "✅ Agent image pulled successfully"
+
+      - name: Start AgentEx services with host access
+        working-directory: ./agentex
+        run: |
+          echo "🚀 Starting AgentEx services with host access override..."
+          docker compose -f docker-compose.yml up -d
+          echo "⏳ Waiting for services to be ready..."
+          sleep 30
+          docker compose ps
+
+      - name: Run agent integration test
+        run: |
+          echo "🧪 Running integration test for agent: s000-hello-acp"
+          echo "🐳 Using image: ghcr.io/scaleapi/scale-agentex-python/tutorial-agents/00_sync-000_hello_acp:latest"
+
+          # Start the agent container
+
+          docker run -d --name agent-test-s000-hello-acp \
+            -e AGENT_NAME=s000-hello-acp \
+            -e ACP_URL=http://agent-test-s000-hello-acp:8000 \
+            -e ACP_TYPE=sync \
+            -e AGENTEX_BASE_URL=http://agentex:5003 \
+            -e AGENTEX_API_BASE_URL=http://agentex:5003 \
+            -p 8000:8000 \
+            --network agentex-network \
+            ghcr.io/scaleapi/scale-agentex-python/tutorial-agents/00_sync-000_hello_acp:latest
+
+          echo "⏳ Waiting for agent to start..."
+          sleep 10
+
+          # Check for "Application startup complete" log message
+          echo "🔍 Waiting for 'Application startup complete' log message..."
+          TIMEOUT=60
+          ELAPSED=0
+
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            if docker logs agent-test-s000-hello-acp 2>&1 | grep -q "Application startup complete"; then
+              echo "✅ Agent application has started successfully"
+              break
+            fi
+
+            echo "⏳ Still waiting for startup... (${ELAPSED}s/${TIMEOUT}s)"
+            sleep 2
+            ELAPSED=$((ELAPSED + 2))
+          done
+
+          if [ $ELAPSED -ge $TIMEOUT ]; then
+            echo "❌ Timeout waiting for 'Application startup complete' message"
+            echo "📋 Container logs:"
+            docker logs agent-test-s000-hello-acp
+            exit 1
+          fi
+
+          # Run the test inside the container
+          echo "🧪 Running tests inside the agent container..."
+          if docker exec agent-test-s000-hello-acp python tests/test_agent.py; then
+            echo "✅ Tests passed successfully"
+          else
+            echo "❌ Tests failed"
+            echo "📋 Container logs:"
+            docker logs agent-test-s000-hello-acp
+            exit 1
+          fi
+
+          echo "🧹 Cleaning up container..."
+          docker rm -f agent-test-s000-hello-acp
