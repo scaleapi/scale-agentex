@@ -21,6 +21,7 @@ from src.api.routes import (
     events,
     health,
     messages,
+    schedules,
     spans,
     states,
     tasks,
@@ -152,3 +153,4 @@ app.include_router(events.router)
 app.include_router(agent_task_tracker.router)
 app.include_router(agent_api_keys.router)
 app.include_router(deployment_history.router)
+app.include_router(schedules.router)
