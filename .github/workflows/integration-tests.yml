@@ -1,17 +1,336 @@
 name: Run Agentex Integration Tests
 
+permissions:
+  contents: read
+  packages: read
+
 on:
   pull_request:
     paths:
-      - 'agentex/**'
+      - "agentex/**"
   push:
     branches:
       - main
     paths:
-      - 'agentex/**'
+      - "agentex/**"
   workflow_dispatch:
     inputs:
       commit-sha:
-        description: "Commit SHA to test against"
+        description: "Commit SHA or branch to test against"
         required: true
         type: string
+        default: main
+
+jobs:
+  discover-agent-images:
+    name: "Discover Tutorial Agent Images"
+    runs-on: ubuntu-latest
+    outputs:
+      agent-matrix: ${{ steps.discover.outputs.agent-matrix }}
+    steps:
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # - name: Generate GitHub App Token
+      #   id: generate-token
+      #   uses: actions/create-github-app-token@v1
+      #   with:
+      #     app-id: ${{ secrets.GITHUB_APP_ID }}
+      #     private-key: ${{ secrets.GITHUB_APP_PRIVATE_KEY }}
+      #     owner: scaleapi
+
+      - name: Discover tutorial agent images
+        id: discover
+        # env:
+        #   GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          echo "🔍 Building agent matrix from known tutorial agent images..."
+
+          # Define the list of known tutorial agent packages
+          PACKAGES=(
+            "scale-agentex-python/tutorial-agents/00_sync-000_hello_acp"
+            "scale-agentex-python/tutorial-agents/00_sync-010_multiturn"
+            "scale-agentex-python/tutorial-agents/00_sync-020_streaming"
+            "scale-agentex-python/tutorial-agents/10_async-00_base-000_hello_acp"
+            "scale-agentex-python/tutorial-agents/10_async-00_base-010_multiturn"
+            "scale-agentex-python/tutorial-agents/10_async-00_base-020_streaming"
+            "scale-agentex-python/tutorial-agents/10_async-00_base-030_tracing"
+            "scale-agentex-python/tutorial-agents/10_async-00_base-040_other_sdks"
+            "scale-agentex-python/tutorial-agents/10_async-00_base-080_batch_events"
+            "scale-agentex-python/tutorial-agents/10_async-10_temporal-000_hello_acp"
+            "scale-agentex-python/tutorial-agents/10_async-10_temporal-010_agent_chat"
+            "scale-agentex-python/tutorial-agents/10_async-10_temporal-020_state_machine"
+            "scale-agentex-python/tutorial-agents/10_async-10_temporal-030_custom_activities"
+            "scale-agentex-python/tutorial-agents/10_async-10_temporal-050_agent_chat_guardrails"
+            "scale-agentex-python/tutorial-agents/10_async-10_temporal-060_open_ai_agents_sdk_hello_world"
+            "scale-agentex-python/tutorial-agents/10_async-10_temporal-070_open_ai_agents_sdk_tools"
+            "scale-agentex-python/tutorial-agents/10_async-10_temporal-080_open_ai_agents_sdk_human_in_the_loop"
+            "scale-agentex-python/tutorial-agents/10_async-10_temporal-090_claude_agents_sdk_mvp"
+          )
+
+          # Build agent matrix from the package list
+          AGENT_IMAGES="["
+
+          for package_name in "${PACKAGES[@]}"; do
+            echo "Processing package: $package_name"
+
+            # Extract agent directory name and convert to agent name format (e.g., "s000-hello-acp")
+            # Pattern: [digits]_[type]-[digits]_[rest] -> s[digits]-[rest]
+            agent_name=$(basename "$package_name" | sed -E 's/^[0-9]+_[^-]+-([0-9]+)_(.*)$/s\1-\2/' | tr '_' '-')
+            echo "  - Agent name: $agent_name"
+
+            # Add to JSON array
+            if [[ "$AGENT_IMAGES" != "[" ]]; then
+              AGENT_IMAGES+=","
+            fi
+
+            AGENT_IMAGES+='{"image":"ghcr.io/scaleapi/'"$package_name"':latest","agent_name":"'"$agent_name"'"}'
+          done
+
+          AGENT_IMAGES+="]"
+
+          echo "📋 Generated agent matrix:"
+          echo "$AGENT_IMAGES" | jq '.'
+
+          # Convert to compact JSON for matrix
+          echo "agent-matrix=$(echo "$AGENT_IMAGES" | jq -c '.')" >> $GITHUB_OUTPUT
+
+  run-integration-tests:
+    name: "Run Integration Tests - ${{ matrix.agent.agent_name }}"
+    runs-on: ubuntu-latest
+    needs: discover-agent-images
+    strategy:
+      fail-fast: false # Continue testing other agents even if one fails
+      matrix:
+        agent: ${{ fromJson(needs.discover-agent-images.outputs.agent-matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit-sha || github.ref }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull agent image
+        run: |
+          echo "🐳 Pulling agent image: ${{ matrix.agent.image }}"
+          docker pull ${{ matrix.agent.image }}
+          echo "✅ Agent image pulled successfully"
+
+      - name: Start AgentEx services with host access
+        working-directory: ./agentex
+        run: |
+          echo "🚀 Starting AgentEx services..."
+          docker compose -f docker-compose.yml up -d
+
+          echo "📋 Initial service status:"
+          docker compose ps
+
+          echo "⏳ Waiting for database migrations and service initialization..."
+          sleep 45  # AgentEx has 30s start_period + time for migrations
+
+          echo "🔍 Checking AgentEx service health..."
+          HEALTH_TIMEOUT=90
+          HEALTH_ELAPSED=0
+
+          while [ $HEALTH_ELAPSED -lt $HEALTH_TIMEOUT ]; do
+            if curl -s http://localhost:5003/health > /dev/null 2>&1; then
+              echo "✅ AgentEx health endpoint is responding"
+              break
+            fi
+            echo "⏳ Waiting for AgentEx health check... (${HEALTH_ELAPSED}s/${HEALTH_TIMEOUT}s)"
+            sleep 5
+            HEALTH_ELAPSED=$((HEALTH_ELAPSED + 5))
+          done
+
+          if [ $HEALTH_ELAPSED -ge $HEALTH_TIMEOUT ]; then
+            echo "❌ AgentEx service health check failed"
+            echo "📋 AgentEx service logs:"
+            docker compose logs agentex
+            exit 1
+          fi
+
+          echo "🔍 Verifying AgentEx API endpoints..."
+          if curl -s http://localhost:5003/api > /dev/null 2>&1; then
+            echo "✅ AgentEx API endpoints are accessible"
+          else
+            echo "❌ AgentEx API endpoints not responding"
+            echo "📋 AgentEx service logs:"
+            docker compose logs agentex
+            exit 1
+          fi
+
+          echo "📋 Final service status after health checks:"
+          docker compose ps
+
+      - name: Run agent integration test
+        env:
+          OPENAI_API_KEY: ${{ secrets.TUTORIAL_OPENAI_API_KEY }}
+        run: |
+          # Set variables for this agent
+          AGENT_NAME="${{ matrix.agent.agent_name }}"
+          AGENT_IMAGE="${{ matrix.agent.image }}"
+          CONTAINER_NAME="agent-test-${AGENT_NAME}"
+
+          echo "🧪 Running integration test for agent: ${AGENT_NAME}"
+          echo "🐳 Using image: ${AGENT_IMAGE}"
+
+          # Start the agent container
+          docker run -d --name "${CONTAINER_NAME}" \
+            -e AGENT_NAME="${AGENT_NAME}" \
+            -e ACP_URL="http://${CONTAINER_NAME}" \
+            -e ACP_PORT=8000 \
+            -e ACP_TYPE=sync \
+            -e AGENTEX_BASE_URL=http://agentex:5003 \
+            -e AGENTEX_API_BASE_URL=http://agentex:5003 \
+            -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
+            -p 8000:8000 \
+            --network agentex-network \
+            "${AGENT_IMAGE}"
+
+          echo "⏳ Waiting for agent to start..."
+          sleep 10
+
+          # Check for "Application startup complete" log message
+          echo "🔍 Waiting for 'Application startup complete' log message..."
+          TIMEOUT=60
+          ELAPSED=0
+
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            if docker logs "${CONTAINER_NAME}" 2>&1 | grep -q "Application startup complete"; then
+              echo "✅ Agent application has started successfully"
+              break
+            fi
+
+            echo "⏳ Still waiting for startup... (${ELAPSED}s/${TIMEOUT}s)"
+            sleep 2
+            ELAPSED=$((ELAPSED + 2))
+          done
+
+          if [ $ELAPSED -ge $TIMEOUT ]; then
+            echo "❌ Timeout waiting for 'Application startup complete' message"
+            echo "📋 Container logs:"
+            docker logs "${CONTAINER_NAME}"
+            exit 1
+          fi
+
+          echo "🔍 Verifying agent registration with AgentEx..."
+          REGISTRATION_TIMEOUT=30
+          REGISTRATION_ELAPSED=0
+
+          while [ $REGISTRATION_ELAPSED -lt $REGISTRATION_TIMEOUT ]; do
+            AGENT_DATA=$(curl -s http://localhost:5003/api/agents)
+            if echo "$AGENT_DATA" | grep -q "${AGENT_NAME}"; then
+              echo "✅ Agent successfully registered with AgentEx"
+
+              # Verify the ACP URL doesn't have double port
+              if echo "$AGENT_DATA" | grep -q ":8000:8000"; then
+                echo "❌ Double port detected in agent registration!"
+                echo "📋 Agent data:"
+                echo "$AGENT_DATA" | jq '.' || echo "$AGENT_DATA"
+                exit 1
+              else
+                echo "✅ ACP URL correctly formatted (no double port)"
+              fi
+              break
+            fi
+            echo "⏳ Waiting for agent registration... (${REGISTRATION_ELAPSED}s/${REGISTRATION_TIMEOUT}s)"
+            sleep 5
+            REGISTRATION_ELAPSED=$((REGISTRATION_ELAPSED + 5))
+          done
+
+          if [ $REGISTRATION_ELAPSED -ge $REGISTRATION_TIMEOUT ]; then
+            echo "⚠️ Agent registration check timeout, proceeding with tests anyway"
+            echo "📋 Current agents registered:"
+            curl -s http://localhost:5003/api/agents || echo "Failed to query agents"
+          fi
+
+          # Test connectivity before running main tests
+          echo "🔍 Testing connectivity to agent..."
+          if ! docker exec "${CONTAINER_NAME}" curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "⚠️ Agent health endpoint not responding, checking if agent is listening..."
+            docker exec "${CONTAINER_NAME}" netstat -tlnp 2>/dev/null || echo "netstat not available"
+          fi
+
+          echo "🔍 Testing connectivity to AgentEx from agent container..."
+          if ! docker exec "${CONTAINER_NAME}" curl -s http://agentex:5003/health > /dev/null 2>&1; then
+            echo "❌ Cannot reach AgentEx from agent container"
+            echo "📋 AgentEx service logs:"
+            cd agentex && docker compose logs --tail=50 agentex
+            cd ..
+          else
+            echo "✅ Agent can reach AgentEx services"
+          fi
+
+          # Show pre-test logs
+          echo "📋 Agent logs before testing:"
+          docker logs --tail=20 "${CONTAINER_NAME}"
+
+          echo "📋 AgentEx logs before testing:"
+          cd agentex && docker compose logs --tail=20 agentex
+          cd ..
+
+          # Run the test inside the container with explicit exit code handling
+          echo "🧪 Running tests inside the agent container..."
+          set +e  # Don't exit on error immediately
+          docker exec "${CONTAINER_NAME}" pytest tests/test_agent.py -v
+          TEST_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+
+          echo "🔍 Test exit code: $TEST_EXIT_CODE"
+
+          # Show post-test logs regardless of outcome
+          echo "📋 Agent logs after testing:"
+          docker logs --tail=50 "${CONTAINER_NAME}"
+
+          echo "📋 AgentEx logs after testing:"
+          cd agentex && docker compose logs --tail=50 agentex
+          cd ..
+
+          if [ $TEST_EXIT_CODE -eq 0 ]; then
+            echo "✅ Tests passed successfully"
+          else
+            echo "❌ Tests failed with exit code $TEST_EXIT_CODE"
+            echo "📋 Full agent logs:"
+            docker logs "${CONTAINER_NAME}"
+            echo "📋 Full AgentEx logs:"
+            cd agentex && docker compose logs agentex
+            cd ..
+            exit 1
+          fi
+
+          echo "🧹 Cleaning up container..."
+          docker rm -f "${CONTAINER_NAME}"
+
+  # Summary job to ensure the workflow fails if any test fails
+  integration-tests-summary:
+    name: "Integration Tests Summary"
+    runs-on: ubuntu-latest
+    needs: [discover-agent-images, run-integration-tests]
+    if: always() # Run even if some tests fail
+    steps:
+      - name: Check test results
+        run: |
+          echo "🔍 Checking integration test results..."
+
+          # Check if the matrix job had any failures
+          if [ "${{ needs.run-integration-tests.result }}" != "success" ]; then
+            echo "❌ One or more integration tests failed"
+            echo "Matrix job result: ${{ needs.run-integration-tests.result }}"
+            exit 1
+          else
+            echo "✅ All integration tests passed successfully"
+          fi
+
+      - name: Final status
+        run: |
+          echo "🎉 All tutorial agent integration tests completed successfully!"
