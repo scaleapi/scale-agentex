@@ -136,7 +136,7 @@ export async function subscribeTaskState(
                   return res;
                 }),
                 client.agents
-                  .list({ task_id: taskID }, { signal })
+                  .list({ task_id: taskID, limit: 1000 }, { signal })
                   .then(res => {
                     eventListener.onAgentsChange(res);
                     return res;
@@ -144,8 +144,7 @@ export async function subscribeTaskState(
                 client.messages
                   .list({ task_id: taskID }, { signal })
                   .then(res => {
-                    const chronologicalMessages = res.slice().reverse();
-                    eventListener.onMessagesChange(chronologicalMessages);
+                    eventListener.onMessagesChange(res);
                     return res;
                   }),
               ]);
