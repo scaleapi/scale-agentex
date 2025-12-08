@@ -337,13 +337,7 @@ jobs:
             echo "📋 Agent logs after test attempt $RETRY_COUNT:"
             docker logs --tail=30 "${CONTAINER_NAME}"
 
-            echo "<details><summary>📋 AgentEx logs after test attempt $RETRY_COUNT (click to expand)</summary>"
-            echo ""
-            echo '```'
-            cd agentex && docker compose logs --tail=30 agentex
-            cd ..
-            echo '```'
-            echo "</details>"
+            # AgentEx logs are hidden by default - no output to console
 
             if [ $TEST_EXIT_CODE -eq 0 ]; then
               echo "✅ Tests passed successfully on attempt $RETRY_COUNT"
@@ -364,18 +358,62 @@ jobs:
             echo "❌ All $MAX_RETRIES test attempts failed"
             echo "📋 Full agent logs:"
             docker logs "${CONTAINER_NAME}"
-            echo "<details><summary>📋 Full AgentEx logs (click to expand)</summary>"
-            echo ""
-            echo '```'
-            cd agentex && docker compose logs agentex
-            cd ..
-            echo '```'
-            echo "</details>"
+            # AgentEx logs are hidden by default in failure case too
             exit 1
           fi
 
           echo "🧹 Cleaning up container..."
           docker rm -f "${CONTAINER_NAME}"
+
+      - name: Show AgentEx logs
+        if: always()
+        working-directory: ./agentex
+        run: |
+          echo "📋 AgentEx service logs:"
+          echo "========================"
+          docker compose logs agentex
+          echo "========================"
+          echo ""
+          echo "📋 AgentEx worker logs:"
+          echo "========================"
+          docker compose logs agentex-temporal-worker
+          echo "========================"
+
+      - name: Record test result
+        id: test-result
+        if: always()
+        run: |
+          # Create results directory
+          mkdir -p test-results
+
+          # Set variables for this agent
+          AGENT_NAME="${{ matrix.agent.agent_name }}"
+
+          # Determine result based on whether we passed
+          if [ "${{ job.status }}" == "success" ]; then
+            result="passed"
+            echo "result=passed" >> $GITHUB_OUTPUT
+            echo "agent=${{ matrix.agent.agent_name }}" >> $GITHUB_OUTPUT
+          else
+            result="failed"
+            echo "result=failed" >> $GITHUB_OUTPUT
+            echo "agent=${{ matrix.agent.agent_name }}" >> $GITHUB_OUTPUT
+          fi
+
+          # Save result to file for artifact upload
+          # Create a safe filename from agent name
+          safe_name=$(echo "${{ matrix.agent.agent_name }}" | tr '/' '_' | tr -d ' ' | tr ':' '_')
+          echo "$result" > "test-results/result-${safe_name}.txt"
+          echo "${{ matrix.agent.agent_name }}" > "test-results/agent-${safe_name}.txt"
+          echo "safe_name=${safe_name}" >> $GITHUB_OUTPUT
+
+      - name: Upload test result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-result-${{ steps.test-result.outputs.safe_name }}
+          path: test-results/
+          retention-days: 1
 
   # Summary job to ensure the workflow fails if any test fails
   integration-tests-summary:
@@ -384,19 +422,129 @@ jobs:
     needs: [discover-agent-images, run-integration-tests]
     if: always() # Run even if some tests fail
     steps:
-      - name: Check test results
-        run: |
-          echo "🔍 Checking integration test results..."
+      - name: Download all test results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-result-*
+          path: all-results/
+          merge-multiple: true
+        continue-on-error: true
 
-          # Check if the matrix job had any failures
-          if [ "${{ needs.run-integration-tests.result }}" != "success" ]; then
-            echo "❌ One or more integration tests failed"
-            echo "Matrix job result: ${{ needs.run-integration-tests.result }}"
-            exit 1
+      - name: Generate Integration Test Summary
+        run: |
+          echo "# 🧪 AgentEx Integration Tests Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Initialize counters
+          passed_count=0
+          failed_count=0
+          skipped_count=0
+          total_count=0
+
+          # Get all agents that were supposed to run
+          agents='${{ needs.discover-agent-images.outputs.agent-matrix }}'
+
+          if [ -d "all-results" ] && [ "$(ls -A all-results 2>/dev/null)" ]; then
+            echo "📊 Processing individual test results from artifacts..."
+
+            echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Agent | Status | Result |" >> $GITHUB_STEP_SUMMARY
+            echo "|-------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+
+            # Process each result file
+            for result_file in all-results/result-*.txt; do
+              if [ -f "$result_file" ]; then
+                # Extract the safe name from filename
+                safe_name=$(basename "$result_file" .txt | sed 's/result-//')
+
+                # Get corresponding agent name file
+                agent_file="all-results/agent-${safe_name}.txt"
+
+                if [ -f "$agent_file" ]; then
+                  agent_name=$(cat "$agent_file")
+                  result=$(cat "$result_file")
+
+                  total_count=$((total_count + 1))
+
+                  if [ "$result" = "passed" ]; then
+                    echo "| \`$agent_name\` | ✅ | Passed |" >> $GITHUB_STEP_SUMMARY
+                    passed_count=$((passed_count + 1))
+                  else
+                    echo "| \`$agent_name\` | ❌ | Failed |" >> $GITHUB_STEP_SUMMARY
+                    failed_count=$((failed_count + 1))
+                  fi
+                fi
+              fi
+            done
+
+            # Check for any agents that didn't have results (skipped/cancelled)
+            # Use process substitution to avoid subshell scoping issues
+            while IFS= read -r expected_agent; do
+              safe_expected=$(echo "$expected_agent" | tr '/' '_' | tr -d ' ' | tr ':' '_')
+              if [ ! -f "all-results/result-${safe_expected}.txt" ]; then
+                echo "| \`$expected_agent\` | ⏭️ | Skipped/Cancelled |" >> $GITHUB_STEP_SUMMARY
+                skipped_count=$((skipped_count + 1))
+                total_count=$((total_count + 1))
+              fi
+            done < <(echo "$agents" | jq -r '.[].agent_name')
+
           else
-            echo "✅ All integration tests passed successfully"
+            echo "⚠️ No individual test results found. This could mean:"
+            echo "- Test jobs were cancelled before completion"
+            echo "- Artifacts failed to upload"
+            echo "- No agents were found to test"
+            echo ""
+
+            overall_result="${{ needs.run-integration-tests.result }}"
+            echo "Overall job status: **$overall_result**"
+
+            if [[ "$overall_result" == "success" ]]; then
+              echo "✅ All tests appear to have passed based on job status."
+            elif [[ "$overall_result" == "failure" ]]; then
+              echo "❌ Some tests appear to have failed based on job status."
+              echo ""
+              echo "💡 **Tip:** Check individual job logs for specific failure details."
+            elif [[ "$overall_result" == "cancelled" ]]; then
+              echo "⏭️ Tests were cancelled."
+            else
+              echo "❓ Test status is unclear: $overall_result"
+            fi
+
+            # Don't show detailed breakdown when we don't have individual results
+            agent_count=$(echo "$agents" | jq -r '. | length')
+            echo ""
+            echo "Expected agent count: $agent_count"
           fi
 
-      - name: Final status
-        run: |
-          echo "🎉 All tutorial agent integration tests completed successfully!"
+          # Only show detailed statistics if we have individual results
+          if [ -d "all-results" ] && [ "$(ls -A all-results 2>/dev/null)" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## Summary Statistics" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- **Total Tests:** $total_count" >> $GITHUB_STEP_SUMMARY
+            echo "- **Passed:** $passed_count ✅" >> $GITHUB_STEP_SUMMARY
+            echo "- **Failed:** $failed_count ❌" >> $GITHUB_STEP_SUMMARY
+            echo "- **Skipped:** $skipped_count ⏭️" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            if [ $failed_count -eq 0 ] && [ $passed_count -gt 0 ]; then
+              echo "🎉 **All tests passed!**" >> $GITHUB_STEP_SUMMARY
+            elif [ $failed_count -gt 0 ]; then
+              echo "⚠️ **Some tests failed.** Check individual job logs for details." >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "💡 **Tip:** Look for agent container logs in failed jobs for debugging information." >> $GITHUB_STEP_SUMMARY
+            else
+              echo "ℹ️ **Tests were cancelled or skipped.**" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            # Exit with error if any tests failed
+            if [ $failed_count -gt 0 ]; then
+              exit 1
+            fi
+          else
+            # Fallback to overall job result when individual results aren't available
+            if [[ "$overall_result" == "failure" ]]; then
+              exit 1
+            fi
+          fi
