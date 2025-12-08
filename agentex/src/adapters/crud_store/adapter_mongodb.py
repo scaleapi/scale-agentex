@@ -647,6 +647,7 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
             query: dict[str, Any] = {mongo_field_name: mongo_field_value}
 
             # If cursor is provided, look up the cursor document's timestamp
+            # Use compound comparison (created_at, _id) to handle timestamp ties
             if before_id or after_id:
                 cursor_id = before_id or after_id
                 try:
@@ -658,11 +659,27 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
                 if cursor_doc and "created_at" in cursor_doc:
                     cursor_timestamp = cursor_doc["created_at"]
                     if before_id:
-                        # Get documents with created_at < cursor's created_at
-                        query["created_at"] = {"$lt": cursor_timestamp}
+                        # Get documents where:
+                        # - created_at < cursor_timestamp, OR
+                        # - created_at == cursor_timestamp AND _id < cursor_id (tie-breaker)
+                        query["$or"] = [
+                            {"created_at": {"$lt": cursor_timestamp}},
+                            {
+                                "created_at": cursor_timestamp,
+                                "_id": {"$lt": cursor_object_id},
+                            },
+                        ]
                     else:  # after_id
-                        # Get documents with created_at > cursor's created_at
-                        query["created_at"] = {"$gt": cursor_timestamp}
+                        # Get documents where:
+                        # - created_at > cursor_timestamp, OR
+                        # - created_at == cursor_timestamp AND _id > cursor_id (tie-breaker)
+                        query["$or"] = [
+                            {"created_at": {"$gt": cursor_timestamp}},
+                            {
+                                "created_at": cursor_timestamp,
+                                "_id": {"$gt": cursor_object_id},
+                            },
+                        ]
 
             # Create a cursor
             db_cursor = self.collection.find(query)

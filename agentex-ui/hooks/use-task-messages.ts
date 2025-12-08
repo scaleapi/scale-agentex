@@ -59,7 +59,7 @@ export function useTaskMessages({
       }
 
       // Uses default limit (50) - for full history use useInfiniteTaskMessages
-      const response = await agentexClient.messages.list({
+      const response = await agentexClient.messages.listPaginated({
         task_id: taskId,
       });
 
@@ -250,7 +250,7 @@ export function useSendMessage({
           }
 
           // Fetch final state from server to ensure consistency
-          const response = await agentexClient.messages.list({
+          const response = await agentexClient.messages.listPaginated({
             task_id: taskId,
           });
 
