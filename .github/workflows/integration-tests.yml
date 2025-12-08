@@ -78,9 +78,9 @@ jobs:
           for package_name in "${PACKAGES[@]}"; do
             echo "Processing package: $package_name"
 
-            # Extract agent directory name and convert to agent name format (e.g., "s000-hello-acp")
-            # Pattern: [digits]_[type]-[digits]_[rest] -> s[digits]-[rest]
-            agent_name=$(basename "$package_name" | sed -E 's/^[0-9]+_[^-]+-([0-9]+)_(.*)$/s\1-\2/' | tr '_' '-')
+            # Extract agent directory name and convert to agent name format (e.g., "000-hello-acp")
+            # Pattern: [digits]_[type]-[digits]_[rest] -> [digits]-[rest]
+            agent_name=$(basename "$package_name" | sed -E 's/^[0-9]+_[^-]+-([0-9]+)_(.*)$/\1-\2/' | tr '_' '-')
             echo "  - Agent name: $agent_name"
 
             # Add to JSON array
@@ -184,14 +184,31 @@ jobs:
           echo "🧪 Running integration test for agent: ${AGENT_NAME}"
           echo "🐳 Using image: ${AGENT_IMAGE}"
 
+          # Debug: Check if OPENAI_API_KEY is available
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "⚠️ OPENAI_API_KEY is not set or empty"
+          else
+            echo "✅ OPENAI_API_KEY is available (length: ${#OPENAI_API_KEY})"
+          fi
+
+          # Determine ACP type from image name
+          if [[ "${AGENT_IMAGE}" == *"10_async"* ]]; then
+            ACP_TYPE="async"
+            echo "🔄 Detected ASYNC agent type"
+          else
+            ACP_TYPE="sync"
+            echo "🔄 Detected SYNC agent type"
+          fi
+
           # Start the agent container
           docker run -d --name "${CONTAINER_NAME}" \
             -e AGENT_NAME="${AGENT_NAME}" \
             -e ACP_URL="http://${CONTAINER_NAME}" \
             -e ACP_PORT=8000 \
-            -e ACP_TYPE=sync \
+            -e ACP_TYPE="${ACP_TYPE}" \
             -e AGENTEX_BASE_URL=http://agentex:5003 \
             -e AGENTEX_API_BASE_URL=http://agentex:5003 \
+            -e REDIS_URL=redis://agentex-redis:6379 \
             -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
             -p 8000:8000 \
             --network agentex-network \
@@ -199,6 +216,10 @@ jobs:
 
           echo "⏳ Waiting for agent to start..."
           sleep 10
+
+          # Debug: Check environment variables inside the container
+          echo "🔍 Checking environment variables in agent container..."
+          docker exec "${CONTAINER_NAME}" env | grep -E "OPENAI|AGENTEX|REDIS" | head -10 || echo "No relevant env vars found"
 
           # Check for "Application startup complete" log message
           echo "🔍 Waiting for 'Application startup complete' log message..."
@@ -228,7 +249,7 @@ jobs:
           REGISTRATION_ELAPSED=0
 
           while [ $REGISTRATION_ELAPSED -lt $REGISTRATION_TIMEOUT ]; do
-            AGENT_DATA=$(curl -s http://localhost:5003/api/agents)
+            AGENT_DATA=$(curl -s http://localhost:5003/agents)
             if echo "$AGENT_DATA" | grep -q "${AGENT_NAME}"; then
               echo "✅ Agent successfully registered with AgentEx"
 
@@ -251,7 +272,7 @@ jobs:
           if [ $REGISTRATION_ELAPSED -ge $REGISTRATION_TIMEOUT ]; then
             echo "❌ Agent registration check timeout - test failed"
             echo "📋 Current agents registered:"
-            curl -s http://localhost:5003/api/agents || echo "Failed to query agents"
+            curl -s http://localhost:5003/agents || echo "Failed to query agents"
 
             echo "📋 Agent container logs:"
             docker logs "${CONTAINER_NAME}"
