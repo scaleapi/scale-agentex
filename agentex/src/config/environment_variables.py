@@ -51,6 +51,7 @@ class EnvVarKeys(str, Enum):
     SSE_KEEPALIVE_PING_INTERVAL = "SSE_KEEPALIVE_PING_INTERVAL"
     AGENTEX_SERVER_TASK_QUEUE = "AGENTEX_SERVER_TASK_QUEUE"
     ENABLE_HEALTH_CHECK_WORKFLOW = "ENABLE_HEALTH_CHECK_WORKFLOW"
+    WEBHOOK_REQUEST_TIMEOUT = "WEBHOOK_REQUEST_TIMEOUT"
 
 
 class Environment(str, Enum):
@@ -96,6 +97,7 @@ class EnvironmentVariables(BaseModel):
     SSE_KEEPALIVE_PING_INTERVAL: int = 15  # SSE keepalive ping interval in seconds
     AGENTEX_SERVER_TASK_QUEUE: str | None = None
     ENABLE_HEALTH_CHECK_WORKFLOW: bool = False
+    WEBHOOK_REQUEST_TIMEOUT: float = 15.0  # Webhook request timeout in seconds
 
     @classmethod
     def refresh(cls, force_refresh: bool = False) -> EnvironmentVariables | None:
@@ -167,6 +169,9 @@ class EnvironmentVariables(BaseModel):
             ENABLE_HEALTH_CHECK_WORKFLOW=(
                 os.environ.get(EnvVarKeys.ENABLE_HEALTH_CHECK_WORKFLOW, "false")
                 == "true"
+            ),
+            WEBHOOK_REQUEST_TIMEOUT=float(
+                os.environ.get(EnvVarKeys.WEBHOOK_REQUEST_TIMEOUT, "15.0")
             ),
         )
         refreshed_environment_variables = environment_variables
