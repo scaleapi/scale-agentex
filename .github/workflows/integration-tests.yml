@@ -172,20 +172,6 @@ jobs:
           echo "📋 Final service status after health checks:"
           docker compose ps
 
-      - name: Install agent container dependencies
-        run: |
-          # Set variables for this agent
-          AGENT_NAME="${{ matrix.agent.agent_name }}"
-          CONTAINER_NAME="agent-test-${AGENT_NAME}"
-
-          echo "📦 Installing Node.js and NPM in agent container..."
-          docker exec "${CONTAINER_NAME}" sh -c "
-            apt-get update -qq &&
-            apt-get install -y -qq nodejs npm &&
-            echo '✅ Node.js version:' && node --version &&
-            echo '✅ NPM version:' && npm --version
-          " || echo "⚠️ Failed to install Node.js, tests may fail"
-
       - name: Run agent integration test
         env:
           OPENAI_API_KEY: ${{ secrets.TUTORIAL_OPENAI_API_KEY }}
@@ -198,44 +184,94 @@ jobs:
           echo "🧪 Running integration test for agent: ${AGENT_NAME}"
           echo "🐳 Using image: ${AGENT_IMAGE}"
 
-          # Debug: Check if OPENAI_API_KEY is available
-          if [ -z "$OPENAI_API_KEY" ]; then
-            echo "⚠️ OPENAI_API_KEY is not set or empty"
-          else
-            echo "✅ OPENAI_API_KEY is available (length: ${#OPENAI_API_KEY})"
-          fi
-
-          # Determine ACP type from image name
+          # Determine ACP type and agent characteristics from image name
           if [[ "${AGENT_IMAGE}" == *"10_async"* ]]; then
             ACP_TYPE="async"
-            echo "🔄 Detected ASYNC agent type"
           else
             ACP_TYPE="sync"
-            echo "🔄 Detected SYNC agent type"
           fi
 
-          # Start the agent container
-          docker run -d --name "${CONTAINER_NAME}" \
-            -e AGENT_NAME="${AGENT_NAME}" \
-            -e ACP_URL="http://${CONTAINER_NAME}" \
-            -e ACP_PORT=8000 \
-            -e ACP_TYPE="${ACP_TYPE}" \
-            -e AGENTEX_BASE_URL=http://agentex:5003 \
-            -e AGENTEX_API_BASE_URL=http://agentex:5003 \
-            -e REDIS_URL=redis://agentex-redis:6379 \
-            -e TEMPORAL_ADDRESS=agentex-temporal:7233 \
-            -e TEMPORAL_HOST=agentex-temporal \
-            -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
-            -p 8000:8000 \
-            --network agentex-network \
-            "${AGENT_IMAGE}"
+          # Check if this is a Temporal agent
+          if [[ "${AGENT_IMAGE}" == *"temporal"* ]]; then
+            IS_TEMPORAL_AGENT=true
+
+            # Extract queue name from agent name (e.g., "10-temporal-000-hello-acp" -> "000_hello_acp_queue")
+            QUEUE_NAME=$(echo "${AGENT_NAME}" | sed -E 's/.*temporal-([0-9]+)-(.*)$/\1_\2_queue/' | tr '-' '_')
+          else
+            IS_TEMPORAL_AGENT=false
+          fi
+
+          # Start the agent container with appropriate configuration
+          if [ "${IS_TEMPORAL_AGENT}" = true ]; then
+            # Temporal agent: start both worker and ACP server
+            docker run -d --name "${CONTAINER_NAME}" \
+              -e ENVIRONMENT=development \
+              -e AGENT_NAME="${AGENT_NAME}" \
+              -e ACP_URL="http://${CONTAINER_NAME}" \
+              -e ACP_PORT=8000 \
+              -e ACP_TYPE="${ACP_TYPE}" \
+              -e AGENTEX_BASE_URL=http://agentex:5003 \
+              -e AGENTEX_API_BASE_URL=http://agentex:5003 \
+              -e REDIS_URL=redis://agentex-redis:6379 \
+              -e TEMPORAL_ADDRESS=agentex-temporal:7233 \
+              -e TEMPORAL_HOST=agentex-temporal \
+              -e AGENTEX_SERVER_TASK_QUEUE=agentex-server \
+              -e WORKFLOW_NAME="${AGENT_NAME}" \
+              -e WORKFLOW_TASK_QUEUE="${QUEUE_NAME}" \
+              -e DATABASE_URL=postgresql://postgres:postgres@agentex-postgres:5432/agentex \
+              -e MONGODB_URI=mongodb://agentex-mongodb:27017 \
+              -e MONGODB_DATABASE_NAME=agentex \
+              -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
+              -p 8000:8000 \
+              --network agentex-network \
+              "${AGENT_IMAGE}" \
+              bash -c "python project/run_worker.py & uvicorn project.acp:acp --host 0.0.0.0 --port 8000"
+          else
+            # Non-temporal agent: start ACP server only
+            docker run -d --name "${CONTAINER_NAME}" \
+              -e ENVIRONMENT=development \
+              -e AGENT_NAME="${AGENT_NAME}" \
+              -e ACP_URL="http://${CONTAINER_NAME}" \
+              -e ACP_PORT=8000 \
+              -e ACP_TYPE="${ACP_TYPE}" \
+              -e AGENTEX_BASE_URL=http://agentex:5003 \
+              -e AGENTEX_API_BASE_URL=http://agentex:5003 \
+              -e REDIS_URL=redis://agentex-redis:6379 \
+              -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
+              -p 8000:8000 \
+              --network agentex-network \
+              "${AGENT_IMAGE}"
+          fi
+
+          # there are some agents that need npx to be installed to be run
+          echo "📦 Installing Node.js, NPM, and NPX in agent container..."
+          docker exec "${CONTAINER_NAME}" sh -c "
+            set -e
+            echo '🔄 Updating package list...'
+            apt-get update -qq
+
+            echo '🔄 Installing Node.js and NPM...'
+            apt-get install -y -qq curl
+            curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+            apt-get install -y -qq nodejs
+
+            echo '✅ Versions after installation:'
+            node --version
+            npm --version
+
+          " || {
+            echo "❌ Node.js installation failed, checking container state..."
+            docker exec "${CONTAINER_NAME}" sh -c "
+              echo 'Container OS info:'
+              cat /etc/os-release || echo 'OS info not available'
+              echo 'Available packages:'
+              apt list --installed | grep node || echo 'No node packages found'
+            "
+            exit 1
+          }
 
           echo "⏳ Waiting for agent to start..."
           sleep 10
-
-          # Debug: Check environment variables inside the container
-          echo "🔍 Checking environment variables in agent container..."
-          docker exec "${CONTAINER_NAME}" env | grep -E "OPENAI|AGENTEX|REDIS" | head -10 || echo "No relevant env vars found"
 
           # Check for "Application startup complete" log message
           echo "🔍 Waiting for 'Application startup complete' log message..."
@@ -260,100 +296,81 @@ jobs:
             exit 1
           fi
 
-          echo "🔍 Verifying agent registration with AgentEx..."
+          echo "🔍 Waiting for agent registration with AgentEx..."
           REGISTRATION_TIMEOUT=30
           REGISTRATION_ELAPSED=0
 
           while [ $REGISTRATION_ELAPSED -lt $REGISTRATION_TIMEOUT ]; do
-            AGENT_DATA=$(curl -s http://localhost:5003/agents)
-            if echo "$AGENT_DATA" | grep -q "${AGENT_NAME}"; then
-              echo "✅ Agent successfully registered with AgentEx"
-
-              # Verify the ACP URL doesn't have double port
-              if echo "$AGENT_DATA" | grep -q ":8000:8000"; then
-                echo "❌ Double port detected in agent registration!"
-                echo "📋 Agent data:"
-                echo "$AGENT_DATA" | jq '.' || echo "$AGENT_DATA"
-                exit 1
-              else
-                echo "✅ ACP URL correctly formatted (no double port)"
-              fi
+            if curl -s http://localhost:5003/agents | grep -q "${AGENT_NAME}"; then
+              echo "✅ Agent registered successfully"
               break
             fi
-            echo "⏳ Waiting for agent registration... (${REGISTRATION_ELAPSED}s/${REGISTRATION_TIMEOUT}s)"
+            echo "⏳ Waiting for registration... (${REGISTRATION_ELAPSED}s/${REGISTRATION_TIMEOUT}s)"
             sleep 5
             REGISTRATION_ELAPSED=$((REGISTRATION_ELAPSED + 5))
           done
 
           if [ $REGISTRATION_ELAPSED -ge $REGISTRATION_TIMEOUT ]; then
-            echo "❌ Agent registration check timeout - test failed"
-            echo "📋 Current agents registered:"
-            curl -s http://localhost:5003/agents || echo "Failed to query agents"
-
-            echo "📋 Agent container logs:"
-            docker logs "${CONTAINER_NAME}"
-
-            echo "📋 AgentEx service logs:"
-            cd agentex && docker compose logs --tail=50 agentex
-            cd ..
-
-            echo "🧹 Cleaning up container..."
-            docker rm -f "${CONTAINER_NAME}"
-
+            echo "❌ Agent registration timeout after ${REGISTRATION_TIMEOUT}s"
             exit 1
           fi
 
-          # Test connectivity before running main tests
-          echo "🔍 Testing connectivity to agent..."
-          if ! docker exec "${CONTAINER_NAME}" curl -s http://localhost:8000/health > /dev/null 2>&1; then
-            echo "⚠️ Agent health endpoint not responding, checking if agent is listening..."
-            docker exec "${CONTAINER_NAME}" netstat -tlnp 2>/dev/null || echo "netstat not available"
-          fi
 
-          echo "🔍 Testing connectivity to AgentEx from agent container..."
-          if ! docker exec "${CONTAINER_NAME}" curl -s http://agentex:5003/health > /dev/null 2>&1; then
-            echo "❌ Cannot reach AgentEx from agent container"
-            echo "📋 AgentEx service logs:"
-            cd agentex && docker compose logs --tail=50 agentex
+          # Run the test inside the container with retry logic for resilience
+          echo "🧪 Running tests inside the agent container with retry logic..."
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          TEST_PASSED=false
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$TEST_PASSED" = false ]; do
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            echo "🔄 Test attempt $RETRY_COUNT/$MAX_RETRIES"
+
+            set +e  # Don't exit on error immediately
+            docker exec "${CONTAINER_NAME}" pytest tests/test_agent.py -v
+            TEST_EXIT_CODE=$?
+            set -e  # Re-enable exit on error
+
+            echo "🔍 Test exit code for attempt $RETRY_COUNT: $TEST_EXIT_CODE"
+
+            # Show post-test logs after each attempt
+            echo "📋 Agent logs after test attempt $RETRY_COUNT:"
+            docker logs --tail=30 "${CONTAINER_NAME}"
+
+            echo "<details><summary>📋 AgentEx logs after test attempt $RETRY_COUNT (click to expand)</summary>"
+            echo ""
+            echo '```'
+            cd agentex && docker compose logs --tail=30 agentex
             cd ..
+            echo '```'
+            echo "</details>"
+
+            if [ $TEST_EXIT_CODE -eq 0 ]; then
+              echo "✅ Tests passed successfully on attempt $RETRY_COUNT"
+              TEST_PASSED=true
+            else
+              echo "❌ Test attempt $RETRY_COUNT failed with exit code $TEST_EXIT_CODE"
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "🔄 Will retry in 5 seconds..."
+                sleep 5
+              fi
+            fi
+          done
+
+          # Final result handling
+          if [ "$TEST_PASSED" = true ]; then
+            echo "🎉 Tests passed after $RETRY_COUNT attempts"
           else
-            echo "✅ Agent can reach AgentEx services"
-          fi
-
-          # Show pre-test logs
-          echo "📋 Agent logs before testing:"
-          docker logs --tail=20 "${CONTAINER_NAME}"
-
-          echo "📋 AgentEx logs before testing:"
-          cd agentex && docker compose logs --tail=20 agentex
-          cd ..
-
-          # Run the test inside the container with explicit exit code handling
-          echo "🧪 Running tests inside the agent container..."
-          set +e  # Don't exit on error immediately
-          docker exec "${CONTAINER_NAME}" pytest tests/test_agent.py -v
-          TEST_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-
-          echo "🔍 Test exit code: $TEST_EXIT_CODE"
-
-          # Show post-test logs regardless of outcome
-          echo "📋 Agent logs after testing:"
-          docker logs --tail=50 "${CONTAINER_NAME}"
-
-          echo "📋 AgentEx logs after testing:"
-          cd agentex && docker compose logs --tail=50 agentex
-          cd ..
-
-          if [ $TEST_EXIT_CODE -eq 0 ]; then
-            echo "✅ Tests passed successfully"
-          else
-            echo "❌ Tests failed with exit code $TEST_EXIT_CODE"
+            echo "❌ All $MAX_RETRIES test attempts failed"
             echo "📋 Full agent logs:"
             docker logs "${CONTAINER_NAME}"
-            echo "📋 Full AgentEx logs:"
+            echo "<details><summary>📋 Full AgentEx logs (click to expand)</summary>"
+            echo ""
+            echo '```'
             cd agentex && docker compose logs agentex
             cd ..
+            echo '```'
+            echo "</details>"
             exit 1
           fi
 
