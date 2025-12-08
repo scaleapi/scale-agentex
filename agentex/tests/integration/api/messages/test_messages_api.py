@@ -121,20 +121,15 @@ class TestMessagesAPIIntegration:
     async def test_list_messages_returns_valid_structure_and_schema(
         self, isolated_client, test_message, test_task
     ):
-        """Test that list messages endpoint returns valid paginated response with real data"""
+        """Test that list messages endpoint returns valid list response with real data"""
         # When - Request all messages for the task
         response = await isolated_client.get(f"/messages?task_id={test_task.id}")
 
-        # Then - Should succeed with valid paginated response structure
+        # Then - Should succeed with a list response
         assert response.status_code == 200
-        response_data = response.json()
+        messages = response.json()
 
-        # Validate paginated response structure
-        assert "data" in response_data
-        assert "next_cursor" in response_data
-        assert "has_more" in response_data
-
-        messages = response_data["data"]
+        # Original endpoint returns a list directly
         assert isinstance(messages, list)
         assert len(messages) >= 1  # Should have at least our test message
 
@@ -259,15 +254,15 @@ class TestMessagesAPIIntegration:
         resp_json = response.json()
         assert "Item with id" in resp_json["message"]
 
-    async def test_list_messages_pagination(
+    async def test_list_messages_paginated(
         self, isolated_client, test_pagination_messages, test_task
     ):
-        """Test GET /messages/ endpoint with cursor-based pagination."""
+        """Test GET /messages/paginated endpoint with cursor-based pagination."""
         # Given - 60 message records exist (created by test_pagination_messages fixture)
 
-        # When - List messages with default limit
+        # When - List messages with default limit using the paginated endpoint
         response = await isolated_client.get(
-            "/messages", params={"task_id": test_task.id}
+            "/messages/paginated", params={"task_id": test_task.id}
         )
         assert response.status_code == 200
         response_data = response.json()
@@ -290,7 +285,7 @@ class TestMessagesAPIIntegration:
             if cursor:
                 params["cursor"] = cursor
 
-            response = await isolated_client.get("/messages", params=params)
+            response = await isolated_client.get("/messages/paginated", params=params)
             assert response.status_code == 200
             page_data = response.json()
 
@@ -353,9 +348,9 @@ class TestMessagesAPIIntegration:
             },
         )
 
-        # Then - Should return messages in ascending order
+        # Then - Should return messages in ascending order (list response)
         assert response_asc.status_code == 200
-        messages_asc = response_asc.json()["data"]
+        messages_asc = response_asc.json()
         assert len(messages_asc) == 3
 
         # Verify ascending order
@@ -372,9 +367,9 @@ class TestMessagesAPIIntegration:
             },
         )
 
-        # Then - Should return messages in descending order
+        # Then - Should return messages in descending order (list response)
         assert response_desc.status_code == 200
-        messages_desc = response_desc.json()["data"]
+        messages_desc = response_desc.json()
         assert len(messages_desc) == 3
 
         # Verify descending order
@@ -429,9 +424,9 @@ class TestMessagesAPIIntegration:
             params={"task_id": task.id},
         )
 
-        # Then - Should return messages successfully
+        # Then - Should return messages successfully (list response)
         assert response.status_code == 200
-        messages = response.json()["data"]
+        messages = response.json()
         assert len(messages) == 3
 
         # Verify descending order - items with same timestamp may have any relative order,

@@ -125,21 +125,51 @@ async def update_message(
 
 @router.get(
     "",
-    response_model=PaginatedMessagesResponse,
+    response_model=list[TaskMessage],
 )
 async def list_messages(
     task_id: DAuthorizedQuery(AgentexResourceType.task, AuthorizedOperationType.read),
     message_use_case: DMessageUseCase,
     limit: int = 50,
-    cursor: str | None = None,
-    direction: Literal["older", "newer"] = "older",
-    # Legacy params for backwards compatibility
     page_number: int = 1,
     order_by: str | None = None,
     order_direction: str = "desc",
+) -> list[TaskMessage]:
+    """
+    List messages for a task with offset-based pagination.
+
+    For cursor-based pagination with infinite scroll support, use /messages/paginated.
+    """
+    task_message_entities = await message_use_case.list_messages(
+        task_id=task_id,
+        limit=limit,
+        page_number=page_number,
+        order_by=order_by,
+        order_direction=order_direction,
+    )
+
+    return [
+        TaskMessage.model_validate(task_message_entity)
+        for task_message_entity in task_message_entities
+    ]
+
+
+@router.get(
+    "/paginated",
+    response_model=PaginatedMessagesResponse,
+)
+async def list_messages_paginated(
+    task_id: DAuthorizedQuery(AgentexResourceType.task, AuthorizedOperationType.read),
+    message_use_case: DMessageUseCase,
+    limit: int = 50,
+    cursor: str | None = None,
+    direction: Literal["older", "newer"] = "older",
 ) -> PaginatedMessagesResponse:
     """
     List messages for a task with cursor-based pagination.
+
+    This endpoint is designed for infinite scroll UIs where new messages may arrive
+    while paginating through older ones.
 
     Args:
         task_id: The task ID to filter messages by
@@ -148,19 +178,16 @@ async def list_messages(
                 a previous response to get the next page.
         direction: Pagination direction - "older" to get older messages (default),
                    "newer" to get newer messages.
-        page_number: [DEPRECATED] Use cursor instead. Page number for offset pagination.
-        order_by: Field to order by (default: created_at)
-        order_direction: Order direction - "asc" or "desc" (default: desc)
 
     Returns:
         PaginatedMessagesResponse with:
-        - data: List of messages
+        - data: List of messages (newest first when direction="older")
         - next_cursor: Cursor for fetching the next page (null if no more pages)
         - has_more: Whether there are more messages to fetch
 
     Example:
-        First request: GET /messages?task_id=xxx&limit=50
-        Next page: GET /messages?task_id=xxx&limit=50&cursor=<next_cursor>
+        First request: GET /messages/paginated?task_id=xxx&limit=50
+        Next page: GET /messages/paginated?task_id=xxx&limit=50&cursor=<next_cursor>
     """
     # Decode cursor if provided
     before_id = None
@@ -180,9 +207,9 @@ async def list_messages(
     task_message_entities = await message_use_case.list_messages(
         task_id=task_id,
         limit=limit + 1,
-        page_number=page_number if not cursor else 1,
-        order_by=order_by,
-        order_direction=order_direction,
+        page_number=1,
+        order_by=None,
+        order_direction="desc",
         before_id=before_id,
         after_id=after_id,
     )

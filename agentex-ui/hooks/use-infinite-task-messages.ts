@@ -50,7 +50,7 @@ export function useInfiniteTaskMessages({
   return useInfiniteQuery({
     queryKey: infiniteTaskMessagesKeys.byTaskId(taskId),
     queryFn: async ({ pageParam }): Promise<PaginatedMessagesResponse> => {
-      return agentexClient.messages.list({
+      return agentexClient.messages.listPaginated({
         task_id: taskId,
         limit,
         direction: 'older',
