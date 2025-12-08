@@ -172,6 +172,20 @@ jobs:
           echo "📋 Final service status after health checks:"
           docker compose ps
 
+      - name: Install agent container dependencies
+        run: |
+          # Set variables for this agent
+          AGENT_NAME="${{ matrix.agent.agent_name }}"
+          CONTAINER_NAME="agent-test-${AGENT_NAME}"
+
+          echo "📦 Installing Node.js and NPM in agent container..."
+          docker exec "${CONTAINER_NAME}" sh -c "
+            apt-get update -qq &&
+            apt-get install -y -qq nodejs npm &&
+            echo '✅ Node.js version:' && node --version &&
+            echo '✅ NPM version:' && npm --version
+          " || echo "⚠️ Failed to install Node.js, tests may fail"
+
       - name: Run agent integration test
         env:
           OPENAI_API_KEY: ${{ secrets.TUTORIAL_OPENAI_API_KEY }}
@@ -209,6 +223,8 @@ jobs:
             -e AGENTEX_BASE_URL=http://agentex:5003 \
             -e AGENTEX_API_BASE_URL=http://agentex:5003 \
             -e REDIS_URL=redis://agentex-redis:6379 \
+            -e TEMPORAL_ADDRESS=agentex-temporal:7233 \
+            -e TEMPORAL_HOST=agentex-temporal \
             -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
             -p 8000:8000 \
             --network agentex-network \
