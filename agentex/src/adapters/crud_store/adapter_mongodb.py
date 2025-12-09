@@ -605,6 +605,102 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
                 message=f"Failed to find items by field in MongoDB: {e}", detail=str(e)
             ) from e
 
+    async def find_by_field_with_cursor(
+        self,
+        field_name: str,
+        field_value: Any,
+        limit: int | None = None,
+        sort_by: dict[str, int] | None = None,
+        before_id: str | None = None,
+        after_id: str | None = None,
+    ) -> builtins.list[T]:
+        """
+        Find documents by a given field with cursor-based pagination.
+        Maps _id to .id for each returned item.
+
+        Args:
+            field_name: The field name to search by
+            field_value: The value to search for
+            limit: Optional limit on the number of documents to return
+            sort_by: Optional dictionary for sorting, e.g. {"created_at": -1} for descending
+            before_id: Get documents created before this document ID
+            after_id: Get documents created after this document ID
+
+        Note:
+            Cursor pagination uses the created_at timestamp of the cursor document
+            to filter results. This provides stable pagination even when new
+            documents are added.
+        """
+        try:
+            # Map 'id' field to '_id' for MongoDB if needed
+            mongo_field_name = "_id" if field_name == "id" else field_name
+            mongo_field_value = field_value
+
+            # Convert id string to ObjectId if searching by _id
+            if mongo_field_name == "_id" and isinstance(mongo_field_value, str):
+                try:
+                    mongo_field_value = ObjectId(mongo_field_value)
+                except Exception:
+                    pass
+
+            # Build base query
+            query: dict[str, Any] = {mongo_field_name: mongo_field_value}
+
+            # If cursor is provided, look up the cursor document's timestamp
+            # Use compound comparison (created_at, _id) to handle timestamp ties
+            if before_id or after_id:
+                cursor_id = before_id or after_id
+                try:
+                    cursor_object_id = ObjectId(cursor_id)
+                except Exception:
+                    cursor_object_id = cursor_id
+
+                cursor_doc = self.collection.find_one({"_id": cursor_object_id})
+                if cursor_doc and "created_at" in cursor_doc:
+                    cursor_timestamp = cursor_doc["created_at"]
+                    if before_id:
+                        # Get documents where:
+                        # - created_at < cursor_timestamp, OR
+                        # - created_at == cursor_timestamp AND _id < cursor_id (tie-breaker)
+                        query["$or"] = [
+                            {"created_at": {"$lt": cursor_timestamp}},
+                            {
+                                "created_at": cursor_timestamp,
+                                "_id": {"$lt": cursor_object_id},
+                            },
+                        ]
+                    else:  # after_id
+                        # Get documents where:
+                        # - created_at > cursor_timestamp, OR
+                        # - created_at == cursor_timestamp AND _id > cursor_id (tie-breaker)
+                        query["$or"] = [
+                            {"created_at": {"$gt": cursor_timestamp}},
+                            {
+                                "created_at": cursor_timestamp,
+                                "_id": {"$gt": cursor_object_id},
+                            },
+                        ]
+
+            # Create a cursor
+            db_cursor = self.collection.find(query)
+
+            # Apply sorting
+            sort_by_items = list(sort_by.items()) if sort_by else []
+            # Use ID for tiebreaking
+            sort_by_items.append(("_id", 1))
+            db_cursor = db_cursor.sort(sort_by_items)
+
+            # Apply limit if specified
+            limit = limit or DEFAULT_PAGE_LIMIT
+            db_cursor = db_cursor.limit(limit)
+
+            return [self._deserialize(doc) for doc in db_cursor]
+        except Exception as e:
+            raise ServiceError(
+                message=f"Failed to find items by field with cursor in MongoDB: {e}",
+                detail=str(e),
+            ) from e
+
     @retry_write_operation()
     async def delete_by_field(self, field_name: str, field_value: Any) -> int:
         """

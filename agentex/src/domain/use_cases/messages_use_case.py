@@ -111,18 +111,26 @@ class MessagesUseCase:
         page_number: int,
         order_by: str | None = None,
         order_direction: str = "desc",
+        before_id: str | None = None,
+        after_id: str | None = None,
     ) -> list[TaskMessageEntity]:
         """
-        Get all messages for a task.
+        Get all messages for a task with optional cursor-based pagination.
 
         Args:
             task_id: The task ID
-            limit: Optional limit on the number of messages to return
-            order_by: Optional field name to order by (defaults to created_at)
-            order_direction: Optional direction to order by ("asc" or "desc", defaults to "desc")
+            limit: Maximum number of messages to return
+            page_number: Page number for offset-based pagination
+            order_by: Field name to order by (defaults to created_at)
+            order_direction: Direction to order by ("asc" or "desc", defaults to "desc")
+            before_id: Get messages created before this message ID (cursor pagination)
+            after_id: Get messages created after this message ID (cursor pagination)
 
         Returns:
             List of TaskMessageEntity objects for the task
+
+        Note:
+            When using before_id or after_id, page_number is ignored.
         """
         return await self.task_message_service.get_messages(
             task_id=task_id,
@@ -130,6 +138,8 @@ class MessagesUseCase:
             page_number=page_number,
             order_by=order_by,
             order_direction=order_direction,
+            before_id=before_id,
+            after_id=after_id,
         )
 
 

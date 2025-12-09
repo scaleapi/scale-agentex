@@ -1,4 +1,7 @@
+from typing import Literal
+
 from fastapi import APIRouter
+from pydantic import Field
 
 from src.api.schemas.authorization_types import (
     AgentexResourceType,
@@ -14,8 +17,22 @@ from src.api.schemas.task_messages import (
 from src.domain.entities.task_messages import convert_task_message_content_to_entity
 from src.domain.use_cases.messages_use_case import DMessageUseCase
 from src.utils.authorization_shortcuts import DAuthorizedBodyId, DAuthorizedQuery
+from src.utils.model_utils import BaseModel
+from src.utils.pagination import decode_cursor, encode_cursor
 
 router = APIRouter(prefix="/messages", tags=["Messages"])
+
+
+class PaginatedMessagesResponse(BaseModel):
+    """Response with cursor pagination metadata."""
+
+    data: list[TaskMessage] = Field(..., description="List of messages")
+    next_cursor: str | None = Field(
+        None, description="Cursor for fetching the next page of older messages"
+    )
+    has_more: bool = Field(
+        False, description="Whether there are more messages to fetch"
+    )
 
 
 @router.post(
@@ -118,6 +135,11 @@ async def list_messages(
     order_by: str | None = None,
     order_direction: str = "desc",
 ) -> list[TaskMessage]:
+    """
+    List messages for a task with offset-based pagination.
+
+    For cursor-based pagination with infinite scroll support, use /messages/paginated.
+    """
     task_message_entities = await message_use_case.list_messages(
         task_id=task_id,
         limit=limit,
@@ -130,6 +152,85 @@ async def list_messages(
         TaskMessage.model_validate(task_message_entity)
         for task_message_entity in task_message_entities
     ]
+
+
+@router.get(
+    "/paginated",
+    response_model=PaginatedMessagesResponse,
+)
+async def list_messages_paginated(
+    task_id: DAuthorizedQuery(AgentexResourceType.task, AuthorizedOperationType.read),
+    message_use_case: DMessageUseCase,
+    limit: int = 50,
+    cursor: str | None = None,
+    direction: Literal["older", "newer"] = "older",
+) -> PaginatedMessagesResponse:
+    """
+    List messages for a task with cursor-based pagination.
+
+    This endpoint is designed for infinite scroll UIs where new messages may arrive
+    while paginating through older ones.
+
+    Args:
+        task_id: The task ID to filter messages by
+        limit: Maximum number of messages to return (default: 50)
+        cursor: Opaque cursor string for pagination. Pass the `next_cursor` from
+                a previous response to get the next page.
+        direction: Pagination direction - "older" to get older messages (default),
+                   "newer" to get newer messages.
+
+    Returns:
+        PaginatedMessagesResponse with:
+        - data: List of messages (newest first when direction="older")
+        - next_cursor: Cursor for fetching the next page (null if no more pages)
+        - has_more: Whether there are more messages to fetch
+
+    Example:
+        First request: GET /messages/paginated?task_id=xxx&limit=50
+        Next page: GET /messages/paginated?task_id=xxx&limit=50&cursor=<next_cursor>
+    """
+    # Decode cursor if provided
+    before_id = None
+    after_id = None
+    if cursor:
+        try:
+            cursor_data = decode_cursor(cursor)
+            if direction == "older":
+                before_id = cursor_data.id
+            else:
+                after_id = cursor_data.id
+        except ValueError:
+            # Invalid cursor, ignore and return from start
+            pass
+
+    # Fetch one extra to determine if there are more results
+    task_message_entities = await message_use_case.list_messages(
+        task_id=task_id,
+        limit=limit + 1,
+        page_number=1,
+        order_by=None,
+        order_direction="desc",
+        before_id=before_id,
+        after_id=after_id,
+    )
+
+    # Check if there are more results
+    has_more = len(task_message_entities) > limit
+    task_message_entities = task_message_entities[:limit]
+
+    # Build next cursor from last message
+    next_cursor = None
+    if has_more and task_message_entities:
+        last_message = task_message_entities[-1]
+        next_cursor = encode_cursor(last_message.id, last_message.created_at)
+
+    messages = [TaskMessage.model_validate(entity) for entity in task_message_entities]
+
+    return PaginatedMessagesResponse(
+        data=messages,
+        next_cursor=next_cursor,
+        has_more=has_more,
+    )
 
 
 @router.get(

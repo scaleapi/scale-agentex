@@ -49,23 +49,43 @@ class TaskMessageService:
         page_number: int,
         order_by: str | None = None,
         order_direction: str = "desc",
+        before_id: str | None = None,
+        after_id: str | None = None,
     ) -> list[TaskMessageEntity]:
         """
-        Get all messages for a specific task.
+        Get all messages for a specific task with optional cursor-based pagination.
 
         Args:
             task_id: The task ID
-            limit: Optional limit on the number of messages to return
-            order_by: Optional field name to order by (defaults to created_at)
-            order_direction: Optional direction to order by ("asc" or "desc", defaults to "desc")
+            limit: Maximum number of messages to return
+            page_number: Page number for offset-based pagination
+            order_by: Field name to order by (defaults to created_at)
+            order_direction: Direction to order by ("asc" or "desc", defaults to "desc")
+            before_id: Get messages created before this message ID (cursor pagination)
+            after_id: Get messages created after this message ID (cursor pagination)
 
         Returns:
             List of TaskMessageEntity objects for the task
+
+        Note:
+            When using before_id or after_id, page_number is ignored.
         """
         # Default to created_at descending (newest first)
         sort_field = order_by or "created_at"
         sort_direction = 1 if order_direction.lower() == "asc" else -1
 
+        # If cursor pagination is requested, use cursor-based query
+        if before_id or after_id:
+            return await self.repository.find_by_field_with_cursor(
+                field_name="task_id",
+                field_value=task_id,
+                limit=limit,
+                sort_by={sort_field: sort_direction},
+                before_id=before_id,
+                after_id=after_id,
+            )
+
+        # Otherwise use standard offset-based pagination
         return await self.repository.find_by_field(
             "task_id",
             task_id,
