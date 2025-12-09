@@ -27,6 +27,8 @@ from src.api.routes import (
     tasks,
 )
 from src.config import dependencies
+from src.config.dependencies import resolve_environment_variable_dependency
+from src.config.environment_variables import EnvVarKeys
 from src.domain.exceptions import GenericException
 from src.utils.logging import make_logger
 
@@ -84,9 +86,15 @@ app = FastAPI(
 )
 
 # Add CORS middleware
+allowed_origins = resolve_environment_variable_dependency(EnvVarKeys.ALLOWED_ORIGINS)
+allowed_origins_list = (
+    [origin.strip() for origin in allowed_origins.split(",")]
+    if allowed_origins and isinstance(allowed_origins, str)
+    else ["*"]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=allowed_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
