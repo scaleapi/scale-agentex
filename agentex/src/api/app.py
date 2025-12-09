@@ -87,17 +87,18 @@ app = FastAPI(
 
 # Add CORS middleware
 allowed_origins = resolve_environment_variable_dependency(EnvVarKeys.ALLOWED_ORIGINS)
-if allowed_origins:
-    allowed_origins_list = (
-        allowed_origins.split(",") if isinstance(allowed_origins, str) else ["*"]
-    )
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=allowed_origins_list,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+allowed_origins_list = (
+    [origin.strip() for origin in allowed_origins.split(",")]
+    if allowed_origins and isinstance(allowed_origins, str)
+    else ["*"]
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Add Authentication middleware
 app.add_middleware(AgentexAuthMiddleware)
