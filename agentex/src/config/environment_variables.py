@@ -41,6 +41,7 @@ class EnvVarKeys(str, Enum):
     REDIS_SOCKET_TIMEOUT = "REDIS_SOCKET_TIMEOUT"
     IMAGE_PULL_SECRET_NAME = "IMAGE_PULL_SECRET_NAME"
     AGENTEX_AUTH_URL = "AGENTEX_AUTH_URL"
+    ALLOWED_ORIGINS = "ALLOWED_ORIGINS"
     DD_AGENT_HOST = "DD_AGENT_HOST"
     DD_STATSD_PORT = "DD_STATSD_PORT"
     HTTPX_CONNECT_TIMEOUT = "HTTPX_CONNECT_TIMEOUT"
@@ -87,6 +88,7 @@ class EnvironmentVariables(BaseModel):
     REDIS_SOCKET_TIMEOUT: int = 30  # Socket timeout in seconds
     IMAGE_PULL_SECRET_NAME: str | None = None
     AGENTEX_AUTH_URL: str | None = None
+    ALLOWED_ORIGINS: str | None = None
     HTTPX_CONNECT_TIMEOUT: float = 10.0  # HTTPX connection timeout in seconds
     HTTPX_READ_TIMEOUT: float = 30.0  # HTTPX read timeout in seconds
     HTTPX_WRITE_TIMEOUT: float = 30.0  # HTTPX write timeout in seconds
@@ -143,6 +145,7 @@ class EnvironmentVariables(BaseModel):
             ),
             IMAGE_PULL_SECRET_NAME=os.environ.get(EnvVarKeys.IMAGE_PULL_SECRET_NAME),
             AGENTEX_AUTH_URL=os.environ.get(EnvVarKeys.AGENTEX_AUTH_URL),
+            ALLOWED_ORIGINS=os.environ.get(EnvVarKeys.ALLOWED_ORIGINS, "*"),
             DD_AGENT_HOST=os.environ.get(EnvVarKeys.DD_AGENT_HOST),
             DD_STATSD_PORT=os.environ.get(EnvVarKeys.DD_STATSD_PORT),
             HTTPX_CONNECT_TIMEOUT=float(
