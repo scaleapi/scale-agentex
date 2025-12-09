@@ -15,7 +15,7 @@ import { toast } from '@/components/ui/toast';
 import { agentsKeys } from '@/hooks/use-agents';
 import {
   infiniteTaskMessagesKeys,
-  PaginatedMessagesResponse,
+  MessageListPaginatedResponse,
 } from '@/hooks/use-infinite-task-messages';
 
 import type AgentexSDK from 'agentex';
@@ -120,7 +120,7 @@ export function useSendMessage({
           // Get current messages and add the user's message optimistically
           const currentInfiniteData =
             queryClient.getQueryData<
-              InfiniteData<PaginatedMessagesResponse, string | undefined>
+              InfiniteData<MessageListPaginatedResponse, string | undefined>
             >(infiniteQueryKey);
 
           const currentMessages = currentInfiniteData
@@ -130,7 +130,7 @@ export function useSendMessage({
           const newestFirst = [...updatedMessages].reverse();
 
           queryClient.setQueryData<
-            InfiniteData<PaginatedMessagesResponse, string | undefined>
+            InfiniteData<MessageListPaginatedResponse, string | undefined>
           >(infiniteQueryKey, oldData => ({
             pages: [
               {
@@ -179,7 +179,7 @@ export function useSendMessage({
           // Get current messages from infinite query cache
           const currentInfiniteData =
             queryClient.getQueryData<
-              InfiniteData<PaginatedMessagesResponse, string | undefined>
+              InfiniteData<MessageListPaginatedResponse, string | undefined>
             >(infiniteQueryKey);
 
           // Extract current messages (flattened and in chronological order)
@@ -204,7 +204,7 @@ export function useSendMessage({
             // Convert to newest-first for API format
             const newestFirst = [...messages].reverse();
             queryClient.setQueryData<
-              InfiniteData<PaginatedMessagesResponse, string | undefined>
+              InfiniteData<MessageListPaginatedResponse, string | undefined>
             >(infiniteQueryKey, oldData => ({
               pages: [
                 {
@@ -260,13 +260,13 @@ export function useSendMessage({
 
           // Update the first page with server data
           queryClient.setQueryData<
-            InfiniteData<PaginatedMessagesResponse, string | undefined>
+            InfiniteData<MessageListPaginatedResponse, string | undefined>
           >(infiniteQueryKey, oldData => ({
             pages: [
               {
                 data: newestFirstMessages,
-                next_cursor: response.next_cursor,
-                has_more: response.has_more,
+                next_cursor: response.next_cursor ?? null,
+                has_more: response.has_more ?? false,
               },
               ...(oldData?.pages.slice(1) ?? []),
             ],

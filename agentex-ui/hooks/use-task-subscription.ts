@@ -6,7 +6,7 @@ import { subscribeTaskState } from 'agentex/lib';
 import { updateTaskInInfiniteQuery } from '@/hooks/use-create-task';
 import {
   infiniteTaskMessagesKeys,
-  PaginatedMessagesResponse,
+  MessageListPaginatedResponse,
 } from '@/hooks/use-infinite-task-messages';
 import { tasksKeys } from '@/hooks/use-tasks';
 
@@ -64,7 +64,7 @@ export function useTaskSubscription({
           const newestFirstMessages = [...messages].reverse();
 
           queryClient.setQueryData<
-            InfiniteData<PaginatedMessagesResponse, string | undefined>
+            InfiniteData<MessageListPaginatedResponse, string | undefined>
           >(infiniteTaskMessagesKeys.byTaskId(taskId), oldData => {
             if (!oldData) {
               // Don't initialize cache from subscription - the SDK doesn't pass
@@ -91,7 +91,7 @@ export function useTaskSubscription({
                 {
                   ...oldData.pages[0],
                   data: newFirstPageMessages,
-                } as PaginatedMessagesResponse,
+                } as MessageListPaginatedResponse,
                 ...oldData.pages.slice(1),
               ],
             };

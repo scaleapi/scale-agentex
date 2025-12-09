@@ -1,10 +1,13 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 
 import type AgentexSDK from 'agentex';
-import type { PaginatedMessagesResponse, TaskMessage } from 'agentex/resources';
+import type {
+  MessageListPaginatedResponse,
+  TaskMessage,
+} from 'agentex/resources';
 
 // Re-export for use in other hooks
-export type { PaginatedMessagesResponse };
+export type { MessageListPaginatedResponse };
 
 export const infiniteTaskMessagesKeys = {
   all: ['infiniteTaskMessages'] as const,
@@ -49,7 +52,7 @@ export function useInfiniteTaskMessages({
 }) {
   return useInfiniteQuery({
     queryKey: infiniteTaskMessagesKeys.byTaskId(taskId),
-    queryFn: async ({ pageParam }): Promise<PaginatedMessagesResponse> => {
+    queryFn: async ({ pageParam }): Promise<MessageListPaginatedResponse> => {
       return agentexClient.messages.listPaginated({
         task_id: taskId,
         limit,
