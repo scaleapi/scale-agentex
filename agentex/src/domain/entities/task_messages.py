@@ -12,7 +12,7 @@ from src.api.schemas.task_messages import (
     ToolRequestContent,
     ToolResponseContent,
 )
-from src.utils.model_utils import BaseModel
+from src.utils.model_utils import BaseModel, make_optional
 
 
 class TaskMessageContentType(str, Enum):
@@ -81,6 +81,9 @@ class TextContentEntity(BaseTaskMessageContentEntity):
     )
 
 
+OptionalTextContentEntity = make_optional(TextContentEntity)
+
+
 class ReasoningContentEntity(BaseTaskMessageContentEntity):
     type: Literal[TaskMessageContentType.REASONING] = Field(
         default=TaskMessageContentType.REASONING,
@@ -90,6 +93,9 @@ class ReasoningContentEntity(BaseTaskMessageContentEntity):
     content: list[str] | None = Field(
         None, description="The reasoning content or chain-of-thought text"
     )
+
+
+OptionalReasoningContentEntity = make_optional(ReasoningContentEntity)
 
 
 class ToolRequestContentEntity(BaseTaskMessageContentEntity):
@@ -102,6 +108,9 @@ class ToolRequestContentEntity(BaseTaskMessageContentEntity):
     )
     name: str = Field(..., description="The name of the tool that is being requested.")
     arguments: dict[str, Any] = Field(..., description="The arguments to the tool.")
+
+
+OptionalToolRequestContentEntity = make_optional(ToolRequestContentEntity)
 
 
 class ToolResponseContentEntity(BaseTaskMessageContentEntity):
@@ -118,6 +127,9 @@ class ToolResponseContentEntity(BaseTaskMessageContentEntity):
     content: Any = Field(..., description="The result of the tool.")
 
 
+OptionalToolResponseContentEntity = make_optional(ToolResponseContentEntity)
+
+
 class DataContentEntity(BaseTaskMessageContentEntity):
     type: Literal[TaskMessageContentType.DATA] = Field(
         default=TaskMessageContentType.DATA,
@@ -126,15 +138,25 @@ class DataContentEntity(BaseTaskMessageContentEntity):
     data: dict[str, Any] = Field(..., description="The contents of the data message.")
 
 
+OptionalDataContentEntity = make_optional(DataContentEntity)
+
 TaskMessageContentEntity = Annotated[
     TextContentEntity
-    | ReasoningContentEntity
     | DataContentEntity
     | ToolRequestContentEntity
     | ToolResponseContentEntity
     | ReasoningContentEntity,
     Field(discriminator="type"),
 ]
+
+OptionalTaskMessageContentEntity = (
+    OptionalToolRequestContentEntity
+    | OptionalDataContentEntity
+    | OptionalTextContentEntity
+    | OptionalToolResponseContentEntity
+    | OptionalReasoningContentEntity
+    | None
+)
 
 
 def convert_task_message_content_to_entity(
@@ -213,6 +235,23 @@ class TaskMessageEntity(BaseModel):
     )
     updated_at: datetime | None = Field(
         None, description="The timestamp when the message was last updated"
+    )
+
+
+class TaskMessageEntityFilter(BaseModel):
+    """Filter model for TaskMessage - all fields optional for flexible filtering."""
+
+    content: OptionalTaskMessageContentEntity | None = Field(
+        None, description="Filter by message content"
+    )
+    streaming_status: Literal["IN_PROGRESS", "DONE"] | None = Field(
+        None, description="Filter by streaming status"
+    )
+    created_at: datetime | None = Field(
+        None, description="Filter by message creation timestamp"
+    )
+    updated_at: datetime | None = Field(
+        None, description="Filter by message last update timestamp"
     )
 
 

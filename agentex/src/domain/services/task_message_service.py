@@ -1,5 +1,5 @@
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends
 
@@ -51,6 +51,7 @@ class TaskMessageService:
         order_direction: str = "desc",
         before_id: str | None = None,
         after_id: str | None = None,
+        filters: dict[str, Any] | None = None,
     ) -> list[TaskMessageEntity]:
         """
         Get all messages for a specific task with optional cursor-based pagination.
@@ -83,6 +84,7 @@ class TaskMessageService:
                 sort_by={sort_field: sort_direction},
                 before_id=before_id,
                 after_id=after_id,
+                filters=filters,
             )
 
         # Otherwise use standard offset-based pagination
@@ -92,6 +94,7 @@ class TaskMessageService:
             limit=limit,
             page_number=page_number,
             sort_by={sort_field: sort_direction},
+            filters=filters,
         )
 
     async def append_message(

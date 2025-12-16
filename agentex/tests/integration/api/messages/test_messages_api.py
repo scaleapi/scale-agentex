@@ -6,7 +6,11 @@ Tests the full HTTP request → FastAPI → response cycle with API-first valida
 import pytest
 import pytest_asyncio
 from src.domain.entities.agents import ACPType, AgentEntity
-from src.domain.entities.task_messages import TaskMessageEntity, TextContentEntity
+from src.domain.entities.task_messages import (
+    DataContentEntity,
+    TaskMessageEntity,
+    TextContentEntity,
+)
 from src.domain.entities.tasks import TaskEntity, TaskStatus
 from src.utils.ids import orm_id
 
@@ -434,3 +438,445 @@ class TestMessagesAPIIntegration:
         timestamps = [m["created_at"] for m in messages]
         # Sort timestamps descending and verify the returned order matches a valid descending order
         assert timestamps == sorted(timestamps, reverse=True)
+
+    async def test_list_messages_filter_by_content_type(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test filtering messages by content type"""
+        # Given - Create agent and task
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="filter-test-agent",
+            description="Agent for filter testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="filter-test-task",
+            status=TaskStatus.RUNNING,
+            status_reason="Task for filter testing",
+        )
+        await task_repo.create(agent_id=agent.id, task=task)
+
+        # Create messages with different content types
+        message_repo = isolated_repositories["task_message_repository"]
+
+        # Create text messages
+        text_messages = []
+        for i in range(3):
+            message = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=TextContentEntity(
+                    type="text", author="user", content=f"Text message {i}"
+                ),
+                streaming_status="DONE",
+            )
+            text_messages.append(await message_repo.create(message))
+
+        # Create data messages
+        data_messages = []
+        for i in range(2):
+            message = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=DataContentEntity(
+                    type="data", author="agent", data={"value": i}
+                ),
+                streaming_status="DONE",
+            )
+            data_messages.append(await message_repo.create(message))
+
+        # When - Filter by text content type
+        response = await isolated_client.get(
+            "/messages",
+            params={"task_id": task.id, "filters": '{"content": {"type": "text"}}'},
+        )
+
+        # Then - Should return only text messages
+        assert response.status_code == 200
+        filtered_messages = response.json()
+        assert len(filtered_messages) == 3
+        assert all(msg["content"]["type"] == "text" for msg in filtered_messages)
+
+        # When - Filter by data content type
+        response = await isolated_client.get(
+            "/messages",
+            params={"task_id": task.id, "filters": '{"content": {"type": "data"}}'},
+        )
+
+        # Then - Should return only data messages
+        assert response.status_code == 200
+        filtered_messages = response.json()
+        assert len(filtered_messages) == 2
+        assert all(msg["content"]["type"] == "data" for msg in filtered_messages)
+
+    async def test_list_messages_filter_by_author(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test filtering messages by author"""
+        # Given - Create agent and task
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="author-filter-agent",
+            description="Agent for author filter testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="author-filter-task",
+            status=TaskStatus.RUNNING,
+            status_reason="Task for author filter testing",
+        )
+        await task_repo.create(agent_id=agent.id, task=task)
+
+        # Create messages from different authors
+        message_repo = isolated_repositories["task_message_repository"]
+
+        # User messages
+        user_messages = []
+        for i in range(2):
+            message = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=TextContentEntity(
+                    type="text", author="user", content=f"User message {i}"
+                ),
+                streaming_status="DONE",
+            )
+            user_messages.append(await message_repo.create(message))
+
+        # Agent messages
+        agent_messages = []
+        for i in range(3):
+            message = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=TextContentEntity(
+                    type="text", author="agent", content=f"Agent message {i}"
+                ),
+                streaming_status="DONE",
+            )
+            agent_messages.append(await message_repo.create(message))
+
+        # When - Filter by user author
+        response = await isolated_client.get(
+            "/messages",
+            params={"task_id": task.id, "filters": '{"content": {"author": "user"}}'},
+        )
+
+        # Then - Should return only user messages
+        assert response.status_code == 200
+        filtered_messages = response.json()
+        assert len(filtered_messages) == 2
+        assert all(msg["content"]["author"] == "user" for msg in filtered_messages)
+
+        # When - Filter by agent author
+        response = await isolated_client.get(
+            "/messages",
+            params={"task_id": task.id, "filters": '{"content": {"author": "agent"}}'},
+        )
+
+        # Then - Should return only agent messages
+        assert response.status_code == 200
+        filtered_messages = response.json()
+        assert len(filtered_messages) == 3
+        assert all(msg["content"]["author"] == "agent" for msg in filtered_messages)
+
+    async def test_list_messages_filter_by_streaming_status(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test filtering messages by streaming status"""
+        # Given - Create agent and task
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="status-filter-agent",
+            description="Agent for status filter testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="status-filter-task",
+            status=TaskStatus.RUNNING,
+            status_reason="Task for status filter testing",
+        )
+        await task_repo.create(agent_id=agent.id, task=task)
+
+        # Create messages with different streaming statuses
+        message_repo = isolated_repositories["task_message_repository"]
+
+        # In progress messages
+        in_progress_messages = []
+        for i in range(2):
+            message = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=TextContentEntity(
+                    type="text", author="user", content=f"In progress message {i}"
+                ),
+                streaming_status="IN_PROGRESS",
+            )
+            in_progress_messages.append(await message_repo.create(message))
+
+        # Done messages
+        done_messages = []
+        for i in range(3):
+            message = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=TextContentEntity(
+                    type="text", author="agent", content=f"Done message {i}"
+                ),
+                streaming_status="DONE",
+            )
+            done_messages.append(await message_repo.create(message))
+
+        # When - Filter by IN_PROGRESS status
+        response = await isolated_client.get(
+            "/messages",
+            params={
+                "task_id": task.id,
+                "filters": '{"streaming_status": "IN_PROGRESS"}',
+            },
+        )
+
+        # Then - Should return only in progress messages
+        assert response.status_code == 200
+        filtered_messages = response.json()
+        assert len(filtered_messages) == 2
+        assert all(
+            msg["streaming_status"] == "IN_PROGRESS" for msg in filtered_messages
+        )
+
+        # When - Filter by DONE status
+        response = await isolated_client.get(
+            "/messages",
+            params={"task_id": task.id, "filters": '{"streaming_status": "DONE"}'},
+        )
+
+        # Then - Should return only done messages
+        assert response.status_code == 200
+        filtered_messages = response.json()
+        assert len(filtered_messages) == 3
+        assert all(msg["streaming_status"] == "DONE" for msg in filtered_messages)
+
+    async def test_list_messages_filter_combined_criteria(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test filtering messages with multiple criteria"""
+        # Given - Create agent and task
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="combined-filter-agent",
+            description="Agent for combined filter testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="combined-filter-task",
+            status=TaskStatus.RUNNING,
+            status_reason="Task for combined filter testing",
+        )
+        await task_repo.create(agent_id=agent.id, task=task)
+
+        # Create diverse messages
+        message_repo = isolated_repositories["task_message_repository"]
+
+        # Target message: text + user + done
+        target_message = TaskMessageEntity(
+            id=orm_id(),
+            task_id=task.id,
+            content=TextContentEntity(
+                type="text", author="user", content="Target message"
+            ),
+            streaming_status="DONE",
+        )
+        await message_repo.create(target_message)
+
+        # Non-matching messages
+        non_matches = [
+            TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=TextContentEntity(
+                    type="text", author="agent", content="Wrong author"
+                ),
+                streaming_status="DONE",
+            ),
+            TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=DataContentEntity(
+                    type="data", author="user", data={"test": "wrong type"}
+                ),
+                streaming_status="DONE",
+            ),
+            TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=TextContentEntity(
+                    type="text", author="user", content="Wrong status"
+                ),
+                streaming_status="IN_PROGRESS",
+            ),
+        ]
+        for message in non_matches:
+            await message_repo.create(message)
+
+        # When - Filter by text + user + done
+        response = await isolated_client.get(
+            "/messages",
+            params={
+                "task_id": task.id,
+                "filters": '{"content": {"type": "text", "author": "user"}, "streaming_status": "DONE"}',
+            },
+        )
+
+        # Then - Should return only the target message
+        assert response.status_code == 200
+        filtered_messages = response.json()
+        assert len(filtered_messages) == 1
+        assert filtered_messages[0]["id"] == target_message.id
+        assert filtered_messages[0]["content"]["type"] == "text"
+        assert filtered_messages[0]["content"]["author"] == "user"
+        assert filtered_messages[0]["streaming_status"] == "DONE"
+
+    async def test_list_messages_paginated_with_filters(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test that cursor pagination works with filters"""
+        # Given - Create agent and task
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="paginated-filter-agent",
+            description="Agent for paginated filter testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="paginated-filter-task",
+            status=TaskStatus.RUNNING,
+            status_reason="Task for paginated filter testing",
+        )
+        await task_repo.create(agent_id=agent.id, task=task)
+
+        # Create many text messages for pagination testing
+        message_repo = isolated_repositories["task_message_repository"]
+        text_messages = []
+        for i in range(25):
+            message = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=TextContentEntity(
+                    type="text", author="user", content=f"Text message {i}"
+                ),
+                streaming_status="DONE",
+            )
+            text_messages.append(await message_repo.create(message))
+
+        # Create some data messages (should be filtered out)
+        for i in range(10):
+            message = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=DataContentEntity(
+                    type="data", author="agent", data={"value": i}
+                ),
+                streaming_status="DONE",
+            )
+            await message_repo.create(message)
+
+        # When - Use paginated endpoint with text filter
+        response = await isolated_client.get(
+            "/messages/paginated",
+            params={
+                "task_id": task.id,
+                "filters": '{"content": {"type": "text"}}',
+                "limit": 10,
+            },
+        )
+
+        # Then - Should return filtered results with pagination
+        assert response.status_code == 200
+        response_data = response.json()
+
+        # Should have pagination metadata
+        assert "data" in response_data
+        assert "next_cursor" in response_data
+        assert "has_more" in response_data
+
+        # Should return only text messages
+        assert len(response_data["data"]) == 10
+        assert all(msg["content"]["type"] == "text" for msg in response_data["data"])
+
+        # Should indicate more pages available
+        assert response_data["has_more"] is True
+        assert response_data["next_cursor"] is not None
+
+        # When - Get next page with cursor
+        response = await isolated_client.get(
+            "/messages/paginated",
+            params={
+                "task_id": task.id,
+                "filters": '{"content": {"type": "text"}}',
+                "limit": 10,
+                "cursor": response_data["next_cursor"],
+            },
+        )
+
+        # Then - Should continue paginating through filtered results
+        assert response.status_code == 200
+        page2_data = response.json()
+        assert len(page2_data["data"]) == 10
+        assert all(msg["content"]["type"] == "text" for msg in page2_data["data"])
+
+    async def test_list_messages_filter_validation_errors(
+        self, isolated_client, test_task
+    ):
+        """Test that invalid filter JSON returns proper error"""
+        # When - Send invalid JSON filter
+        response = await isolated_client.get(
+            "/messages",
+            params={"task_id": test_task.id, "filters": '{"invalid": json}'},
+        )
+
+        # Then - Should return validation error
+        assert response.status_code == 400
+
+        # When - Send filter with invalid field
+        response = await isolated_client.get(
+            "/messages",
+            params={
+                "task_id": test_task.id,
+                "filters": '{"nonexistent_field": "value"}',
+            },
+        )
+
+        # This will return a 200 error and an empty list
+        assert response.status_code == 200
+        assert len(response.json()) == 0
