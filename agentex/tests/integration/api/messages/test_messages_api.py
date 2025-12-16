@@ -761,6 +761,290 @@ class TestMessagesAPIIntegration:
         assert filtered_messages[0]["content"]["author"] == "user"
         assert filtered_messages[0]["streaming_status"] == "DONE"
 
+    async def test_list_messages_filter_data_content_partial_match(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test filtering data messages with partial matching on nested data fields"""
+        # Given - Create agent and task
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="data-filter-agent",
+            description="Agent for data content filter testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="data-filter-task",
+            status=TaskStatus.RUNNING,
+            status_reason="Task for data content filter testing",
+        )
+        await task_repo.create(agent_id=agent.id, task=task)
+
+        # Create data messages with different nested data
+        message_repo = isolated_repositories["task_message_repository"]
+
+        # Messages with status="completed"
+        completed_messages = []
+        for i in range(3):
+            message = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=DataContentEntity(
+                    type="data",
+                    author="agent",
+                    data={"status": "completed", "value": i, "extra": "field"},
+                ),
+                streaming_status="DONE",
+            )
+            completed_messages.append(await message_repo.create(message))
+
+        # Messages with status="pending"
+        pending_messages = []
+        for i in range(2):
+            message = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=DataContentEntity(
+                    type="data",
+                    author="agent",
+                    data={"status": "pending", "value": i + 10},
+                ),
+                streaming_status="DONE",
+            )
+            pending_messages.append(await message_repo.create(message))
+
+        # Messages with different structure
+        other_message = TaskMessageEntity(
+            id=orm_id(),
+            task_id=task.id,
+            content=DataContentEntity(
+                type="data",
+                author="user",
+                data={"different": "structure", "no_status": True},
+            ),
+            streaming_status="DONE",
+        )
+        await message_repo.create(other_message)
+
+        # When - Filter by partial match on data.status="completed"
+        response = await isolated_client.get(
+            "/messages",
+            params={
+                "task_id": task.id,
+                "filters": '{"content": {"data": {"status": "completed"}}}',
+            },
+        )
+
+        # Then - Should return only messages with status="completed"
+        assert response.status_code == 200
+        filtered_messages = response.json()
+        assert len(filtered_messages) == 3
+        assert all(
+            msg["content"]["data"]["status"] == "completed" for msg in filtered_messages
+        )
+        assert (m["id"] for m in filtered_messages) == (
+            m.id for m in completed_messages
+        )
+
+        # When - Filter by partial match on data.status="pending"
+        response = await isolated_client.get(
+            "/messages",
+            params={
+                "task_id": task.id,
+                "filters": '{"content": {"data": {"status": "pending"}}}',
+            },
+        )
+
+        # Then - Should return only messages with status="pending"
+        assert response.status_code == 200
+        filtered_messages = response.json()
+        assert len(filtered_messages) == 2
+        assert all(
+            msg["content"]["data"]["status"] == "pending" for msg in filtered_messages
+        )
+
+        # When - Filter by data type and partial data match
+        response = await isolated_client.get(
+            "/messages",
+            params={
+                "task_id": task.id,
+                "filters": '{"content": {"type": "data", "data": {"status": "completed"}}}',
+            },
+        )
+
+        # Then - Should return completed data messages
+        assert response.status_code == 200
+        filtered_messages = response.json()
+        assert len(filtered_messages) == 3
+        assert all(msg["content"]["type"] == "data" for msg in filtered_messages)
+        assert all(
+            msg["content"]["data"]["status"] == "completed" for msg in filtered_messages
+        )
+
+    async def test_list_messages_filter_data_content_deeply_nested(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test filtering data messages with deeply nested data structures"""
+        # Given - Create agent and task
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="nested-data-filter-agent",
+            description="Agent for nested data content filter testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="nested-data-filter-task",
+            status=TaskStatus.RUNNING,
+            status_reason="Task for nested data content filter testing",
+        )
+        await task_repo.create(agent_id=agent.id, task=task)
+
+        # Create data messages with deeply nested structures
+        message_repo = isolated_repositories["task_message_repository"]
+
+        # Messages with user.role="admin"
+        admin_messages = []
+        for i in range(2):
+            message = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=DataContentEntity(
+                    type="data",
+                    author="agent",
+                    data={
+                        "metadata": {
+                            "user": {"id": f"admin-{i}", "role": "admin", "level": 10},
+                            "timestamp": "2024-01-01",
+                        },
+                        "result": {"success": True},
+                    },
+                ),
+                streaming_status="DONE",
+            )
+            admin_messages.append(await message_repo.create(message))
+
+        # Messages with user.role="viewer"
+        viewer_messages = []
+        for i in range(3):
+            message = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=DataContentEntity(
+                    type="data",
+                    author="agent",
+                    data={
+                        "metadata": {
+                            "user": {"id": f"viewer-{i}", "role": "viewer", "level": 1},
+                            "timestamp": "2024-01-02",
+                        },
+                        "result": {"success": True},
+                    },
+                ),
+                streaming_status="DONE",
+            )
+            viewer_messages.append(await message_repo.create(message))
+
+        # Message with different nested structure
+        other_message = TaskMessageEntity(
+            id=orm_id(),
+            task_id=task.id,
+            content=DataContentEntity(
+                type="data",
+                author="agent",
+                data={
+                    "metadata": {"source": "external", "version": "1.0"},
+                    "result": {"success": False},
+                },
+            ),
+            streaming_status="DONE",
+        )
+        await message_repo.create(other_message)
+
+        # When - Filter by deeply nested field: metadata.user.role="admin"
+        response = await isolated_client.get(
+            "/messages",
+            params={
+                "task_id": task.id,
+                "filters": '{"content": {"data": {"metadata": {"user": {"role": "admin"}}}}}',
+            },
+        )
+
+        # Then - Should return only admin messages
+        assert response.status_code == 200
+        filtered_messages = response.json()
+        assert len(filtered_messages) == 2
+        assert all(
+            msg["content"]["data"]["metadata"]["user"]["role"] == "admin"
+            for msg in filtered_messages
+        )
+        assert (m["id"] for m in filtered_messages) == (m.id for m in admin_messages)
+
+        # When - Filter by deeply nested field: metadata.user.role="viewer"
+        response = await isolated_client.get(
+            "/messages",
+            params={
+                "task_id": task.id,
+                "filters": '{"content": {"data": {"metadata": {"user": {"role": "viewer"}}}}}',
+            },
+        )
+
+        # Then - Should return only viewer messages
+        assert response.status_code == 200
+        filtered_messages = response.json()
+        assert len(filtered_messages) == 3
+        assert all(
+            msg["content"]["data"]["metadata"]["user"]["role"] == "viewer"
+            for msg in filtered_messages
+        )
+
+        # When - Filter by result.success=True (matches both admin and viewer)
+        response = await isolated_client.get(
+            "/messages",
+            params={
+                "task_id": task.id,
+                "filters": '{"content": {"data": {"result": {"success": true}}}}',
+            },
+        )
+
+        # Then - Should return admin and viewer messages (5 total)
+        assert response.status_code == 200
+        filtered_messages = response.json()
+        assert len(filtered_messages) == 5
+        assert all(
+            msg["content"]["data"]["result"]["success"] is True
+            for msg in filtered_messages
+        )
+
+        # When - Filter by multiple nested criteria
+        response = await isolated_client.get(
+            "/messages",
+            params={
+                "task_id": task.id,
+                "filters": '{"content": {"data": {"metadata": {"user": {"role": "admin"}}, "result": {"success": true}}}}',
+            },
+        )
+
+        # Then - Should return only admin messages with success=true
+        assert response.status_code == 200
+        filtered_messages = response.json()
+        assert len(filtered_messages) == 2
+        assert all(
+            msg["content"]["data"]["metadata"]["user"]["role"] == "admin"
+            and msg["content"]["data"]["result"]["success"] is True
+            for msg in filtered_messages
+        )
+
     async def test_list_messages_paginated_with_filters(
         self, isolated_client, isolated_repositories
     ):

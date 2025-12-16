@@ -667,25 +667,27 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
                 if cursor_doc and "created_at" in cursor_doc:
                     cursor_timestamp = cursor_doc["created_at"]
                     if before_id:
-                        # Get documents where:
-                        # - created_at < cursor_timestamp, OR
-                        # - created_at == cursor_timestamp AND _id < cursor_id (tie-breaker)
+                        # Get documents where (for descending created_at, ascending _id sort):
+                        # - created_at < cursor_timestamp (strictly older), OR
+                        # - created_at == cursor_timestamp AND _id > cursor_id (same timestamp,
+                        #   but later in ascending _id order, i.e., comes after cursor in results)
                         query["$or"] = [
                             {"created_at": {"$lt": cursor_timestamp}},
                             {
                                 "created_at": cursor_timestamp,
-                                "_id": {"$lt": cursor_object_id},
+                                "_id": {"$gt": cursor_object_id},
                             },
                         ]
                     else:  # after_id
-                        # Get documents where:
-                        # - created_at > cursor_timestamp, OR
-                        # - created_at == cursor_timestamp AND _id > cursor_id (tie-breaker)
+                        # Get documents where (for descending created_at, ascending _id sort):
+                        # - created_at > cursor_timestamp (strictly newer), OR
+                        # - created_at == cursor_timestamp AND _id < cursor_id (same timestamp,
+                        #   but earlier in ascending _id order, i.e., comes before cursor in results)
                         query["$or"] = [
                             {"created_at": {"$gt": cursor_timestamp}},
                             {
                                 "created_at": cursor_timestamp,
-                                "_id": {"$gt": cursor_object_id},
+                                "_id": {"$lt": cursor_object_id},
                             },
                         ]
 
