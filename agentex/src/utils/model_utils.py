@@ -79,42 +79,6 @@ class BaseModel(PydanticBaseModel):
         return value
 
 
-def exclude_fields(
-    entity_model: type[BaseModel],
-    exclude_fields: set[str],
-    model_name_suffix: str = "Filter",
-) -> type[BaseModel]:
-    """
-    Create a filter model by excluding specific fields from an entity model.
-
-    Args:
-        entity_model: The source entity model to base the filter on
-        exclude_fields: Fields to exclude from the filter model (defaults to {"id"})
-        model_name_suffix: Suffix for the generated model name (defaults to "Filter")
-
-    Returns:
-        A new Pydantic model class with specified fields excluded
-
-    Example:
-        TaskMessageFilter = create_filter_model(TaskMessageEntity)
-        UserFilter = create_filter_model(UserEntity, {"id", "password_hash"})
-    """
-
-    # Extract fields from source model, excluding specified ones
-    fields = {}
-    for field_name, field_info in entity_model.model_fields.items():
-        if field_name not in exclude_fields:
-            fields[field_name] = (field_info.annotation, field_info)
-
-    # Create new model class dynamically
-    filter_model_name = f"{entity_model.__name__}{model_name_suffix}"
-    return create_model(
-        filter_model_name,
-        __base__=BaseModel,  # Use our custom BaseModel
-        **fields,
-    )
-
-
 def make_optional(
     entity_model: type[BaseModel], model_name_suffix: str = "Optional"
 ) -> type[BaseModel]:

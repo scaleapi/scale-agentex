@@ -247,12 +247,6 @@ class TaskMessageEntityFilter(BaseModel):
     streaming_status: Literal["IN_PROGRESS", "DONE"] | None = Field(
         None, description="Filter by streaming status"
     )
-    created_at: datetime | None = Field(
-        None, description="Filter by message creation timestamp"
-    )
-    updated_at: datetime | None = Field(
-        None, description="Filter by message last update timestamp"
-    )
 
 
 def convert_task_message_to_entity(message: TaskMessage) -> TaskMessageEntity:
