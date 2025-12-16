@@ -1,16 +1,21 @@
 import { useEffect } from 'react';
 
 import { InfiniteData, useQueryClient } from '@tanstack/react-query';
-// import { subscribeTaskState } from 'agentex/lib';
+import { subscribeTaskState } from 'agentex/lib';
 
-import { subscribeTaskState } from '@/hooks/custom-subscribe-task-state';
 import { updateTaskInInfiniteQuery } from '@/hooks/use-create-task';
-import { taskMessagesKeys } from '@/hooks/use-task-messages';
-import type { TaskMessagesData } from '@/hooks/use-task-messages';
+import {
+  infiniteTaskMessagesKeys,
+  MessageListPaginatedResponse,
+} from '@/hooks/use-infinite-task-messages';
 import { tasksKeys } from '@/hooks/use-tasks';
 
 import type AgentexSDK from 'agentex';
-import type { TaskListResponse, TaskRetrieveResponse } from 'agentex/resources';
+import type {
+  TaskListResponse,
+  TaskMessage,
+  TaskRetrieveResponse,
+} from 'agentex/resources';
 
 /**
  * Subscribes to real-time updates for a task's state, messages, and streaming status.
@@ -48,28 +53,55 @@ export function useTaskSubscription({
       { taskID: taskId },
       {
         onMessagesChange(messages) {
-          queryClient.setQueryData<TaskMessagesData>(
-            taskMessagesKeys.byTaskId(taskId),
-            {
-              messages: [...messages],
-              deltaAccumulator: null,
-              rpcStatus: 'pending',
+          // Guard against undefined messages from SDK
+          if (!messages || !Array.isArray(messages)) {
+            return;
+          }
+
+          // Update the infinite query cache with real-time messages
+          // Messages from SDK come in chronological order (oldest first)
+          // We need to convert to API format (newest first) for the first page
+          const newestFirstMessages = [...messages].reverse();
+
+          queryClient.setQueryData<
+            InfiniteData<MessageListPaginatedResponse, string | undefined>
+          >(infiniteTaskMessagesKeys.byTaskId(taskId), oldData => {
+            if (!oldData) {
+              // Don't initialize cache from subscription - the SDK doesn't pass
+              // pagination metadata (has_more, next_cursor), so we'd incorrectly
+              // set has_more: false even when more messages exist.
+              // Let useInfiniteTaskMessages handle initial fetch with proper metadata.
+              return undefined;
             }
-          );
+
+            // Get IDs of all messages from older pages (not the first page)
+            const olderPageMessageIds = new Set(
+              oldData.pages.slice(1).flatMap(page => page.data.map(m => m.id))
+            );
+
+            // Filter out messages that are already in older pages
+            // to avoid duplicates when combining real-time with paginated data
+            const newFirstPageMessages = newestFirstMessages.filter(
+              m => !olderPageMessageIds.has(m.id)
+            );
+
+            return {
+              ...oldData,
+              pages: [
+                {
+                  ...oldData.pages[0],
+                  data: newFirstPageMessages,
+                } as MessageListPaginatedResponse,
+                ...oldData.pages.slice(1),
+              ],
+            };
+          });
 
           const hasStreamingMessages = messages.some(
-            msg => msg.streaming_status === 'IN_PROGRESS'
+            (msg: TaskMessage) => msg.streaming_status === 'IN_PROGRESS'
           );
 
           if (!hasStreamingMessages && messages.length > 0) {
-            queryClient.setQueryData<TaskMessagesData>(
-              taskMessagesKeys.byTaskId(taskId),
-              data => ({
-                messages: data?.messages || [],
-                deltaAccumulator: data?.deltaAccumulator || null,
-                rpcStatus: 'success',
-              })
-            );
             queryClient.invalidateQueries({ queryKey: ['spans', taskId] });
           }
         },
@@ -90,14 +122,9 @@ export function useTaskSubscription({
         },
         onStreamStatusChange() {},
         onError() {
-          queryClient.setQueryData<TaskMessagesData>(
-            taskMessagesKeys.byTaskId(taskId),
-            data => ({
-              messages: data?.messages || [],
-              deltaAccumulator: data?.deltaAccumulator || null,
-              rpcStatus: 'error',
-            })
-          );
+          // Error handling - we don't need to update query cache on error
+          // The UI will show the last known good state
+          console.error('Task subscription error for task:', taskId);
         },
       },
       { signal: abortController.signal }

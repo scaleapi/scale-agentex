@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  InfiniteData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import {
   agentRPCNonStreaming,
   agentRPCWithStreaming,
@@ -8,6 +13,10 @@ import { v4 } from 'uuid';
 
 import { toast } from '@/components/ui/toast';
 import { agentsKeys } from '@/hooks/use-agents';
+import {
+  infiniteTaskMessagesKeys,
+  MessageListPaginatedResponse,
+} from '@/hooks/use-infinite-task-messages';
 
 import type AgentexSDK from 'agentex';
 import type { IDeltaAccumulator } from 'agentex/lib';
@@ -49,14 +58,15 @@ export function useTaskMessages({
         return { messages: [], deltaAccumulator: null, rpcStatus: 'idle' };
       }
 
-      const messages = await agentexClient.messages.list({
+      // Uses default limit (50) - for full history use useInfiniteTaskMessages
+      const response = await agentexClient.messages.listPaginated({
         task_id: taskId,
       });
 
       // API returns messages in descending order (newest first),
       // reverse to chronological order (oldest first) for display
       return {
-        messages: messages.slice().reverse(),
+        messages: response.data.slice().reverse(),
         deltaAccumulator: null,
         rpcStatus: 'idle',
       };
@@ -82,8 +92,6 @@ export function useSendMessage({
 
   return useMutation({
     mutationFn: async ({ taskId, agentName, content }: SendMessageParams) => {
-      const queryKey = taskMessagesKeys.byTaskId(taskId);
-
       const agents = queryClient.getQueryData<Agent[]>(agentsKeys.all) || [];
       const agent = agents.find(a => a.name === agentName);
 
@@ -94,12 +102,48 @@ export function useSendMessage({
       switch (agent.acp_type) {
         case 'async':
         case 'agentic': {
-          queryClient.setQueryData<TaskMessagesData>(queryKey, data => ({
-            messages: data?.messages || [],
-            deltaAccumulator: data?.deltaAccumulator || null,
-            rpcStatus: 'pending',
+          const infiniteQueryKey = infiniteTaskMessagesKeys.byTaskId(taskId);
+
+          // Cancel any in-flight queries to prevent race conditions
+          await queryClient.cancelQueries({ queryKey: infiniteQueryKey });
+
+          // Add optimistic update to show user's message immediately
+          const tempUserMessage: TaskMessage = {
+            id: v4(),
+            content,
+            task_id: taskId,
+            created_at: new Date().toISOString(),
+            streaming_status: 'DONE',
+            updated_at: new Date().toISOString(),
+          };
+
+          // Get current messages and add the user's message optimistically
+          const currentInfiniteData =
+            queryClient.getQueryData<
+              InfiniteData<MessageListPaginatedResponse, string | undefined>
+            >(infiniteQueryKey);
+
+          const currentMessages = currentInfiniteData
+            ? currentInfiniteData.pages.flatMap(page => page.data).reverse()
+            : [];
+          const updatedMessages = [...currentMessages, tempUserMessage];
+          const newestFirst = [...updatedMessages].reverse();
+
+          queryClient.setQueryData<
+            InfiniteData<MessageListPaginatedResponse, string | undefined>
+          >(infiniteQueryKey, oldData => ({
+            pages: [
+              {
+                data: newestFirst,
+                next_cursor: oldData?.pages[0]?.next_cursor ?? null,
+                has_more: oldData?.pages[0]?.has_more ?? false,
+              },
+              ...(oldData?.pages.slice(1) ?? []),
+            ],
+            pageParams: oldData?.pageParams ?? [undefined],
           }));
 
+          // Send the event to the backend
           const response = await agentRPCNonStreaming(
             agentexClient,
             { agentName },
@@ -108,37 +152,41 @@ export function useSendMessage({
           );
 
           if (response.error != null) {
-            queryClient.setQueryData<TaskMessagesData>(queryKey, data => ({
-              messages: data?.messages || [],
-              deltaAccumulator: data?.deltaAccumulator || null,
-              rpcStatus: 'error',
-            }));
             throw new Error(response.error.message);
           }
 
-          queryClient.setQueryData<TaskMessagesData>(queryKey, data => ({
-            messages: data?.messages || [],
-            deltaAccumulator: data?.deltaAccumulator || null,
-            rpcStatus: 'pending',
-          }));
+          // Invalidate and refetch after a short delay to ensure we get the latest state
+          // This is a fallback in case the subscription doesn't update correctly
+          setTimeout(() => {
+            queryClient.invalidateQueries({
+              queryKey: infiniteTaskMessagesKeys.byTaskId(taskId),
+            });
+          }, 500);
 
-          return (
-            queryClient.getQueryData<TaskMessagesData>(queryKey) || {
-              messages: [],
-              deltaAccumulator: null,
-              rpcStatus: 'pending',
-            }
-          );
-        }
-
-        case 'sync': {
-          const currentData = queryClient.getQueryData<TaskMessagesData>(
-            queryKey
-          ) || {
-            messages: [],
+          return {
+            messages: updatedMessages,
             deltaAccumulator: null,
             rpcStatus: 'pending',
           };
+        }
+
+        case 'sync': {
+          const infiniteQueryKey = infiniteTaskMessagesKeys.byTaskId(taskId);
+
+          // Cancel any in-flight queries to prevent race conditions
+          await queryClient.cancelQueries({ queryKey: infiniteQueryKey });
+
+          // Get current messages from infinite query cache
+          const currentInfiniteData =
+            queryClient.getQueryData<
+              InfiniteData<MessageListPaginatedResponse, string | undefined>
+            >(infiniteQueryKey);
+
+          // Extract current messages (flattened and in chronological order)
+          let latestMessages: TaskMessage[] = currentInfiniteData
+            ? currentInfiniteData.pages.flatMap(page => page.data).reverse()
+            : [];
+          let latestDeltaAccumulator: IDeltaAccumulator | null = null;
 
           const tempUserMessage: TaskMessage = {
             id: v4(),
@@ -149,14 +197,28 @@ export function useSendMessage({
             updated_at: new Date().toISOString(),
           };
 
-          let latestMessages = [...currentData.messages, tempUserMessage];
-          let latestDeltaAccumulator = currentData.deltaAccumulator;
+          latestMessages = [...latestMessages, tempUserMessage];
 
-          queryClient.setQueryData<TaskMessagesData>(queryKey, {
-            messages: latestMessages,
-            deltaAccumulator: latestDeltaAccumulator,
-            rpcStatus: 'pending',
-          });
+          // Update the infinite query with optimistic update
+          const updateInfiniteCache = (messages: TaskMessage[]) => {
+            // Convert to newest-first for API format
+            const newestFirst = [...messages].reverse();
+            queryClient.setQueryData<
+              InfiniteData<MessageListPaginatedResponse, string | undefined>
+            >(infiniteQueryKey, oldData => ({
+              pages: [
+                {
+                  data: newestFirst,
+                  next_cursor: oldData?.pages[0]?.next_cursor ?? null,
+                  has_more: oldData?.pages[0]?.has_more ?? false,
+                },
+                ...(oldData?.pages.slice(1) ?? []),
+              ],
+              pageParams: oldData?.pageParams ?? [undefined],
+            }));
+          };
+
+          updateInfiniteCache(latestMessages);
 
           const controller = new AbortController();
 
@@ -168,19 +230,7 @@ export function useSendMessage({
             { signal: controller.signal }
           )) {
             if (response.error != null) {
-              queryClient.setQueryData<TaskMessagesData>(queryKey, data => ({
-                messages: data?.messages || [],
-                deltaAccumulator: data?.deltaAccumulator || null,
-                rpcStatus: 'error',
-              }));
               throw new Error(response.error.message);
-            }
-
-            const cacheData =
-              queryClient.getQueryData<TaskMessagesData>(queryKey);
-            if (cacheData) {
-              latestMessages = cacheData.messages;
-              latestDeltaAccumulator = cacheData.deltaAccumulator;
             }
 
             const result = aggregateMessageEvents(
@@ -192,30 +242,36 @@ export function useSendMessage({
             latestMessages = result.messages;
             latestDeltaAccumulator = result.deltaAccumulator;
 
-            queryClient.setQueryData<TaskMessagesData>(queryKey, {
-              messages: latestMessages,
-              deltaAccumulator: latestDeltaAccumulator,
-              rpcStatus: 'pending',
-            });
+            updateInfiniteCache(latestMessages);
 
             if (response.result.type === 'done') {
               queryClient.invalidateQueries({ queryKey: ['spans', taskId] });
             }
           }
 
-          const finalMessages = await agentexClient.messages.list({
+          // Fetch final state from server to ensure consistency
+          const response = await agentexClient.messages.listPaginated({
             task_id: taskId,
           });
 
-          // API returns messages in descending order (newest first),
-          // reverse to chronological order (oldest first) for display
-          const chronologicalMessages = finalMessages.slice().reverse();
+          // API returns messages in descending order (newest first)
+          const newestFirstMessages = response.data;
+          const chronologicalMessages = newestFirstMessages.slice().reverse();
 
-          queryClient.setQueryData<TaskMessagesData>(queryKey, {
-            messages: chronologicalMessages,
-            deltaAccumulator: null,
-            rpcStatus: 'success',
-          });
+          // Update the first page with server data
+          queryClient.setQueryData<
+            InfiniteData<MessageListPaginatedResponse, string | undefined>
+          >(infiniteQueryKey, oldData => ({
+            pages: [
+              {
+                data: newestFirstMessages,
+                next_cursor: response.next_cursor ?? null,
+                has_more: response.has_more ?? false,
+              },
+              ...(oldData?.pages.slice(1) ?? []),
+            ],
+            pageParams: oldData?.pageParams ?? [undefined],
+          }));
 
           return {
             messages: chronologicalMessages,
