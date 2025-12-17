@@ -239,13 +239,23 @@ class TaskMessageEntity(BaseModel):
 
 
 class TaskMessageEntityFilter(BaseModel):
-    """Filter model for TaskMessage - all fields optional for flexible filtering."""
+    """Filter model for TaskMessage - all fields optional for flexible filtering.
+
+    The `exclude` field determines whether this filter is inclusionary or exclusionary.
+    When multiple filters are provided:
+    - Inclusionary filters (exclude=False) are OR'd together
+    - Exclusionary filters (exclude=True) are OR'd together and negated with $nor
+    - The two groups are AND'd: (include1 OR include2) AND NOT (exclude1 OR exclude2)
+    """
 
     content: OptionalTaskMessageContentEntity | None = Field(
         None, description="Filter by message content"
     )
     streaming_status: Literal["IN_PROGRESS", "DONE"] | None = Field(
         None, description="Filter by streaming status"
+    )
+    exclude: bool = Field(
+        False, description="If true, this filter excludes matching messages"
     )
 
 
