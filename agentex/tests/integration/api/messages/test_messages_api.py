@@ -847,10 +847,9 @@ class TestMessagesAPIIntegration:
         assert all(
             msg["content"]["data"]["status"] == "completed" for msg in filtered_messages
         )
-        assert (m["id"] for m in filtered_messages) == (
+        assert {m["id"] for m in filtered_messages} == {
             m.id for m in completed_messages
-        )
-
+        }
         # When - Filter by partial match on data.status="pending"
         response = await isolated_client.get(
             "/messages",
@@ -988,8 +987,7 @@ class TestMessagesAPIIntegration:
             msg["content"]["data"]["metadata"]["user"]["role"] == "admin"
             for msg in filtered_messages
         )
-        assert (m["id"] for m in filtered_messages) == (m.id for m in admin_messages)
-
+        assert {m["id"] for m in filtered_messages} == {m.id for m in admin_messages}
         # When - Filter by deeply nested field: metadata.user.role="viewer"
         response = await isolated_client.get(
             "/messages",
@@ -1164,3 +1162,101 @@ class TestMessagesAPIIntegration:
         # This will return a 200 error and an empty list
         assert response.status_code == 200
         assert len(response.json()) == 0
+
+    async def test_list_messages_filter_data_type_in_multiple_values(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test filtering data messages where content.data.type matches multiple values using $in"""
+        # Given - Create agent and task
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="data-type-filter-agent",
+            description="Agent for data type filter testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="data-type-filter-task",
+            status=TaskStatus.RUNNING,
+            status_reason="Task for data type filter testing",
+        )
+        await task_repo.create(agent_id=agent.id, task=task)
+
+        message_repo = isolated_repositories["task_message_repository"]
+
+        # Create messages with different data types
+        report_status_messages = []
+        for i in range(2):
+            msg = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=DataContentEntity(
+                    type="data",
+                    author="agent",
+                    data={"type": "report_status_update", "status": f"update_{i}"},
+                ),
+                streaming_status="DONE",
+            )
+            await message_repo.create(msg)
+            report_status_messages.append(msg)
+
+        reasoning_summary_messages = []
+        for i in range(3):
+            msg = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=DataContentEntity(
+                    type="data",
+                    author="agent",
+                    data={"type": "reasoning_summary", "summary": f"reasoning_{i}"},
+                ),
+                streaming_status="DONE",
+            )
+            await message_repo.create(msg)
+            reasoning_summary_messages.append(msg)
+
+        # Create other data messages that should NOT be matched
+        other_messages = []
+        for data_type in ["progress_update", "error_report", "final_result"]:
+            msg = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=DataContentEntity(
+                    type="data",
+                    author="agent",
+                    data={"type": data_type, "info": "other data"},
+                ),
+                streaming_status="DONE",
+            )
+            await message_repo.create(msg)
+            other_messages.append(msg)
+
+        # When - Filter for messages where content.data.type is "report_status_update" OR "reasoning_summary"
+        response = await isolated_client.get(
+            "/messages",
+            params={
+                "task_id": task.id,
+                "filters": '[{"content": {"data": {"type": "report_status_update"}}}, {"content": {"data": {"type": "reasoning_summary"}}}]',
+            },
+        )
+
+        # Then - Should return only report_status_update and reasoning_summary messages (5 total)
+        assert response.status_code == 200
+        filtered_messages = response.json()
+        assert len(filtered_messages) == 5
+
+        # Verify all returned messages have the expected data types
+        returned_types = {msg["content"]["data"]["type"] for msg in filtered_messages}
+        assert returned_types == {"report_status_update", "reasoning_summary"}
+
+        # Verify the correct message IDs are returned
+        expected_ids = {
+            m.id for m in report_status_messages + reasoning_summary_messages
+        }
+        actual_ids = {m["id"] for m in filtered_messages}
+        assert actual_ids == expected_ids
