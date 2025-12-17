@@ -36,6 +36,15 @@ class TaskMessageRepository(MongoDBCRUDRepository[TaskMessageEntity]):
             "name": "task_id_streaming_status_idx",
             "description": "Index for streaming status queries during streaming operations",
         },
+        {
+            "keys": [
+                ("task_id", pymongo.ASCENDING),
+                ("content.type", pymongo.ASCENDING),
+                ("created_at", pymongo.ASCENDING),
+            ],
+            "name": "task_id_content_type_created_at_idx",
+            "description": "Compound index for filtering messages by task_id, content type, and sorting by created_at",
+        },
     ]
 
     def __init__(self, db: DMongoDBDatabase):

@@ -1,6 +1,7 @@
+import json
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import Field
 
 from src.api.schemas.authorization_types import (
@@ -14,7 +15,10 @@ from src.api.schemas.task_messages import (
     TaskMessage,
     UpdateTaskMessageRequest,
 )
-from src.domain.entities.task_messages import convert_task_message_content_to_entity
+from src.domain.entities.task_messages import (
+    TaskMessageEntityFilter,
+    convert_task_message_content_to_entity,
+)
 from src.domain.use_cases.messages_use_case import DMessageUseCase
 from src.utils.authorization_shortcuts import DAuthorizedBodyId, DAuthorizedQuery
 from src.utils.model_utils import BaseModel
@@ -134,18 +138,31 @@ async def list_messages(
     page_number: int = 1,
     order_by: str | None = None,
     order_direction: str = "desc",
+    filters: str | None = Query(None, description="JSON-encoded filter object"),
 ) -> list[TaskMessage]:
     """
     List messages for a task with offset-based pagination.
 
     For cursor-based pagination with infinite scroll support, use /messages/paginated.
     """
+    # Parse the JSON filter string into a TaskMessageEntityFilter
+    parsed_filter = None
+    if filters:
+        try:
+            parsed_filter = TaskMessageEntityFilter(**json.loads(filters))
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid JSON in filters parameter: {e.msg}",
+            ) from e
+
     task_message_entities = await message_use_case.list_messages(
         task_id=task_id,
         limit=limit,
         page_number=page_number,
         order_by=order_by,
         order_direction=order_direction,
+        filters=parsed_filter,
     )
 
     return [
@@ -164,6 +181,7 @@ async def list_messages_paginated(
     limit: int = 50,
     cursor: str | None = None,
     direction: Literal["older", "newer"] = "older",
+    filters: str | None = Query(None, description="JSON-encoded filter object"),
 ) -> PaginatedMessagesResponse:
     """
     List messages for a task with cursor-based pagination.
@@ -189,6 +207,17 @@ async def list_messages_paginated(
         First request: GET /messages/paginated?task_id=xxx&limit=50
         Next page: GET /messages/paginated?task_id=xxx&limit=50&cursor=<next_cursor>
     """
+    # Parse the JSON filter string into a TaskMessageEntityFilter
+    parsed_filter = None
+    if filters:
+        try:
+            parsed_filter = TaskMessageEntityFilter(**json.loads(filters))
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid JSON in filters parameter: {e.msg}",
+            ) from e
+
     # Decode cursor if provided
     before_id = None
     after_id = None
@@ -212,6 +241,7 @@ async def list_messages_paginated(
         order_direction="desc",
         before_id=before_id,
         after_id=after_id,
+        filters=parsed_filter,
     )
 
     # Check if there are more results

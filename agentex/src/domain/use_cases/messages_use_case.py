@@ -1,15 +1,37 @@
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends
 
 from src.domain.entities.task_messages import (
     TaskMessageContentEntity,
     TaskMessageEntity,
+    TaskMessageEntityFilter,
 )
 from src.domain.services.task_message_service import DTaskMessageService
-from src.utils.logging import make_logger
 
-logger = make_logger(__name__)
+
+def convert_filters_to_mongodb_query(
+    filters: TaskMessageEntityFilter,
+) -> dict[str, Any]:
+    """
+    Convert TaskMessageEntityFilter to MongoDB query dict.
+
+    Flattens nested objects to dot notation for MongoDB queries.
+    e.g., {"content": {"type": "text"}} -> {"content.type": "text"}
+    """
+
+    def flatten(obj: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in obj.items():
+            full_key = f"{prefix}.{key}" if prefix else key
+            if isinstance(value, dict):
+                result.update(flatten(value, full_key))
+            else:
+                result[full_key] = value
+        return result
+
+    data = filters.model_dump(exclude_none=True)
+    return flatten(data)
 
 
 class MessagesUseCase:
@@ -113,6 +135,7 @@ class MessagesUseCase:
         order_direction: str = "desc",
         before_id: str | None = None,
         after_id: str | None = None,
+        filters: TaskMessageEntityFilter | None = None,
     ) -> list[TaskMessageEntity]:
         """
         Get all messages for a task with optional cursor-based pagination.
@@ -132,6 +155,9 @@ class MessagesUseCase:
         Note:
             When using before_id or after_id, page_number is ignored.
         """
+        converted_filters = (
+            convert_filters_to_mongodb_query(filters) if filters else None
+        )
         return await self.task_message_service.get_messages(
             task_id=task_id,
             limit=limit,
@@ -140,6 +166,7 @@ class MessagesUseCase:
             order_direction=order_direction,
             before_id=before_id,
             after_id=after_id,
+            filters=converted_filters,
         )
 
 

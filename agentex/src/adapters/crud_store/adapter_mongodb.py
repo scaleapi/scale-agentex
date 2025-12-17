@@ -555,6 +555,7 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
         limit: int | None = None,
         page_number: int | None = None,
         sort_by: dict[str, int] | None = None,
+        filters: dict[str, Any] | None = None,
     ) -> builtins.list[T]:
         """
         Find documents by a given field.
@@ -581,7 +582,11 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
                     pass
 
             # Create a cursor
-            cursor = self.collection.find({mongo_field_name: mongo_field_value})
+            query: dict[str, Any] = {mongo_field_name: mongo_field_value}
+            if filters:
+                query.update(filters)
+
+            cursor = self.collection.find(query)
 
             # Apply sorting
             sort_by_items = list(sort_by.items()) if sort_by else []
@@ -613,6 +618,7 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
         sort_by: dict[str, int] | None = None,
         before_id: str | None = None,
         after_id: str | None = None,
+        filters: dict[str, Any] | None = None,
     ) -> builtins.list[T]:
         """
         Find documents by a given field with cursor-based pagination.
@@ -646,6 +652,8 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
             # Build base query
             query: dict[str, Any] = {mongo_field_name: mongo_field_value}
 
+            if filters:
+                query.update(filters)
             # If cursor is provided, look up the cursor document's timestamp
             # Use compound comparison (created_at, _id) to handle timestamp ties
             if before_id or after_id:
@@ -659,25 +667,27 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
                 if cursor_doc and "created_at" in cursor_doc:
                     cursor_timestamp = cursor_doc["created_at"]
                     if before_id:
-                        # Get documents where:
-                        # - created_at < cursor_timestamp, OR
-                        # - created_at == cursor_timestamp AND _id < cursor_id (tie-breaker)
+                        # Get documents where (for descending created_at, ascending _id sort):
+                        # - created_at < cursor_timestamp (strictly older), OR
+                        # - created_at == cursor_timestamp AND _id > cursor_id (same timestamp,
+                        #   but later in ascending _id order, i.e., comes after cursor in results)
                         query["$or"] = [
                             {"created_at": {"$lt": cursor_timestamp}},
                             {
                                 "created_at": cursor_timestamp,
-                                "_id": {"$lt": cursor_object_id},
+                                "_id": {"$gt": cursor_object_id},
                             },
                         ]
                     else:  # after_id
-                        # Get documents where:
-                        # - created_at > cursor_timestamp, OR
-                        # - created_at == cursor_timestamp AND _id > cursor_id (tie-breaker)
+                        # Get documents where (for descending created_at, ascending _id sort):
+                        # - created_at > cursor_timestamp (strictly newer), OR
+                        # - created_at == cursor_timestamp AND _id < cursor_id (same timestamp,
+                        #   but earlier in ascending _id order, i.e., comes before cursor in results)
                         query["$or"] = [
                             {"created_at": {"$gt": cursor_timestamp}},
                             {
                                 "created_at": cursor_timestamp,
-                                "_id": {"$gt": cursor_object_id},
+                                "_id": {"$lt": cursor_object_id},
                             },
                         ]
 
