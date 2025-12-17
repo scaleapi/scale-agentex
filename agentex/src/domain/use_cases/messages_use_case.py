@@ -54,10 +54,7 @@ def convert_filters_to_mongodb_query(
     # Build include query (OR'd together)
     if include_filters:
         converted = [_convert_single_filter(f) for f in include_filters]
-        if len(converted) == 1:
-            include_query = converted[0]
-        else:
-            include_query = {"$or": converted}
+        include_query = {"$or": converted}
 
     # Build exclude query (OR'd together, then $nor)
     if exclude_filters:
