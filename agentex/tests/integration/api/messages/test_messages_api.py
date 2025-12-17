@@ -1260,3 +1260,168 @@ class TestMessagesAPIIntegration:
         }
         actual_ids = {m["id"] for m in filtered_messages}
         assert actual_ids == expected_ids
+
+    async def test_list_messages_filter_with_exclusions(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test filtering messages with both inclusionary and exclusionary filters."""
+        # Given - Create agent and task
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="exclusion-filter-agent",
+            description="Agent for exclusion filter testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="exclusion-filter-task",
+            status=TaskStatus.RUNNING,
+            status_reason="Task for exclusion filter testing",
+        )
+        await task_repo.create(agent_id=agent.id, task=task)
+
+        message_repo = isolated_repositories["task_message_repository"]
+
+        # Create data messages with various types
+        included_messages = []
+        for data_type in ["report_status_update", "reasoning_summary", "task_created"]:
+            msg = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=DataContentEntity(
+                    type="data",
+                    author="agent",
+                    data={"type": data_type, "info": f"info for {data_type}"},
+                ),
+                streaming_status="DONE",
+            )
+            await message_repo.create(msg)
+            included_messages.append(msg)
+
+        # Create messages that should be excluded
+        excluded_messages = []
+        for data_type in ["progress_update", "error_report"]:
+            msg = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=DataContentEntity(
+                    type="data",
+                    author="agent",
+                    data={"type": data_type, "info": f"info for {data_type}"},
+                ),
+                streaming_status="DONE",
+            )
+            await message_repo.create(msg)
+            excluded_messages.append(msg)
+
+        # When - Filter with exclusion: get all data messages except progress_update and error_report
+        response = await isolated_client.get(
+            "/messages",
+            params={
+                "task_id": task.id,
+                "filters": '[{"content": {"type": "data"}}, {"content": {"data": {"type": "progress_update"}}, "exclude": true}, {"content": {"data": {"type": "error_report"}}, "exclude": true}]',
+            },
+        )
+
+        # Then - Should return only the included messages (3), not the excluded ones (2)
+        assert response.status_code == 200
+        filtered_messages = response.json()
+        assert len(filtered_messages) == 3
+
+        returned_types = {msg["content"]["data"]["type"] for msg in filtered_messages}
+        assert returned_types == {
+            "report_status_update",
+            "reasoning_summary",
+            "task_created",
+        }
+
+        expected_ids = {m.id for m in included_messages}
+        actual_ids = {m["id"] for m in filtered_messages}
+        assert actual_ids == expected_ids
+
+        # Verify excluded messages are not in results
+        excluded_ids = {m.id for m in excluded_messages}
+        assert actual_ids.isdisjoint(excluded_ids)
+
+    async def test_list_messages_filter_exclusion_only(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test filtering messages with only exclusionary filters (no inclusionary)."""
+        # Given - Create agent and task
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="exclusion-only-agent",
+            description="Agent for exclusion-only filter testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="exclusion-only-task",
+            status=TaskStatus.RUNNING,
+            status_reason="Task for exclusion-only filter testing",
+        )
+        await task_repo.create(agent_id=agent.id, task=task)
+
+        message_repo = isolated_repositories["task_message_repository"]
+
+        # Create text messages
+        text_messages = []
+        for i in range(3):
+            msg = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=TextContentEntity(
+                    type="text",
+                    author="agent",
+                    content=f"Text message {i}",
+                ),
+                streaming_status="DONE",
+            )
+            await message_repo.create(msg)
+            text_messages.append(msg)
+
+        # Create data messages to exclude
+        data_messages = []
+        for i in range(2):
+            msg = TaskMessageEntity(
+                id=orm_id(),
+                task_id=task.id,
+                content=DataContentEntity(
+                    type="data",
+                    author="agent",
+                    data={"type": "excluded_type", "index": i},
+                ),
+                streaming_status="DONE",
+            )
+            await message_repo.create(msg)
+            data_messages.append(msg)
+
+        # When - Filter to exclude data messages only (no inclusionary filter)
+        response = await isolated_client.get(
+            "/messages",
+            params={
+                "task_id": task.id,
+                "filters": '[{"content": {"type": "data"}, "exclude": true}]',
+            },
+        )
+
+        # Then - Should return only text messages
+        assert response.status_code == 200
+        filtered_messages = response.json()
+        assert len(filtered_messages) == 3
+
+        assert all(msg["content"]["type"] == "text" for msg in filtered_messages)
+
+        expected_ids = {m.id for m in text_messages}
+        actual_ids = {m["id"] for m in filtered_messages}
+        assert actual_ids == expected_ids

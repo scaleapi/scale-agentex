@@ -10,49 +10,69 @@ from src.domain.entities.task_messages import (
 from src.domain.services.task_message_service import DTaskMessageService
 
 
-def convert_filter_to_mongodb_query(
-    filter_obj: TaskMessageEntityFilter,
-) -> dict[str, Any]:
-    """
-    Convert a single TaskMessageEntityFilter to MongoDB query dict.
-    Flattens nested objects to dot notation for MongoDB queries.
-    e.g., {"content": {"type": "text"}} -> {"content.type": "text"}
-    """
+def _flatten_to_dot_notation(obj: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+    """Flatten nested dict to dot notation for MongoDB queries."""
+    result: dict[str, Any] = {}
+    for key, value in obj.items():
+        full_key = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            result.update(_flatten_to_dot_notation(value, full_key))
+        else:
+            result[full_key] = value
+    return result
 
-    def flatten(obj: dict[str, Any], prefix: str = "") -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for key, value in obj.items():
-            full_key = f"{prefix}.{key}" if prefix else key
-            if isinstance(value, dict):
-                result.update(flatten(value, full_key))
-            else:
-                result[full_key] = value
-        return result
 
-    data = filter_obj.model_dump(exclude_none=True)
-    return flatten(data)
+def _convert_single_filter(filter_obj: TaskMessageEntityFilter) -> dict[str, Any]:
+    """Convert a single filter to MongoDB query dict, excluding the 'exclude' field."""
+    data = filter_obj.model_dump(exclude_none=True, exclude={"exclude"})
+    return _flatten_to_dot_notation(data)
 
 
 def convert_filters_to_mongodb_query(
     filters: list[TaskMessageEntityFilter],
 ) -> dict[str, Any]:
     """
-    Convert a list of TaskMessageEntityFilters to a MongoDB query dict.
+    Convert a list of TaskMessageEntityFilters to MongoDB query dict.
 
-    Multiple filters are combined with $or logic.
-    Each filter is flattened to dot notation for nested field matching.
+    Filters are separated into include (exclude=False) and exclude (exclude=True) groups:
+    - Inclusionary filters are OR'd together
+    - Exclusionary filters are OR'd together and negated with $nor
+    - The two groups are AND'd: (include1 OR include2) AND NOT (exclude1 OR exclude2)
 
-    e.g., [{"content": {"data": {"type": "a"}}}, {"content": {"data": {"type": "b"}}}]
-    -> {"$or": [{"content.data.type": "a"}, {"content.data.type": "b"}]}
+    e.g., [{"content": {"type": "text"}}, {"content": {"data": {"type": "x"}}, "exclude": true}]
+    -> {"$and": [{"content.type": "text"}, {"$nor": [{"content.data.type": "x"}]}]}
     """
     if not filters:
         return {}
 
-    if len(filters) == 1:
-        return convert_filter_to_mongodb_query(filters[0])
+    include_filters = [f for f in filters if not f.exclude]
+    exclude_filters = [f for f in filters if f.exclude]
 
-    # Multiple filters - combine with $or
-    return {"$or": [convert_filter_to_mongodb_query(f) for f in filters]}
+    include_query: dict[str, Any] | None = None
+    exclude_query: dict[str, Any] | None = None
+
+    # Build include query (OR'd together)
+    if include_filters:
+        converted = [_convert_single_filter(f) for f in include_filters]
+        if len(converted) == 1:
+            include_query = converted[0]
+        else:
+            include_query = {"$or": converted}
+
+    # Build exclude query (OR'd together, then $nor)
+    if exclude_filters:
+        converted = [_convert_single_filter(f) for f in exclude_filters]
+        exclude_query = {"$nor": converted}
+
+    # Combine with $and if both exist
+    if include_query and exclude_query:
+        return {"$and": [include_query, exclude_query]}
+    elif include_query:
+        return include_query
+    elif exclude_query:
+        return exclude_query
+    else:
+        return {}
 
 
 class MessagesUseCase:

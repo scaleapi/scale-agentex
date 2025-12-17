@@ -26,6 +26,41 @@ from src.utils.pagination import decode_cursor, encode_cursor
 
 router = APIRouter(prefix="/messages", tags=["Messages"])
 
+# Generate JSON schema reference for TaskMessageEntityFilter
+_filter_schema = TaskMessageEntityFilter.model_json_schema()
+
+FILTERS_DESCRIPTION = f"""JSON-encoded array of TaskMessageEntityFilter objects.
+
+Schema: {json.dumps(_filter_schema, indent=2)}
+
+Each filter can include:
+- `content`: Filter by message content (type, author, data fields)
+- `streaming_status`: Filter by status ("IN_PROGRESS" or "DONE")
+- `exclude`: If true, excludes matching messages (default: false)
+
+Multiple filters are combined: inclusionary filters (exclude=false) are OR'd together,
+exclusionary filters (exclude=true) are OR'd and negated, then both groups are AND'd.
+"""
+
+FILTERS_EXAMPLES = {
+    "single_filter": {
+        "summary": "Filter by content type",
+        "value": '{"content": {"type": "text"}}',
+    },
+    "multiple_types": {
+        "summary": "Filter multiple content types (OR)",
+        "value": '[{"content": {"type": "text"}}, {"content": {"type": "data"}}]',
+    },
+    "with_exclusion": {
+        "summary": "Include data messages, exclude specific data types",
+        "value": '[{"content": {"type": "data"}}, {"content": {"data": {"type": "error_report"}}, "exclude": true}]',
+    },
+    "nested_data": {
+        "summary": "Filter by nested data field",
+        "value": '{"content": {"data": {"type": "report_status_update"}}}',
+    },
+}
+
 
 class PaginatedMessagesResponse(BaseModel):
     """Response with cursor pagination metadata."""
@@ -138,7 +173,9 @@ async def list_messages(
     page_number: int = 1,
     order_by: str | None = None,
     order_direction: str = "desc",
-    filters: str | None = Query(None, description="JSON-encoded filter object"),
+    filters: str | None = Query(
+        None, description=FILTERS_DESCRIPTION, openapi_examples=FILTERS_EXAMPLES
+    ),
 ) -> list[TaskMessage]:
     """
     List messages for a task with offset-based pagination.
@@ -186,7 +223,9 @@ async def list_messages_paginated(
     limit: int = 50,
     cursor: str | None = None,
     direction: Literal["older", "newer"] = "older",
-    filters: str | None = Query(None, description="JSON-encoded filter object"),
+    filters: str | None = Query(
+        None, description=FILTERS_DESCRIPTION, openapi_examples=FILTERS_EXAMPLES
+    ),
 ) -> PaginatedMessagesResponse:
     """
     List messages for a task with cursor-based pagination.
