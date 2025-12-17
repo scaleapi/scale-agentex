@@ -10,11 +10,11 @@ from src.domain.entities.task_messages import (
 from src.domain.services.task_message_service import DTaskMessageService
 
 
-def convert_filters_to_mongodb_query(
-    filters: TaskMessageEntityFilter,
+def convert_filter_to_mongodb_query(
+    filter_obj: TaskMessageEntityFilter,
 ) -> dict[str, Any]:
     """
-    Convert TaskMessageEntityFilter to MongoDB query dict.
+    Convert a single TaskMessageEntityFilter to MongoDB query dict.
 
     Flattens nested objects to dot notation for MongoDB queries.
     e.g., {"content": {"type": "text"}} -> {"content.type": "text"}
@@ -30,8 +30,30 @@ def convert_filters_to_mongodb_query(
                 result[full_key] = value
         return result
 
-    data = filters.model_dump(exclude_none=True)
+    data = filter_obj.model_dump(exclude_none=True)
     return flatten(data)
+
+
+def convert_filters_to_mongodb_query(
+    filters: list[TaskMessageEntityFilter],
+) -> dict[str, Any]:
+    """
+    Convert a list of TaskMessageEntityFilters to a MongoDB query dict.
+
+    Multiple filters are combined with $or logic.
+    Each filter is flattened to dot notation for nested field matching.
+
+    e.g., [{"content": {"data": {"type": "a"}}}, {"content": {"data": {"type": "b"}}}]
+    -> {"$or": [{"content.data.type": "a"}, {"content.data.type": "b"}]}
+    """
+    if not filters:
+        return {}
+
+    if len(filters) == 1:
+        return convert_filter_to_mongodb_query(filters[0])
+
+    # Multiple filters - combine with $or
+    return {"$or": [convert_filter_to_mongodb_query(f) for f in filters]}
 
 
 class MessagesUseCase:
@@ -135,7 +157,7 @@ class MessagesUseCase:
         order_direction: str = "desc",
         before_id: str | None = None,
         after_id: str | None = None,
-        filters: TaskMessageEntityFilter | None = None,
+        filters: list[TaskMessageEntityFilter] | None = None,
     ) -> list[TaskMessageEntity]:
         """
         Get all messages for a task with optional cursor-based pagination.
@@ -148,6 +170,7 @@ class MessagesUseCase:
             order_direction: Direction to order by ("asc" or "desc", defaults to "desc")
             before_id: Get messages created before this message ID (cursor pagination)
             after_id: Get messages created after this message ID (cursor pagination)
+            filters: List of filters to apply (combined with AND logic)
 
         Returns:
             List of TaskMessageEntity objects for the task

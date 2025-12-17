@@ -145,11 +145,16 @@ async def list_messages(
 
     For cursor-based pagination with infinite scroll support, use /messages/paginated.
     """
-    # Parse the JSON filter string into a TaskMessageEntityFilter
-    parsed_filter = None
+    # Parse the JSON filter string into a list of TaskMessageEntityFilter
+    parsed_filters: list[TaskMessageEntityFilter] | None = None
     if filters:
         try:
-            parsed_filter = TaskMessageEntityFilter(**json.loads(filters))
+            filters_data = json.loads(filters)
+            # Support both single filter object and array of filters
+            if isinstance(filters_data, list):
+                parsed_filters = [TaskMessageEntityFilter(**f) for f in filters_data]
+            else:
+                parsed_filters = [TaskMessageEntityFilter(**filters_data)]
         except json.JSONDecodeError as e:
             raise HTTPException(
                 status_code=400,
@@ -162,7 +167,7 @@ async def list_messages(
         page_number=page_number,
         order_by=order_by,
         order_direction=order_direction,
-        filters=parsed_filter,
+        filters=parsed_filters,
     )
 
     return [
@@ -207,11 +212,16 @@ async def list_messages_paginated(
         First request: GET /messages/paginated?task_id=xxx&limit=50
         Next page: GET /messages/paginated?task_id=xxx&limit=50&cursor=<next_cursor>
     """
-    # Parse the JSON filter string into a TaskMessageEntityFilter
-    parsed_filter = None
+    # Parse the JSON filter string into a list of TaskMessageEntityFilter
+    parsed_filters: list[TaskMessageEntityFilter] | None = None
     if filters:
         try:
-            parsed_filter = TaskMessageEntityFilter(**json.loads(filters))
+            filters_data = json.loads(filters)
+            # Support both single filter object and array of filters
+            if isinstance(filters_data, list):
+                parsed_filters = [TaskMessageEntityFilter(**f) for f in filters_data]
+            else:
+                parsed_filters = [TaskMessageEntityFilter(**filters_data)]
         except json.JSONDecodeError as e:
             raise HTTPException(
                 status_code=400,
@@ -241,7 +251,7 @@ async def list_messages_paginated(
         order_direction="desc",
         before_id=before_id,
         after_id=after_id,
-        filters=parsed_filter,
+        filters=parsed_filters,
     )
 
     # Check if there are more results
