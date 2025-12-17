@@ -850,7 +850,6 @@ class TestMessagesAPIIntegration:
         assert {m["id"] for m in filtered_messages} == {
             m.id for m in completed_messages
         }
-
         # When - Filter by partial match on data.status="pending"
         response = await isolated_client.get(
             "/messages",
@@ -989,7 +988,6 @@ class TestMessagesAPIIntegration:
             for msg in filtered_messages
         )
         assert {m["id"] for m in filtered_messages} == {m.id for m in admin_messages}
-
         # When - Filter by deeply nested field: metadata.user.role="viewer"
         response = await isolated_client.get(
             "/messages",

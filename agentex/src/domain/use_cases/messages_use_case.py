@@ -15,7 +15,6 @@ def convert_filter_to_mongodb_query(
 ) -> dict[str, Any]:
     """
     Convert a single TaskMessageEntityFilter to MongoDB query dict.
-
     Flattens nested objects to dot notation for MongoDB queries.
     e.g., {"content": {"type": "text"}} -> {"content.type": "text"}
     """
