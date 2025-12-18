@@ -29,8 +29,10 @@ from typing_extensions import TypeVar
 from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
 from src.adapters.crud_store.port import CRUDRepository
 from src.adapters.orm import BaseORM
-from src.config.dependencies import DDatabaseAsyncReadWriteSessionMaker
-from src.config.environment_variables import EnvironmentVariables
+from src.config.dependencies import (
+    DDatabaseAsyncReadWriteSessionMaker,
+    GlobalDependencies,
+)
 from src.domain.exceptions import ClientError, ServiceError
 from src.utils.logging import make_logger
 from src.utils.model_utils import BaseModel
@@ -149,18 +151,20 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
         async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker,
         orm: type[M],
         entity: type[T],
-        environment_variables: EnvironmentVariables | None = None,
     ):
         self.async_rw_session_maker = async_read_write_session_maker
         self.orm = orm
         self.entity = entity
 
-        # Initialize performance logger if environment variables provided
-        if environment_variables:
+        # Initialize performance logger from GlobalDependencies singleton
+        # This automatically gets environment variables when the app is running
+        try:
+            env_vars = GlobalDependencies().environment_variables
             self._perf_logger: PostgresPerformanceLogger | None = (
-                create_postgres_perf_logger(environment_variables)
+                create_postgres_perf_logger(env_vars)
             )
-        else:
+        except Exception:
+            # Singleton not initialized (e.g., in tests without full app context)
             self._perf_logger = None
 
         # Extract table name from ORM for metrics

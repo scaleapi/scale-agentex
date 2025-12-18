@@ -9,10 +9,7 @@ from src.adapters.crud_store.adapter_postgres import (
     async_sql_exception_handler,
 )
 from src.adapters.orm import AgentORM, TaskAgentORM
-from src.config.dependencies import (
-    DDatabaseAsyncReadWriteSessionMaker,
-    DEnvironmentVariables,
-)
+from src.config.dependencies import DDatabaseAsyncReadWriteSessionMaker
 from src.domain.entities.agents import AgentEntity, AgentStatus
 from src.utils.logging import make_logger
 
@@ -23,13 +20,11 @@ class AgentRepository(PostgresCRUDRepository[AgentORM, AgentEntity]):
     def __init__(
         self,
         async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker,
-        environment_variables: DEnvironmentVariables | None = None,
     ):
         super().__init__(
             async_read_write_session_maker,
             AgentORM,
             AgentEntity,
-            environment_variables=environment_variables,
         )
 
     async def list(
