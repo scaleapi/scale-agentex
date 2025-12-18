@@ -5,7 +5,10 @@ from fastapi import Depends
 from sqlalchemy import desc, select
 from src.adapters.crud_store.adapter_postgres import PostgresCRUDRepository
 from src.adapters.orm import AgentORM, DeploymentHistoryORM
-from src.config.dependencies import DDatabaseAsyncReadWriteSessionMaker
+from src.config.dependencies import (
+    DDatabaseAsyncReadWriteSessionMaker,
+    DEnvironmentVariables,
+)
 from src.domain.entities.agents import AgentEntity
 from src.domain.entities.deployment_history import DeploymentHistoryEntity
 from src.utils.ids import orm_id
@@ -22,11 +25,13 @@ class DeploymentHistoryRepository(
     def __init__(
         self,
         async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker,
+        environment_variables: DEnvironmentVariables | None = None,
     ):
         super().__init__(
             async_read_write_session_maker,
             DeploymentHistoryORM,
             DeploymentHistoryEntity,
+            environment_variables=environment_variables,
         )
 
     async def list(

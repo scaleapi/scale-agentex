@@ -3,7 +3,10 @@ from typing import Annotated, Any
 from fastapi import Depends
 from src.adapters.crud_store.adapter_postgres import PostgresCRUDRepository
 from src.adapters.orm import SpanORM
-from src.config.dependencies import DDatabaseAsyncReadWriteSessionMaker
+from src.config.dependencies import (
+    DDatabaseAsyncReadWriteSessionMaker,
+    DEnvironmentVariables,
+)
 from src.domain.entities.spans import SpanEntity
 from src.utils.logging import make_logger
 
@@ -12,9 +15,16 @@ logger = make_logger(__name__)
 
 class SpanRepository(PostgresCRUDRepository[SpanORM, SpanEntity]):
     def __init__(
-        self, async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker
+        self,
+        async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker,
+        environment_variables: DEnvironmentVariables | None = None,
     ):
-        super().__init__(async_read_write_session_maker, SpanORM, SpanEntity)
+        super().__init__(
+            async_read_write_session_maker,
+            SpanORM,
+            SpanEntity,
+            environment_variables=environment_variables,
+        )
 
     async def list(
         self,

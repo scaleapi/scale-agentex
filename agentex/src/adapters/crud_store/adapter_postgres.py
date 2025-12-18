@@ -30,9 +30,15 @@ from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotEx
 from src.adapters.crud_store.port import CRUDRepository
 from src.adapters.orm import BaseORM
 from src.config.dependencies import DDatabaseAsyncReadWriteSessionMaker
+from src.config.environment_variables import EnvironmentVariables
 from src.domain.exceptions import ClientError, ServiceError
 from src.utils.logging import make_logger
 from src.utils.model_utils import BaseModel
+from src.utils.postgres_perf_logging import (
+    PostgresPerformanceLogger,
+    QueryType,
+    create_postgres_perf_logger,
+)
 
 logger = make_logger(__name__)
 
@@ -143,10 +149,22 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
         async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker,
         orm: type[M],
         entity: type[T],
+        environment_variables: EnvironmentVariables | None = None,
     ):
         self.async_rw_session_maker = async_read_write_session_maker
         self.orm = orm
         self.entity = entity
+
+        # Initialize performance logger if environment variables provided
+        if environment_variables:
+            self._perf_logger: PostgresPerformanceLogger | None = (
+                create_postgres_perf_logger(environment_variables)
+            )
+        else:
+            self._perf_logger = None
+
+        # Extract table name from ORM for metrics
+        self._table_name = getattr(self.orm, "__tablename__", self.orm.__name__)
 
     @asynccontextmanager
     async def start_async_db_session(
@@ -159,10 +177,35 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
         async with session_maker() as session:
             yield session
 
-    async def create(self, item: T) -> T:
+    @asynccontextmanager
+    async def _track_query(
+        self,
+        query_type: QueryType,
+        enable_logging: bool | None = None,
+        extra_tags: dict[str, Any] | None = None,
+    ):
+        """
+        Helper context manager for tracking query performance.
+
+        If performance logger is not initialized, this is a no-op.
+        """
+        if self._perf_logger is None:
+            yield
+            return
+
+        async with self._perf_logger.track_query(
+            query_type=query_type,
+            table_name=self._table_name,
+            enable_logging=enable_logging,
+            extra_tags=extra_tags,
+        ):
+            yield
+
+    async def create(self, item: T, *, perf_logging: bool | None = None) -> T:
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
+            self._track_query(QueryType.INSERT, perf_logging),
         ):
             orm = self.orm(**item.to_dict())
             session.add(orm)
@@ -170,10 +213,13 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
             await session.refresh(orm)
             return self.entity.model_validate(orm)
 
-    async def batch_create(self, items: list[T]) -> list[T]:
+    async def batch_create(
+        self, items: list[T], *, perf_logging: bool | None = None
+    ) -> list[T]:
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
+            self._track_query(QueryType.BATCH_INSERT, perf_logging),
         ):
             # Prepare a list of ORM instances from items
             orm_instances = [self.orm(**item.to_dict()) for item in items]
@@ -194,21 +240,31 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
         id: str | None = None,
         name: str | None = None,
         relationships: list[Relationships] | None = None,
+        *,
+        perf_logging: bool | None = None,
     ) -> T:
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
+            self._track_query(QueryType.SELECT, perf_logging),
         ):
             result = await self._get(session, id, name, relationships=relationships)
             return self.entity.model_validate(result)
 
-    async def get_by_field(self, field_name: str, field_value: Any) -> T | None:
+    async def get_by_field(
+        self,
+        field_name: str,
+        field_value: Any,
+        *,
+        perf_logging: bool | None = None,
+    ) -> T | None:
         """
         Find a single item by a given field using an efficient single-row query.
 
         Args:
             field_name: The field name to search by
             field_value: The value to search for
+            perf_logging: Override global perf logging setting for this query
 
         Returns:
             A single item matching the field criteria
@@ -221,6 +277,7 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
+            self._track_query(QueryType.SELECT, perf_logging),
         ):
             # Check if the field exists on the model
             if not hasattr(self.orm, field_name):
@@ -253,13 +310,20 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
 
             return self.entity.model_validate(result)
 
-    async def find_by_field(self, field_name: str, field_value: Any) -> list[T]:
+    async def find_by_field(
+        self,
+        field_name: str,
+        field_value: Any,
+        *,
+        perf_logging: bool | None = None,
+    ) -> list[T]:
         """
         Find all items that match a given field value.
 
         Args:
             field_name: The field name to search by
             field_value: The value to search for
+            perf_logging: Override global perf logging setting for this query
 
         Returns:
             A list of items matching the field criteria. Returns empty list if no matches found.
@@ -271,6 +335,7 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
+            self._track_query(QueryType.SELECT, perf_logging),
         ):
             # Check if the field exists on the model
             if not hasattr(self.orm, field_name):
@@ -299,18 +364,22 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
         ids: list[str] | None = None,
         names: list[str] | None = None,
         relationships: list[Relationships] | None = None,
+        *,
+        perf_logging: bool | None = None,
     ) -> list[T]:
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
+            self._track_query(QueryType.BATCH_SELECT, perf_logging),
         ):
             results = await self._batch_get(session, ids, names, relationships)
             return [self.entity.model_validate(result) for result in results]
 
-    async def update(self, item: T) -> T:
+    async def update(self, item: T, *, perf_logging: bool | None = None) -> T:
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
+            self._track_query(QueryType.UPDATE, perf_logging),
         ):
             orm = self.orm(**item.to_dict())
             modified_orm = await session.merge(orm)
@@ -319,10 +388,13 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
             await session.refresh(modified_orm)
             return self.entity.model_validate(modified_orm)
 
-    async def batch_update(self, items: list[T]) -> list[T]:
+    async def batch_update(
+        self, items: list[T], *, perf_logging: bool | None = None
+    ) -> list[T]:
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
+            self._track_query(QueryType.BATCH_UPDATE, perf_logging),
         ):
             # Convert each item to a dictionary for bulk update
             update_data = [item.to_dict() for item in items]
@@ -337,10 +409,17 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
             )
             return [self.entity.model_validate(result) for result in fresh_results]
 
-    async def delete(self, id: str | None = None, name: str | None = None) -> None:
+    async def delete(
+        self,
+        id: str | None = None,
+        name: str | None = None,
+        *,
+        perf_logging: bool | None = None,
+    ) -> None:
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
+            self._track_query(QueryType.DELETE, perf_logging),
         ):
             # Ensure at least one of id or name is provided
             if not id and not name:
@@ -357,11 +436,16 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
             await session.commit()
 
     async def batch_delete(
-        self, ids: list[str] | None = None, names: list[str] | None = None
+        self,
+        ids: list[str] | None = None,
+        names: list[str] | None = None,
+        *,
+        perf_logging: bool | None = None,
     ) -> None:
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
+            self._track_query(QueryType.BATCH_DELETE, perf_logging),
         ):
             # Ensure at least one of ids or names is provided
             if not ids and not names:
@@ -466,10 +550,13 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
         limit: int | None = None,
         page_number: int | None = None,
         relationships: list[Relationships] | None = None,
+        *,
+        perf_logging: bool | None = None,
     ) -> list[T]:
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
+            self._track_query(QueryType.SELECT, perf_logging),
         ):
             if query is None:
                 query = select(self.orm)

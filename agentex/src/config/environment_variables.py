@@ -53,6 +53,9 @@ class EnvVarKeys(str, Enum):
     AGENTEX_SERVER_TASK_QUEUE = "AGENTEX_SERVER_TASK_QUEUE"
     ENABLE_HEALTH_CHECK_WORKFLOW = "ENABLE_HEALTH_CHECK_WORKFLOW"
     WEBHOOK_REQUEST_TIMEOUT = "WEBHOOK_REQUEST_TIMEOUT"
+    POSTGRES_PERF_LOGGING_ENABLED = "POSTGRES_PERF_LOGGING_ENABLED"
+    POSTGRES_SLOW_QUERY_THRESHOLD_MS = "POSTGRES_SLOW_QUERY_THRESHOLD_MS"
+    POSTGRES_PERF_LOGGING_SAMPLE_RATE = "POSTGRES_PERF_LOGGING_SAMPLE_RATE"
 
 
 class Environment(str, Enum):
@@ -100,6 +103,11 @@ class EnvironmentVariables(BaseModel):
     AGENTEX_SERVER_TASK_QUEUE: str | None = None
     ENABLE_HEALTH_CHECK_WORKFLOW: bool = False
     WEBHOOK_REQUEST_TIMEOUT: float = 15.0  # Webhook request timeout in seconds
+    POSTGRES_PERF_LOGGING_ENABLED: bool = False  # Enable PostgreSQL performance logging
+    POSTGRES_SLOW_QUERY_THRESHOLD_MS: float = (
+        100.0  # Slow query threshold in milliseconds
+    )
+    POSTGRES_PERF_LOGGING_SAMPLE_RATE: float = 1.0  # Sampling rate (0.0-1.0)
 
     @classmethod
     def refresh(cls, force_refresh: bool = False) -> EnvironmentVariables | None:
@@ -175,6 +183,18 @@ class EnvironmentVariables(BaseModel):
             ),
             WEBHOOK_REQUEST_TIMEOUT=float(
                 os.environ.get(EnvVarKeys.WEBHOOK_REQUEST_TIMEOUT, "15.0")
+            ),
+            POSTGRES_PERF_LOGGING_ENABLED=(
+                os.environ.get(
+                    EnvVarKeys.POSTGRES_PERF_LOGGING_ENABLED, "false"
+                ).lower()
+                == "true"
+            ),
+            POSTGRES_SLOW_QUERY_THRESHOLD_MS=float(
+                os.environ.get(EnvVarKeys.POSTGRES_SLOW_QUERY_THRESHOLD_MS, "100.0")
+            ),
+            POSTGRES_PERF_LOGGING_SAMPLE_RATE=float(
+                os.environ.get(EnvVarKeys.POSTGRES_PERF_LOGGING_SAMPLE_RATE, "1.0")
             ),
         )
         refreshed_environment_variables = environment_variables
