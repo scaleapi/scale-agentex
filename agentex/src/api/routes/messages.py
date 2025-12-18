@@ -26,12 +26,10 @@ from src.utils.pagination import decode_cursor, encode_cursor
 
 router = APIRouter(prefix="/messages", tags=["Messages"])
 
-# Generate JSON schema reference for TaskMessageEntityFilter
+# Generate JSON schema for TaskMessageEntityFilter to embed in OpenAPI
 _filter_schema = TaskMessageEntityFilter.model_json_schema()
 
-FILTERS_DESCRIPTION = f"""JSON-encoded array of TaskMessageEntityFilter objects.
-
-Schema: {json.dumps(_filter_schema, indent=2)}
+FILTERS_DESCRIPTION = """JSON-encoded array of TaskMessageEntityFilter objects.
 
 Each filter can include:
 - `content`: Filter by message content (type, author, data fields)
@@ -42,10 +40,19 @@ Multiple filters are combined: inclusionary filters (exclude=false) are OR'd tog
 exclusionary filters (exclude=true) are OR'd and negated, then both groups are AND'd.
 """
 
+# Use openapi_extra to embed the actual schema for the JSON-encoded string
+FILTERS_OPENAPI_EXTRA = {
+    "schema": {
+        "type": "array",
+        "items": _filter_schema,
+        "title": "TaskMessageEntityFilter[]",
+    }
+}
+
 FILTERS_EXAMPLES = {
     "single_filter": {
         "summary": "Filter by content type",
-        "value": '{"content": {"type": "text"}}',
+        "value": '[{"content": {"type": "text"}}]',
     },
     "multiple_types": {
         "summary": "Filter multiple content types (OR)",
@@ -57,7 +64,7 @@ FILTERS_EXAMPLES = {
     },
     "nested_data": {
         "summary": "Filter by nested data field",
-        "value": '{"content": {"data": {"type": "report_status_update"}}}',
+        "value": '[{"content": {"data": {"type": "report_status_update"}}}]',
     },
 }
 
@@ -174,7 +181,10 @@ async def list_messages(
     order_by: str | None = None,
     order_direction: str = "desc",
     filters: str | None = Query(
-        None, description=FILTERS_DESCRIPTION, openapi_examples=FILTERS_EXAMPLES
+        None,
+        description=FILTERS_DESCRIPTION,
+        openapi_examples=FILTERS_EXAMPLES,
+        openapi_extra=FILTERS_OPENAPI_EXTRA,
     ),
 ) -> list[TaskMessage]:
     """
@@ -224,7 +234,10 @@ async def list_messages_paginated(
     cursor: str | None = None,
     direction: Literal["older", "newer"] = "older",
     filters: str | None = Query(
-        None, description=FILTERS_DESCRIPTION, openapi_examples=FILTERS_EXAMPLES
+        None,
+        description=FILTERS_DESCRIPTION,
+        openapi_examples=FILTERS_EXAMPLES,
+        openapi_extra=FILTERS_OPENAPI_EXTRA,
     ),
 ) -> PaginatedMessagesResponse:
     """
