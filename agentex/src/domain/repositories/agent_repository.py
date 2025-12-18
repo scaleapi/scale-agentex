@@ -21,11 +21,7 @@ class AgentRepository(PostgresCRUDRepository[AgentORM, AgentEntity]):
         self,
         async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker,
     ):
-        super().__init__(
-            async_read_write_session_maker,
-            AgentORM,
-            AgentEntity,
-        )
+        super().__init__(async_read_write_session_maker, AgentORM, AgentEntity)
 
     async def list(
         self,

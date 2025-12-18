@@ -20,9 +20,7 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
         async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker,
     ):
         super().__init__(
-            async_read_write_session_maker,
-            AgentAPIKeyORM,
-            AgentAPIKeyEntity,
+            async_read_write_session_maker, AgentAPIKeyORM, AgentAPIKeyEntity
         )
 
     async def list(

@@ -12,14 +12,9 @@ logger = make_logger(__name__)
 
 class SpanRepository(PostgresCRUDRepository[SpanORM, SpanEntity]):
     def __init__(
-        self,
-        async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker,
+        self, async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker
     ):
-        super().__init__(
-            async_read_write_session_maker,
-            SpanORM,
-            SpanEntity,
-        )
+        super().__init__(async_read_write_session_maker, SpanORM, SpanEntity)
 
     async def list(
         self,

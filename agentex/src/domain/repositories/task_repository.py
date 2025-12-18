@@ -28,14 +28,9 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
     }
 
     def __init__(
-        self,
-        async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker,
+        self, async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker
     ):
-        super().__init__(
-            async_read_write_session_maker,
-            TaskORM,
-            TaskEntity,
-        )
+        super().__init__(async_read_write_session_maker, TaskORM, TaskEntity)
 
     async def list_with_join(
         self,
