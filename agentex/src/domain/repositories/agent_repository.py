@@ -67,4 +67,10 @@ class AgentRepository(PostgresCRUDRepository[AgentORM, AgentEntity]):
             yield await session.scalar(select(func.pg_try_advisory_xact_lock(lock_key)))
 
 
-DAgentRepository = Annotated[AgentRepository, Depends(AgentRepository)]
+def _get_agent_repository() -> AgentRepository:
+    from src.config.dependencies import _get_cached_agent_repository
+
+    return _get_cached_agent_repository()
+
+
+DAgentRepository = Annotated[AgentRepository, Depends(_get_agent_repository)]

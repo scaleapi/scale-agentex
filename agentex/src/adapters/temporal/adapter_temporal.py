@@ -612,17 +612,27 @@ class TemporalAdapter(TemporalGateway):
 
 
 # Dependency injection annotation for FastAPI
+# Module-level cache for the temporal adapter singleton
+_cached_temporal_adapter: TemporalAdapter | None = None
+
+
 async def get_temporal_adapter() -> TemporalAdapter:
     """
     Factory function for dependency injection.
     Gets the temporal client from global dependencies.
+    Caches the adapter instance to avoid per-request instantiation.
     """
+    global _cached_temporal_adapter
+    if _cached_temporal_adapter is not None:
+        return _cached_temporal_adapter
+
     from src.config.dependencies import GlobalDependencies
 
     global_deps = GlobalDependencies()
     await global_deps.load()
     client = global_deps.temporal_client
-    return TemporalAdapter(temporal_client=client)
+    _cached_temporal_adapter = TemporalAdapter(temporal_client=client)
+    return _cached_temporal_adapter
 
 
 DTemporalAdapter = Annotated[TemporalAdapter, Depends(get_temporal_adapter)]

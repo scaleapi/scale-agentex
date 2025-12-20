@@ -35,7 +35,6 @@ from src.domain.use_cases.agents_use_case import DAgentsUseCase
 from src.utils.authorization_shortcuts import (
     DAuthorizedId,
     DAuthorizedName,
-    DAuthorizedResourceIds,
 )
 from src.utils.logging import make_logger
 
@@ -90,8 +89,7 @@ async def get_agent_by_name(
     description="List all registered agents, optionally filtered by query parameters.",
 )
 async def list_agents(
-    agents_use_case: DAgentsUseCase,
-    _authorized_ids: DAuthorizedResourceIds(AgentexResourceType.agent),
+    request: Request,
     task_id: str | None = Query(None, description="Task ID"),
     limit: int = Query(50, description="Limit", ge=1),
     page_number: int = Query(1, description="Page number", ge=1),
@@ -99,13 +97,20 @@ async def list_agents(
     order_direction: str = Query("desc", description="Order direction (asc or desc)"),
 ):
     """List all registered agents."""
+    # Access use case from app.state (bypasses DI overhead)
+    agents_use_case = request.app.state.agents_use_case
+
+    # Get authorized IDs from middleware cache (bypasses DI overhead)
+    # None means no filtering (auth bypassed or disabled)
+    authorized_ids = request.state.authorized_resources.get(AgentexResourceType.agent)
+
     agent_entities = await agents_use_case.list(
         task_id=task_id,
         limit=limit,
         page_number=page_number,
         order_by=order_by,
         order_direction=order_direction,
-        **{"id": _authorized_ids} if _authorized_ids is not None else {},
+        **{"id": authorized_ids} if authorized_ids is not None else {},
     )
     return [Agent.model_validate(agent_entity) for agent_entity in agent_entities]
 

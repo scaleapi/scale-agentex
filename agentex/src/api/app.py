@@ -63,9 +63,42 @@ class HTTPExceptionWithMessage(HTTPException):
         self.message = message
 
 
+async def _initialize_service_container(app: FastAPI):
+    """
+    Initialize singleton services and store them on app.state.
+    This bypasses FastAPI's per-request DI overhead for stateless services.
+    """
+    from src.adapters.temporal.adapter_temporal import get_temporal_adapter
+    from src.config.dependencies import (
+        _get_cached_agent_repository,
+        _get_cached_deployment_history_repository,
+    )
+
+    # Initialize repositories (already cached, but ensure they're created)
+    agent_repo = _get_cached_agent_repository()
+    deployment_history_repo = _get_cached_deployment_history_repository()
+    temporal_adapter = await get_temporal_adapter()
+
+    # Create and cache the use case
+    from src.domain.use_cases.agents_use_case import AgentsUseCase
+
+    agents_use_case = AgentsUseCase(
+        agent_repository=agent_repo,
+        deployment_history_repository=deployment_history_repo,
+        temporal_adapter=temporal_adapter,
+    )
+
+    # Store on app.state for direct access in routes
+    app.state.agents_use_case = agents_use_case
+    app.state.agent_repository = agent_repo
+
+    logger.info("Service container initialized on app.state")
+
+
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(app: FastAPI):
     await dependencies.startup_global_dependencies()
+    await _initialize_service_container(app)
     configure_statsd()
     yield
     await dependencies.async_shutdown()

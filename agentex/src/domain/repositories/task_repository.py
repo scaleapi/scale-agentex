@@ -130,4 +130,10 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
             return TaskEntity.model_validate(modified_orm)
 
 
-DTaskRepository = Annotated[TaskRepository, Depends(TaskRepository)]
+def _get_task_repository() -> TaskRepository:
+    from src.config.dependencies import _get_cached_task_repository
+
+    return _get_cached_task_repository()
+
+
+DTaskRepository = Annotated[TaskRepository, Depends(_get_task_repository)]

@@ -1,5 +1,6 @@
 import asyncio
 import os
+from functools import lru_cache
 from typing import Annotated
 
 import httpx
@@ -280,12 +281,15 @@ DDatabaseAsyncReadWriteEngine = Annotated[
 # DDatabaseAsyncReadOnlyEngine = Annotated[AsyncEngine, Depends(database_async_read_only_engine)]
 
 
-def database_async_read_write_session_maker(
-    db_async_read_write_engine: DDatabaseAsyncReadWriteEngine,
-) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(
-        autoflush=False, bind=db_async_read_write_engine, expire_on_commit=False
-    )
+@lru_cache(maxsize=1)
+def _get_cached_session_maker() -> async_sessionmaker[AsyncSession]:
+    """Cached session maker - created once and reused for all requests."""
+    engine = database_async_read_write_engine()
+    return async_sessionmaker(autoflush=False, bind=engine, expire_on_commit=False)
+
+
+def database_async_read_write_session_maker() -> async_sessionmaker[AsyncSession]:
+    return _get_cached_session_maker()
 
 
 # def database_async_read_only_session_maker(
@@ -304,6 +308,63 @@ def middleware_async_read_only_session_maker() -> async_sessionmaker[AsyncSessio
 DDatabaseAsyncReadWriteSessionMaker = Annotated[
     async_sessionmaker[AsyncSession], Depends(database_async_read_write_session_maker)
 ]
+
+
+# =============================================================================
+# Cached Repository Factories
+# =============================================================================
+# These factories cache repository instances to avoid per-request instantiation.
+# Repositories are stateless - they only hold a reference to the session maker.
+
+
+@lru_cache(maxsize=1)
+def _get_cached_agent_repository():
+    """Cached AgentRepository instance."""
+    from src.domain.repositories.agent_repository import AgentRepository
+
+    return AgentRepository(_get_cached_session_maker())
+
+
+@lru_cache(maxsize=1)
+def _get_cached_task_repository():
+    """Cached TaskRepository instance."""
+    from src.domain.repositories.task_repository import TaskRepository
+
+    return TaskRepository(_get_cached_session_maker())
+
+
+@lru_cache(maxsize=1)
+def _get_cached_deployment_history_repository():
+    """Cached DeploymentHistoryRepository instance."""
+    from src.domain.repositories.deployment_history_repository import (
+        DeploymentHistoryRepository,
+    )
+
+    return DeploymentHistoryRepository(_get_cached_session_maker())
+
+
+@lru_cache(maxsize=1)
+def _get_cached_span_repository():
+    """Cached SpanRepository instance."""
+    from src.domain.repositories.span_repository import SpanRepository
+
+    return SpanRepository(_get_cached_session_maker())
+
+
+@lru_cache(maxsize=1)
+def _get_cached_schedule_repository():
+    """Cached ScheduleRepository instance."""
+    from src.domain.repositories.schedule_repository import ScheduleRepository
+
+    return ScheduleRepository(_get_cached_session_maker())
+
+
+@lru_cache(maxsize=1)
+def _get_cached_agent_api_keys_repository():
+    """Cached AgentAPIKeysRepository instance."""
+    from src.domain.repositories.agent_api_keys_repository import AgentAPIKeysRepository
+
+    return AgentAPIKeysRepository(_get_cached_session_maker())
 
 
 # DDatabaseAsyncReadOnlySessionMaker = Annotated[

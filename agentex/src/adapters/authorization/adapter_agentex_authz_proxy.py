@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends
@@ -86,6 +87,19 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
         return response["items"]
 
 
+@lru_cache(maxsize=1)
+def _get_cached_agentex_authorization() -> AgentexAuthorizationProxy:
+    """Cached AgentexAuthorizationProxy instance."""
+    from src.config.dependencies import resolve_environment_variable_dependency
+
+    url = resolve_environment_variable_dependency(EnvVarKeys.AGENTEX_AUTH_URL)
+    return AgentexAuthorizationProxy(agentex_auth_url=url)
+
+
+def _get_agentex_authorization() -> AgentexAuthorizationProxy:
+    return _get_cached_agentex_authorization()
+
+
 DAgentexAuthorization = Annotated[
-    AgentexAuthorizationProxy, Depends(AgentexAuthorizationProxy)
+    AgentexAuthorizationProxy, Depends(_get_agentex_authorization)
 ]

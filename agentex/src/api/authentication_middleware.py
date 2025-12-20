@@ -19,6 +19,10 @@ from src.api.middleware_utils import (
     verify_agent_identity,
     verify_auth_gateway,
 )
+from src.api.schemas.authorization_types import (
+    AgentexResourceType,
+    AuthorizedOperationType,
+)
 from src.config.dependencies import (
     DEnvironmentVariable,
     resolve_environment_variable_dependency,
@@ -44,13 +48,56 @@ class AgentexAuthMiddleware(BaseHTTPMiddleware):
             ),
             environment=resolve_environment_variable_dependency(EnvVarKeys.ENVIRONMENT),
         )
+        # Cached authorization proxy for pre-computing authorized resources
+        self._authz_proxy = None
+        if self._enabled:
+            from src.adapters.authorization.adapter_agentex_authz_proxy import (
+                _get_cached_agentex_authorization,
+            )
+
+            self._authz_proxy = _get_cached_agentex_authorization()
 
     def is_enabled(self) -> bool:
         return self._enabled
 
+    async def _cache_authorized_resources(self, request: Request) -> None:
+        """
+        Pre-compute authorized resource IDs and cache on request.state.
+        This avoids DI overhead in route handlers.
+        """
+        # Initialize cache dict for authorized resources
+        request.state.authorized_resources = {}
+
+        # If agent_identity is set, auth is bypassed - no filtering needed
+        if request.state.agent_identity:
+            return
+
+        # If auth is disabled, no filtering needed
+        if not self._enabled:
+            return
+
+        # If no principal context, can't compute authorizations
+        if not request.state.principal_context:
+            return
+
+        # Pre-compute authorized agent IDs (most common case)
+        try:
+            agent_ids = await self._authz_proxy.list_resources(
+                request.state.principal_context,
+                AgentexResourceType.agent,
+                AuthorizedOperationType.read,
+            )
+            request.state.authorized_resources[AgentexResourceType.agent] = (
+                list(agent_ids) if agent_ids else None
+            )
+        except Exception as e:
+            logger.warning(f"Failed to pre-compute authorized agents: {e}")
+            request.state.authorized_resources[AgentexResourceType.agent] = None
+
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
         request.state.principal_context = None
         request.state.agent_identity = None
+        request.state.authorized_resources = {}  # Pre-computed auth, None means no filtering
 
         # Skip authentication for OPTIONS requests (CORS preflight)
         if request.method == "OPTIONS":
@@ -157,6 +204,9 @@ class AgentexAuthMiddleware(BaseHTTPMiddleware):
             await auth_cache.set_auth_gateway_response(
                 headers_dict, request.state.principal_context
             )
+
+        # Pre-compute and cache authorized resources to avoid DI overhead in routes
+        await self._cache_authorized_resources(request)
 
         return await call_next(request)
 
