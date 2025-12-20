@@ -208,4 +208,26 @@ class AgentsUseCase:
         )
 
 
-DAgentsUseCase = Annotated[AgentsUseCase, Depends(AgentsUseCase)]
+# Module-level cache for the use case singleton
+_cached_agents_use_case: AgentsUseCase | None = None
+
+
+async def _get_agents_use_case(
+    agent_repository: DAgentRepository,
+    deployment_history_repository: DDeploymentHistoryRepository,
+    temporal_adapter: DTemporalAdapter,
+) -> AgentsUseCase:
+    """Cached factory for AgentsUseCase to avoid per-request instantiation."""
+    global _cached_agents_use_case
+    if _cached_agents_use_case is not None:
+        return _cached_agents_use_case
+
+    _cached_agents_use_case = AgentsUseCase(
+        agent_repository=agent_repository,
+        deployment_history_repository=deployment_history_repository,
+        temporal_adapter=temporal_adapter,
+    )
+    return _cached_agents_use_case
+
+
+DAgentsUseCase = Annotated[AgentsUseCase, Depends(_get_agents_use_case)]

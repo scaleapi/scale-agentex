@@ -150,6 +150,12 @@ class DeploymentHistoryRepository(
 
 
 # Type alias for dependency injection
+def _get_deployment_history_repository() -> DeploymentHistoryRepository:
+    from src.config.dependencies import _get_cached_deployment_history_repository
+
+    return _get_cached_deployment_history_repository()
+
+
 DDeploymentHistoryRepository = Annotated[
-    DeploymentHistoryRepository, Depends(DeploymentHistoryRepository)
+    DeploymentHistoryRepository, Depends(_get_deployment_history_repository)
 ]
