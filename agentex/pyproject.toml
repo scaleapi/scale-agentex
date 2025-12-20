@@ -27,6 +27,9 @@ dependencies = [
     "ddtrace>=3.13.0",
     "json_log_formatter>=1.1.1",
     "datadog>=0.52.1",
+    "opentelemetry-api>=1.27.0",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.48b0",
 ]
 
 [dependency-groups]

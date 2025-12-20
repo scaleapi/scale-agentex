@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import (
 from temporalio.client import Client as TemporalClient
 
 from src.config.environment_variables import Environment, EnvironmentVariables
+from src.config.otel_instrumentation import instrument_engine, uninstrument_all
 from src.utils.database import async_db_engine_creator
 from src.utils.logging import make_logger
 
@@ -111,6 +112,12 @@ class GlobalDependencies(metaclass=Singleton):
             max_overflow=10,  # Allow 10 additional connections for middleware
             pool_pre_ping=True,
             pool_recycle=3600,  # Recycle connections after 1 hour
+        )
+
+        # Instrument SQLAlchemy engines with OpenTelemetry
+        instrument_engine(self.database_async_read_write_engine, "main")
+        instrument_engine(
+            self.database_async_middleware_read_write_engine, "middleware"
         )
 
         # Initialize MongoDB client and database
@@ -222,6 +229,9 @@ def shutdown():
 
 
 async def async_shutdown():
+    # Uninstrument SQLAlchemy engines before disposal
+    uninstrument_all()
+
     global_dependencies = GlobalDependencies()
     run_concurrently = []
     # if global_dependencies.database_async_read_only_engine:
