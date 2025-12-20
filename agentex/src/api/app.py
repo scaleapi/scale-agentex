@@ -20,7 +20,6 @@ from src.api.routes import (
     agents,
     deployment_history,
     events,
-    health,
     messages,
     schedules,
     spans,
@@ -159,7 +158,6 @@ fastapi_app.include_router(tasks.router)
 fastapi_app.include_router(messages.router)
 fastapi_app.include_router(spans.router)
 fastapi_app.include_router(states.router)
-fastapi_app.include_router(health.router)
 fastapi_app.include_router(events.router)
 fastapi_app.include_router(agent_task_tracker.router)
 fastapi_app.include_router(agent_api_keys.router)

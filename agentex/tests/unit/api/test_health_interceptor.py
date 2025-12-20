@@ -52,21 +52,29 @@ class TestHealthCheckInterceptor:
         assert response.status_code == 200
         assert response.content == b"OK"
 
-    def test_passes_through_post_to_health_paths(self):
-        """Test that POST to health paths passes through for 405 handling."""
+    def test_returns_405_for_non_get_health_requests(self):
+        """Test that non-GET requests to health paths return 405."""
 
-        def method_handler(request):
-            return PlainTextResponse("Method handler called", status_code=200)
+        def should_not_be_called(request):
+            raise AssertionError(
+                "Inner app should not be called for health check paths"
+            )
 
         inner_app = Starlette(
-            routes=[Route("/healthcheck", method_handler, methods=["POST"])]
+            routes=[
+                Route("/healthcheck", should_not_be_called, methods=["POST", "PUT"])
+            ]
         )
         wrapped_app = HealthCheckInterceptor(inner_app)
 
-        client = TestClient(wrapped_app)
-        response = client.post("/healthcheck")
-        assert response.status_code == 200
-        assert response.content == b"Method handler called"
+        client = TestClient(wrapped_app, raise_server_exceptions=True)
+
+        for path in HEALTH_CHECK_PATHS:
+            for method in ["post", "put", "delete", "patch"]:
+                response = getattr(client, method)(path)
+                assert response.status_code == 405
+                assert response.headers.get("allow") == "GET"
+                assert response.content == b""
 
     def test_passes_through_websocket_connections(self):
         """Test that WebSocket connections pass through."""

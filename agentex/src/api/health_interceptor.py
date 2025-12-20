@@ -37,24 +37,37 @@ class HealthCheckInterceptor:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if (
-            scope["type"] == "http"
-            and scope.get("method") == "GET"
-            and scope["path"] in HEALTH_CHECK_PATHS
-        ):
-            await send(
-                {
-                    "type": "http.response.start",
-                    "status": 200,
-                    "headers": [],
-                }
-            )
-            await send(
-                {
-                    "type": "http.response.body",
-                    "body": b"",
-                }
-            )
-            return
+        if scope["type"] == "http" and scope["path"] in HEALTH_CHECK_PATHS:
+            if scope.get("method") == "GET":
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 200,
+                        "headers": [],
+                    }
+                )
+                await send(
+                    {
+                        "type": "http.response.body",
+                        "body": b"",
+                    }
+                )
+                return
+            else:
+                # Return 405 Method Not Allowed for non-GET requests
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 405,
+                        "headers": [(b"allow", b"GET")],
+                    }
+                )
+                await send(
+                    {
+                        "type": "http.response.body",
+                        "body": b"",
+                    }
+                )
+                return
 
         await self.app(scope, receive, send)
