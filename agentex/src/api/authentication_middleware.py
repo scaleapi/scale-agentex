@@ -72,17 +72,26 @@ class AgentexAuthMiddleware(BaseHTTPMiddleware):
         if request.state.agent_identity:
             return
 
-        # If auth is disabled, no filtering needed
-        if not self._enabled:
+        # If auth is disabled, no filtering needed (use method for testability)
+        if not self.is_enabled():
             return
 
         # If no principal context, can't compute authorizations
         if not request.state.principal_context:
             return
 
+        # Lazily initialize authz proxy if needed (for test mocking support)
+        authz_proxy = self._authz_proxy
+        if authz_proxy is None:
+            from src.adapters.authorization.adapter_agentex_authz_proxy import (
+                _get_cached_agentex_authorization,
+            )
+
+            authz_proxy = _get_cached_agentex_authorization()
+
         # Pre-compute authorized agent IDs (most common case)
         try:
-            agent_ids = await self._authz_proxy.list_resources(
+            agent_ids = await authz_proxy.list_resources(
                 request.state.principal_context,
                 AgentexResourceType.agent,
                 AuthorizedOperationType.read,

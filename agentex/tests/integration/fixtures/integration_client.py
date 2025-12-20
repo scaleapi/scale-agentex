@@ -314,10 +314,37 @@ async def isolated_integration_app(
         }
     )
 
-    # Clear any cached dependencies
+    # Clear any cached dependencies (including lru_cache singletons)
     await reset_auth_cache()
     EnvironmentVariables.clear_cache()
     GlobalDependencies._instances = {}
+
+    # Clear lru_cache singletons that were added for performance optimization
+    from src.adapters.authorization.adapter_agentex_authz_proxy import (
+        _get_cached_agentex_authorization,
+    )
+    from src.config.dependencies import (
+        _get_cached_agent_repository,
+        _get_cached_deployment_history_repository,
+        _get_cached_session_maker,
+        _get_cached_task_repository,
+    )
+
+    _get_cached_session_maker.cache_clear()
+    _get_cached_agent_repository.cache_clear()
+    _get_cached_task_repository.cache_clear()
+    _get_cached_deployment_history_repository.cache_clear()
+    _get_cached_agentex_authorization.cache_clear()
+
+    # Clear module-level cached use case
+    from src.domain.use_cases import agents_use_case as agents_use_case_module
+
+    agents_use_case_module._cached_agents_use_case = None
+
+    # Clear module-level cached temporal adapter
+    from src.adapters.temporal import adapter_temporal as temporal_adapter_module
+
+    temporal_adapter_module._cached_temporal_adapter = None
 
     # Import use case classes we can properly create with direct repositories
     from src.domain.use_cases.agent_api_keys_use_case import AgentAPIKeysUseCase
@@ -471,11 +498,21 @@ async def isolated_integration_app(
     )
 
     try:
+        # Initialize app.state with isolated use cases (mimics _initialize_service_container)
+        app.state.agents_use_case = create_agents_use_case()
+        app.state.agent_repository = isolated_repositories["agent_repository"]
+
         # Return FastAPI app with isolated dependencies
         yield app
     finally:
         # Clear dependency overrides
         app.dependency_overrides.clear()
+
+        # Clear app.state
+        if hasattr(app.state, "agents_use_case"):
+            del app.state.agents_use_case
+        if hasattr(app.state, "agent_repository"):
+            del app.state.agent_repository
 
 
 @pytest_asyncio.fixture
