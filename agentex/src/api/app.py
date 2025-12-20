@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.api.authentication_middleware import AgentexAuthMiddleware
+from src.api.health_interceptor import HealthCheckInterceptor
 from src.api.logged_api_route import LoggedAPIRoute
 from src.api.RequestLoggingMiddleware import RequestLoggingMiddleware
 from src.api.routes import (
@@ -72,7 +73,7 @@ async def lifespan(_: FastAPI):
     dependencies.shutdown()
 
 
-app = FastAPI(
+fastapi_app = FastAPI(
     title="Agentex API",
     openapi_url="/openapi.json",
     docs_url="/swagger",
@@ -92,7 +93,7 @@ allowed_origins_list = (
     if allowed_origins and isinstance(allowed_origins, str)
     else ["*"]
 )
-app.add_middleware(
+fastapi_app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins_list,
     allow_credentials=True,
@@ -101,13 +102,15 @@ app.add_middleware(
 )
 
 # Add Authentication middleware
-app.add_middleware(AgentexAuthMiddleware)
-app.add_middleware(RequestLoggingMiddleware)
+fastapi_app.add_middleware(AgentexAuthMiddleware)
+fastapi_app.add_middleware(RequestLoggingMiddleware)
 
 # Mount the MkDocs site
 docs_path = Path(__file__).parent.parent.parent / "docs" / "site"
 if docs_path.exists():
-    app.mount("/docs", StaticFiles(directory=str(docs_path), html=True), name="docs")
+    fastapi_app.mount(
+        "/docs", StaticFiles(directory=str(docs_path), html=True), name="docs"
+    )
 
 
 def format_error_response(detail: str, status_code: int) -> JSONResponse:
@@ -117,7 +120,7 @@ def format_error_response(detail: str, status_code: int) -> JSONResponse:
     )
 
 
-@app.exception_handler(RequestValidationError)
+@fastapi_app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     exc_str = f"{exc}".replace("\n", " ").replace("   ", " ")
     logger.error(f"{request}: {exc_str}")
@@ -127,22 +130,22 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
-@app.exception_handler(ItemDoesNotExist)
+@fastapi_app.exception_handler(ItemDoesNotExist)
 async def handle_missing(request, exc: ItemDoesNotExist):
     return format_error_response(str(exc), 404)
 
 
-@app.exception_handler(GenericException)
+@fastapi_app.exception_handler(GenericException)
 async def handle_generic(request, exc):
     return format_error_response(exc.message, exc.code)
 
 
-@app.exception_handler(HTTPException)
+@fastapi_app.exception_handler(HTTPException)
 async def handle_http_exc(request, exc):
     return format_error_response(exc.detail, exc.status_code)
 
 
-@app.exception_handler(Exception)
+@fastapi_app.exception_handler(Exception)
 async def handle_unexpected(request, exc):
     logger.exception("Unhandled exception caught by exception handler", exc_info=exc)
     return format_error_response(
@@ -151,14 +154,19 @@ async def handle_unexpected(request, exc):
 
 
 # Include all routers
-app.include_router(agents.router)
-app.include_router(tasks.router)
-app.include_router(messages.router)
-app.include_router(spans.router)
-app.include_router(states.router)
-app.include_router(health.router)
-app.include_router(events.router)
-app.include_router(agent_task_tracker.router)
-app.include_router(agent_api_keys.router)
-app.include_router(deployment_history.router)
-app.include_router(schedules.router)
+fastapi_app.include_router(agents.router)
+fastapi_app.include_router(tasks.router)
+fastapi_app.include_router(messages.router)
+fastapi_app.include_router(spans.router)
+fastapi_app.include_router(states.router)
+fastapi_app.include_router(health.router)
+fastapi_app.include_router(events.router)
+fastapi_app.include_router(agent_task_tracker.router)
+fastapi_app.include_router(agent_api_keys.router)
+fastapi_app.include_router(deployment_history.router)
+fastapi_app.include_router(schedules.router)
+
+# Wrap FastAPI app with health check interceptor for sub-millisecond K8s probe responses.
+# This must be the outermost layer to bypass all middleware.
+# Export as `app` so existing uvicorn entry points (app:app) work without changes.
+app = HealthCheckInterceptor(fastapi_app)

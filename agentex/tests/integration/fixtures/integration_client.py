@@ -17,7 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from src.adapters.temporal.adapter_temporal import TemporalAdapter
-from src.api.app import app
+from src.api.app import app, fastapi_app
 from src.api.authentication_cache import reset_auth_cache
 from src.config.dependencies import GlobalDependencies
 from src.config.environment_variables import EnvironmentVariables
@@ -428,7 +428,8 @@ async def isolated_integration_app(
     from src.domain.repositories.task_state_repository import TaskStateRepository
 
     # Override use cases AND core dependencies with isolated versions
-    app.dependency_overrides.update(
+    # Note: We use fastapi_app (not app) because app is the HealthCheckInterceptor wrapper
+    fastapi_app.dependency_overrides.update(
         {
             # Core dependencies - these must be overridden for isolation to work
             DMongoDBDatabase: lambda: isolated_repositories["mongodb_database"],
@@ -471,11 +472,11 @@ async def isolated_integration_app(
     )
 
     try:
-        # Return FastAPI app with isolated dependencies
+        # Return the wrapped app (HealthCheckInterceptor) for realistic testing
         yield app
     finally:
-        # Clear dependency overrides
-        app.dependency_overrides.clear()
+        # Clear dependency overrides on the FastAPI instance
+        fastapi_app.dependency_overrides.clear()
 
 
 @pytest_asyncio.fixture
@@ -496,9 +497,9 @@ def reset_dependency_overrides():
     Ensures dependency overrides are cleared before and after each test.
     This prevents test interference at the FastAPI level.
     """
-    app.dependency_overrides.clear()
+    fastapi_app.dependency_overrides.clear()
     yield
-    app.dependency_overrides.clear()
+    fastapi_app.dependency_overrides.clear()
 
 
 @pytest_asyncio.fixture
