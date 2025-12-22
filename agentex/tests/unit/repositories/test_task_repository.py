@@ -59,8 +59,8 @@ async def test_task_repository_crud_operations(postgres_url):
     async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
     # Create repositories
-    task_repo = TaskRepository(async_session_maker)
-    agent_repo = AgentRepository(async_session_maker)
+    task_repo = TaskRepository(async_session_maker, async_session_maker)
+    agent_repo = AgentRepository(async_session_maker, async_session_maker)
 
     # First, create an agent (required for task creation)
     agent_id = orm_id()
@@ -207,8 +207,8 @@ async def test_task_repository_params_support(postgres_url):
     async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
     # Create repositories
-    task_repo = TaskRepository(async_session_maker)
-    agent_repo = AgentRepository(async_session_maker)
+    task_repo = TaskRepository(async_session_maker, async_session_maker)
+    agent_repo = AgentRepository(async_session_maker, async_session_maker)
 
     # First, create an agent (required for task creation)
     agent_id = orm_id()
@@ -345,8 +345,8 @@ async def test_task_repository_task_metadata_support(postgres_url):
     async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
     # Create repositories
-    task_repo = TaskRepository(async_session_maker)
-    agent_repo = AgentRepository(async_session_maker)
+    task_repo = TaskRepository(async_session_maker, async_session_maker)
+    agent_repo = AgentRepository(async_session_maker, async_session_maker)
 
     # First, create an agent (required for task creation)
     agent_id = orm_id()
@@ -536,8 +536,8 @@ async def test_task_repository_null_task_metadata_handling(postgres_url):
     async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
     # Create repositories
-    task_repo = TaskRepository(async_session_maker)
-    agent_repo = AgentRepository(async_session_maker)
+    task_repo = TaskRepository(async_session_maker, async_session_maker)
+    agent_repo = AgentRepository(async_session_maker, async_session_maker)
 
     # First, create an agent (required for task creation)
     agent_id = orm_id()
@@ -683,8 +683,8 @@ async def test_list_with_join_includes_task_metadata(postgres_url):
             )
         await session.commit()
 
-    task_repo = TaskRepository(async_session_maker)
-    agent_repo = AgentRepository(async_session_maker)
+    task_repo = TaskRepository(async_session_maker, async_session_maker)
+    agent_repo = AgentRepository(async_session_maker, async_session_maker)
 
     # Create test agents
     agent_1 = AgentEntity(
@@ -887,8 +887,8 @@ async def test_list_with_join(postgres_url):
             )
         await session.commit()
 
-    task_repo = TaskRepository(async_session_maker)
-    agent_repo = AgentRepository(async_session_maker)
+    task_repo = TaskRepository(async_session_maker, async_session_maker)
+    agent_repo = AgentRepository(async_session_maker, async_session_maker)
 
     agent_1 = AgentEntity(
         id=orm_id(),
