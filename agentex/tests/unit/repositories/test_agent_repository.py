@@ -55,7 +55,9 @@ async def test_agent_repository_crud_operations(postgres_url, isolated_test_sche
         async with engine.begin() as conn:
             # Bind session to this connection for transactional isolation
             scoped_session_maker = async_sessionmaker(bind=conn)
-            test_repository = AgentRepository(scoped_session_maker)
+            test_repository = AgentRepository(
+                scoped_session_maker, scoped_session_maker
+            )
 
             # Test 1: Create an agent
             agent_data = AgentEntity(
@@ -169,7 +171,7 @@ async def test_agent_repository_crud_operations(postgres_url, isolated_test_sche
     )
     try:
         session_maker2 = async_sessionmaker(engine2)
-        repository2 = AgentRepository(session_maker2)
+        repository2 = AgentRepository(session_maker2, session_maker2)
 
         # Should be empty after rollback
         agent_list = await repository2.list()
