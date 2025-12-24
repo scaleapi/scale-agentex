@@ -46,6 +46,12 @@ class AgentORM(BaseORM):
     # Many-to-Many relationship with tasks
     tasks = relationship("TaskORM", secondary="task_agents", back_populates="agents")
 
+    # Indexes for efficient querying
+    __table_args__ = (
+        # Index for filtering agents by status (used in list queries)
+        Index("ix_agents_status", "status"),
+    )
+
 
 class TaskORM(BaseORM):
     __tablename__ = "tasks"
@@ -63,6 +69,12 @@ class TaskORM(BaseORM):
     task_metadata = Column(JSONB, nullable=True)
     # Many-to-Many relationship with agents
     agents = relationship("AgentORM", secondary="task_agents", back_populates="tasks")
+
+    # Indexes for efficient querying
+    __table_args__ = (
+        # Index for filtering tasks by status (used in list queries)
+        Index("ix_tasks_status", "status"),
+    )
 
 
 class TaskAgentORM(BaseORM):
@@ -138,6 +150,16 @@ class SpanORM(BaseORM):
     input = Column(JSON, nullable=True)
     output = Column(JSON, nullable=True)
     data = Column(JSON, nullable=True)
+
+    # Indexes for efficient querying
+    __table_args__ = (
+        # Index for filtering spans by trace_id
+        Index("ix_spans_trace_id", "trace_id"),
+        # Composite index for filtering by trace_id and ordering by start_time
+        Index("ix_spans_trace_id_start_time", "trace_id", "start_time"),
+        # Index for traversing span hierarchy
+        Index("ix_spans_parent_id", "parent_id"),
+    )
 
 
 class AgentAPIKeyORM(BaseORM):
