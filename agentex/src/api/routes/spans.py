@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from src.api.schemas.spans import CreateSpanRequest, Span, UpdateSpanRequest
 from src.domain.use_cases.spans_use_case import DSpanUseCase
@@ -80,8 +80,8 @@ async def get_span(
 async def list_spans(
     span_use_case: DSpanUseCase,
     trace_id: str | None = None,
-    limit: int = 50,
-    page_number: int = 1,
+    limit: int = Query(default=50, ge=1, le=1000),
+    page_number: int = Query(default=1, ge=1),
     order_by: str | None = None,
     order_direction: str = "desc",
 ) -> list[Span]:
