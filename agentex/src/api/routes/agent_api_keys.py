@@ -1,6 +1,6 @@
 import secrets
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from src.api.schemas.agent_api_keys import (
     AgentAPIKey,
@@ -79,8 +79,8 @@ async def list_agent_api_keys(
     agent_use_case: DAgentsUseCase,
     agent_id: str | None = None,
     agent_name: str | None = None,
-    limit: int = 50,
-    page_number: int = 1,
+    limit: int = Query(default=50, ge=1, le=1000),
+    page_number: int = Query(default=1, ge=1),
 ) -> list[AgentAPIKey]:
     if not agent_id and not agent_name:
         raise HTTPException(
