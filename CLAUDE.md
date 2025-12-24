@@ -189,9 +189,28 @@ src/
 Global dependencies are managed via a Singleton pattern in `src/config/dependencies.py`:
 
 - `GlobalDependencies`: Singleton holding connections to Temporal, databases, Redis, etc.
-- FastAPI dependencies use `Annotated` types (e.g., `DDatabaseAsyncReadWriteEngine`)
+- FastAPI dependencies use `Annotated` types with a `D` prefix convention:
+  ```python
+  DRedisStreamRepository = Annotated[RedisStreamRepository, Depends(RedisStreamRepository)]
+  ```
 - Connection pools are configured with appropriate sizes for concurrency
 - Startup/shutdown lifecycle managed in `app.py` lifespan context
+
+### Port/Adapter Pattern
+
+Adapters follow a port/adapter pattern with interfaces and implementations:
+
+- **Ports**: Abstract interfaces in `port.py` files (e.g., `src/adapters/streams/port.py`)
+- **Adapters**: Concrete implementations in `adapter_*.py` files (e.g., `adapter_redis.py`)
+- Example: `StreamRepository` (abstract) → `RedisStreamRepository` (implementation)
+
+### Environment Variables
+
+Environment variables are defined in `src/config/environment_variables.py`:
+
+- `EnvVarKeys`: Enum of all environment variable names
+- `EnvironmentVariables`: Pydantic model with validation and defaults
+- Add new variables to both the enum and the class
 
 ### Testing Strategy
 
@@ -311,9 +330,9 @@ sudo systemctl stop redis-server
 
 ### Adding Database Tables
 
-1. Create SQLAlchemy model in `database/models/`
-2. Generate migration: `make migration NAME="add_table_name"`
-3. Review and edit migration file if needed
+1. Add SQLAlchemy model to `src/adapters/orm.py`
+2. Generate migration from inside Docker: `docker exec agentex make migration NAME="add_table_name"`
+3. Review and edit migration file in `database/migrations/alembic/versions/`
 4. Apply migration: `make apply-migrations`
 
 ### Adding MongoDB Collections
