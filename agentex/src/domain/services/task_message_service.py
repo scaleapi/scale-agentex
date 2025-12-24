@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
@@ -199,16 +200,33 @@ class TaskMessageService:
         Returns:
             List of updated TaskMessageEntity objects
         """
-        updated_messages = []
-        for message_id, message in updates.items():
-            # Get the existing task message
-            task_message = await self.repository.get(id=message_id)
-            if task_message and task_message.task_id == task_id:
-                # Update the message field but preserve other fields
-                task_message.content = message
-                updated_messages.append(await self.repository.update(task_message))
+        if not updates:
+            return []
 
-        return updated_messages
+        # Fetch all messages in parallel
+        message_ids = list(updates.keys())
+        fetch_results = await asyncio.gather(
+            *[self.repository.get(id=message_id) for message_id in message_ids],
+            return_exceptions=True,
+        )
+
+        # Prepare updates for valid messages (exist and belong to task)
+        messages_to_update = []
+        for message_id, task_message in zip(message_ids, fetch_results, strict=True):
+            if isinstance(task_message, Exception):
+                continue
+            if task_message and task_message.task_id == task_id:
+                task_message.content = updates[message_id]
+                messages_to_update.append(task_message)
+
+        if not messages_to_update:
+            return []
+
+        # Update all valid messages in parallel
+        updated_messages = await asyncio.gather(
+            *[self.repository.update(msg) for msg in messages_to_update]
+        )
+        return list(updated_messages)
 
     async def delete_message(self, task_id: str, message_id: str) -> bool:
         """
@@ -239,12 +257,23 @@ class TaskMessageService:
         Returns:
             Number of messages deleted
         """
-        # First check which messages exist and belong to the task
-        valid_ids = []
-        for message_id in message_ids:
-            task_message = await self.repository.get(id=message_id)
-            if task_message and task_message.task_id == task_id:
-                valid_ids.append(message_id)
+        if not message_ids:
+            return 0
+
+        # Fetch all messages in parallel to validate ownership
+        fetch_results = await asyncio.gather(
+            *[self.repository.get(id=message_id) for message_id in message_ids],
+            return_exceptions=True,
+        )
+
+        # Filter to valid IDs (exist and belong to task)
+        valid_ids = [
+            message_id
+            for message_id, task_message in zip(message_ids, fetch_results, strict=True)
+            if not isinstance(task_message, Exception)
+            and task_message
+            and task_message.task_id == task_id
+        ]
 
         if valid_ids:
             await self.repository.batch_delete(ids=valid_ids)
