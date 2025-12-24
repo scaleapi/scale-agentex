@@ -236,20 +236,20 @@ graph TB
     REQ[Incoming Request] --> HCI
 
     subgraph Stack["Middleware Stack"]
-        HCI[1. HealthCheckInterceptor<br/>ASGI Level - Fast Path]
-        CORS[2. CORSMiddleware<br/>Handle CORS headers]
-        AUTH[3. AgentexAuthMiddleware<br/>Verify identity]
-        LOG[4. RequestLoggingMiddleware<br/>Generate request ID]
-        ROUTE[5. LoggedAPIRoute<br/>Log req/res + handle]
+        HCI[HealthCheckInterceptor - ASGI Fast Path]
+        CORS[CORSMiddleware - Handle CORS]
+        AUTH[AgentexAuthMiddleware - Verify Identity]
+        LOG[RequestLoggingMiddleware - Request ID]
+        ROUTE[LoggedAPIRoute - Log and Handle]
     end
 
-    HCI -->|Non-health paths| CORS
+    HCI -->|regular paths| CORS
     CORS --> AUTH
     AUTH --> LOG
     LOG --> ROUTE
     ROUTE --> RESP[Response]
 
-    HCI -->|/healthz, /healthcheck| FAST[200 OK<br/>Sub-millisecond]
+    HCI -->|health checks| FAST[200 OK - fast path]
 ```
 
 | Middleware | Purpose |
