@@ -24,6 +24,7 @@ def create_agent_repository(postgres_session):
 
     return AgentRepository(
         async_read_write_session_maker=session_maker,
+        async_read_only_session_maker=session_maker,
     )
 
 
@@ -39,6 +40,7 @@ def create_task_repository(postgres_session):
 
     return TaskRepository(
         async_read_write_session_maker=session_maker,
+        async_read_only_session_maker=session_maker,
     )
 
 
@@ -54,6 +56,7 @@ def create_event_repository(postgres_session):
 
     return EventRepository(
         async_read_write_session_maker=session_maker,
+        async_read_only_session_maker=session_maker,
     )
 
 
@@ -69,6 +72,7 @@ def create_span_repository(postgres_session):
 
     return SpanRepository(
         async_read_write_session_maker=session_maker,
+        async_read_only_session_maker=session_maker,
     )
 
 
@@ -91,6 +95,7 @@ def create_agent_api_key_repository(postgres_session):
 
     return AgentAPIKeyRepository(
         async_read_write_session_maker=session_maker,
+        async_read_only_session_maker=session_maker,
     )
 
 
@@ -108,6 +113,7 @@ def create_agent_task_tracker_repository(postgres_session):
 
     return AgentTaskTrackerRepository(
         async_read_write_session_maker=session_maker,
+        async_read_only_session_maker=session_maker,
     )
 
 

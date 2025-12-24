@@ -29,7 +29,10 @@ from typing_extensions import TypeVar
 from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
 from src.adapters.crud_store.port import CRUDRepository
 from src.adapters.orm import BaseORM
-from src.config.dependencies import DDatabaseAsyncReadWriteSessionMaker
+from src.config.dependencies import (
+    DDatabaseAsyncReadOnlySessionMaker,
+    DDatabaseAsyncReadWriteSessionMaker,
+)
 from src.domain.exceptions import ClientError, ServiceError
 from src.utils.logging import make_logger
 from src.utils.model_utils import BaseModel
@@ -141,21 +144,25 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
     def __init__(
         self,
         async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker,
+        async_read_only_session_maker: DDatabaseAsyncReadOnlySessionMaker | None,
         orm: type[M],
         entity: type[T],
     ):
         self.async_rw_session_maker = async_read_write_session_maker
+        # Fall back to read-write if read-only not provided (backward compatibility)
+        self.async_ro_session_maker = (
+            async_read_only_session_maker or async_read_write_session_maker
+        )
         self.orm = orm
         self.entity = entity
 
     @asynccontextmanager
     async def start_async_db_session(
-        self, allow_writes: bool | None = True
+        self, allow_writes: bool = True
     ) -> AsyncGenerator[AsyncSession, None]:
-        if allow_writes:
-            session_maker = self.async_rw_session_maker
-        else:
-            raise NotImplementedError("Read-only sessions are not yet supported.")
+        session_maker = (
+            self.async_rw_session_maker if allow_writes else self.async_ro_session_maker
+        )
         async with session_maker() as session:
             yield session
 
@@ -196,7 +203,7 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
         relationships: list[Relationships] | None = None,
     ) -> T:
         async with (
-            self.start_async_db_session(True) as session,
+            self.start_async_db_session(allow_writes=False) as session,
             async_sql_exception_handler(),
         ):
             result = await self._get(session, id, name, relationships=relationships)
@@ -219,7 +226,7 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
             ServiceError: If there's an error executing the query
         """
         async with (
-            self.start_async_db_session(True) as session,
+            self.start_async_db_session(allow_writes=False) as session,
             async_sql_exception_handler(),
         ):
             # Check if the field exists on the model
@@ -269,7 +276,7 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
             ServiceError: If there's an error executing the query
         """
         async with (
-            self.start_async_db_session(True) as session,
+            self.start_async_db_session(allow_writes=False) as session,
             async_sql_exception_handler(),
         ):
             # Check if the field exists on the model
@@ -301,7 +308,7 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
         relationships: list[Relationships] | None = None,
     ) -> list[T]:
         async with (
-            self.start_async_db_session(True) as session,
+            self.start_async_db_session(allow_writes=False) as session,
             async_sql_exception_handler(),
         ):
             results = await self._batch_get(session, ids, names, relationships)
@@ -468,7 +475,7 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
         relationships: list[Relationships] | None = None,
     ) -> list[T]:
         async with (
-            self.start_async_db_session(True) as session,
+            self.start_async_db_session(allow_writes=False) as session,
             async_sql_exception_handler(),
         ):
             if query is None:

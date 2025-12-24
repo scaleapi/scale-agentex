@@ -69,25 +69,25 @@ def mock_http_gateway():
 @pytest.fixture
 def agent_repository(postgres_session_maker):
     """Real AgentRepository using test PostgreSQL database"""
-    return AgentRepository(postgres_session_maker)
+    return AgentRepository(postgres_session_maker, postgres_session_maker)
 
 
 @pytest.fixture
 def agent_api_key_repository(postgres_session_maker):
     """Real AgentAPIKeyRepository using test PostgreSQL database"""
-    return AgentAPIKeyRepository(postgres_session_maker)
+    return AgentAPIKeyRepository(postgres_session_maker, postgres_session_maker)
 
 
 @pytest.fixture
 def task_repository(postgres_session_maker):
     """Real TaskRepository using test PostgreSQL database"""
-    return TaskRepository(postgres_session_maker)
+    return TaskRepository(postgres_session_maker, postgres_session_maker)
 
 
 @pytest.fixture
 def event_repository(postgres_session_maker):
     """Real EventRepository using test PostgreSQL database"""
-    return EventRepository(postgres_session_maker)
+    return EventRepository(postgres_session_maker, postgres_session_maker)
 
 
 @pytest.fixture

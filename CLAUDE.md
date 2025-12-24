@@ -86,6 +86,12 @@ make test-integration                        # Integration tests shortcut
 make test-cov                                # Run with coverage report
 make test-docker-check                       # Verify Docker setup for tests
 
+# Linting (ruff)
+uv run ruff check src/                       # Check for lint errors
+uv run ruff check src/ --fix                 # Auto-fix lint errors
+uv run ruff format src/                      # Format code
+uv run ruff check path/to/file.py            # Check specific file
+
 # Documentation
 make serve-docs           # Serve MkDocs on localhost:8001
 make build-docs           # Build documentation
