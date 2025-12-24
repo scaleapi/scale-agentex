@@ -95,6 +95,9 @@ uv run ruff check src/ --fix                 # Auto-fix lint errors
 uv run ruff format src/                      # Format code
 uv run ruff check path/to/file.py            # Check specific file
 
+# NOTE: Fix lint errors before committing. Pre-commit hooks will run ruff
+# automatically, but it's faster to fix issues proactively.
+
 # Documentation
 make serve-docs           # Serve MkDocs on localhost:8001
 make build-docs           # Build documentation
