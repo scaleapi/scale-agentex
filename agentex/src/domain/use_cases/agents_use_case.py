@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
@@ -118,9 +119,11 @@ class AgentsUseCase:
                 logger.info(
                     f"Agent {name} was likely created in parallel, skipping creation"
                 )
-        await self.maybe_update_agent_deployment_history(agent)
-
-        await self.ensure_healthcheck_workflow(agent)
+        # Run deployment history and healthcheck in parallel - both are independent operations
+        await asyncio.gather(
+            self.maybe_update_agent_deployment_history(agent),
+            self.ensure_healthcheck_workflow(agent),
+        )
         return agent
 
     async def maybe_update_agent_deployment_history(self, agent: AgentEntity) -> None:
