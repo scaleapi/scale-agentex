@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Response
 
+from src.api.cache import cacheable
 from src.api.schemas.authorization_types import (
     AgentexResourceType,
     AuthorizedOperationType,
@@ -48,9 +49,11 @@ async def create_schedule(
     summary="List Agent Schedules",
     description="List all schedules for an agent.",
 )
+@cacheable(max_age=60)
 async def list_schedules(
     agent_id: DAuthorizedId(AgentexResourceType.agent, AuthorizedOperationType.read),
     schedules_use_case: DSchedulesUseCase,
+    response: Response,
     page_size: int = Query(default=100, ge=1, le=1000),
 ) -> ScheduleListResponse:
     """List all schedules for an agent."""
@@ -63,10 +66,12 @@ async def list_schedules(
     summary="Get Schedule",
     description="Get details of a schedule by its name.",
 )
+@cacheable(max_age=60)
 async def get_schedule(
     agent_id: DAuthorizedId(AgentexResourceType.agent, AuthorizedOperationType.read),
     schedule_name: str,
     schedules_use_case: DSchedulesUseCase,
+    response: Response,
 ) -> ScheduleResponse:
     """Get details of a schedule."""
     return await schedules_use_case.get_schedule(agent_id, schedule_name)

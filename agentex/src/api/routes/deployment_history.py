@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
 
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
+from src.api.cache import cacheable
 from src.api.schemas.deployment_history import (
     DeploymentHistory,
 )
@@ -19,9 +20,11 @@ router = APIRouter(prefix="/deployment-history", tags=["Deployment History"])
     response_model=DeploymentHistory,
     description="Get a deployment record by its unique ID.",
 )
+@cacheable(max_age=300)
 async def get_deployment_by_id(
     deployment_id: str,
     deployment_history_use_case: DDeploymentHistoryUseCase,
+    response: Response,
 ) -> DeploymentHistory:
     """Get a deployment record by its unique ID."""
     try:
@@ -42,9 +45,11 @@ async def get_deployment_by_id(
     response_model=list[DeploymentHistory],
     description="List deployment history for an agent.",
 )
+@cacheable(max_age=300)
 async def list_deployments(
     deployment_history_use_case: DDeploymentHistoryUseCase,
     agent_use_case: DAgentsUseCase,
+    response: Response,
     agent_id: str | None = None,
     agent_name: str | None = None,
     limit: int = 50,

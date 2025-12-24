@@ -1,5 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
+from src.api.cache import cacheable
 from src.api.schemas.spans import CreateSpanRequest, Span, UpdateSpanRequest
 from src.domain.use_cases.spans_use_case import DSpanUseCase
 from src.utils.logging import make_logger
@@ -62,9 +63,11 @@ async def partial_update_span(
     "/{span_id}",
     response_model=Span,
 )
+@cacheable(max_age=300)
 async def get_span(
     span_id: str,
     span_use_case: DSpanUseCase,
+    response: Response,
 ) -> Span:
     """
     Get a span by ID
@@ -77,8 +80,10 @@ async def get_span(
     "",
     response_model=list[Span],
 )
+@cacheable(max_age=300)
 async def list_spans(
     span_use_case: DSpanUseCase,
+    response: Response,
     trace_id: str | None = None,
     limit: int = 50,
     page_number: int = 1,

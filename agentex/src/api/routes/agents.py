@@ -1,11 +1,12 @@
 import secrets
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
+from src.api.cache import cacheable
 from src.api.schemas.agents import Agent, RegisterAgentRequest, RegisterAgentResponse
 from src.api.schemas.agents_rpc import (
     AgentRPCRequest,
@@ -50,9 +51,11 @@ router = APIRouter(prefix="/agents", tags=["Agents"])
     response_model=Agent,
     description="Get an agent by its unique ID.",
 )
+@cacheable(max_age=60)
 async def get_agent_by_id(
     agent_id: DAuthorizedId(AgentexResourceType.agent, AuthorizedOperationType.read),  # type: ignore
     agents_use_case: DAgentsUseCase,
+    response: Response,
 ):
     """Get an agent by its unique ID."""
     agent_entity = await agents_use_case.get(id=agent_id)
@@ -65,12 +68,14 @@ async def get_agent_by_id(
     summary="Get Agent by Name",
     description="Get an agent by its unique name.",
 )
+@cacheable(max_age=60)
 async def get_agent_by_name(
     agent_name: DAuthorizedName(
         AgentexResourceType.agent, AuthorizedOperationType.read
     ),
     agents_use_case: DAgentsUseCase,
     authorization: DAuthorizationService,
+    response: Response,
 ):
     """Get an agent by its unique name."""
     agent_entity = await agents_use_case.get(name=agent_name)
@@ -89,9 +94,11 @@ async def get_agent_by_name(
     summary="List Agents",
     description="List all registered agents, optionally filtered by query parameters.",
 )
+@cacheable(max_age=60)
 async def list_agents(
     agents_use_case: DAgentsUseCase,
     _authorized_ids: DAuthorizedResourceIds(AgentexResourceType.agent),
+    response: Response,
     task_id: str | None = Query(None, description="Task ID"),
     limit: int = Query(50, description="Limit", ge=1),
     page_number: int = Query(1, description="Page number", ge=1),
