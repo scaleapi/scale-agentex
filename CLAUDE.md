@@ -255,9 +255,14 @@ Check `agentex/docker-compose.yml` for default values.
 
 Always create migrations when changing models:
 1. Modify SQLAlchemy models in `database/models/`
-2. Run `make migration NAME="description"` from `agentex/`
+2. Run migrations **from inside the Docker container**:
+   ```bash
+   docker exec agentex make migration NAME="description"
+   ```
 3. Review generated migration in `database/migrations/versions/`
 4. Apply with `make apply-migrations`
+
+> **Note**: Running `make migration` locally won't work because Alembic is only available inside the Docker container. Always use `docker exec agentex ...` for migration commands.
 
 Migrations run automatically during `make dev` startup.
 
