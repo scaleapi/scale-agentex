@@ -86,6 +86,9 @@ make test-integration                        # Integration tests shortcut
 make test-cov                                # Run with coverage report
 make test-docker-check                       # Verify Docker setup for tests
 
+# NOTE: Always use `make test` commands rather than `uv run pytest` directly.
+# The Makefile handles proper test configuration and Docker dependencies.
+
 # Linting (ruff)
 uv run ruff check src/                       # Check for lint errors
 uv run ruff check src/ --fix                 # Auto-fix lint errors
