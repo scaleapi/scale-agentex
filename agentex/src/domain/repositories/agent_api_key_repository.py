@@ -80,8 +80,8 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
             )
 
             result = await session.execute(query)
-            agents = result.scalars().all()
-            return AgentAPIKeyEntity.model_validate(agents[0]) if agents else None
+            row = result.scalars().first()
+            return AgentAPIKeyEntity.model_validate(row) if row else None
 
     async def get_by_agent_id_and_name(
         self, agent_id: str, name: str, api_key_type: AgentAPIKeyType
@@ -109,8 +109,8 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
             )
 
             result = await session.execute(query)
-            agents = result.scalars().all()
-            return AgentAPIKeyEntity.model_validate(agents[0]) if agents else None
+            row = result.scalars().first()
+            return AgentAPIKeyEntity.model_validate(row) if row else None
 
     async def get_by_agent_name_and_key_name(
         self, agent_name: str, key_name: str, api_key_type: AgentAPIKeyType
@@ -138,8 +138,8 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
             )
 
             result = await session.execute(query)
-            agents = result.scalars().all()
-            return AgentAPIKeyEntity.model_validate(agents[0]) if agents else None
+            row = result.scalars().first()
+            return AgentAPIKeyEntity.model_validate(row) if row else None
 
     async def get_external_by_agent_id_and_key(
         self, agent_id: str, api_key: str
@@ -167,8 +167,8 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
             )
 
             result = await session.execute(query)
-            agents = result.scalars().all()
-            return AgentAPIKeyEntity.model_validate(agents[0]) if agents else None
+            row = result.scalars().first()
+            return AgentAPIKeyEntity.model_validate(row) if row else None
 
     async def delete_by_agent_name_and_key_name(
         self, agent_name: str, key_name: str, api_key_type: AgentAPIKeyType
