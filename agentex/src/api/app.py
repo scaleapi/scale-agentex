@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
+from src.adapters.http.adapter_httpx import HttpxGateway
 from src.api.authentication_middleware import AgentexAuthMiddleware
 from src.api.health_interceptor import HealthCheckInterceptor
 from src.api.logged_api_route import LoggedAPIRoute
@@ -68,6 +69,8 @@ async def lifespan(_: FastAPI):
     await dependencies.startup_global_dependencies()
     configure_statsd()
     yield
+    # Clean up HTTP clients before other shutdown tasks
+    await HttpxGateway.close_clients()
     await dependencies.async_shutdown()
     dependencies.shutdown()
 
