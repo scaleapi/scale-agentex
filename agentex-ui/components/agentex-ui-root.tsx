@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { ToastContainer } from 'react-toastify';
 
+import { MemorySidebar } from '@/components/memory-sidebar/memory-sidebar';
 import { PrimaryContent } from '@/components/primary-content/primary-content';
 import { useAgentexClient } from '@/components/providers';
 import { TaskSidebar } from '@/components/task-sidebar/task-sidebar';
@@ -18,6 +19,7 @@ import {
 export function AgentexUIRoot() {
   const { agentName, taskID, updateParams } = useSafeSearchParams();
   const [isTracesSidebarOpen, setIsTracesSidebarOpen] = useState(false);
+  const [isMemorySidebarOpen, setIsMemorySidebarOpen] = useState(false);
   const { agentexClient } = useAgentexClient();
   const { data: agents = [], isLoading } = useAgents(agentexClient);
   const [localAgentName, setLocalAgentName] = useLocalStorageState<
@@ -82,8 +84,13 @@ export function AgentexUIRoot() {
           toggleTracesSidebar={() =>
             setIsTracesSidebarOpen(!isTracesSidebarOpen)
           }
+          isMemorySidebarOpen={isMemorySidebarOpen}
+          toggleMemorySidebar={() =>
+            setIsMemorySidebarOpen(!isMemorySidebarOpen)
+          }
         />
         <TracesSidebar isOpen={isTracesSidebarOpen} />
+        <MemorySidebar isOpen={isMemorySidebarOpen} />
       </div>
       <ToastContainer />
     </>

@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Activity, Bot } from 'lucide-react';
+import { Activity, Bot, Brain } from 'lucide-react';
 
 import { InvestigateTracesButton } from '@/components/task-header/investigate-traces-button';
 import { ThemeToggle } from '@/components/task-header/theme-toggle';
@@ -18,8 +18,10 @@ import type { Agent } from 'agentex/resources';
 
 type TaskHeaderProps = {
   taskId: string | null;
-  isTracesSidebarOpen?: boolean;
-  toggleTracesSidebar?: () => void;
+  isTracesSidebarOpen?: boolean | undefined;
+  toggleTracesSidebar?: (() => void) | undefined;
+  isMemorySidebarOpen?: boolean | undefined;
+  toggleMemorySidebar?: (() => void) | undefined;
   agents?: Agent[];
   selectedAgentName?: string;
   onAgentChange?: (agentName: string | undefined) => void;
@@ -30,6 +32,8 @@ export function TaskHeader({
   taskId,
   isTracesSidebarOpen,
   toggleTracesSidebar,
+  isMemorySidebarOpen,
+  toggleMemorySidebar,
   agents = [],
   onAgentChange,
   ref,
@@ -97,6 +101,18 @@ export function TaskHeader({
           className={`flex items-center gap-2 ${!taskId && 'pointer-events-none invisible'}`}
         >
           <ThemeToggle />
+          {toggleMemorySidebar && (
+            <IconButton
+              variant="ghost"
+              onClick={toggleMemorySidebar}
+              aria-label={
+                isMemorySidebarOpen
+                  ? 'Close memory sidebar'
+                  : 'Open memory sidebar'
+              }
+              icon={Brain}
+            />
+          )}
           {toggleTracesSidebar && (
             <IconButton
               variant="ghost"

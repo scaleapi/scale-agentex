@@ -12,11 +12,15 @@ import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 type ContentAreaProps = {
   isTracesSidebarOpen: boolean;
   toggleTracesSidebar: () => void;
+  isMemorySidebarOpen?: boolean;
+  toggleMemorySidebar?: () => void;
 };
 
 export function PrimaryContent({
   isTracesSidebarOpen,
   toggleTracesSidebar,
+  isMemorySidebarOpen,
+  toggleMemorySidebar,
 }: ContentAreaProps) {
   const { taskID } = useSafeSearchParams();
 
@@ -74,6 +78,8 @@ export function PrimaryContent({
           taskID={taskID}
           isTracesSidebarOpen={isTracesSidebarOpen}
           toggleTracesSidebar={toggleTracesSidebar}
+          isMemorySidebarOpen={isMemorySidebarOpen}
+          toggleMemorySidebar={toggleMemorySidebar}
           scrollContainerRef={scrollContainerRef}
           setPrompt={setPrompt}
         />

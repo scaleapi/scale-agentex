@@ -16,6 +16,8 @@ type ChatViewProps = {
   taskID: string;
   isTracesSidebarOpen: boolean;
   toggleTracesSidebar: () => void;
+  isMemorySidebarOpen?: boolean | undefined;
+  toggleMemorySidebar?: (() => void) | undefined;
   setPrompt: (prompt: string) => void;
   scrollContainerRef: React.RefObject<HTMLDivElement | null>;
 };
@@ -24,6 +26,8 @@ export function ChatView({
   taskID,
   isTracesSidebarOpen,
   toggleTracesSidebar,
+  isMemorySidebarOpen,
+  toggleMemorySidebar,
   setPrompt,
   scrollContainerRef,
 }: ChatViewProps) {
@@ -58,6 +62,8 @@ export function ChatView({
         taskId={taskID}
         isTracesSidebarOpen={isTracesSidebarOpen}
         toggleTracesSidebar={toggleTracesSidebar}
+        isMemorySidebarOpen={isMemorySidebarOpen}
+        toggleMemorySidebar={toggleMemorySidebar}
         agents={agents}
         onAgentChange={handleSelectAgent}
         ref={headerRef}
