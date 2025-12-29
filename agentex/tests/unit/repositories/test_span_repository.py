@@ -46,7 +46,7 @@ async def test_span_repository_crud_operations(postgres_url):
 
     # Create async session maker and repository
     async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    span_repo = SpanRepository(async_session_maker)
+    span_repo = SpanRepository(async_session_maker, async_session_maker)
 
     # Test CREATE operation with JSON fields
     now = datetime.now(UTC)

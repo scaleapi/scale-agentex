@@ -25,7 +25,16 @@ export function AgentexProvider({
   sgpAppURL: string;
 }) {
   const agentexClient = useMemo(
-    () => new AgentexSDK({ baseURL: agentexAPIBaseURL }),
+    () =>
+      new AgentexSDK({
+        baseURL: agentexAPIBaseURL,
+        fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+          return fetch(input, {
+            ...init,
+            credentials: 'include',
+          });
+        },
+      }),
     [agentexAPIBaseURL]
   );
 

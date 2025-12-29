@@ -53,8 +53,10 @@ export function useTaskMessages({
         task_id: taskId,
       });
 
+      // API returns messages in descending order (newest first),
+      // reverse to chronological order (oldest first) for display
       return {
-        messages,
+        messages: messages.slice().reverse(),
         deltaAccumulator: null,
         rpcStatus: 'idle',
       };
@@ -205,14 +207,18 @@ export function useSendMessage({
             task_id: taskId,
           });
 
+          // API returns messages in descending order (newest first),
+          // reverse to chronological order (oldest first) for display
+          const chronologicalMessages = finalMessages.slice().reverse();
+
           queryClient.setQueryData<TaskMessagesData>(queryKey, {
-            messages: finalMessages,
+            messages: chronologicalMessages,
             deltaAccumulator: null,
             rpcStatus: 'success',
           });
 
           return {
-            messages: finalMessages,
+            messages: chronologicalMessages,
             deltaAccumulator: null,
           };
         }

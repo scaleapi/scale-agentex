@@ -10,7 +10,10 @@ from src.adapters.crud_store.adapter_postgres import (
     async_sql_exception_handler,
 )
 from src.adapters.orm import AgentORM, AgentTaskTrackerORM, TaskAgentORM, TaskORM
-from src.config.dependencies import DDatabaseAsyncReadWriteSessionMaker
+from src.config.dependencies import (
+    DDatabaseAsyncReadOnlySessionMaker,
+    DDatabaseAsyncReadWriteSessionMaker,
+)
 from src.domain.entities.tasks import TaskEntity, TaskRelationships, TaskStatus
 from src.utils.logging import make_logger
 
@@ -28,9 +31,16 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
     }
 
     def __init__(
-        self, async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker
+        self,
+        async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker,
+        async_read_only_session_maker: DDatabaseAsyncReadOnlySessionMaker,
     ):
-        super().__init__(async_read_write_session_maker, TaskORM, TaskEntity)
+        super().__init__(
+            async_read_write_session_maker,
+            async_read_only_session_maker,
+            TaskORM,
+            TaskEntity,
+        )
 
     async def list_with_join(
         self,
