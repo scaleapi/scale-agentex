@@ -35,52 +35,58 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # - name: Generate GitHub App Token
-      #   id: generate-token
-      #   uses: actions/create-github-app-token@v1
-      #   with:
-      #     app-id: ${{ secrets.GITHUB_APP_ID }}
-      #     private-key: ${{ secrets.GITHUB_APP_PRIVATE_KEY }}
-      #     owner: scaleapi
-
       - name: Discover tutorial agent images
         id: discover
-        # env:
-        #   GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
+
         run: |
-          echo "🔍 Building agent matrix from known tutorial agent images..."
+          echo "🔍 Discovering tutorial agent images from GitHub Packages API..."
 
-          # Define the list of known tutorial agent packages
-          PACKAGES=(
-            "scale-agentex-python/tutorial-agents/00_sync-000_hello_acp"
-            "scale-agentex-python/tutorial-agents/00_sync-010_multiturn"
-            "scale-agentex-python/tutorial-agents/00_sync-020_streaming"
-            "scale-agentex-python/tutorial-agents/10_async-00_base-000_hello_acp"
-            "scale-agentex-python/tutorial-agents/10_async-00_base-010_multiturn"
-            "scale-agentex-python/tutorial-agents/10_async-00_base-020_streaming"
-            "scale-agentex-python/tutorial-agents/10_async-00_base-030_tracing"
-            "scale-agentex-python/tutorial-agents/10_async-00_base-040_other_sdks"
-            "scale-agentex-python/tutorial-agents/10_async-00_base-080_batch_events"
-            "scale-agentex-python/tutorial-agents/10_async-10_temporal-000_hello_acp"
-            "scale-agentex-python/tutorial-agents/10_async-10_temporal-010_agent_chat"
-            "scale-agentex-python/tutorial-agents/10_async-10_temporal-020_state_machine"
-            "scale-agentex-python/tutorial-agents/10_async-10_temporal-030_custom_activities"
-            "scale-agentex-python/tutorial-agents/10_async-10_temporal-050_agent_chat_guardrails"
-            "scale-agentex-python/tutorial-agents/10_async-10_temporal-060_open_ai_agents_sdk_hello_world"
-            "scale-agentex-python/tutorial-agents/10_async-10_temporal-070_open_ai_agents_sdk_tools"
-            "scale-agentex-python/tutorial-agents/10_async-10_temporal-080_open_ai_agents_sdk_human_in_the_loop"
-            "scale-agentex-python/tutorial-agents/10_async-10_temporal-090_claude_agents_sdk_mvp"
-          )
+          # Query GitHub API for container packages in the scaleapi org
+          API_RESPONSE=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/orgs/scaleapi/packages?package_type=container&per_page=100")
 
-          # Build agent matrix from the package list
+          # Check if response is an error
+          if echo "$API_RESPONSE" | jq -e '.message' > /dev/null 2>&1; then
+            echo "❌ GitHub API error:"
+            echo "$API_RESPONSE" | jq '.'
+            exit 1
+          fi
+
+          # Check if response is an array
+          if ! echo "$API_RESPONSE" | jq -e 'type == "array"' > /dev/null 2>&1; then
+            echo "❌ Unexpected API response format:"
+            echo "$API_RESPONSE" | head -c 500
+            exit 1
+          fi
+
+          # Filter for: public packages, from scale-agentex-python repo, with tutorial-agents in the name, excluding deprecated agentic agents
+          # TODO: Remove the "agentic" exclusion filter once we have delete:packages permissions to clean up deprecated packages
+          PACKAGES=$(echo "$API_RESPONSE" | \
+            jq -r '[.[] | select(.visibility == "public" and .repository.name == "scale-agentex-python" and (.name | contains("tutorial-agents")) and (.name | contains("agentic") | not))] | .[].name')
+
+          if [ -z "$PACKAGES" ]; then
+            echo "❌ No tutorial agent packages found"
+            echo "📋 Available packages in response:"
+            echo "$API_RESPONSE" | jq -r '.[].name' | head -20
+            exit 1
+          fi
+
+          echo "📦 Found packages:"
+          echo "$PACKAGES"
+
+          # Build agent matrix from discovered packages
           AGENT_IMAGES="["
 
-          for package_name in "${PACKAGES[@]}"; do
+          while IFS= read -r package_name; do
+            [ -z "$package_name" ] && continue
             echo "Processing package: $package_name"
 
-            # Extract agent directory name and convert to agent name format (e.g., "000-hello-acp")
-            # Pattern: [digits]_[type]-[digits]_[rest] -> [digits]-[rest]
-            agent_name=$(basename "$package_name" | sed -E 's/^[0-9]+_[^-]+-([0-9]+)_(.*)$/\1-\2/' | tr '_' '-')
+            # Extract everything after "tutorial-agents/" and convert underscores to dashes
+            # e.g., "scale-agentex-python/tutorial-agents/10_async-00_base-000_hello_acp" -> "10-async-00-base-000-hello-acp"
+            agent_name=$(echo "$package_name" | sed 's|.*/tutorial-agents/||' | tr '_' '-')
             echo "  - Agent name: $agent_name"
 
             # Add to JSON array
@@ -89,7 +95,7 @@ jobs:
             fi
 
             AGENT_IMAGES+='{"image":"ghcr.io/scaleapi/'"$package_name"':latest","agent_name":"'"$agent_name"'"}'
-          done
+          done <<< "$PACKAGES"
 
           AGENT_IMAGES+="]"
 
@@ -179,7 +185,8 @@ jobs:
           # Set variables for this agent
           AGENT_NAME="${{ matrix.agent.agent_name }}"
           AGENT_IMAGE="${{ matrix.agent.image }}"
-          CONTAINER_NAME="agent-test-${AGENT_NAME}"
+          # Truncate container name to max 63 chars for DNS compatibility
+          CONTAINER_NAME="$(echo "${AGENT_NAME}" | cut -c1-63)"
 
           echo "🧪 Running integration test for agent: ${AGENT_NAME}"
           echo "🐳 Using image: ${AGENT_IMAGE}"
@@ -296,25 +303,48 @@ jobs:
             exit 1
           fi
 
-          echo "🔍 Waiting for agent registration with AgentEx..."
-          REGISTRATION_TIMEOUT=30
+          echo "🔍 Waiting for agent to successfully register (checking container logs)..."
+          REGISTRATION_TIMEOUT=60
           REGISTRATION_ELAPSED=0
 
           while [ $REGISTRATION_ELAPSED -lt $REGISTRATION_TIMEOUT ]; do
-            if curl -s http://localhost:5003/agents | grep -q "${AGENT_NAME}"; then
-              echo "✅ Agent registered successfully"
+            # Check for successful registration message in agent logs
+            if docker logs "${CONTAINER_NAME}" 2>&1 | grep -q "Successfully registered agent"; then
+              echo "✅ Agent successfully registered (confirmed from container logs)"
               break
             fi
-            echo "⏳ Waiting for registration... (${REGISTRATION_ELAPSED}s/${REGISTRATION_TIMEOUT}s)"
-            sleep 5
-            REGISTRATION_ELAPSED=$((REGISTRATION_ELAPSED + 5))
+            echo "⏳ Waiting for successful registration... (${REGISTRATION_ELAPSED}s/${REGISTRATION_TIMEOUT}s)"
+            sleep 2
+            REGISTRATION_ELAPSED=$((REGISTRATION_ELAPSED + 2))
           done
 
           if [ $REGISTRATION_ELAPSED -ge $REGISTRATION_TIMEOUT ]; then
             echo "❌ Agent registration timeout after ${REGISTRATION_TIMEOUT}s"
+            echo "📋 Container logs:"
+            docker logs "${CONTAINER_NAME}"
             exit 1
           fi
 
+          # Verify agent is visible in AgentEx API
+          echo "🔍 Verifying agent is listed in AgentEx..."
+          if ! curl -s http://localhost:5003/agents | grep -q "${AGENT_NAME}"; then
+            echo "⚠️ Agent not found in AgentEx API yet, continuing anyway..."
+          fi
+
+          # Wait for Temporal worker to be fully ready
+          echo "⏳ Waiting for Temporal worker to start processing..."
+          WORKER_TIMEOUT=30
+          WORKER_ELAPSED=0
+
+          while [ $WORKER_ELAPSED -lt $WORKER_TIMEOUT ]; do
+            if docker logs "${CONTAINER_NAME}" 2>&1 | grep -q "Running workers for task queue"; then
+              echo "✅ Temporal worker is running"
+              break
+            fi
+            echo "⏳ Waiting for worker... (${WORKER_ELAPSED}s/${WORKER_TIMEOUT}s)"
+            sleep 2
+            WORKER_ELAPSED=$((WORKER_ELAPSED + 2))
+          done
 
           # Run the test inside the container with retry logic for resilience
           echo "🧪 Running tests inside the agent container with retry logic..."
