@@ -21,6 +21,7 @@ from sqlalchemy import (
     select,
     update,
 )
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.interfaces import LoaderOption
 from sqlalchemy.sql import Select
@@ -167,15 +168,25 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
             yield session
 
     async def create(self, item: T) -> T:
+        """Create an item using INSERT ... RETURNING for single query efficiency.
+
+        Uses RETURNING with explicit columns to avoid lazy-loading relationship
+        attributes on the returned ORM object, which would fail outside async context.
+        """
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
         ):
-            orm = self.orm(**item.to_dict())
-            session.add(orm)
+            # Exclude None values to allow server defaults (e.g., created_at) to apply
+            values = {k: v for k, v in item.to_dict().items() if v is not None}
+            # Return only columns (not full ORM) to avoid lazy-loading relationships
+            stmt = (
+                insert(self.orm).values(**values).returning(*self.orm.__table__.columns)
+            )
+            result = await session.execute(stmt)
+            row = result.one()
             await session.commit()
-            await session.refresh(orm)
-            return self.entity.model_validate(orm)
+            return self.entity.model_validate(dict(row._mapping))
 
     async def batch_create(self, items: list[T]) -> list[T]:
         async with (
