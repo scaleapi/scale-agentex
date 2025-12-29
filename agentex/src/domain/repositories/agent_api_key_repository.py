@@ -7,7 +7,10 @@ from src.adapters.crud_store.adapter_postgres import (
 )
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.adapters.orm import AgentAPIKeyORM, AgentORM
-from src.config.dependencies import DDatabaseAsyncReadWriteSessionMaker
+from src.config.dependencies import (
+    DDatabaseAsyncReadOnlySessionMaker,
+    DDatabaseAsyncReadWriteSessionMaker,
+)
 from src.domain.entities.agent_api_keys import AgentAPIKeyEntity, AgentAPIKeyType
 from src.utils.logging import make_logger
 
@@ -18,9 +21,13 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
     def __init__(
         self,
         async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker,
+        async_read_only_session_maker: DDatabaseAsyncReadOnlySessionMaker,
     ):
         super().__init__(
-            async_read_write_session_maker, AgentAPIKeyORM, AgentAPIKeyEntity
+            async_read_write_session_maker,
+            async_read_only_session_maker,
+            AgentAPIKeyORM,
+            AgentAPIKeyEntity,
         )
 
     async def list(
@@ -57,7 +64,7 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
         Returns:
             An AgentAPIKeyEntity if found, otherwise None.
         """
-        async with self.start_async_db_session(allow_writes=True) as session:
+        async with self.start_async_db_session(allow_writes=False) as session:
             # Build query with join to agents table
             query = (
                 select(AgentAPIKeyORM)
@@ -73,8 +80,8 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
             )
 
             result = await session.execute(query)
-            agents = result.scalars().all()
-            return AgentAPIKeyEntity.model_validate(agents[0]) if agents else None
+            row = result.scalars().first()
+            return AgentAPIKeyEntity.model_validate(row) if row else None
 
     async def get_by_agent_id_and_name(
         self, agent_id: str, name: str, api_key_type: AgentAPIKeyType
@@ -89,7 +96,7 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
         Returns:
             An AgentAPIKeyEntity if found, otherwise None.
         """
-        async with self.start_async_db_session(allow_writes=True) as session:
+        async with self.start_async_db_session(allow_writes=False) as session:
             # Build query with join to agents table
             query = (
                 select(AgentAPIKeyORM)
@@ -102,8 +109,8 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
             )
 
             result = await session.execute(query)
-            agents = result.scalars().all()
-            return AgentAPIKeyEntity.model_validate(agents[0]) if agents else None
+            row = result.scalars().first()
+            return AgentAPIKeyEntity.model_validate(row) if row else None
 
     async def get_by_agent_name_and_key_name(
         self, agent_name: str, key_name: str, api_key_type: AgentAPIKeyType
@@ -118,7 +125,7 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
         Returns:
             An AgentAPIKeyEntity if found, otherwise None.
         """
-        async with self.start_async_db_session(allow_writes=True) as session:
+        async with self.start_async_db_session(allow_writes=False) as session:
             # Build query with join to agents table
             query = (
                 select(AgentAPIKeyORM)
@@ -131,8 +138,8 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
             )
 
             result = await session.execute(query)
-            agents = result.scalars().all()
-            return AgentAPIKeyEntity.model_validate(agents[0]) if agents else None
+            row = result.scalars().first()
+            return AgentAPIKeyEntity.model_validate(row) if row else None
 
     async def get_external_by_agent_id_and_key(
         self, agent_id: str, api_key: str
@@ -147,7 +154,7 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
         Returns:
             An AgentAPIKeyEntity if found, otherwise None.
         """
-        async with self.start_async_db_session(allow_writes=True) as session:
+        async with self.start_async_db_session(allow_writes=False) as session:
             # Build query with join to agents table
             query = (
                 select(AgentAPIKeyORM)
@@ -160,8 +167,8 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
             )
 
             result = await session.execute(query)
-            agents = result.scalars().all()
-            return AgentAPIKeyEntity.model_validate(agents[0]) if agents else None
+            row = result.scalars().first()
+            return AgentAPIKeyEntity.model_validate(row) if row else None
 
     async def delete_by_agent_name_and_key_name(
         self, agent_name: str, key_name: str, api_key_type: AgentAPIKeyType

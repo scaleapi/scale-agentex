@@ -17,6 +17,7 @@ class EnvVarKeys(str, Enum):
     ENVIRONMENT = "ENVIRONMENT"
     OPENAI_API_KEY = "OPENAI_API_KEY"
     DATABASE_URL = "DATABASE_URL"
+    READ_ONLY_DATABASE_URL = "READ_ONLY_DATABASE_URL"
     TEMPORAL_ADDRESS = "TEMPORAL_ADDRESS"
     TEMPORAL_NAMESPACE = "TEMPORAL_NAMESPACE"
     REDIS_URL = "REDIS_URL"
@@ -68,6 +69,7 @@ class EnvironmentVariables(BaseModel):
     ENVIRONMENT: str | None = Environment.DEV
     OPENAI_API_KEY: str | None
     DATABASE_URL: str | None
+    READ_ONLY_DATABASE_URL: str | None = None
     TEMPORAL_ADDRESS: str | None
     TEMPORAL_NAMESPACE: str | None
     REDIS_URL: str | None
@@ -113,6 +115,7 @@ class EnvironmentVariables(BaseModel):
             ENVIRONMENT=os.environ.get(EnvVarKeys.ENVIRONMENT),
             OPENAI_API_KEY=os.environ.get(EnvVarKeys.OPENAI_API_KEY),
             DATABASE_URL=os.environ.get(EnvVarKeys.DATABASE_URL),
+            READ_ONLY_DATABASE_URL=os.environ.get(EnvVarKeys.READ_ONLY_DATABASE_URL),
             TEMPORAL_ADDRESS=os.environ.get(EnvVarKeys.TEMPORAL_ADDRESS),
             TEMPORAL_NAMESPACE=os.environ.get(EnvVarKeys.TEMPORAL_NAMESPACE),
             REDIS_URL=os.environ.get(EnvVarKeys.REDIS_URL),
