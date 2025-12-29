@@ -79,8 +79,7 @@ class HttpxGateway(HttpPort):
 
     @classmethod
     async def close_clients(cls) -> None:
-        # TODO: Call this method
-        """Close and cleanup the shared clients. Call this during app shutdown for proper cleanup."""
+        """Close and cleanup the shared clients. Called during app shutdown for proper cleanup."""
         if cls._regular_client:
             await cls._regular_client.aclose()
             cls._regular_client = None
