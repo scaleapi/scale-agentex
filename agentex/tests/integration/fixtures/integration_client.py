@@ -315,7 +315,9 @@ async def isolated_repositories(isolated_test_schema):
         # Direct access for advanced use cases
         "postgres_rw_session_factory": async_rw_session_factory,
         "postgres_ro_session_factory": async_ro_session_factory,
+        "postgres_engine": postgres_engine,
         "mongodb_database": mongodb_database,
+        "mongodb_client": isolated_test_schema["mongodb_client"],
         "redis_client": redis_client,
         "test_id": isolated_test_schema["test_id"],
     }
@@ -346,6 +348,16 @@ async def isolated_integration_app(
     await reset_auth_cache()
     EnvironmentVariables.clear_cache()
     GlobalDependencies._instances = {}
+
+    # Configure GlobalDependencies singleton with test container connections
+    # This is required for HealthCheckInterceptor which directly accesses GlobalDependencies
+    deps = GlobalDependencies()
+    deps.database_async_read_write_engine = isolated_repositories["postgres_engine"]
+    deps.database_async_read_only_engine = isolated_repositories["postgres_engine"]
+    deps.mongodb_client = isolated_repositories["mongodb_client"]
+    deps.mongodb_database = isolated_repositories["mongodb_database"]
+    deps.redis_pool = isolated_repositories["redis_client"].connection_pool
+    deps._loaded = True
 
     # Import use case classes we can properly create with direct repositories
     from src.domain.use_cases.agent_api_keys_use_case import AgentAPIKeysUseCase
