@@ -54,11 +54,13 @@ class RedisStreamRepository(StreamRepository):
 
             logger.info(f"Publishing data to stream {topic}, data: {data_json}")
 
-            # Add to Redis stream with a reasonable max length
+            # Add to Redis stream with maxlen to prevent unbounded growth
             await self.send_redis_connection_metrics()
             message_id = await self.redis.xadd(
                 name=topic,
                 fields={"data": data_json},
+                maxlen=self.environment_variables.REDIS_STREAM_MAXLEN,
+                approximate=True,  # Use ~ for better performance (O(1) vs O(N))
             )
             return message_id
         except Exception as e:
