@@ -1,17 +1,580 @@
 name: Run Agentex Integration Tests
 
+permissions:
+  contents: read
+  packages: read
+
 on:
   pull_request:
     paths:
-      - 'agentex/**'
+      - "agentex/**"
   push:
     branches:
       - main
     paths:
-      - 'agentex/**'
+      - "agentex/**"
   workflow_dispatch:
     inputs:
       commit-sha:
-        description: "Commit SHA to test against"
+        description: "Commit SHA or branch to test against"
         required: true
         type: string
+        default: main
+
+jobs:
+  discover-agent-images:
+    name: "Discover Tutorial Agent Images"
+    runs-on: ubuntu-latest
+    outputs:
+      agent-matrix: ${{ steps.discover.outputs.agent-matrix }}
+    steps:
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Discover tutorial agent images
+        id: discover
+        env:
+          GITHUB_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
+
+        run: |
+          echo "🔍 Discovering tutorial agent images from GitHub Packages API..."
+
+          # Query GitHub API for container packages in the scaleapi org
+          API_RESPONSE=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/orgs/scaleapi/packages?package_type=container&per_page=100")
+
+          # Check if response is an error
+          if echo "$API_RESPONSE" | jq -e '.message' > /dev/null 2>&1; then
+            echo "❌ GitHub API error:"
+            echo "$API_RESPONSE" | jq '.'
+            exit 1
+          fi
+
+          # Check if response is an array
+          if ! echo "$API_RESPONSE" | jq -e 'type == "array"' > /dev/null 2>&1; then
+            echo "❌ Unexpected API response format:"
+            echo "$API_RESPONSE" | head -c 500
+            exit 1
+          fi
+
+          # Filter for: public packages, from scale-agentex-python repo, with tutorial-agents in the name, excluding deprecated agentic agents
+          # TODO: Remove the "agentic" exclusion filter once we have delete:packages permissions to clean up deprecated packages
+          PACKAGES=$(echo "$API_RESPONSE" | \
+            jq -r '[.[] | select(.visibility == "public" and .repository.name == "scale-agentex-python" and (.name | contains("tutorial-agents")) and (.name | contains("agentic") | not))] | .[].name')
+
+          if [ -z "$PACKAGES" ]; then
+            echo "❌ No tutorial agent packages found"
+            echo "📋 Available packages in response:"
+            echo "$API_RESPONSE" | jq -r '.[].name' | head -20
+            exit 1
+          fi
+
+          echo "📦 Found packages:"
+          echo "$PACKAGES"
+
+          # Build agent matrix from discovered packages
+          AGENT_IMAGES="["
+
+          while IFS= read -r package_name; do
+            [ -z "$package_name" ] && continue
+            echo "Processing package: $package_name"
+
+            # Extract everything after "tutorial-agents/" and convert underscores to dashes
+            # e.g., "scale-agentex-python/tutorial-agents/10_async-00_base-000_hello_acp" -> "10-async-00-base-000-hello-acp"
+            agent_name=$(echo "$package_name" | sed 's|.*/tutorial-agents/||' | tr '_' '-')
+            echo "  - Agent name: $agent_name"
+
+            # Add to JSON array
+            if [[ "$AGENT_IMAGES" != "[" ]]; then
+              AGENT_IMAGES+=","
+            fi
+
+            AGENT_IMAGES+='{"image":"ghcr.io/scaleapi/'"$package_name"':latest","agent_name":"'"$agent_name"'"}'
+          done <<< "$PACKAGES"
+
+          AGENT_IMAGES+="]"
+
+          echo "📋 Generated agent matrix:"
+          echo "$AGENT_IMAGES" | jq '.'
+
+          # Convert to compact JSON for matrix
+          echo "agent-matrix=$(echo "$AGENT_IMAGES" | jq -c '.')" >> $GITHUB_OUTPUT
+
+  run-integration-tests:
+    name: "Run Integration Tests - ${{ matrix.agent.agent_name }}"
+    runs-on: ubuntu-latest
+    needs: discover-agent-images
+    strategy:
+      fail-fast: false # Continue testing other agents even if one fails
+      matrix:
+        agent: ${{ fromJson(needs.discover-agent-images.outputs.agent-matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit-sha || github.ref }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull agent image
+        run: |
+          echo "🐳 Pulling agent image: ${{ matrix.agent.image }}"
+          docker pull ${{ matrix.agent.image }}
+          echo "✅ Agent image pulled successfully"
+
+      - name: Start AgentEx services with host access
+        working-directory: ./agentex
+        run: |
+          echo "🚀 Starting AgentEx services..."
+          docker compose -f docker-compose.yml up -d
+
+          echo "📋 Initial service status:"
+          docker compose ps
+
+          echo "⏳ Waiting for database migrations and service initialization..."
+          sleep 45  # AgentEx has 30s start_period + time for migrations
+
+          echo "🔍 Checking AgentEx service health..."
+          HEALTH_TIMEOUT=90
+          HEALTH_ELAPSED=0
+
+          while [ $HEALTH_ELAPSED -lt $HEALTH_TIMEOUT ]; do
+            if curl -s http://localhost:5003/health > /dev/null 2>&1; then
+              echo "✅ AgentEx health endpoint is responding"
+              break
+            fi
+            echo "⏳ Waiting for AgentEx health check... (${HEALTH_ELAPSED}s/${HEALTH_TIMEOUT}s)"
+            sleep 5
+            HEALTH_ELAPSED=$((HEALTH_ELAPSED + 5))
+          done
+
+          if [ $HEALTH_ELAPSED -ge $HEALTH_TIMEOUT ]; then
+            echo "❌ AgentEx service health check failed"
+            echo "📋 AgentEx service logs:"
+            docker compose logs agentex
+            exit 1
+          fi
+
+          echo "🔍 Verifying AgentEx API endpoints..."
+          if curl -s http://localhost:5003/api > /dev/null 2>&1; then
+            echo "✅ AgentEx API endpoints are accessible"
+          else
+            echo "❌ AgentEx API endpoints not responding"
+            echo "📋 AgentEx service logs:"
+            docker compose logs agentex
+            exit 1
+          fi
+
+          echo "📋 Final service status after health checks:"
+          docker compose ps
+
+      - name: Run agent integration test
+        env:
+          OPENAI_API_KEY: ${{ secrets.TUTORIAL_OPENAI_API_KEY }}
+        run: |
+          # Set variables for this agent
+          AGENT_NAME="${{ matrix.agent.agent_name }}"
+          AGENT_IMAGE="${{ matrix.agent.image }}"
+          # Truncate container name to max 63 chars for DNS compatibility
+          CONTAINER_NAME="$(echo "${AGENT_NAME}" | cut -c1-63)"
+
+          echo "🧪 Running integration test for agent: ${AGENT_NAME}"
+          echo "🐳 Using image: ${AGENT_IMAGE}"
+
+          # Determine ACP type and agent characteristics from image name
+          if [[ "${AGENT_IMAGE}" == *"10_async"* ]]; then
+            ACP_TYPE="async"
+          else
+            ACP_TYPE="sync"
+          fi
+
+          # Check if this is a Temporal agent
+          if [[ "${AGENT_IMAGE}" == *"temporal"* ]]; then
+            IS_TEMPORAL_AGENT=true
+
+            # Extract queue name from agent name (e.g., "10-temporal-000-hello-acp" -> "000_hello_acp_queue")
+            QUEUE_NAME=$(echo "${AGENT_NAME}" | sed -E 's/.*temporal-([0-9]+)-(.*)$/\1_\2_queue/' | tr '-' '_')
+          else
+            IS_TEMPORAL_AGENT=false
+          fi
+
+          # Start the agent container with appropriate configuration
+          if [ "${IS_TEMPORAL_AGENT}" = true ]; then
+            # Temporal agent: start both worker and ACP server
+            docker run -d --name "${CONTAINER_NAME}" \
+              -e ENVIRONMENT=development \
+              -e AGENT_NAME="${AGENT_NAME}" \
+              -e ACP_URL="http://${CONTAINER_NAME}" \
+              -e ACP_PORT=8000 \
+              -e ACP_TYPE="${ACP_TYPE}" \
+              -e AGENTEX_BASE_URL=http://agentex:5003 \
+              -e AGENTEX_API_BASE_URL=http://agentex:5003 \
+              -e REDIS_URL=redis://agentex-redis:6379 \
+              -e TEMPORAL_ADDRESS=agentex-temporal:7233 \
+              -e TEMPORAL_HOST=agentex-temporal \
+              -e AGENTEX_SERVER_TASK_QUEUE=agentex-server \
+              -e WORKFLOW_NAME="${AGENT_NAME}" \
+              -e WORKFLOW_TASK_QUEUE="${QUEUE_NAME}" \
+              -e DATABASE_URL=postgresql://postgres:postgres@agentex-postgres:5432/agentex \
+              -e MONGODB_URI=mongodb://agentex-mongodb:27017 \
+              -e MONGODB_DATABASE_NAME=agentex \
+              -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
+              -p 8000:8000 \
+              --network agentex-network \
+              "${AGENT_IMAGE}" \
+              bash -c "python project/run_worker.py & uvicorn project.acp:acp --host 0.0.0.0 --port 8000"
+          else
+            # Non-temporal agent: start ACP server only
+            docker run -d --name "${CONTAINER_NAME}" \
+              -e ENVIRONMENT=development \
+              -e AGENT_NAME="${AGENT_NAME}" \
+              -e ACP_URL="http://${CONTAINER_NAME}" \
+              -e ACP_PORT=8000 \
+              -e ACP_TYPE="${ACP_TYPE}" \
+              -e AGENTEX_BASE_URL=http://agentex:5003 \
+              -e AGENTEX_API_BASE_URL=http://agentex:5003 \
+              -e REDIS_URL=redis://agentex-redis:6379 \
+              -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
+              -p 8000:8000 \
+              --network agentex-network \
+              "${AGENT_IMAGE}"
+          fi
+
+          # there are some agents that need npx to be installed to be run
+          echo "📦 Installing Node.js, NPM, and NPX in agent container..."
+          docker exec "${CONTAINER_NAME}" sh -c "
+            set -e
+            echo '🔄 Updating package list...'
+            apt-get update -qq
+
+            echo '🔄 Installing Node.js and NPM...'
+            apt-get install -y -qq curl
+            curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+            apt-get install -y -qq nodejs
+
+            echo '✅ Versions after installation:'
+            node --version
+            npm --version
+
+          " || {
+            echo "❌ Node.js installation failed, checking container state..."
+            docker exec "${CONTAINER_NAME}" sh -c "
+              echo 'Container OS info:'
+              cat /etc/os-release || echo 'OS info not available'
+              echo 'Available packages:'
+              apt list --installed | grep node || echo 'No node packages found'
+            "
+            exit 1
+          }
+
+          echo "⏳ Waiting for agent to start..."
+          sleep 10
+
+          # Check for "Application startup complete" log message
+          echo "🔍 Waiting for 'Application startup complete' log message..."
+          TIMEOUT=60
+          ELAPSED=0
+
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            if docker logs "${CONTAINER_NAME}" 2>&1 | grep -q "Application startup complete"; then
+              echo "✅ Agent application has started successfully"
+              break
+            fi
+
+            echo "⏳ Still waiting for startup... (${ELAPSED}s/${TIMEOUT}s)"
+            sleep 2
+            ELAPSED=$((ELAPSED + 2))
+          done
+
+          if [ $ELAPSED -ge $TIMEOUT ]; then
+            echo "❌ Timeout waiting for 'Application startup complete' message"
+            echo "📋 Container logs:"
+            docker logs "${CONTAINER_NAME}"
+            exit 1
+          fi
+
+          echo "🔍 Waiting for agent to successfully register (checking container logs)..."
+          REGISTRATION_TIMEOUT=60
+          REGISTRATION_ELAPSED=0
+
+          while [ $REGISTRATION_ELAPSED -lt $REGISTRATION_TIMEOUT ]; do
+            # Check for successful registration message in agent logs
+            if docker logs "${CONTAINER_NAME}" 2>&1 | grep -q "Successfully registered agent"; then
+              echo "✅ Agent successfully registered (confirmed from container logs)"
+              break
+            fi
+            echo "⏳ Waiting for successful registration... (${REGISTRATION_ELAPSED}s/${REGISTRATION_TIMEOUT}s)"
+            sleep 2
+            REGISTRATION_ELAPSED=$((REGISTRATION_ELAPSED + 2))
+          done
+
+          if [ $REGISTRATION_ELAPSED -ge $REGISTRATION_TIMEOUT ]; then
+            echo "❌ Agent registration timeout after ${REGISTRATION_TIMEOUT}s"
+            echo "📋 Container logs:"
+            docker logs "${CONTAINER_NAME}"
+            exit 1
+          fi
+
+          # Verify agent is visible in AgentEx API
+          echo "🔍 Verifying agent is listed in AgentEx..."
+          if ! curl -s http://localhost:5003/agents | grep -q "${AGENT_NAME}"; then
+            echo "⚠️ Agent not found in AgentEx API yet, continuing anyway..."
+          fi
+
+          # Wait for Temporal worker to be fully ready
+          echo "⏳ Waiting for Temporal worker to start processing..."
+          WORKER_TIMEOUT=30
+          WORKER_ELAPSED=0
+
+          while [ $WORKER_ELAPSED -lt $WORKER_TIMEOUT ]; do
+            if docker logs "${CONTAINER_NAME}" 2>&1 | grep -q "Running workers for task queue"; then
+              echo "✅ Temporal worker is running"
+              break
+            fi
+            echo "⏳ Waiting for worker... (${WORKER_ELAPSED}s/${WORKER_TIMEOUT}s)"
+            sleep 2
+            WORKER_ELAPSED=$((WORKER_ELAPSED + 2))
+          done
+
+          # Run the test inside the container with retry logic for resilience
+          echo "🧪 Running tests inside the agent container with retry logic..."
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          TEST_PASSED=false
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$TEST_PASSED" = false ]; do
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            echo "🔄 Test attempt $RETRY_COUNT/$MAX_RETRIES"
+
+            set +e  # Don't exit on error immediately
+            docker exec "${CONTAINER_NAME}" pytest tests/test_agent.py -v
+            TEST_EXIT_CODE=$?
+            set -e  # Re-enable exit on error
+
+            echo "🔍 Test exit code for attempt $RETRY_COUNT: $TEST_EXIT_CODE"
+
+            # Show post-test logs after each attempt
+            echo "📋 Agent logs after test attempt $RETRY_COUNT:"
+            docker logs --tail=30 "${CONTAINER_NAME}"
+
+            # AgentEx logs are hidden by default - no output to console
+
+            if [ $TEST_EXIT_CODE -eq 0 ]; then
+              echo "✅ Tests passed successfully on attempt $RETRY_COUNT"
+              TEST_PASSED=true
+            else
+              echo "❌ Test attempt $RETRY_COUNT failed with exit code $TEST_EXIT_CODE"
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "🔄 Will retry in 5 seconds..."
+                sleep 5
+              fi
+            fi
+          done
+
+          # Final result handling
+          if [ "$TEST_PASSED" = true ]; then
+            echo "🎉 Tests passed after $RETRY_COUNT attempts"
+          else
+            echo "❌ All $MAX_RETRIES test attempts failed"
+            echo "📋 Full agent logs:"
+            docker logs "${CONTAINER_NAME}"
+            # AgentEx logs are hidden by default in failure case too
+            exit 1
+          fi
+
+          echo "🧹 Cleaning up container..."
+          docker rm -f "${CONTAINER_NAME}"
+
+      - name: Show AgentEx logs
+        if: always()
+        working-directory: ./agentex
+        run: |
+          echo "📋 AgentEx service logs:"
+          echo "========================"
+          docker compose logs agentex
+          echo "========================"
+          echo ""
+          echo "📋 AgentEx worker logs:"
+          echo "========================"
+          docker compose logs agentex-temporal-worker
+          echo "========================"
+
+      - name: Record test result
+        id: test-result
+        if: always()
+        run: |
+          # Create results directory
+          mkdir -p test-results
+
+          # Set variables for this agent
+          AGENT_NAME="${{ matrix.agent.agent_name }}"
+
+          # Determine result based on whether we passed
+          if [ "${{ job.status }}" == "success" ]; then
+            result="passed"
+            echo "result=passed" >> $GITHUB_OUTPUT
+            echo "agent=${{ matrix.agent.agent_name }}" >> $GITHUB_OUTPUT
+          else
+            result="failed"
+            echo "result=failed" >> $GITHUB_OUTPUT
+            echo "agent=${{ matrix.agent.agent_name }}" >> $GITHUB_OUTPUT
+          fi
+
+          # Save result to file for artifact upload
+          # Create a safe filename from agent name
+          safe_name=$(echo "${{ matrix.agent.agent_name }}" | tr '/' '_' | tr -d ' ' | tr ':' '_')
+          echo "$result" > "test-results/result-${safe_name}.txt"
+          echo "${{ matrix.agent.agent_name }}" > "test-results/agent-${safe_name}.txt"
+          echo "safe_name=${safe_name}" >> $GITHUB_OUTPUT
+
+      - name: Upload test result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-result-${{ steps.test-result.outputs.safe_name }}
+          path: test-results/
+          retention-days: 1
+
+  # Summary job to ensure the workflow fails if any test fails
+  integration-tests-summary:
+    name: "Integration Tests Summary"
+    runs-on: ubuntu-latest
+    needs: [discover-agent-images, run-integration-tests]
+    if: always() # Run even if some tests fail
+    steps:
+      - name: Download all test results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-result-*
+          path: all-results/
+          merge-multiple: true
+        continue-on-error: true
+
+      - name: Generate Integration Test Summary
+        run: |
+          echo "# 🧪 AgentEx Integration Tests Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Initialize counters
+          passed_count=0
+          failed_count=0
+          skipped_count=0
+          total_count=0
+
+          # Get all agents that were supposed to run
+          agents='${{ needs.discover-agent-images.outputs.agent-matrix }}'
+
+          if [ -d "all-results" ] && [ "$(ls -A all-results 2>/dev/null)" ]; then
+            echo "📊 Processing individual test results from artifacts..."
+
+            echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Agent | Status | Result |" >> $GITHUB_STEP_SUMMARY
+            echo "|-------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+
+            # Process each result file
+            for result_file in all-results/result-*.txt; do
+              if [ -f "$result_file" ]; then
+                # Extract the safe name from filename
+                safe_name=$(basename "$result_file" .txt | sed 's/result-//')
+
+                # Get corresponding agent name file
+                agent_file="all-results/agent-${safe_name}.txt"
+
+                if [ -f "$agent_file" ]; then
+                  agent_name=$(cat "$agent_file")
+                  result=$(cat "$result_file")
+
+                  total_count=$((total_count + 1))
+
+                  if [ "$result" = "passed" ]; then
+                    echo "| \`$agent_name\` | ✅ | Passed |" >> $GITHUB_STEP_SUMMARY
+                    passed_count=$((passed_count + 1))
+                  else
+                    echo "| \`$agent_name\` | ❌ | Failed |" >> $GITHUB_STEP_SUMMARY
+                    failed_count=$((failed_count + 1))
+                  fi
+                fi
+              fi
+            done
+
+            # Check for any agents that didn't have results (skipped/cancelled)
+            # Use process substitution to avoid subshell scoping issues
+            while IFS= read -r expected_agent; do
+              safe_expected=$(echo "$expected_agent" | tr '/' '_' | tr -d ' ' | tr ':' '_')
+              if [ ! -f "all-results/result-${safe_expected}.txt" ]; then
+                echo "| \`$expected_agent\` | ⏭️ | Skipped/Cancelled |" >> $GITHUB_STEP_SUMMARY
+                skipped_count=$((skipped_count + 1))
+                total_count=$((total_count + 1))
+              fi
+            done < <(echo "$agents" | jq -r '.[].agent_name')
+
+          else
+            echo "⚠️ No individual test results found. This could mean:"
+            echo "- Test jobs were cancelled before completion"
+            echo "- Artifacts failed to upload"
+            echo "- No agents were found to test"
+            echo ""
+
+            overall_result="${{ needs.run-integration-tests.result }}"
+            echo "Overall job status: **$overall_result**"
+
+            if [[ "$overall_result" == "success" ]]; then
+              echo "✅ All tests appear to have passed based on job status."
+            elif [[ "$overall_result" == "failure" ]]; then
+              echo "❌ Some tests appear to have failed based on job status."
+              echo ""
+              echo "💡 **Tip:** Check individual job logs for specific failure details."
+            elif [[ "$overall_result" == "cancelled" ]]; then
+              echo "⏭️ Tests were cancelled."
+            else
+              echo "❓ Test status is unclear: $overall_result"
+            fi
+
+            # Don't show detailed breakdown when we don't have individual results
+            agent_count=$(echo "$agents" | jq -r '. | length')
+            echo ""
+            echo "Expected agent count: $agent_count"
+          fi
+
+          # Only show detailed statistics if we have individual results
+          if [ -d "all-results" ] && [ "$(ls -A all-results 2>/dev/null)" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## Summary Statistics" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- **Total Tests:** $total_count" >> $GITHUB_STEP_SUMMARY
+            echo "- **Passed:** $passed_count ✅" >> $GITHUB_STEP_SUMMARY
+            echo "- **Failed:** $failed_count ❌" >> $GITHUB_STEP_SUMMARY
+            echo "- **Skipped:** $skipped_count ⏭️" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            if [ $failed_count -eq 0 ] && [ $passed_count -gt 0 ]; then
+              echo "🎉 **All tests passed!**" >> $GITHUB_STEP_SUMMARY
+            elif [ $failed_count -gt 0 ]; then
+              echo "⚠️ **Some tests failed.** Check individual job logs for details." >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "💡 **Tip:** Look for agent container logs in failed jobs for debugging information." >> $GITHUB_STEP_SUMMARY
+            else
+              echo "ℹ️ **Tests were cancelled or skipped.**" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            # Exit with error if any tests failed
+            if [ $failed_count -gt 0 ]; then
+              exit 1
+            fi
+          else
+            # Fallback to overall job result when individual results aren't available
+            if [[ "$overall_result" == "failure" ]]; then
+              exit 1
+            fi
+          fi
