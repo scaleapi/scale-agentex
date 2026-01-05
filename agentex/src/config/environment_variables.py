@@ -40,6 +40,7 @@ class EnvVarKeys(str, Enum):
     REDIS_MAX_CONNECTIONS = "REDIS_MAX_CONNECTIONS"
     REDIS_CONNECTION_TIMEOUT = "REDIS_CONNECTION_TIMEOUT"
     REDIS_SOCKET_TIMEOUT = "REDIS_SOCKET_TIMEOUT"
+    REDIS_STREAM_MAXLEN = "REDIS_STREAM_MAXLEN"
     IMAGE_PULL_SECRET_NAME = "IMAGE_PULL_SECRET_NAME"
     AGENTEX_AUTH_URL = "AGENTEX_AUTH_URL"
     ALLOWED_ORIGINS = "ALLOWED_ORIGINS"
@@ -88,6 +89,9 @@ class EnvironmentVariables(BaseModel):
     REDIS_MAX_CONNECTIONS: int = 50  # Increased for SSE streaming
     REDIS_CONNECTION_TIMEOUT: int = 60  # Connection timeout in seconds
     REDIS_SOCKET_TIMEOUT: int = 30  # Socket timeout in seconds
+    REDIS_STREAM_MAXLEN: int = (
+        10000  # Max entries per Redis stream to prevent unbounded growth
+    )
     IMAGE_PULL_SECRET_NAME: str | None = None
     AGENTEX_AUTH_URL: str | None = None
     ALLOWED_ORIGINS: str | None = None
@@ -145,6 +149,9 @@ class EnvironmentVariables(BaseModel):
             ),
             REDIS_SOCKET_TIMEOUT=int(
                 os.environ.get(EnvVarKeys.REDIS_SOCKET_TIMEOUT, "30")
+            ),
+            REDIS_STREAM_MAXLEN=int(
+                os.environ.get(EnvVarKeys.REDIS_STREAM_MAXLEN, "10000")
             ),
             IMAGE_PULL_SECRET_NAME=os.environ.get(EnvVarKeys.IMAGE_PULL_SECRET_NAME),
             AGENTEX_AUTH_URL=os.environ.get(EnvVarKeys.AGENTEX_AUTH_URL),
