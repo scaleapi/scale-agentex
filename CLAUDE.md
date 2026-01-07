@@ -86,11 +86,17 @@ make test-integration                        # Integration tests shortcut
 make test-cov                                # Run with coverage report
 make test-docker-check                       # Verify Docker setup for tests
 
+# NOTE: Always use `make test` commands rather than `uv run pytest` directly.
+# The Makefile handles proper test configuration and Docker dependencies.
+
 # Linting (ruff)
 uv run ruff check src/                       # Check for lint errors
 uv run ruff check src/ --fix                 # Auto-fix lint errors
 uv run ruff format src/                      # Format code
 uv run ruff check path/to/file.py            # Check specific file
+
+# NOTE: Fix lint errors before committing. Pre-commit hooks will run ruff
+# automatically, but it's faster to fix issues proactively.
 
 # Documentation
 make serve-docs           # Serve MkDocs on localhost:8001
@@ -183,9 +189,28 @@ src/
 Global dependencies are managed via a Singleton pattern in `src/config/dependencies.py`:
 
 - `GlobalDependencies`: Singleton holding connections to Temporal, databases, Redis, etc.
-- FastAPI dependencies use `Annotated` types (e.g., `DDatabaseAsyncReadWriteEngine`)
+- FastAPI dependencies use `Annotated` types with a `D` prefix convention:
+  ```python
+  DRedisStreamRepository = Annotated[RedisStreamRepository, Depends(RedisStreamRepository)]
+  ```
 - Connection pools are configured with appropriate sizes for concurrency
 - Startup/shutdown lifecycle managed in `app.py` lifespan context
+
+### Port/Adapter Pattern
+
+Adapters follow a port/adapter pattern with interfaces and implementations:
+
+- **Ports**: Abstract interfaces in `port.py` files (e.g., `src/adapters/streams/port.py`)
+- **Adapters**: Concrete implementations in `adapter_*.py` files (e.g., `adapter_redis.py`)
+- Example: `StreamRepository` (abstract) → `RedisStreamRepository` (implementation)
+
+### Environment Variables
+
+Environment variables are defined in `src/config/environment_variables.py`:
+
+- `EnvVarKeys`: Enum of all environment variable names
+- `EnvironmentVariables`: Pydantic model with validation and defaults
+- Add new variables to both the enum and the class
 
 ### Testing Strategy
 
@@ -255,9 +280,14 @@ Check `agentex/docker-compose.yml` for default values.
 
 Always create migrations when changing models:
 1. Modify SQLAlchemy models in `database/models/`
-2. Run `make migration NAME="description"` from `agentex/`
+2. Run migrations **from inside the Docker container**:
+   ```bash
+   docker exec agentex make migration NAME="description"
+   ```
 3. Review generated migration in `database/migrations/versions/`
 4. Apply with `make apply-migrations`
+
+> **Note**: Running `make migration` locally won't work because Alembic is only available inside the Docker container. Always use `docker exec agentex ...` for migration commands.
 
 Migrations run automatically during `make dev` startup.
 
@@ -300,9 +330,9 @@ sudo systemctl stop redis-server
 
 ### Adding Database Tables
 
-1. Create SQLAlchemy model in `database/models/`
-2. Generate migration: `make migration NAME="add_table_name"`
-3. Review and edit migration file if needed
+1. Add SQLAlchemy model to `src/adapters/orm.py`
+2. Generate migration from inside Docker: `docker exec agentex make migration NAME="add_table_name"`
+3. Review and edit migration file in `database/migrations/alembic/versions/`
 4. Apply migration: `make apply-migrations`
 
 ### Adding MongoDB Collections
