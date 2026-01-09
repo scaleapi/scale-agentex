@@ -62,6 +62,7 @@ class PostgresPoolMetrics:
         pool_name: str,
         db_url: str,
         environment: str,
+        service_name: str = "agentex",
     ):
         self.engine = engine
         self.pool_name = pool_name
@@ -77,6 +78,7 @@ class PostgresPoolMetrics:
         host, port, db_name = _parse_db_url(db_url)
 
         self.base_attributes = {
+            "service.name": service_name,
             "db.system.name": "postgresql",
             "db.client.connection.pool.name": pool_name,
             "server.address": host,
@@ -264,6 +266,7 @@ class PostgresQueryMetrics:
         pool_name: str,
         db_url: str,
         environment: str,
+        service_name: str = "agentex",
     ):
         self.engine = engine
         self.pool_name = pool_name
@@ -278,6 +281,7 @@ class PostgresQueryMetrics:
         host, port, db_name = _parse_db_url(db_url)
 
         self.base_attributes = {
+            "service.name": service_name,
             "db.system.name": "postgresql",
             "db.client.connection.pool.name": pool_name,
             "server.address": host,
@@ -377,7 +381,19 @@ class PostgresQueryMetrics:
             """Track query errors."""
             statement = exception_context.statement or ""
             operation = self._extract_operation(statement)
-            error_type = type(exception_context.original_exception).__name__
+            original_exception = exception_context.original_exception
+            error_type = type(original_exception).__name__
+
+            # Log the error with details for debugging
+            # Truncate statement to avoid logging sensitive data
+            truncated_stmt = (
+                statement[:200] + "..." if len(statement) > 200 else statement
+            )
+            logger.warning(
+                f"Database error on pool {self.pool_name}: "
+                f"type={error_type}, operation={operation}, "
+                f"message={original_exception}, statement={truncated_stmt}"
+            )
 
             attrs = {
                 **self.base_attributes,
@@ -408,6 +424,7 @@ class PostgresHealthMetrics:
         db_url: str,
         environment: str,
         is_replica: bool = False,
+        service_name: str = "agentex",
     ):
         self.engine = engine
         self.pool_name = pool_name
@@ -423,6 +440,7 @@ class PostgresHealthMetrics:
         host, _, db_name = _parse_db_url(db_url)
 
         self.base_attributes = {
+            "service.name": service_name,
             "db.system.name": "postgresql",
             "db.client.connection.pool.name": pool_name,
             "server.address": host,
@@ -542,6 +560,7 @@ class PostgresMetricsCollector:
         db_url: str,
         environment: str,
         is_replica: bool = False,
+        service_name: str = "agentex",
     ):
         """Register an engine for metrics collection."""
         self._pool_metrics[pool_name] = PostgresPoolMetrics(
@@ -549,12 +568,14 @@ class PostgresMetricsCollector:
             pool_name=pool_name,
             db_url=db_url,
             environment=environment,
+            service_name=service_name,
         )
         self._query_metrics[pool_name] = PostgresQueryMetrics(
             engine=engine,
             pool_name=pool_name,
             db_url=db_url,
             environment=environment,
+            service_name=service_name,
         )
         self._health_metrics[pool_name] = PostgresHealthMetrics(
             engine=engine,
@@ -562,6 +583,7 @@ class PostgresMetricsCollector:
             db_url=db_url,
             environment=environment,
             is_replica=is_replica,
+            service_name=service_name,
         )
         logger.info(f"Registered PostgreSQL metrics for pool: {pool_name}")
 

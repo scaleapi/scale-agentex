@@ -197,6 +197,7 @@ class GlobalDependencies(metaclass=Singleton):
         # Initialize PostgreSQL metrics collector
         self.postgres_metrics_collector = PostgresMetricsCollector()
         environment = self.environment_variables.ENVIRONMENT
+        service_name = os.environ.get("OTEL_SERVICE_NAME", "agentex")
 
         if self.database_async_read_write_engine:
             self.postgres_metrics_collector.register_engine(
@@ -204,6 +205,7 @@ class GlobalDependencies(metaclass=Singleton):
                 pool_name="main",
                 db_url=self.environment_variables.DATABASE_URL,
                 environment=environment,
+                service_name=service_name,
             )
 
         if self.database_async_middleware_read_write_engine:
@@ -212,6 +214,7 @@ class GlobalDependencies(metaclass=Singleton):
                 pool_name="middleware",
                 db_url=self.environment_variables.DATABASE_URL,
                 environment=environment,
+                service_name=service_name,
             )
 
         if self.database_async_read_only_engine:
@@ -227,6 +230,7 @@ class GlobalDependencies(metaclass=Singleton):
                 db_url=read_only_db_url,
                 environment=environment,
                 is_replica=is_replica,
+                service_name=service_name,
             )
 
         self._loaded = True
