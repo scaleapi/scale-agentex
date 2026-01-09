@@ -191,9 +191,12 @@ class PostgresPoolMetrics:
             pool = self.engine.sync_engine.pool
 
             # Connection counts by state
+            # Note: pool.overflow() can be negative (relative to max_overflow)
+            # Positive overflow means overflow connections are in use
             idle_connections = pool.checkedin()
             used_connections = pool.checkedout()
-            overflow_connections = pool.overflow()
+            raw_overflow = pool.overflow()
+            overflow_in_use = max(0, raw_overflow)
             max_connections = pool.size() + pool._max_overflow
 
             # Record idle connections (delta from last)
@@ -204,18 +207,18 @@ class PostgresPoolMetrics:
             self._last_idle = idle_connections
 
             # Record used connections (delta from last)
+            # Only count actual checked-out connections
             used_attrs = {**self.base_attributes, "db.client.connection.state": "used"}
-            current_used = used_connections + overflow_connections
-            used_delta = current_used - self._last_used
+            used_delta = used_connections - self._last_used
             if used_delta != 0:
                 self._connection_count.add(used_delta, used_attrs)
-            self._last_used = current_used
+            self._last_used = used_connections
 
-            # Record overflow (delta from last)
-            overflow_delta = overflow_connections - self._last_overflow
+            # Record overflow connections in use (delta from last)
+            overflow_delta = overflow_in_use - self._last_overflow
             if overflow_delta != 0:
                 self._connection_overflow.add(overflow_delta, self.base_attributes)
-            self._last_overflow = overflow_connections
+            self._last_overflow = overflow_in_use
 
             # Record max connections (delta from last, usually static)
             max_delta = max_connections - self._last_max
