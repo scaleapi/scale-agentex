@@ -19,6 +19,7 @@ from temporalio.client import Client as TemporalClient
 
 from src.config.environment_variables import Environment, EnvironmentVariables
 from src.utils.database import async_db_engine_creator
+from src.utils.db_metrics import PostgresMetricsCollector
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
@@ -47,6 +48,7 @@ class GlobalDependencies(metaclass=Singleton):
         self.httpx_client: httpx.AsyncClient | None = None
         self.redis_pool: redis.ConnectionPool | None = None
         self.database_async_read_only_engine: AsyncEngine | None = None
+        self.postgres_metrics_collector: PostgresMetricsCollector | None = None
         self._loaded = False
 
     async def create_temporal_client(self):
@@ -192,10 +194,49 @@ class GlobalDependencies(metaclass=Singleton):
                 pool_recycle=3600,
             )
 
+        # Initialize PostgreSQL metrics collector
+        self.postgres_metrics_collector = PostgresMetricsCollector()
+        environment = self.environment_variables.ENVIRONMENT
+
+        if self.database_async_read_write_engine:
+            self.postgres_metrics_collector.register_engine(
+                engine=self.database_async_read_write_engine,
+                pool_name="main",
+                db_url=self.environment_variables.DATABASE_URL,
+                environment=environment,
+            )
+
+        if self.database_async_middleware_read_write_engine:
+            self.postgres_metrics_collector.register_engine(
+                engine=self.database_async_middleware_read_write_engine,
+                pool_name="middleware",
+                db_url=self.environment_variables.DATABASE_URL,
+                environment=environment,
+            )
+
+        if self.database_async_read_only_engine:
+            # Check if this is actually a replica (different URL from primary)
+            is_replica = (
+                self.environment_variables.READ_ONLY_DATABASE_URL is not None
+                and self.environment_variables.READ_ONLY_DATABASE_URL
+                != self.environment_variables.DATABASE_URL
+            )
+            self.postgres_metrics_collector.register_engine(
+                engine=self.database_async_read_only_engine,
+                pool_name="readonly",
+                db_url=read_only_db_url,
+                environment=environment,
+                is_replica=is_replica,
+            )
+
         self._loaded = True
 
     async def force_reload(self):
         """Force reload all dependencies with fresh environment variables"""
+        # Stop metrics collection
+        if self.postgres_metrics_collector:
+            await self.postgres_metrics_collector.stop_collection()
+
         # Clear existing connections
         if self.database_async_read_write_engine:
             await self.database_async_read_write_engine.dispose()
@@ -215,6 +256,7 @@ class GlobalDependencies(metaclass=Singleton):
         self.docker_client = None
         self.mongodb_client = None
         self.mongodb_database = None
+        self.postgres_metrics_collector = None
 
         # Reload with fresh environment variables
         EnvironmentVariables.clear_cache()
@@ -232,6 +274,11 @@ def shutdown():
 
 async def async_shutdown():
     global_dependencies = GlobalDependencies()
+
+    # Stop PostgreSQL metrics collection
+    if global_dependencies.postgres_metrics_collector:
+        await global_dependencies.postgres_metrics_collector.stop_collection()
+
     run_concurrently = []
     if global_dependencies.database_async_read_only_engine:
         run_concurrently.append(

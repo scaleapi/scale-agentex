@@ -1,8 +1,6 @@
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from datadog import initialize, statsd
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,21 +26,16 @@ from src.api.routes import (
     tasks,
 )
 from src.config import dependencies
-from src.config.dependencies import resolve_environment_variable_dependency
+from src.config.dependencies import (
+    GlobalDependencies,
+    resolve_environment_variable_dependency,
+)
 from src.config.environment_variables import EnvVarKeys
 from src.domain.exceptions import GenericException
 from src.utils.logging import make_logger
+from src.utils.otel_metrics import init_otel_metrics, shutdown_otel_metrics
 
 logger = make_logger(__name__)
-
-
-def configure_statsd():
-    """Configure the global DataDog StatsD client"""
-    initialize(
-        statsd_host=os.getenv("DD_AGENT_HOST", "localhost"),
-        statsd_port=int(os.getenv("DD_STATSD_PORT", "8125")),
-    )
-    return statsd
 
 
 class HTTPExceptionWithMessage(HTTPException):
@@ -66,13 +59,25 @@ class HTTPExceptionWithMessage(HTTPException):
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # Initialize OpenTelemetry metrics first (before dependencies register instruments)
+    init_otel_metrics()
+
     await dependencies.startup_global_dependencies()
-    configure_statsd()
+
+    # Start PostgreSQL metrics collection
+    global_deps = GlobalDependencies()
+    if global_deps.postgres_metrics_collector:
+        await global_deps.postgres_metrics_collector.start_collection()
+
     yield
+
     # Clean up HTTP clients before other shutdown tasks
     await HttpxGateway.close_clients()
     await dependencies.async_shutdown()
     dependencies.shutdown()
+
+    # Shutdown OTel metrics (flushes remaining data)
+    shutdown_otel_metrics()
 
 
 fastapi_app = FastAPI(
