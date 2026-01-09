@@ -408,8 +408,7 @@ class PostgresHealthMetrics:
     """
     Emits health-related metrics for PostgreSQL connections.
 
-    Performs periodic health checks and measures replica lag for
-    read-only connections.
+    Performs periodic health checks via simple SELECT 1 queries.
 
     If OTel is not configured (OTEL_EXPORTER_OTLP_ENDPOINT not set),
     this class becomes a no-op.
@@ -423,12 +422,10 @@ class PostgresHealthMetrics:
         pool_name: str,
         db_url: str,
         environment: str,
-        is_replica: bool = False,
         service_name: str = "agentex",
     ):
         self.engine = engine
         self.pool_name = pool_name
-        self.is_replica = is_replica
 
         # Get meter - if None, OTel is not configured
         meter = get_meter("agentex.db.health")
@@ -458,12 +455,6 @@ class PostgresHealthMetrics:
             name="db.client.connection.health_check_failures",
             description="Total health check failures",
             unit="{failure}",
-        )
-
-        self._replica_lag: Histogram = meter.create_histogram(
-            name="db.client.replica.lag",
-            description="Replication lag in seconds",
-            unit="s",
         )
 
         # Track last health status for delta
@@ -505,37 +496,6 @@ class PostgresHealthMetrics:
                 1, {**self.base_attributes, "error.type": error_type}
             )
 
-    async def check_replica_lag(self):
-        """
-        Check replication lag on read replica.
-
-        Only runs if is_replica=True. Emits db.client.replica.lag in seconds.
-        """
-        if not self._enabled or not self.is_replica:
-            return
-
-        try:
-            async with asyncio.timeout(self.HEALTH_CHECK_TIMEOUT):
-                async with self.engine.connect() as conn:
-                    result = await conn.execute(
-                        text(
-                            """
-                            SELECT CASE
-                                WHEN pg_is_in_recovery() THEN
-                                    EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp()))
-                                ELSE 0
-                            END AS lag_seconds
-                            """
-                        )
-                    )
-                    lag = result.scalar()
-
-                    if lag is not None:
-                        self._replica_lag.record(lag, self.base_attributes)
-
-        except Exception as e:
-            logger.debug(f"Failed to check replica lag for {self.pool_name}: {e}")
-
 
 class PostgresMetricsCollector:
     """
@@ -559,7 +519,6 @@ class PostgresMetricsCollector:
         pool_name: str,
         db_url: str,
         environment: str,
-        is_replica: bool = False,
         service_name: str = "agentex",
     ):
         """Register an engine for metrics collection."""
@@ -582,7 +541,6 @@ class PostgresMetricsCollector:
             pool_name=pool_name,
             db_url=db_url,
             environment=environment,
-            is_replica=is_replica,
             service_name=service_name,
         )
         logger.info(f"Registered PostgreSQL metrics for pool: {pool_name}")
@@ -596,7 +554,6 @@ class PostgresMetricsCollector:
 
         for metrics in self._health_metrics.values():
             tasks.append(metrics.check_health())
-            tasks.append(metrics.check_replica_lag())
 
         await asyncio.gather(*tasks, return_exceptions=True)
 

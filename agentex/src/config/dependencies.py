@@ -218,18 +218,11 @@ class GlobalDependencies(metaclass=Singleton):
             )
 
         if self.database_async_read_only_engine:
-            # Check if this is actually a replica (different URL from primary)
-            is_replica = (
-                self.environment_variables.READ_ONLY_DATABASE_URL is not None
-                and self.environment_variables.READ_ONLY_DATABASE_URL
-                != self.environment_variables.DATABASE_URL
-            )
             self.postgres_metrics_collector.register_engine(
                 engine=self.database_async_read_only_engine,
                 pool_name="readonly",
                 db_url=read_only_db_url,
                 environment=environment,
-                is_replica=is_replica,
                 service_name=service_name,
             )
 
