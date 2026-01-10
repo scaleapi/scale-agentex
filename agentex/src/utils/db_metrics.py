@@ -16,6 +16,7 @@ import time
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
+from datadog import statsd
 from sqlalchemy import event, text
 from sqlalchemy.engine import ExecutionContext
 
@@ -34,6 +35,27 @@ _METRICS_DEBOUNCE_INTERVAL = 30
 
 # Slow query threshold in seconds (configurable via environment variable)
 _SLOW_QUERY_THRESHOLD = float(os.environ.get("POSTGRES_SLOW_QUERY_THRESHOLD", "0.5"))
+
+
+def _format_statsd_tags(attributes: dict) -> list[str]:
+    """Convert OTel attributes dict to Datadog StatsD tags list."""
+    tag_mapping = {
+        "service.name": "service",
+        "db.system.name": "db_system",
+        "db.client.connection.pool.name": "pool",
+        "server.address": "server",
+        "db.namespace": "db_name",
+        "deployment.environment": "env",
+        "db.client.connection.state": "state",
+        "db.operation.name": "operation",
+        "db.collection.name": "table",
+        "error.type": "error_type",
+    }
+    tags = []
+    for key, value in attributes.items():
+        tag_name = tag_mapping.get(key, key.replace(".", "_"))
+        tags.append(f"{tag_name}:{value}")
+    return tags
 
 
 def _parse_db_url(url: str) -> tuple[str, int, str]:
@@ -134,6 +156,7 @@ class PostgresPoolMetrics:
     def _register_pool_events(self):
         """Register SQLAlchemy pool event listeners for timing metrics."""
         sync_pool = self.engine.sync_engine.pool
+        base_tags = _format_statsd_tags(self.base_attributes)
 
         @event.listens_for(sync_pool, "connect")
         def on_connect(
@@ -141,7 +164,10 @@ class PostgresPoolMetrics:
             connection_record: ConnectionPoolEntry,
         ):
             """Track new connection creation."""
-            self._connection_created.add(1, self.base_attributes)
+            if self._enabled:
+                self._connection_created.add(1, self.base_attributes)
+            # StatsD: increment counter for new connections
+            statsd.increment("db.client.connection.created", tags=base_tags)
 
         @event.listens_for(sync_pool, "checkout")
         def on_checkout(
@@ -161,7 +187,12 @@ class PostgresPoolMetrics:
             checkout_time = connection_record.info.pop("_checkout_time", None)
             if checkout_time is not None:
                 use_time = time.monotonic() - checkout_time
-                self._connection_use_time.record(use_time, self.base_attributes)
+                if self._enabled:
+                    self._connection_use_time.record(use_time, self.base_attributes)
+                # StatsD: histogram for connection use time (in milliseconds for Datadog)
+                statsd.histogram(
+                    "db.client.connection.use_time", use_time * 1000, tags=base_tags
+                )
 
         @event.listens_for(sync_pool, "invalidate")
         def on_invalidate(
@@ -172,7 +203,11 @@ class PostgresPoolMetrics:
             """Track connection invalidation."""
             error_type = type(exception).__name__ if exception else "unknown"
             attrs = {**self.base_attributes, "error.type": error_type}
-            self._connection_invalidated.add(1, attrs)
+            if self._enabled:
+                self._connection_invalidated.add(1, attrs)
+            # StatsD: increment counter for invalidated connections
+            error_tags = base_tags + [f"error_type:{error_type}"]
+            statsd.increment("db.client.connection.invalidated", tags=error_tags)
 
     async def collect_pool_metrics(self):
         """
@@ -181,9 +216,6 @@ class PostgresPoolMetrics:
         Only collects metrics if at least _METRICS_DEBOUNCE_INTERVAL seconds
         have passed since the last collection to avoid overhead.
         """
-        if not self._enabled:
-            return
-
         now = time.monotonic()
         if now - self._last_metrics_time < _METRICS_DEBOUNCE_INTERVAL:
             return
@@ -201,32 +233,61 @@ class PostgresPoolMetrics:
             overflow_in_use = max(0, raw_overflow)
             max_connections = pool.size() + pool._max_overflow
 
-            # Record idle connections (delta from last)
-            idle_attrs = {**self.base_attributes, "db.client.connection.state": "idle"}
-            idle_delta = idle_connections - self._last_idle
-            if idle_delta != 0:
-                self._connection_count.add(idle_delta, idle_attrs)
-            self._last_idle = idle_connections
+            # OTel metrics (if enabled)
+            if self._enabled:
+                # Record idle connections (delta from last)
+                idle_attrs = {
+                    **self.base_attributes,
+                    "db.client.connection.state": "idle",
+                }
+                idle_delta = idle_connections - self._last_idle
+                if idle_delta != 0:
+                    self._connection_count.add(idle_delta, idle_attrs)
+                self._last_idle = idle_connections
 
-            # Record used connections (delta from last)
-            # Only count actual checked-out connections
-            used_attrs = {**self.base_attributes, "db.client.connection.state": "used"}
-            used_delta = used_connections - self._last_used
-            if used_delta != 0:
-                self._connection_count.add(used_delta, used_attrs)
-            self._last_used = used_connections
+                # Record used connections (delta from last)
+                used_attrs = {
+                    **self.base_attributes,
+                    "db.client.connection.state": "used",
+                }
+                used_delta = used_connections - self._last_used
+                if used_delta != 0:
+                    self._connection_count.add(used_delta, used_attrs)
+                self._last_used = used_connections
 
-            # Record overflow connections in use (delta from last)
-            overflow_delta = overflow_in_use - self._last_overflow
-            if overflow_delta != 0:
-                self._connection_overflow.add(overflow_delta, self.base_attributes)
-            self._last_overflow = overflow_in_use
+                # Record overflow connections in use (delta from last)
+                overflow_delta = overflow_in_use - self._last_overflow
+                if overflow_delta != 0:
+                    self._connection_overflow.add(overflow_delta, self.base_attributes)
+                self._last_overflow = overflow_in_use
 
-            # Record max connections (delta from last, usually static)
-            max_delta = max_connections - self._last_max
-            if max_delta != 0:
-                self._connection_max.add(max_delta, self.base_attributes)
-            self._last_max = max_connections
+                # Record max connections (delta from last, usually static)
+                max_delta = max_connections - self._last_max
+                if max_delta != 0:
+                    self._connection_max.add(max_delta, self.base_attributes)
+                self._last_max = max_connections
+
+            # StatsD metrics (always send as gauges)
+            base_tags = _format_statsd_tags(self.base_attributes)
+
+            def _send_statsd_pool_metrics():
+                idle_tags = base_tags + ["state:idle"]
+                used_tags = base_tags + ["state:used"]
+
+                statsd.gauge(
+                    "db.client.connection.count", idle_connections, tags=idle_tags
+                )
+                statsd.gauge(
+                    "db.client.connection.count", used_connections, tags=used_tags
+                )
+                statsd.gauge(
+                    "db.client.connection.overflow", overflow_in_use, tags=base_tags
+                )
+                statsd.gauge(
+                    "db.client.connection.max", max_connections, tags=base_tags
+                )
+
+            await asyncio.to_thread(_send_statsd_pool_metrics)
 
         except Exception as e:
             logger.error(f"Failed to collect pool metrics for {self.pool_name}: {e}")
@@ -275,11 +336,9 @@ class PostgresQueryMetrics:
         meter = get_meter("agentex.db.query")
         self._enabled = meter is not None
 
-        if not self._enabled:
-            return
-
         host, port, db_name = _parse_db_url(db_url)
 
+        # Always set base_attributes for StatsD (even if OTel is disabled)
         self.base_attributes = {
             "service.name": service_name,
             "db.system.name": "postgresql",
@@ -289,29 +348,31 @@ class PostgresQueryMetrics:
             "deployment.environment": environment,
         }
 
-        self._operation_duration: Histogram = meter.create_histogram(
-            name="db.client.operation.duration",
-            description="Database operation duration",
-            unit="s",
-        )
+        # OTel metrics (only if enabled)
+        if self._enabled:
+            self._operation_duration: Histogram = meter.create_histogram(
+                name="db.client.operation.duration",
+                description="Database operation duration",
+                unit="s",
+            )
 
-        self._slow_queries: Counter = meter.create_counter(
-            name="db.client.operation.slow_total",
-            description="Total slow queries exceeding threshold",
-            unit="{query}",
-        )
+            self._slow_queries: Counter = meter.create_counter(
+                name="db.client.operation.slow_total",
+                description="Total slow queries exceeding threshold",
+                unit="{query}",
+            )
 
-        self._operation_errors: Counter = meter.create_counter(
-            name="db.client.operation.errors_total",
-            description="Total query errors",
-            unit="{error}",
-        )
+            self._operation_errors: Counter = meter.create_counter(
+                name="db.client.operation.errors_total",
+                description="Total query errors",
+                unit="{error}",
+            )
 
-        self._returned_rows: Histogram = meter.create_histogram(
-            name="db.client.response.returned_rows",
-            description="Number of rows returned by queries",
-            unit="{row}",
-        )
+            self._returned_rows: Histogram = meter.create_histogram(
+                name="db.client.response.returned_rows",
+                description="Number of rows returned by queries",
+                unit="{row}",
+            )
 
         self._register_query_events()
 
@@ -330,6 +391,7 @@ class PostgresQueryMetrics:
     def _register_query_events(self):
         """Register SQLAlchemy event listeners for query metrics."""
         sync_engine = self.engine.sync_engine
+        base_tags = _format_statsd_tags(self.base_attributes)
 
         @event.listens_for(sync_engine, "before_cursor_execute")
         def before_execute(
@@ -365,16 +427,36 @@ class PostgresQueryMetrics:
             if table:
                 attrs["db.collection.name"] = table
 
-            # Record operation duration
-            self._operation_duration.record(duration, attrs)
+            # OTel metrics (if enabled)
+            if self._enabled:
+                # Record operation duration
+                self._operation_duration.record(duration, attrs)
+
+                # Track slow queries
+                if duration >= _SLOW_QUERY_THRESHOLD:
+                    self._slow_queries.add(1, attrs)
+
+                # Record row count for SELECT queries
+                if operation == "SELECT" and cursor.rowcount >= 0:
+                    self._returned_rows.record(cursor.rowcount, attrs)
+
+            # StatsD metrics
+            tags = base_tags + [f"operation:{operation}"]
+            if table:
+                tags.append(f"table:{table}")
+
+            # Duration in milliseconds for Datadog
+            statsd.histogram("db.client.operation.duration", duration * 1000, tags=tags)
 
             # Track slow queries
             if duration >= _SLOW_QUERY_THRESHOLD:
-                self._slow_queries.add(1, attrs)
+                statsd.increment("db.client.operation.slow", tags=tags)
 
             # Record row count for SELECT queries
             if operation == "SELECT" and cursor.rowcount >= 0:
-                self._returned_rows.record(cursor.rowcount, attrs)
+                statsd.histogram(
+                    "db.client.response.returned_rows", cursor.rowcount, tags=tags
+                )
 
         @event.listens_for(sync_engine, "handle_error")
         def on_error(exception_context):
@@ -401,7 +483,16 @@ class PostgresQueryMetrics:
                 "error.type": error_type,
             }
 
-            self._operation_errors.add(1, attrs)
+            # OTel metrics (if enabled)
+            if self._enabled:
+                self._operation_errors.add(1, attrs)
+
+            # StatsD metrics
+            error_tags = base_tags + [
+                f"operation:{operation}",
+                f"error_type:{error_type}",
+            ]
+            statsd.increment("db.client.operation.errors", tags=error_tags)
 
 
 class PostgresHealthMetrics:
@@ -411,7 +502,7 @@ class PostgresHealthMetrics:
     Performs periodic health checks via simple SELECT 1 queries.
 
     If OTel is not configured (OTEL_EXPORTER_OTLP_ENDPOINT not set),
-    this class becomes a no-op.
+    OTel metrics become a no-op but StatsD metrics are still emitted.
     """
 
     HEALTH_CHECK_TIMEOUT = 2.0  # seconds
@@ -431,11 +522,9 @@ class PostgresHealthMetrics:
         meter = get_meter("agentex.db.health")
         self._enabled = meter is not None
 
-        if not self._enabled:
-            return
-
         host, _, db_name = _parse_db_url(db_url)
 
+        # Always set base_attributes for StatsD
         self.base_attributes = {
             "service.name": service_name,
             "db.system.name": "postgresql",
@@ -445,17 +534,19 @@ class PostgresHealthMetrics:
             "deployment.environment": environment,
         }
 
-        self._health_status: UpDownCounter = meter.create_up_down_counter(
-            name="db.client.connection.health",
-            description="Connection health status (1=healthy, 0=unhealthy)",
-            unit="{status}",
-        )
+        # OTel metrics (only if enabled)
+        if self._enabled:
+            self._health_status: UpDownCounter = meter.create_up_down_counter(
+                name="db.client.connection.health",
+                description="Connection health status (1=healthy, 0=unhealthy)",
+                unit="{status}",
+            )
 
-        self._health_check_failures: Counter = meter.create_counter(
-            name="db.client.connection.health_check_failures",
-            description="Total health check failures",
-            unit="{failure}",
-        )
+            self._health_check_failures: Counter = meter.create_counter(
+                name="db.client.connection.health_check_failures",
+                description="Total health check failures",
+                unit="{failure}",
+            )
 
         # Track last health status for delta
         self._last_health = 0
@@ -466,19 +557,23 @@ class PostgresHealthMetrics:
 
         Emits db.client.connection.health as delta changes.
         """
-        if not self._enabled:
-            return
+        base_tags = _format_statsd_tags(self.base_attributes)
 
         try:
             async with asyncio.timeout(self.HEALTH_CHECK_TIMEOUT):
                 async with self.engine.connect() as conn:
                     await conn.execute(text("SELECT 1"))
 
-            # Healthy - report delta to get to 1
-            health_delta = 1 - self._last_health
-            if health_delta != 0:
-                self._health_status.add(health_delta, self.base_attributes)
+            # Healthy
+            if self._enabled:
+                # OTel: report delta to get to 1
+                health_delta = 1 - self._last_health
+                if health_delta != 0:
+                    self._health_status.add(health_delta, self.base_attributes)
             self._last_health = 1
+
+            # StatsD: gauge for health status (1=healthy)
+            statsd.gauge("db.client.connection.health", 1, tags=base_tags)
 
         except Exception as e:
             error_type = type(e).__name__
@@ -486,14 +581,24 @@ class PostgresHealthMetrics:
                 f"Health check failed for pool {self.pool_name}: {error_type}"
             )
 
-            # Unhealthy - report delta to get to 0
-            health_delta = 0 - self._last_health
-            if health_delta != 0:
-                self._health_status.add(health_delta, self.base_attributes)
+            # Unhealthy
+            if self._enabled:
+                # OTel: report delta to get to 0
+                health_delta = 0 - self._last_health
+                if health_delta != 0:
+                    self._health_status.add(health_delta, self.base_attributes)
+
+                self._health_check_failures.add(
+                    1, {**self.base_attributes, "error.type": error_type}
+                )
             self._last_health = 0
 
-            self._health_check_failures.add(
-                1, {**self.base_attributes, "error.type": error_type}
+            # StatsD: gauge for health status (0=unhealthy)
+            statsd.gauge("db.client.connection.health", 0, tags=base_tags)
+            # StatsD: increment failure counter
+            error_tags = base_tags + [f"error_type:{error_type}"]
+            statsd.increment(
+                "db.client.connection.health_check_failures", tags=error_tags
             )
 
 
