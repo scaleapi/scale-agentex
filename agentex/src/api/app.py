@@ -1,6 +1,8 @@
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from datadog import initialize, statsd
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,6 +40,15 @@ from src.utils.otel_metrics import init_otel_metrics, shutdown_otel_metrics
 logger = make_logger(__name__)
 
 
+def configure_statsd():
+    """Configure the global DataDog StatsD client"""
+    initialize(
+        statsd_host=os.getenv("DD_AGENT_HOST", "localhost"),
+        statsd_port=int(os.getenv("DD_STATSD_PORT", "8125")),
+    )
+    return statsd
+
+
 class HTTPExceptionWithMessage(HTTPException):
     """
     HTTPException with request ID header.
@@ -63,6 +74,7 @@ async def lifespan(_: FastAPI):
     init_otel_metrics()
 
     await dependencies.startup_global_dependencies()
+    configure_statsd()
 
     # Start PostgreSQL metrics collection
     global_deps = GlobalDependencies()
