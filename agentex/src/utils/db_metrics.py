@@ -94,11 +94,9 @@ class PostgresPoolMetrics:
         meter = get_meter("agentex.db.pool")
         self._enabled = meter is not None
 
-        if not self._enabled:
-            return
-
         host, port, db_name = _parse_db_url(db_url)
 
+        # Always set base_attributes for StatsD (even if OTel is disabled)
         self.base_attributes = {
             "service.name": service_name,
             "db.system.name": "postgresql",
@@ -108,6 +106,11 @@ class PostgresPoolMetrics:
             "db.namespace": db_name,
             "deployment.environment": environment,
         }
+
+        if not self._enabled:
+            # Still register pool events for StatsD metrics
+            self._register_pool_events()
+            return
 
         self._connection_count: UpDownCounter = meter.create_up_down_counter(
             name="db.client.connection.count",
