@@ -1,3 +1,4 @@
+# Agentex Docker Compose - local development services
 version: '3.8'
 
 services:
