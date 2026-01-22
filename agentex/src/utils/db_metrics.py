@@ -36,6 +36,9 @@ _METRICS_DEBOUNCE_INTERVAL = 30
 # Slow query threshold in seconds (configurable via environment variable)
 _SLOW_QUERY_THRESHOLD = float(os.environ.get("POSTGRES_SLOW_QUERY_THRESHOLD", "0.5"))
 
+# StatsD is only enabled if DD_AGENT_HOST is configured
+_STATSD_ENABLED = bool(os.environ.get("DD_AGENT_HOST"))
+
 
 def _format_statsd_tags(attributes: dict) -> list[str]:
     """Convert OTel attributes dict to Datadog StatsD tags list."""
@@ -169,8 +172,8 @@ class PostgresPoolMetrics:
             """Track new connection creation."""
             if self._enabled:
                 self._connection_created.add(1, self.base_attributes)
-            # StatsD: increment counter for new connections
-            statsd.increment("db.client.connection.created", tags=base_tags)
+            if _STATSD_ENABLED:
+                statsd.increment("db.client.connection.created", tags=base_tags)
 
         @event.listens_for(sync_pool, "checkout")
         def on_checkout(
@@ -192,10 +195,10 @@ class PostgresPoolMetrics:
                 use_time = time.monotonic() - checkout_time
                 if self._enabled:
                     self._connection_use_time.record(use_time, self.base_attributes)
-                # StatsD: histogram for connection use time (in milliseconds for Datadog)
-                statsd.histogram(
-                    "db.client.connection.use_time", use_time * 1000, tags=base_tags
-                )
+                if _STATSD_ENABLED:
+                    statsd.histogram(
+                        "db.client.connection.use_time", use_time * 1000, tags=base_tags
+                    )
 
         @event.listens_for(sync_pool, "invalidate")
         def on_invalidate(
@@ -208,9 +211,9 @@ class PostgresPoolMetrics:
             attrs = {**self.base_attributes, "error.type": error_type}
             if self._enabled:
                 self._connection_invalidated.add(1, attrs)
-            # StatsD: increment counter for invalidated connections
-            error_tags = base_tags + [f"error_type:{error_type}"]
-            statsd.increment("db.client.connection.invalidated", tags=error_tags)
+            if _STATSD_ENABLED:
+                error_tags = base_tags + [f"error_type:{error_type}"]
+                statsd.increment("db.client.connection.invalidated", tags=error_tags)
 
     async def collect_pool_metrics(self):
         """
@@ -270,27 +273,28 @@ class PostgresPoolMetrics:
                     self._connection_max.add(max_delta, self.base_attributes)
                 self._last_max = max_connections
 
-            # StatsD metrics (always send as gauges)
-            base_tags = _format_statsd_tags(self.base_attributes)
+            # StatsD metrics (only if Datadog is configured)
+            if _STATSD_ENABLED:
+                base_tags = _format_statsd_tags(self.base_attributes)
 
-            def _send_statsd_pool_metrics():
-                idle_tags = base_tags + ["state:idle"]
-                used_tags = base_tags + ["state:used"]
+                def _send_statsd_pool_metrics():
+                    idle_tags = base_tags + ["state:idle"]
+                    used_tags = base_tags + ["state:used"]
 
-                statsd.gauge(
-                    "db.client.connection.count", idle_connections, tags=idle_tags
-                )
-                statsd.gauge(
-                    "db.client.connection.count", used_connections, tags=used_tags
-                )
-                statsd.gauge(
-                    "db.client.connection.overflow", overflow_in_use, tags=base_tags
-                )
-                statsd.gauge(
-                    "db.client.connection.max", max_connections, tags=base_tags
-                )
+                    statsd.gauge(
+                        "db.client.connection.count", idle_connections, tags=idle_tags
+                    )
+                    statsd.gauge(
+                        "db.client.connection.count", used_connections, tags=used_tags
+                    )
+                    statsd.gauge(
+                        "db.client.connection.overflow", overflow_in_use, tags=base_tags
+                    )
+                    statsd.gauge(
+                        "db.client.connection.max", max_connections, tags=base_tags
+                    )
 
-            await asyncio.to_thread(_send_statsd_pool_metrics)
+                await asyncio.to_thread(_send_statsd_pool_metrics)
 
         except Exception as e:
             logger.error(f"Failed to collect pool metrics for {self.pool_name}: {e}")
@@ -443,23 +447,26 @@ class PostgresQueryMetrics:
                 if operation == "SELECT" and cursor.rowcount >= 0:
                     self._returned_rows.record(cursor.rowcount, attrs)
 
-            # StatsD metrics
-            tags = base_tags + [f"operation:{operation}"]
-            if table:
-                tags.append(f"table:{table}")
+            # StatsD metrics (only if Datadog is configured)
+            if _STATSD_ENABLED:
+                tags = base_tags + [f"operation:{operation}"]
+                if table:
+                    tags.append(f"table:{table}")
 
-            # Duration in milliseconds for Datadog
-            statsd.histogram("db.client.operation.duration", duration * 1000, tags=tags)
-
-            # Track slow queries
-            if duration >= _SLOW_QUERY_THRESHOLD:
-                statsd.increment("db.client.operation.slow", tags=tags)
-
-            # Record row count for SELECT queries
-            if operation == "SELECT" and cursor.rowcount >= 0:
+                # Duration in milliseconds for Datadog
                 statsd.histogram(
-                    "db.client.response.returned_rows", cursor.rowcount, tags=tags
+                    "db.client.operation.duration", duration * 1000, tags=tags
                 )
+
+                # Track slow queries
+                if duration >= _SLOW_QUERY_THRESHOLD:
+                    statsd.increment("db.client.operation.slow", tags=tags)
+
+                # Record row count for SELECT queries
+                if operation == "SELECT" and cursor.rowcount >= 0:
+                    statsd.histogram(
+                        "db.client.response.returned_rows", cursor.rowcount, tags=tags
+                    )
 
         @event.listens_for(sync_engine, "handle_error")
         def on_error(exception_context):
@@ -490,12 +497,13 @@ class PostgresQueryMetrics:
             if self._enabled:
                 self._operation_errors.add(1, attrs)
 
-            # StatsD metrics
-            error_tags = base_tags + [
-                f"operation:{operation}",
-                f"error_type:{error_type}",
-            ]
-            statsd.increment("db.client.operation.errors", tags=error_tags)
+            # StatsD metrics (only if Datadog is configured)
+            if _STATSD_ENABLED:
+                error_tags = base_tags + [
+                    f"operation:{operation}",
+                    f"error_type:{error_type}",
+                ]
+                statsd.increment("db.client.operation.errors", tags=error_tags)
 
 
 class PostgresMetricsCollector:
