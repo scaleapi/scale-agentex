@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from datadog import statsd
-from sqlalchemy import event, text
+from sqlalchemy import event
 from sqlalchemy.engine import ExecutionContext
 
 from src.utils.logging import make_logger
@@ -498,113 +498,6 @@ class PostgresQueryMetrics:
             statsd.increment("db.client.operation.errors", tags=error_tags)
 
 
-class PostgresHealthMetrics:
-    """
-    Emits health-related metrics for PostgreSQL connections.
-
-    Performs periodic health checks via simple SELECT 1 queries.
-
-    If OTel is not configured (OTEL_EXPORTER_OTLP_ENDPOINT not set),
-    OTel metrics become a no-op but StatsD metrics are still emitted.
-    """
-
-    HEALTH_CHECK_TIMEOUT = 2.0  # seconds
-
-    def __init__(
-        self,
-        engine: AsyncEngine,
-        pool_name: str,
-        db_url: str,
-        environment: str,
-        service_name: str = "agentex",
-    ):
-        self.engine = engine
-        self.pool_name = pool_name
-
-        # Get meter - if None, OTel is not configured
-        meter = get_meter("agentex.db.health")
-        self._enabled = meter is not None
-
-        host, _, db_name = _parse_db_url(db_url)
-
-        # Always set base_attributes for StatsD
-        self.base_attributes = {
-            "service.name": service_name,
-            "db.system.name": "postgresql",
-            "db.client.connection.pool.name": pool_name,
-            "server.address": host,
-            "db.namespace": db_name,
-            "deployment.environment": environment,
-        }
-
-        # OTel metrics (only if enabled)
-        if self._enabled:
-            self._health_status: UpDownCounter = meter.create_up_down_counter(
-                name="db.client.connection.health",
-                description="Connection health status (1=healthy, 0=unhealthy)",
-                unit="{status}",
-            )
-
-            self._health_check_failures: Counter = meter.create_counter(
-                name="db.client.connection.health_check_failures",
-                description="Total health check failures",
-                unit="{failure}",
-            )
-
-        # Track last health status for delta
-        self._last_health = 0
-
-    async def check_health(self):
-        """
-        Perform health check and emit metrics.
-
-        Emits db.client.connection.health as delta changes.
-        """
-        base_tags = _format_statsd_tags(self.base_attributes)
-
-        try:
-            async with asyncio.timeout(self.HEALTH_CHECK_TIMEOUT):
-                async with self.engine.connect() as conn:
-                    await conn.execute(text("SELECT 1"))
-
-            # Healthy
-            if self._enabled:
-                # OTel: report delta to get to 1
-                health_delta = 1 - self._last_health
-                if health_delta != 0:
-                    self._health_status.add(health_delta, self.base_attributes)
-            self._last_health = 1
-
-            # StatsD: gauge for health status (1=healthy)
-            statsd.gauge("db.client.connection.health", 1, tags=base_tags)
-
-        except Exception as e:
-            error_type = type(e).__name__
-            logger.warning(
-                f"Health check failed for pool {self.pool_name}: {error_type}"
-            )
-
-            # Unhealthy
-            if self._enabled:
-                # OTel: report delta to get to 0
-                health_delta = 0 - self._last_health
-                if health_delta != 0:
-                    self._health_status.add(health_delta, self.base_attributes)
-
-                self._health_check_failures.add(
-                    1, {**self.base_attributes, "error.type": error_type}
-                )
-            self._last_health = 0
-
-            # StatsD: gauge for health status (0=unhealthy)
-            statsd.gauge("db.client.connection.health", 0, tags=base_tags)
-            # StatsD: increment failure counter
-            error_tags = base_tags + [f"error_type:{error_type}"]
-            statsd.increment(
-                "db.client.connection.health_check_failures", tags=error_tags
-            )
-
-
 class PostgresMetricsCollector:
     """
     Unified collector that manages all PostgreSQL metrics for multiple pools.
@@ -618,7 +511,6 @@ class PostgresMetricsCollector:
     def __init__(self):
         self._pool_metrics: dict[str, PostgresPoolMetrics] = {}
         self._query_metrics: dict[str, PostgresQueryMetrics] = {}
-        self._health_metrics: dict[str, PostgresHealthMetrics] = {}
         self._collection_task: asyncio.Task | None = None
 
     def register_engine(
@@ -644,24 +536,14 @@ class PostgresMetricsCollector:
             environment=environment,
             service_name=service_name,
         )
-        self._health_metrics[pool_name] = PostgresHealthMetrics(
-            engine=engine,
-            pool_name=pool_name,
-            db_url=db_url,
-            environment=environment,
-            service_name=service_name,
-        )
         logger.info(f"Registered PostgreSQL metrics for pool: {pool_name}")
 
     async def collect_all_metrics(self):
-        """Collect all pool and health metrics once."""
+        """Collect all pool metrics once."""
         tasks = []
 
         for metrics in self._pool_metrics.values():
             tasks.append(metrics.collect_pool_metrics())
-
-        for metrics in self._health_metrics.values():
-            tasks.append(metrics.check_health())
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
