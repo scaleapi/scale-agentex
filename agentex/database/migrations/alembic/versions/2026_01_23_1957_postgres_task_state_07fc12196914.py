@@ -1,11 +1,10 @@
-"""add_task_states_table
+"""postgres task state
 
-Revision ID: a1b2c3d4e5f6
-Revises: d024851e790c
-Create Date: 2026-01-12 00:00:00.000000
+Revision ID: 07fc12196914
+Revises: a1b2c3d4e5f6
+Create Date: 2026-01-23 19:57:54.790475
 
 """
-
 from typing import Sequence, Union
 
 from alembic import op
@@ -14,8 +13,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 
 # revision identifiers, used by Alembic.
-revision: str = "a1b2c3d4e5f6"
-down_revision: Union[str, None] = "d024851e790c"
+revision: str = '07fc12196914'
+down_revision: Union[str, None] = 'd024851e790c'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
