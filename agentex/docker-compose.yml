@@ -135,6 +135,19 @@ services:
       retries: 5
       start_period: 5s
 
+  agentex-otel-collector:
+    container_name: agentex-otel-collector
+    image: otel/opentelemetry-collector-contrib:0.101.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8889:8889"   # Prometheus metrics endpoint
+      - "13133:13133" # Health check endpoint
+    networks:
+      - agentex-network
   agentex:
     container_name: agentex
     build:
@@ -153,6 +166,8 @@ services:
       - ENABLE_HEALTH_CHECK_WORKFLOW=true
       - AGENTEX_SERVER_TASK_QUEUE=agentex-server
       - ALLOWED_ORIGINS=http://localhost:3000
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://agentex-otel-collector:4317
+      - OTEL_SERVICE_NAME=agentex-api
     ports:
       - "5003:5003"
     volumes:
@@ -166,6 +181,8 @@ services:
         condition: service_healthy
       agentex-mongodb:
         condition: service_healthy
+      agentex-otel-collector:
+        condition: service_started
     networks:
       - agentex-network
     command: |
