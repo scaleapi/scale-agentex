@@ -6,8 +6,8 @@ permissions:
 
 on:
   pull_request:
-    paths:
-      - "agentex/**"
+    # No paths filter - workflow always triggers so required check is created
+    # Actual test execution is gated by the 'changes' job below
   push:
     branches:
       - main
@@ -22,8 +22,52 @@ on:
         default: main
 
 jobs:
+  changes:
+    name: "Detect Changes"
+    runs-on: ubuntu-latest
+    outputs:
+      should-run: ${{ steps.check.outputs.should-run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for agentex changes
+        id: check
+        run: |
+          # Always run for workflow_dispatch
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+            echo "✅ Running: workflow_dispatch trigger"
+            exit 0
+          fi
+
+          # Always run for push events (they already have paths filter)
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+            echo "✅ Running: push event (paths filter already applied)"
+            exit 0
+          fi
+
+          # For PRs, check if agentex/ files changed
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.sha }}"
+
+          echo "Comparing $BASE_SHA..$HEAD_SHA"
+
+          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -q '^agentex/'; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+            echo "✅ Running: agentex/ files changed"
+          else
+            echo "should-run=false" >> $GITHUB_OUTPUT
+            echo "⏭️ Skipping: no agentex/ files changed"
+            git diff --name-only "$BASE_SHA" "$HEAD_SHA" | head -20
+          fi
+
   discover-agent-images:
     name: "Discover Tutorial Agent Images"
+    needs: changes
+    if: needs.changes.outputs.should-run == 'true'
     runs-on: ubuntu-latest
     outputs:
       agent-matrix: ${{ steps.discover.outputs.agent-matrix }}
@@ -446,13 +490,25 @@ jobs:
           retention-days: 1
 
   # Summary job to ensure the workflow fails if any test fails
+  # This job ALWAYS runs to satisfy branch protection requirements
   integration-tests-summary:
     name: "Integration Tests Summary"
     runs-on: ubuntu-latest
-    needs: [discover-agent-images, run-integration-tests]
-    if: always() # Run even if some tests fail
+    needs: [changes, discover-agent-images, run-integration-tests]
+    if: always() # Always run to create the required status check
     steps:
+      - name: Skip if no agentex changes
+        if: needs.changes.outputs.should-run != 'true'
+        run: |
+          echo "# ⏭️ Integration Tests Skipped" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "No changes detected in \`agentex/\` directory." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "This PR only modifies files outside the agentex backend, so integration tests are not required." >> $GITHUB_STEP_SUMMARY
+          echo "✅ Skipped - no agentex/ changes"
+
       - name: Download all test results
+        if: needs.changes.outputs.should-run == 'true'
         uses: actions/download-artifact@v4
         with:
           pattern: test-result-*
@@ -461,6 +517,7 @@ jobs:
         continue-on-error: true
 
       - name: Generate Integration Test Summary
+        if: needs.changes.outputs.should-run == 'true'
         run: |
           echo "# 🧪 AgentEx Integration Tests Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
