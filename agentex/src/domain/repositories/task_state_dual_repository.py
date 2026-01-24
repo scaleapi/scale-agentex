@@ -1,9 +1,9 @@
-from __future__ import annotations
-
-from typing import Annotated, Any, Literal
+# Note: List is used instead of list because the class has a method named 'list'
+# which shadows the builtin in the class body for type annotations
+from typing import Annotated, Any, List, Literal  # noqa: UP035
 
 from datadog import statsd
-from fastapi import Depends
+from fastapi import Depends, Query
 from src.config.dependencies import DEnvironmentVariables
 from src.domain.entities.states import StateEntity
 from src.domain.repositories.task_state_postgres_repository import (
@@ -47,11 +47,15 @@ class TaskStateDualRepository:
         mongo_repository: DTaskStateRepository,
         postgres_repository: DTaskStatePostgresRepository,
         environment_variables: DEnvironmentVariables,
+        storage_phase_override: str | None = None,
     ):
         self.mongo_repo = mongo_repository
         self.postgres_repo = postgres_repository
+        # Use override if provided, otherwise fall back to env var
         self.phase: TaskStateStoragePhase = (
-            environment_variables.TASK_STATE_STORAGE_PHASE
+            storage_phase_override  # type: ignore
+            if storage_phase_override
+            else environment_variables.TASK_STATE_STORAGE_PHASE
         )
 
     async def create(self, item: StateEntity) -> StateEntity:
@@ -224,7 +228,7 @@ class TaskStateDualRepository:
 
         return mongo_results
 
-    async def batch_create(self, items: list[StateEntity]) -> list[StateEntity]:
+    async def batch_create(self, items: List[StateEntity]) -> List[StateEntity]:  # noqa: UP006
         """Batch create states."""
         if self.phase == "mongodb":
             return await self.mongo_repo.batch_create(items)
@@ -311,10 +315,10 @@ class TaskStateDualRepository:
                 f"State content discrepancy in {operation} for id={mongo_result.id}",
                 extra={
                     **context,
-                    "mongo_state_keys": list(mongo_result.state.keys())
+                    "mongo_state_keys": [*mongo_result.state.keys()]
                     if mongo_result.state
                     else [],
-                    "postgres_state_keys": list(postgres_result.state.keys())
+                    "postgres_state_keys": [*postgres_result.state.keys()]
                     if postgres_result.state
                     else [],
                 },
@@ -325,6 +329,25 @@ class TaskStateDualRepository:
         statsd.increment(METRIC_DUAL_READ_MATCH, tags=tags)
 
 
+def get_task_state_dual_repository(
+    mongo_repository: DTaskStateRepository,
+    postgres_repository: DTaskStatePostgresRepository,
+    environment_variables: DEnvironmentVariables,
+    storage_backend: str | None = Query(
+        None,
+        description="Override storage backend: mongodb, dual_write, dual_read, or postgres",
+        pattern="^(mongodb|dual_write|dual_read|postgres)$",
+    ),
+) -> TaskStateDualRepository:
+    """Factory function that creates TaskStateDualRepository with optional storage backend override."""
+    return TaskStateDualRepository(
+        mongo_repository=mongo_repository,
+        postgres_repository=postgres_repository,
+        environment_variables=environment_variables,
+        storage_phase_override=storage_backend,
+    )
+
+
 DTaskStateDualRepository = Annotated[
-    TaskStateDualRepository, Depends(TaskStateDualRepository)
+    TaskStateDualRepository, Depends(get_task_state_dual_repository)
 ]
