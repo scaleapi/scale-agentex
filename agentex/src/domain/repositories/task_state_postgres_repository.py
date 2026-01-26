@@ -1,7 +1,7 @@
 from typing import Annotated, Any
 
 from fastapi import Depends
-from sqlalchemy import and_, select
+from sqlalchemy import and_, select, update
 from src.adapters.crud_store.adapter_postgres import (
     PostgresCRUDRepository,
     async_sql_exception_handler,
@@ -49,6 +49,28 @@ class TaskStatePostgresRepository(PostgresCRUDRepository[TaskStateORM, StateEnti
             result = await session.execute(query)
             orm_result = result.scalar_one_or_none()
             return StateEntity.model_validate(orm_result) if orm_result else None
+
+    async def update(self, item: StateEntity) -> StateEntity:
+        """
+        Update a task state using UPDATE ... RETURNING for single round-trip.
+
+        This overrides the parent class's update method which uses merge() + refresh()
+        (2 round trips) with a more efficient single-statement approach.
+        """
+        async with (
+            self.start_async_db_session(allow_writes=True) as session,
+            async_sql_exception_handler(),
+        ):
+            stmt = (
+                update(TaskStateORM)
+                .where(TaskStateORM.id == item.id)
+                .values(**item.to_dict())
+                .returning(TaskStateORM)
+            )
+            result = await session.execute(stmt)
+            await session.commit()
+            updated_orm = result.scalar_one()
+            return StateEntity.model_validate(updated_orm)
 
     async def list(
         self,
