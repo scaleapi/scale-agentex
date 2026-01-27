@@ -272,6 +272,8 @@ async def isolated_repositories(isolated_test_schema):
     class MockEnvironmentVariables:
         def __init__(self, redis_url):
             self.REDIS_URL = redis_url
+            self.REDIS_STREAM_MAXLEN = 10000  # Default from EnvironmentVariables
+            self.ENVIRONMENT = "test"
 
     # Get Redis URL from client
     connection_kwargs = redis_client.connection_pool.connection_kwargs
