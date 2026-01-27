@@ -409,7 +409,7 @@ async def _handle_agent_rpc(
     )
 
     logger.info(f"Is streaming request: {is_streaming_request}")
-    logger.info(f"Request: {request}")
+    # logger.info(f"Request: {request}")
 
     if is_streaming_request:
         return await _handle_streaming_rpc(

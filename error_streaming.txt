@@ -1,0 +1,81 @@
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/site-packages/httpx/_transports/default.py", line 72, in map_httpcore_exceptions
+    yield
+  File "/usr/local/lib/python3.12/site-packages/httpx/_transports/default.py", line 257, in __aiter__
+    async for part in self._httpcore_stream:
+  File "/usr/local/lib/python3.12/site-packages/httpcore/_async/connection_pool.py", line 407, in __aiter__
+    raise exc from None
+  File "/usr/local/lib/python3.12/site-packages/httpcore/_async/connection_pool.py", line 403, in __aiter__
+    async for part in self._stream:
+  File "/usr/local/lib/python3.12/site-packages/httpcore/_async/http11.py", line 342, in __aiter__
+    raise exc
+  File "/usr/local/lib/python3.12/site-packages/httpcore/_async/http11.py", line 334, in __aiter__
+    async for chunk in self._connection._receive_response_body(**kwargs):
+  File "/usr/local/lib/python3.12/site-packages/httpcore/_async/http11.py", line 203, in _receive_response_body
+    event = await self._receive_event(timeout=timeout)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/site-packages/httpcore/_async/http11.py", line 213, in _receive_event
+    with map_exceptions({h11.RemoteProtocolError: RemoteProtocolError}):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "/usr/local/lib/python3.12/site-packages/httpcore/_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.RemoteProtocolError: peer closed connection without sending complete message body (incomplete chunked read)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/site-packages/agentex/lib/sdk/fastacp/base/base_acp_server.py", line 237, in generate_json_rpc_stream
+    async for chunk in async_gen:
+  File "/app/centipede_student_assistant/project/acp.py", line 525, in handle_message_send
+    async for event in result.stream_events():
+  File "/usr/local/lib/python3.12/site-packages/agents/result.py", line 270, in stream_events
+    raise self._stored_exception
+  File "/usr/local/lib/python3.12/site-packages/ddtrace/contrib/internal/asyncio/patch.py", line 67, in traced_coro
+    return await coro
+           ^^^^^^^^^^
+  File "/usr/local/lib/python3.12/site-packages/agents/run.py", line 1012, in _start_streaming
+    turn_result = await cls._run_single_turn_streamed(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/site-packages/ddtrace/contrib/internal/trace_utils_async.py", line 36, in wrapper
+    return await func(mod, pin, wrapped, instance, args, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/site-packages/ddtrace/contrib/internal/openai_agents/patch.py", line 43, in patched_run_single_turn_streamed
+    return await _patched_run_single_turn(agents, pin, func, instance, args, kwargs, agent_index=1)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/site-packages/ddtrace/contrib/internal/openai_agents/patch.py", line 48, in _patched_run_single_turn
+    result = await func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/site-packages/agents/run.py", line 1237, in _run_single_turn_streamed
+    async for event in model.stream_response(
+  File "/usr/local/lib/python3.12/site-packages/agents/models/openai_chatcompletions.py", line 173, in stream_response
+    async for chunk in ChatCmplStreamHandler.handle_stream(response, stream):
+  File "/usr/local/lib/python3.12/site-packages/agents/models/chatcmpl_stream_handler.py", line 90, in handle_stream
+    async for chunk in stream:
+  File "/usr/local/lib/python3.12/site-packages/ddtrace/llmobs/_integrations/base_stream_handler.py", line 216, in __aiter__
+    async for chunk in self._self_async_stream_iter:
+  File "/usr/local/lib/python3.12/site-packages/openai/_streaming.py", line 148, in __aiter__
+    async for item in self._iterator:
+  File "/usr/local/lib/python3.12/site-packages/openai/_streaming.py", line 162, in __stream__
+    async for sse in iterator:
+  File "/usr/local/lib/python3.12/site-packages/openai/_streaming.py", line 152, in _iter_events
+    async for sse in self._decoder.aiter_bytes(self.response.aiter_bytes()):
+  File "/usr/local/lib/python3.12/site-packages/openai/_streaming.py", line 304, in aiter_bytes
+    async for chunk in self._aiter_chunks(iterator):
+  File "/usr/local/lib/python3.12/site-packages/openai/_streaming.py", line 315, in _aiter_chunks
+    async for chunk in iterator:
+  File "/usr/local/lib/python3.12/site-packages/httpx/_models.py", line 931, in aiter_bytes
+    async for raw_bytes in self.aiter_raw():
+  File "/usr/local/lib/python3.12/site-packages/httpx/_models.py", line 989, in aiter_raw
+    async for raw_stream_bytes in self.stream:
+  File "/usr/local/lib/python3.12/site-packages/httpx/_client.py", line 150, in __aiter__
+    async for chunk in self._stream:
+  File "/usr/local/lib/python3.12/site-packages/httpx/_transports/default.py", line 256, in __aiter__
+    with map_httpcore_exceptions():
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "/usr/local/lib/python3.12/site-packages/httpx/_transports/default.py", line 89, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.RemoteProtocolError: peer closed connection without sending complete message body (incomplete chunked read)

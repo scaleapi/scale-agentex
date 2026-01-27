@@ -231,7 +231,7 @@ class AgentACPService(TaskMessageMixin):
                 "Calling model dump on payload:", request.model_dump(mode="json")
             )
             payload = request.model_dump(mode="json")
-            logger.info(f"Streaming payload: {payload}")
+            # logger.info(f"Streaming payload: {payload}")
             async for chunk in self._http_gateway.stream_call(
                 method="POST",
                 url=f"{url}/api",

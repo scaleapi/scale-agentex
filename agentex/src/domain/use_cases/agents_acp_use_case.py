@@ -658,7 +658,7 @@ class AgentsACPUseCase(TaskMessageMixin):
                     completed_task_message_indexes.add(task_message_index)
 
                     logger.info(
-                        f"[message_send_stream][full]: messageId={parent_task_message.id}, index={task_message_index}. content={task_message_update.content}"
+                        f"[message_send_stream][full]: messageId={parent_task_message.id}, index={task_message_index}."
                     )
 
                 # If start, write an empty message to the database, deltas will be associated with this message later
