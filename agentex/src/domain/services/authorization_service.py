@@ -31,9 +31,22 @@ class AuthorizationService:
         self.agent_identity = request.state.agent_identity
         self.enabled = enabled
 
-    def _bypass(self) -> bool:
+    def _bypass_check(self) -> bool:
+        """Bypass authorization checks for agent-to-agent calls or when disabled.
+
+        Used for check() and list_resources() operations where we trust agent identity.
+        """
         if self.agent_identity:
             return True
+        return not self.is_enabled()
+
+    def _bypass_write(self) -> bool:
+        """Bypass authorization writes only when authorization is disabled.
+
+        Used for grant() and revoke() operations. We do NOT bypass these for
+        agent_identity because permission records must still be created so that
+        users can access agent-created resources (tasks, etc.) from the UI.
+        """
         return not self.is_enabled()
 
     def is_enabled(self) -> bool:
@@ -42,7 +55,7 @@ class AuthorizationService:
     async def grant(
         self, resource: AgentexResource, *, commit: bool = True, principal_context=...
     ) -> None:
-        if self._bypass():
+        if self._bypass_write():
             logger.info(
                 f"Authorization bypassed for grant operation on resource {resource}"
             )
@@ -67,7 +80,7 @@ class AuthorizationService:
     async def revoke(
         self, resource: AgentexResource, *, commit: bool = True, principal_context=...
     ) -> None:
-        if self._bypass():
+        if self._bypass_write():
             logger.info("Authorization bypassed for revoke operation")
             return None
 
@@ -98,7 +111,7 @@ class AuthorizationService:
         *,
         principal_context=...,
     ) -> bool:
-        if self._bypass():
+        if self._bypass_check():
             logger.info("Authorization bypassed for check operation")
             return True
 
@@ -166,7 +179,7 @@ class AuthorizationService:
     ) -> Iterable[str] | None:
         """List resource identifiers for which the current principal has *filter_operation* permission."""
 
-        if self._bypass():
+        if self._bypass_check():
             logger.info("Authorization bypassed for list_resources operation")
             return None
 
