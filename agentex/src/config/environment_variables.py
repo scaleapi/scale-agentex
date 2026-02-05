@@ -46,6 +46,8 @@ class EnvVarKeys(str, Enum):
     ALLOWED_ORIGINS = "ALLOWED_ORIGINS"
     DD_AGENT_HOST = "DD_AGENT_HOST"
     DD_STATSD_PORT = "DD_STATSD_PORT"
+    HTTPX_MAX_CONNECTIONS = "HTTPX_MAX_CONNECTIONS"
+    HTTPX_MAX_KEEPALIVE_CONNECTIONS = "HTTPX_MAX_KEEPALIVE_CONNECTIONS"
     HTTPX_CONNECT_TIMEOUT = "HTTPX_CONNECT_TIMEOUT"
     HTTPX_READ_TIMEOUT = "HTTPX_READ_TIMEOUT"
     HTTPX_WRITE_TIMEOUT = "HTTPX_WRITE_TIMEOUT"
@@ -95,6 +97,8 @@ class EnvironmentVariables(BaseModel):
     IMAGE_PULL_SECRET_NAME: str | None = None
     AGENTEX_AUTH_URL: str | None = None
     ALLOWED_ORIGINS: str | None = None
+    HTTPX_MAX_CONNECTIONS: int = 200  # Max total connections allowed
+    HTTPX_MAX_KEEPALIVE_CONNECTIONS: int = 100  # Max connections to keep alive
     HTTPX_CONNECT_TIMEOUT: float = 10.0  # HTTPX connection timeout in seconds
     HTTPX_READ_TIMEOUT: float = 30.0  # HTTPX read timeout in seconds
     HTTPX_WRITE_TIMEOUT: float = 30.0  # HTTPX write timeout in seconds
@@ -158,6 +162,12 @@ class EnvironmentVariables(BaseModel):
             ALLOWED_ORIGINS=os.environ.get(EnvVarKeys.ALLOWED_ORIGINS, "*"),
             DD_AGENT_HOST=os.environ.get(EnvVarKeys.DD_AGENT_HOST),
             DD_STATSD_PORT=os.environ.get(EnvVarKeys.DD_STATSD_PORT),
+            HTTPX_MAX_CONNECTIONS=int(
+                os.environ.get(EnvVarKeys.HTTPX_MAX_CONNECTIONS, "200")
+            ),
+            HTTPX_MAX_KEEPALIVE_CONNECTIONS=int(
+                os.environ.get(EnvVarKeys.HTTPX_MAX_KEEPALIVE_CONNECTIONS, "100")
+            ),
             HTTPX_CONNECT_TIMEOUT=float(
                 os.environ.get(EnvVarKeys.HTTPX_CONNECT_TIMEOUT, "10.0")
             ),
