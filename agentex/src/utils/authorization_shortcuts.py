@@ -11,7 +11,7 @@ from src.api.schemas.authorization_types import (
 from src.domain.repositories.agent_repository import DAgentRepository
 from src.domain.repositories.event_repository import DEventRepository
 from src.domain.repositories.task_repository import DTaskRepository
-from src.domain.repositories.task_state_repository import DTaskStateRepository
+from src.domain.repositories.task_state_dual_repository import DTaskStateDualRepository
 from src.domain.services.authorization_service import DAuthorizationService
 
 
@@ -19,7 +19,7 @@ async def _get_parent_task_id(
     resource_type: TaskChildResourceType,
     resource_id: str,
     event_repository: DEventRepository,
-    state_repository: DTaskStateRepository,
+    state_repository: DTaskStateDualRepository,
 ) -> str:
     """Get the parent task ID for a child resource."""
     registry = {
@@ -43,7 +43,7 @@ def DAuthorizedId(
     async def _ensure_authorized_id(
         authorization: DAuthorizationService,
         event_repository: DEventRepository,
-        state_repository: DTaskStateRepository,
+        state_repository: DTaskStateDualRepository,
         resource_id: str = Path(..., alias=param_name),
     ) -> str:
         # For child resources, check the parent task
@@ -80,7 +80,7 @@ def DAuthorizedQuery(
     async def _ensure_authorized_query(
         authorization: DAuthorizationService,
         event_repository: DEventRepository,
-        state_repository: DTaskStateRepository,
+        state_repository: DTaskStateDualRepository,
         resource_id: str = Query(..., alias=param_name, description=description),
     ) -> str:
         # For child resources, check the parent task
