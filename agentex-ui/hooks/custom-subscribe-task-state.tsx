@@ -3,7 +3,6 @@ import { aggregateMessageEvents } from 'agentex/lib/aggregate-message-events';
 import { compareDateStrings } from 'agentex/lib/compare-date-strings';
 import { taskStreamEventGenerator } from 'agentex/lib/task-stream-event-generator';
 
-import type { Agentex } from 'agentex';
 import type { Agent, Task, TaskMessage } from 'agentex/resources';
 
 /**
@@ -84,7 +83,7 @@ type ErrorReturn = {
  * This promise will never reject.
  */
 export async function subscribeTaskState(
-  client: Agentex,
+  client: any,
   taskIdentifier: TaskIdentifier,
   eventListener: ITaskEventListener,
   options?: {
@@ -131,19 +130,19 @@ export async function subscribeTaskState(
 
               // pause reading from stream until we initialize state
               [, , messages] = await Promise.all([
-                client.tasks.retrieve(taskID, null, { signal }).then(res => {
+                client.tasks.retrieve(taskID, null, { signal }).then((res: any) => {
                   eventListener.onTaskChange(res);
                   return res;
                 }),
                 client.agents
                   .list({ task_id: taskID }, { signal })
-                  .then(res => {
+                  .then((res: any) => {
                     eventListener.onAgentsChange(res);
                     return res;
                   }),
                 client.messages
                   .list({ task_id: taskID }, { signal })
-                  .then(res => {
+                  .then((res: any) => {
                     const chronologicalMessages = res.slice().reverse();
                     eventListener.onMessagesChange(chronologicalMessages);
                     return res;

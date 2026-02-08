@@ -188,3 +188,6 @@ agentex/docs/site/
 # tarballs for building
 *.tgz
 **/*.tar.gz
+
+# Node
+node_modules/

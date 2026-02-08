@@ -27,7 +27,7 @@ RUN npm config set maxsockets 3
 
 # Install dependencies with better reliability settings
 RUN npm config set registry https://registry.npmjs.org/ && \
-    npm ci --omit=dev --verbose
+    npm ci --verbose
 
 # Copy source code (node_modules and .next excluded by .dockerignore)
 COPY . .

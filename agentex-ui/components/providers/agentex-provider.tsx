@@ -1,11 +1,10 @@
 'use client';
 
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
-
 import AgentexSDK from 'agentex';
 
 interface AgentexContextValue {
-  agentexClient: AgentexSDK;
+  agentexClient: any;
   sgpAppURL: string;
 }
 

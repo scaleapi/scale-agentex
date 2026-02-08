@@ -9,7 +9,6 @@ import { taskMessagesKeys } from '@/hooks/use-task-messages';
 import type { TaskMessagesData } from '@/hooks/use-task-messages';
 import { tasksKeys } from '@/hooks/use-tasks';
 
-import type AgentexSDK from 'agentex';
 import type { TaskListResponse, TaskRetrieveResponse } from 'agentex/resources';
 
 /**
@@ -31,7 +30,7 @@ export function useTaskSubscription({
   agentName,
   enabled = true,
 }: {
-  agentexClient: AgentexSDK;
+  agentexClient: any;
   taskId: string;
   agentName: string;
   enabled?: boolean;

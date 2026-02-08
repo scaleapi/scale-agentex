@@ -46,4 +46,9 @@ next-env.d.ts
 
 .codeartifact-pip-conf
 
-docs/site/
+
+# local dev
+.venv_local/
+.venv_test/
+.venv/
+uploads/

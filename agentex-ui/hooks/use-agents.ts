@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
 
-import type AgentexSDK from 'agentex';
 import type { Agent } from 'agentex/resources';
 
 export const agentsKeys = {
@@ -13,10 +12,10 @@ export const agentsKeys = {
  * This hook retrieves all agent definitions that can execute tasks. Refetch on window focus
  * is disabled to prevent unnecessary API calls when switching browser tabs.
  *
- * @param agentexClient - AgentexSDK - The SDK client used to communicate with the Agentex API
+ * @param agentexClient - any - The SDK client used to communicate with the Agentex API
  * @returns UseQueryResult<Agent[]> - React Query result containing the array of agent definitions
  */
-export function useAgents(agentexClient: AgentexSDK) {
+export function useAgents(agentexClient: any) {
   return useQuery({
     queryKey: agentsKeys.all,
     queryFn: async (): Promise<Agent[]> => {

@@ -1,6 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import { closeBrackets } from '@codemirror/autocomplete';
 import { json } from '@codemirror/lang-json';
@@ -8,7 +14,7 @@ import { Prec } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import CodeMirror from '@uiw/react-codemirror';
 import { DataContent, TextContent } from 'agentex/resources';
-import { ArrowUp } from 'lucide-react';
+import { ArrowUp, Paperclip, X } from 'lucide-react';
 
 import { useAgentexClient } from '@/components/providers';
 import { IconButton } from '@/components/ui/icon-button';
@@ -20,6 +26,7 @@ import {
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
 import { useSendMessage } from '@/hooks/use-task-messages';
+import { useUploadFile, FileAttachment } from '@/hooks/use-upload-file';
 
 type PromptInputProps = {
   prompt: string;
@@ -47,6 +54,9 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
   const { taskID, agentName, updateParams } = useSafeSearchParams();
   const [isClient, setIsClient] = useState(false);
   const [isSendingJSON, setIsSendingJSON] = useState(false);
+  const [attachments, setAttachments] = useState<FileAttachment[]>([]);
+  const { uploadFile, isUploading } = useUploadFile();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { agentexClient } = useAgentexClient();
 
@@ -132,13 +142,13 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
           type: 'text',
           author: 'user',
           format: 'plain',
-          attachments: [],
+          attachments: attachments,
           content: prompt as string,
         };
 
     await sendMessageMutation.mutateAsync({
-      taskId: currentTaskId,
-      agentName: agentName!,
+      taskId: currentTaskId ?? '',
+      agentName: agentName ?? '',
       content,
     });
   }, [
@@ -151,6 +161,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
     sendMessageMutation,
     setPrompt,
     isSendingJSON,
+    attachments,
   ]);
 
   return (
@@ -158,6 +169,17 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
       <div
         className={`border-input dark:bg-input ${isDisabled ? 'bg-muted scale-90 cursor-not-allowed' : 'scale-100'} flex w-full items-center justify-between rounded-4xl border py-2 pr-2 pl-6 shadow-sm transition-transform duration-300 disabled:cursor-not-allowed`}
       >
+        <div className="flex items-center">
+          {!isSendingJSON && (
+            <IconButton
+              className="text-muted-foreground hover:text-foreground mr-2"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isDisabled || isUploading}
+              icon={Paperclip}
+              aria-label="Attach File"
+            />
+          )}
+        </div>
         {isSendingJSON ? (
           <DataInput
             prompt={prompt}
@@ -178,11 +200,50 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
         <IconButton
           className="pointer-events-auto size-10 rounded-full"
           onClick={handleSendPrompt}
-          disabled={isDisabled || !prompt.trim()}
+          disabled={isDisabled || (!prompt.trim() && attachments.length === 0)}
           icon={ArrowUp}
           aria-label="Send Prompt"
         />
+        <input
+          type="file"
+          ref={fileInputRef}
+          className="hidden"
+          onChange={async e => {
+            const file = e.target.files?.[0];
+            if (file) {
+              const attachment = await uploadFile(file);
+              if (attachment) {
+                setAttachments([...attachments, attachment]);
+              }
+              // Reset input so same file can be selected again if needed
+              e.target.value = '';
+            }
+          }}
+        />
       </div>
+
+      {/* Attachments Display */}
+      {attachments.length > 0 && (
+        <div className="flex flex-wrap gap-2 px-1">
+          {attachments.map((file, idx) => (
+            <div
+              key={file.file_id}
+              className="bg-muted flex items-center gap-1 rounded-md px-2 py-1 text-xs"
+            >
+              <span className="max-w-[150px] truncate">{file.name}</span>
+              <button
+                onClick={() =>
+                  setAttachments(prev => prev.filter((_, i) => i !== idx))
+                }
+                className="hover:bg-background/20 rounded-full p-0.5"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div
         className="text-muted-foreground ml-4 flex items-center gap-2 rounded-full text-sm"
         style={{
@@ -278,7 +339,7 @@ const DataInput = ({
       className="dark:bg-input/30 mx-1 w-full rounded-full text-sm"
       value={prompt}
       onChange={(value: string) => setPrompt(value)}
-      onCreateEditor={view => {
+      onCreateEditor={(view: EditorView) => {
         codeMirrorViewRef.current = view;
       }}
       extensions={[json(), noOutlineTheme, closeBrackets(), commandEnterKeymap]}
