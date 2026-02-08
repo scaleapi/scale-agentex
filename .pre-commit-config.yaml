@@ -1,0 +1,20 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Ruff version.
+    rev: v0.3.4
+    hooks:
+      # Run the linter.
+      - id: ruff
+        args: [--fix]
+      # Run the formatter.
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: agentex-ui-lint-fix
+        name: Agentex UI Linting
+        entry: bash -c 'cd agentex-ui && npx eslint --fix --no-warn-ignored --max-warnings=0 $(echo "$@" | sed "s|agentex-ui/||g")' --
+        language: system
+        files: ^agentex-ui/.*\.(ts|tsx|js|jsx)$
+        pass_filenames: true
+

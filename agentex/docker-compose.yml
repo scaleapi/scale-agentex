@@ -1,0 +1,260 @@
+# Agentex Docker Compose - local development services
+version: '3.8'
+
+services:
+  agentex-temporal-postgresql:
+    container_name: agentex-temporal-postgresql
+    environment:
+      - POSTGRES_PASSWORD=temporal
+      - POSTGRES_USER=temporal
+      - LOG_LEVEL=error
+    image: postgres:12
+    networks:
+      - agentex-network
+    ports:
+      - 5433:5432
+    volumes:
+      - agentex-temporal-postgres-data:/var/lib/postgresql/data:cached
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  agentex-temporal:
+    container_name: agentex-temporal
+    depends_on:
+      agentex-temporal-postgresql:
+        condition: service_healthy
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=agentex-temporal-postgresql
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+      - LOG_LEVEL=error
+    image: temporalio/auto-setup:1.25.0
+    networks:
+      - agentex-network
+    ports:
+      - 7233:7233
+    volumes:
+      - ./temporal/dynamicconfig:/etc/temporal/config/dynamicconfig:cached
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 7233 || exit 0"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  agentex-temporal-admin-tools:
+    container_name: agentex-temporal-admin-tools
+    depends_on:
+      agentex-temporal:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=agentex-temporal:7233
+      - TEMPORAL_CLI_ADDRESS=agentex-temporal:7233
+      - LOG_LEVEL=error
+    image: temporalio/admin-tools:1.25.0-tctl-1.18.1-cli-1.1.0
+    networks:
+      - agentex-network
+    stdin_open: true
+    tty: true
+
+  agentex-temporal-ui:
+    container_name: agentex-temporal-ui
+    depends_on:
+      agentex-temporal:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=agentex-temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+      - LOG_LEVEL=error
+    image: temporalio/ui:2.31.0
+    networks:
+      - agentex-network
+    ports:
+      - 8080:8080
+
+  agentex-redis:
+    image: "redis:7.4.0-alpine"
+    ports:
+      - "6379:6379"
+    networks:
+      - agentex-network  # Redis should also be on the same network
+    volumes:
+      - agentex-redis-data:/data:cached
+    command: [ "redis-server", "--appendonly", "yes" ]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  agentex-postgres:
+    container_name: agentex-postgres
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: agentex
+    ports:
+      - "5432:5432"
+    networks:
+      - agentex-network
+    volumes:
+      - agentex-postgres-data:/var/lib/postgresql/data:cached
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  agentex-mongodb:
+    container_name: agentex-mongodb
+    image: mongo:6.0
+    ports:
+      - "27017:27017"
+    networks:
+      - agentex-network
+    volumes:
+      - agentex-mongodb-data:/data/db:cached
+      - ./scripts/mongodb:/docker-entrypoint-initdb.d/:ro
+    environment:
+      - MONGO_INITDB_DATABASE=agentex
+    command: mongod --bind_ip_all --quiet
+    healthcheck:
+      test: mongosh --eval 'db.runCommand("ping").ok' localhost:27017/agentex --quiet
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  agentex-otel-collector:
+    container_name: agentex-otel-collector
+    image: otel/opentelemetry-collector-contrib:0.101.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8889:8889"   # Prometheus metrics endpoint
+      - "13133:13133" # Health check endpoint
+    networks:
+      - agentex-network
+  agentex:
+    container_name: agentex
+    build:
+      context: ..
+      dockerfile: agentex/Dockerfile
+      target: dev
+    environment:
+      - ENVIRONMENT=development
+      - UVICORN_PORT=5003
+      - DATABASE_URL=postgresql://postgres:postgres@agentex-postgres:5432/agentex
+      - TEMPORAL_ADDRESS=agentex-temporal:7233
+      - REDIS_URL=redis://agentex-redis:6379
+      - MONGODB_URI=mongodb://agentex-mongodb:27017
+      - MONGODB_DATABASE_NAME=agentex
+      - WATCHFILES_FORCE_POLLING=true
+      - ENABLE_HEALTH_CHECK_WORKFLOW=true
+      - AGENTEX_SERVER_TASK_QUEUE=agentex-server
+      - ALLOWED_ORIGINS=http://localhost:3000
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://agentex-otel-collector:4317
+      - OTEL_SERVICE_NAME=agentex-api
+    ports:
+      - "5003:5003"
+    volumes:
+      - .:/app:cached
+    depends_on:
+      agentex-temporal:
+        condition: service_healthy
+      agentex-redis:
+        condition: service_healthy
+      agentex-postgres:
+        condition: service_healthy
+      agentex-mongodb:
+        condition: service_healthy
+      agentex-otel-collector:
+        condition: service_started
+    networks:
+      - agentex-network
+    command: |
+      bash -c "
+        echo 'All services are available' &&
+        export TEMPORAL_ADDRESS=agentex-temporal:7233 &&
+        export TEMPORAL_HOST=agentex-temporal &&
+        export MONGODB_URI=mongodb://agentex-mongodb:27017 &&
+        echo 'Creating database if it does not exist...' &&
+        PGPASSWORD=postgres psql -h agentex-postgres -U postgres -c 'CREATE DATABASE agentex;' || echo 'Database already exists or creation failed' &&
+        echo 'Running database migrations...' &&
+        pushd database/migrations &&
+        alembic upgrade head &&
+        popd &&
+        python src/temporal/run_healthcheck_workflow.py &&
+        echo 'Starting API server...' &&
+        uvicorn src.api.app:app --host 0.0.0.0 --port 5003 --reload --reload-dir /app/src --reload-include '*.py' --workers 1
+      "
+    user: root
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 5003 || exit 0"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  agentex-temporal-worker:
+    container_name: agentex-temporal-worker
+    build:
+      context: ..
+      dockerfile: agentex/Dockerfile
+      target: dev
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql://postgres:postgres@agentex-postgres:5432/agentex
+      - TEMPORAL_ADDRESS=agentex-temporal:7233
+      - TEMPORAL_HOST=agentex-temporal
+      - REDIS_URL=redis://agentex-redis:6379
+      - MONGODB_URI=mongodb://agentex-mongodb:27017
+      - MONGODB_DATABASE_NAME=agentex
+      - AGENTEX_SERVER_TASK_QUEUE=agentex-server
+    volumes:
+      - .:/app:cached
+    depends_on:
+      agentex-temporal:
+        condition: service_healthy
+      agentex-redis:
+        condition: service_healthy
+      agentex-postgres:
+        condition: service_healthy
+      agentex-mongodb:
+        condition: service_healthy
+    networks:
+      - agentex-network
+    command: |
+      bash -c "
+        echo 'Starting Temporal Worker...' &&
+        export TEMPORAL_ADDRESS=agentex-temporal:7233 &&
+        export TEMPORAL_HOST=agentex-temporal &&
+        export MONGODB_URI=mongodb://agentex-mongodb:27017 &&
+        python src/temporal/run_worker.py
+      "
+    user: root
+    restart: unless-stopped
+
+volumes:
+  agentex-temporal-postgres-data:
+  agentex-postgres-data:
+  agentex-redis-data:
+  agentex-mongodb-data:
+
+networks:
+  agentex-network:
+    driver: bridge
+    name: agentex-network

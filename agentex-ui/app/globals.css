@@ -1,0 +1,103 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@source '../node_modules/streamdown/dist/index.js';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-background: var(--background);
+  --color-border: var(--border);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive: var(--destructive);
+  --color-foreground: var(--foreground);
+  --color-input: var(--input);
+  --color-loading: var(--loading);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-ring: var(--ring);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-geist-sans);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --max-page-content-width: var(--spacing) * 256;
+  --radius: 0.625rem;
+  --accent-foreground: #2d3748;
+  --accent: #c5d0e6;
+  --background: #ffffff;
+  --border: oklch(0.922 0 0);
+  --destructive-foreground: #fdb0ba;
+  --destructive: #710025;
+  --foreground: #35363b;
+  --input: oklch(0.922 0 0);
+  --loading: oklch(0.92 0 0);
+  --muted-foreground: oklch(0.442 0 0);
+  --muted: oklch(0.97 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --primary-foreground: #714dff;
+  --primary: #f0f1ff;
+  --ring: #19202f;
+  --secondary-foreground: #ffffff;
+  --secondary: #45464f;
+}
+
+.dark {
+  --accent-foreground: #e5e7eb;
+  --accent: #2b3039;
+  --background: #151618;
+  --border: oklch(1 0 0 / 10%);
+  --destructive-foreground: #ffced5;
+  --destructive: #7a1331;
+  --foreground: #ffffff;
+  --input: #28292a;
+  --loading: #2a2b2d;
+  --muted-foreground: #9ca3af;
+  --muted: #212224;
+  --popover-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --primary-foreground: #714dff;
+  --primary: rgba(147, 92, 255, 0.08);
+  --ring: #d1d5db;
+  --secondary-foreground: oklch(0.985 0 0);
+  --secondary: rgba(255, 255, 255, 0.08);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  *:focus-visible {
+    @apply ring-[1px] ring-[#756BA2];
+  }
+
+  button {
+    @apply cursor-pointer disabled:cursor-auto;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+.hide-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}

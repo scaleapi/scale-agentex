@@ -1,0 +1,6 @@
+---
+description: 
+globs: *.md
+alwaysApply: false
+---
+Before writing a list into any markdown file, make sure to include a new line before the start of the list
