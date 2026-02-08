@@ -160,6 +160,7 @@ class DeltaAccumulator:
             )
             return ReasoningContentEntity(
                 author=MessageAuthor.AGENT,
+                summary=[],
                 content=[reasoning_content_str],
             )
         elif self._delta_type == DeltaType.REASONING_SUMMARY:

@@ -1,4 +1,5 @@
-24429f13b8bd -> d024851e790c (head), add_performance_indexes
+d024851e790c -> d1a6cde41b3f (head), add_langgraph_checkpoint_tables
+24429f13b8bd -> d024851e790c, add_performance_indexes
 a5d67f2d7356 -> 24429f13b8bd, add agent input type
 329fbafa4ff9 -> a5d67f2d7356, add unhealthy status
 d7addd4229e8 -> 329fbafa4ff9, change_default_acp_to_async

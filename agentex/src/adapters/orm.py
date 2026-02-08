@@ -5,6 +5,8 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
+    LargeBinary,
     String,
     Text,
     func,
@@ -212,4 +214,57 @@ class DeploymentHistoryORM(BaseORM):
             "ix_deployment_history_commit_hash",
             "commit_hash",
         ),
+    )
+
+
+# LangGraph checkpoint tables
+# These mirror the schema from langgraph.checkpoint.postgres so that
+# tables are created via Alembic migrations rather than at agent runtime.
+
+
+class CheckpointMigrationORM(BaseORM):
+    __tablename__ = "checkpoint_migrations"
+    v = Column(Integer, primary_key=True)
+
+
+class CheckpointORM(BaseORM):
+    __tablename__ = "checkpoints"
+    thread_id = Column(Text, nullable=False, primary_key=True)
+    checkpoint_ns = Column(Text, nullable=False, primary_key=True, server_default="")
+    checkpoint_id = Column(Text, nullable=False, primary_key=True)
+    parent_checkpoint_id = Column(Text, nullable=True)
+    type = Column(Text, nullable=True)
+    checkpoint = Column(JSONB, nullable=False)
+    metadata_ = Column("metadata", JSONB, nullable=False, server_default="{}")
+    __table_args__ = (
+        Index("checkpoints_thread_id_idx", "thread_id"),
+    )
+
+
+class CheckpointBlobORM(BaseORM):
+    __tablename__ = "checkpoint_blobs"
+    thread_id = Column(Text, nullable=False, primary_key=True)
+    checkpoint_ns = Column(Text, nullable=False, primary_key=True, server_default="")
+    channel = Column(Text, nullable=False, primary_key=True)
+    version = Column(Text, nullable=False, primary_key=True)
+    type = Column(Text, nullable=False)
+    blob = Column(LargeBinary, nullable=True)
+    __table_args__ = (
+        Index("checkpoint_blobs_thread_id_idx", "thread_id"),
+    )
+
+
+class CheckpointWriteORM(BaseORM):
+    __tablename__ = "checkpoint_writes"
+    thread_id = Column(Text, nullable=False, primary_key=True)
+    checkpoint_ns = Column(Text, nullable=False, primary_key=True, server_default="")
+    checkpoint_id = Column(Text, nullable=False, primary_key=True)
+    task_id = Column(Text, nullable=False, primary_key=True)
+    idx = Column(Integer, nullable=False, primary_key=True)
+    channel = Column(Text, nullable=False)
+    type = Column(Text, nullable=True)
+    blob = Column(LargeBinary, nullable=False)
+    task_path = Column(Text, nullable=False, server_default="")
+    __table_args__ = (
+        Index("checkpoint_writes_thread_id_idx", "thread_id"),
     )
