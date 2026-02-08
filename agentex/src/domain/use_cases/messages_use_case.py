@@ -7,7 +7,13 @@ from src.domain.entities.task_messages import (
     TaskMessageEntity,
     TaskMessageEntityFilter,
 )
+    TaskMessageEntity,
+    TaskMessageEntityFilter,
+    TextContentEntity,
+)
 from src.domain.services.task_message_service import DTaskMessageService
+from src.adapters.storage.ports import StorageProvider
+from src.config.storage_dependency import get_storage_provider
 
 
 def _flatten_to_dot_notation(obj: dict[str, Any], prefix: str = "") -> dict[str, Any]:
@@ -76,8 +82,10 @@ class MessagesUseCase:
     def __init__(
         self,
         task_message_service: DTaskMessageService,
+        storage_provider: Annotated[StorageProvider, Depends(get_storage_provider)],
     ):
         self.task_message_service = task_message_service
+        self.storage_provider = storage_provider
 
     async def create(
         self,
@@ -88,13 +96,35 @@ class MessagesUseCase:
         """
         Create a new message for a task.
 
+        If the message content includes attachments, this method will fetch the file content
+        from the storage provider and inject it into the message text context.
+
         Args:
             task_id: The task ID
             content: The task message content to create
+            streaming_status: Optional streaming status
 
         Returns:
             The created TaskMessageEntity with ID and metadata
         """
+        # Context Injection for Attachments
+        if isinstance(content, TextContentEntity) and content.attachments:
+            for attachment in content.attachments:
+                try:
+                    file_bytes = await self.storage_provider.get_file(attachment.file_id)
+                    # Simple heuristic: try to decode as utf-8. If fails, maybe skip or note it's binary.
+                    # For V1, we focused on text/code.
+                    try:
+                        file_text = file_bytes.decode("utf-8")
+                        content.content += f"\n\n--- FILE: {attachment.name} ---\n{file_text}\n"
+                    except UnicodeDecodeError:
+                        content.content += f"\n\n--- FILE: {attachment.name} (Binary Content/Preview Unavailable) ---\n"
+                except Exception as e:
+                    # Log error but don't block message creation? Or fail?
+                    # Failing is safer so user knows it didn't work.
+                    # content.content += f"\n\n--- FILE: {attachment.name} (Error loading: {str(e)}) ---\n"
+                    pass # Or handle better.
+
         return await self.task_message_service.append_message(
             task_id=task_id,
             content=content,

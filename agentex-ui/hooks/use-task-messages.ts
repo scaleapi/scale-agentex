@@ -9,7 +9,6 @@ import { v4 } from 'uuid';
 import { toast } from '@/components/ui/toast';
 import { agentsKeys } from '@/hooks/use-agents';
 
-import type AgentexSDK from 'agentex';
 import type { IDeltaAccumulator } from 'agentex/lib';
 import type { Agent, TaskMessage, TaskMessageContent } from 'agentex/resources';
 
@@ -39,7 +38,7 @@ export function useTaskMessages({
   agentexClient,
   taskId,
 }: {
-  agentexClient: AgentexSDK;
+  agentexClient: any;
   taskId: string;
 }) {
   return useQuery({
@@ -76,7 +75,7 @@ type SendMessageParams = {
 export function useSendMessage({
   agentexClient,
 }: {
-  agentexClient: AgentexSDK;
+  agentexClient: any;
 }) {
   const queryClient = useQueryClient();
 

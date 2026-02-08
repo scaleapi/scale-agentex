@@ -10,7 +10,6 @@ import { agentRPCNonStreaming } from 'agentex/lib';
 import { toast } from '@/components/ui/toast';
 import { tasksKeys } from '@/hooks/use-tasks';
 
-import type AgentexSDK from 'agentex';
 import type {
   Agent,
   Task,
@@ -36,10 +35,10 @@ export function updateTaskInInfiniteQuery(
 ): InfiniteData<TaskListResponse> | undefined {
   if (!data) return undefined;
 
-  if (data.pages.some(page => page.some(t => t.id === task.id))) {
+  if (data.pages.some((page: any) => page.some((t: any) => t.id === task.id))) {
     return {
-      pages: data.pages.map(page =>
-        page.map(t =>
+      pages: data.pages.map((page: any) =>
+        page.map((t: any) =>
           t.id === task.id ? { ...task, agents: t.agents || null } : t
         )
       ),
@@ -93,7 +92,7 @@ type CreateTaskParams = {
 export function useCreateTask({
   agentexClient,
 }: {
-  agentexClient: AgentexSDK;
+  agentexClient: any;
 }) {
   const queryClient = useQueryClient();
 
@@ -117,21 +116,21 @@ export function useCreateTask({
 
       return response.result;
     },
-    onSuccess: (task, variables) => {
+    onSuccess: (task: any, variables: any) => {
       queryClient.setQueryData<TaskRetrieveResponse>(
         tasksKeys.individualById(task.id),
         task
       );
       queryClient.setQueryData<InfiniteData<TaskListResponse>>(
         tasksKeys.all,
-        data => updateTaskInInfiniteQuery(task, variables.agentName, data)
+        (data: any) => updateTaskInInfiniteQuery(task, variables.agentName, data)
       );
       queryClient.setQueryData<InfiniteData<TaskListResponse>>(
         tasksKeys.byAgentName(variables.agentName),
-        data => updateTaskInInfiniteQuery(task, variables.agentName, data)
+        (data: any) => updateTaskInInfiniteQuery(task, variables.agentName, data)
       );
     },
-    onError: error => {
+    onError: (error: any) => {
       toast.error({
         title: 'Failed to create task',
         message: error instanceof Error ? error.message : 'Please try again.',

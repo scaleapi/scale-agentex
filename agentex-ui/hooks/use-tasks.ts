@@ -1,6 +1,5 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 
-import type AgentexSDK from 'agentex';
 import type {
   TaskListResponse,
   TaskListParams,
@@ -31,7 +30,7 @@ export function useTask({
   agentexClient,
   taskId,
 }: {
-  agentexClient: AgentexSDK;
+  agentexClient: any;
   taskId: string;
 }) {
   return useQuery({
@@ -57,7 +56,7 @@ export function useTask({
  * @returns UseInfiniteQueryResult<InfiniteData<TaskListResponse>> - Infinite query with fetchNextPage support
  */
 export function useInfiniteTasks(
-  agentexClient: AgentexSDK,
+  agentexClient: any,
   options?: { agentName?: string; limit?: number }
 ) {
   const { agentName, limit = 30 } = options || {};
@@ -73,7 +72,7 @@ export function useInfiniteTasks(
       };
       return agentexClient.tasks.list(params);
     },
-    getNextPageParam: (lastPage, allPages) => {
+    getNextPageParam: (lastPage: any, allPages: any) => {
       if (lastPage.length < limit) {
         return undefined;
       }

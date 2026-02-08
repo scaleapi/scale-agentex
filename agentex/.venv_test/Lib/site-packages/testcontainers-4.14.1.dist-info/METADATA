@@ -1,0 +1,175 @@
+Metadata-Version: 2.4
+Name: testcontainers
+Version: 4.14.1
+Summary: Python library for throwaway instances of anything that can run in a Docker container
+License: Apache-2.0
+License-File: LICENSE.txt
+Keywords: testing,logging,docker,test automation
+Author: Sergey Pirogov
+Author-email: automationremarks@gmail.com
+Maintainer: Balint Bartha
+Maintainer-email: totallyzen@users.noreply.github.com
+Requires-Python: >=3.10
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Information Technology
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Operating System :: MacOS
+Classifier: Operating System :: Microsoft :: Windows
+Classifier: Operating System :: POSIX
+Classifier: Operating System :: Unix
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3.14
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Provides-Extra: arangodb
+Provides-Extra: aws
+Provides-Extra: azurite
+Provides-Extra: cassandra
+Provides-Extra: chroma
+Provides-Extra: clickhouse
+Provides-Extra: cockroachdb
+Provides-Extra: cosmosdb
+Provides-Extra: db2
+Provides-Extra: elasticsearch
+Provides-Extra: generic
+Provides-Extra: google
+Provides-Extra: influxdb
+Provides-Extra: k3s
+Provides-Extra: kafka
+Provides-Extra: keycloak
+Provides-Extra: localstack
+Provides-Extra: mailpit
+Provides-Extra: memcached
+Provides-Extra: milvus
+Provides-Extra: minio
+Provides-Extra: mongodb
+Provides-Extra: mqtt
+Provides-Extra: mssql
+Provides-Extra: mysql
+Provides-Extra: nats
+Provides-Extra: neo4j
+Provides-Extra: nginx
+Provides-Extra: ollama
+Provides-Extra: openfga
+Provides-Extra: opensearch
+Provides-Extra: oracle
+Provides-Extra: oracle-free
+Provides-Extra: postgres
+Provides-Extra: qdrant
+Provides-Extra: rabbitmq
+Provides-Extra: redis
+Provides-Extra: registry
+Provides-Extra: scylla
+Provides-Extra: selenium
+Provides-Extra: sftp
+Provides-Extra: test-module-import
+Provides-Extra: trino
+Provides-Extra: vault
+Provides-Extra: weaviate
+Requires-Dist: azure-cosmos (>=4,<5) ; extra == "cosmosdb"
+Requires-Dist: azure-storage-blob (>=12,<13) ; extra == "azurite"
+Requires-Dist: bcrypt (>=5,<6) ; extra == "registry"
+Requires-Dist: boto3 (>=1,<2) ; extra == "aws" or extra == "localstack"
+Requires-Dist: cassandra-driver (>=3,<4) ; extra == "scylla"
+Requires-Dist: chromadb-client (>=1,<2) ; extra == "chroma"
+Requires-Dist: cryptography ; extra == "mailpit" or extra == "sftp"
+Requires-Dist: docker
+Requires-Dist: google-cloud-datastore (>=2,<3) ; extra == "google"
+Requires-Dist: google-cloud-pubsub (>=2,<3) ; extra == "google"
+Requires-Dist: httpx ; extra == "aws" or extra == "generic" or extra == "test-module-import"
+Requires-Dist: ibm_db_sa ; (platform_machine != "aarch64" and platform_machine != "arm64") and (extra == "db2")
+Requires-Dist: influxdb (>=5,<6) ; extra == "influxdb"
+Requires-Dist: influxdb-client (>=1,<2) ; extra == "influxdb"
+Requires-Dist: kubernetes ; extra == "k3s"
+Requires-Dist: minio (>=7,<8) ; extra == "minio"
+Requires-Dist: nats-py (>=2,<3) ; extra == "nats"
+Requires-Dist: neo4j (>=6,<7) ; extra == "neo4j"
+Requires-Dist: openfga-sdk ; extra == "openfga"
+Requires-Dist: opensearch-py (>=3,<4) ; (python_version < "4.0") and (extra == "opensearch")
+Requires-Dist: oracledb (>=3,<4) ; extra == "oracle" or extra == "oracle-free"
+Requires-Dist: pika (>=1,<2) ; extra == "rabbitmq"
+Requires-Dist: pymongo (>=4,<5) ; extra == "mongodb"
+Requires-Dist: pymssql (>=2,<3) ; extra == "mssql"
+Requires-Dist: pymysql[rsa] (>=1,<2) ; extra == "mysql"
+Requires-Dist: python-arango (>=8,<9) ; extra == "arangodb"
+Requires-Dist: python-dotenv
+Requires-Dist: python-keycloak (>=6,<7) ; (python_version < "4.0") and (extra == "keycloak")
+Requires-Dist: pyyaml (>=6.0.3) ; extra == "k3s"
+Requires-Dist: qdrant-client (>=1,<2) ; extra == "qdrant"
+Requires-Dist: redis (>=7,<8) ; extra == "generic" or extra == "redis"
+Requires-Dist: selenium (>=4,<5) ; extra == "selenium"
+Requires-Dist: sqlalchemy (>=2,<3) ; extra == "db2" or extra == "mssql" or extra == "mysql" or extra == "oracle" or extra == "oracle-free"
+Requires-Dist: trino ; extra == "trino"
+Requires-Dist: typing-extensions
+Requires-Dist: urllib3
+Requires-Dist: weaviate-client (>=4,<5) ; extra == "weaviate"
+Requires-Dist: wrapt
+Project-URL: GitHub, https://github.com/testcontainers/testcontainers-python
+Project-URL: Issue Tracker, https://github.com/testcontainers/testcontainers-python/issues
+Description-Content-Type: text/markdown
+
+[![Poetry](https://img.shields.io/endpoint?url=https://python-poetry.org/badge/v0.json)](https://python-poetry.org/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+![PyPI - Version](https://img.shields.io/pypi/v/testcontainers)
+[![PyPI - License](https://img.shields.io/pypi/l/testcontainers.svg)](https://github.com/testcontainers/testcontainers-python/blob/main/LICENSE)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/testcontainers.svg)](https://pypi.python.org/pypi/testcontainers)
+[![codecov](https://codecov.io/gh/testcontainers/testcontainers-python/branch/master/graph/badge.svg)](https://codecov.io/gh/testcontainers/testcontainers-python)
+![Core Tests](https://github.com/testcontainers/testcontainers-python/actions/workflows/ci-core.yml/badge.svg)
+![Community Tests](https://github.com/testcontainers/testcontainers-python/actions/workflows/ci-community.yml/badge.svg)
+[![Docs](https://readthedocs.org/projects/testcontainers-python/badge/?version=latest)](http://testcontainers-python.readthedocs.io/en/latest/?badge=latest)
+
+[![Codespace](https://github.com/codespaces/badge.svg)](https://codespaces.new/testcontainers/testcontainers-python)
+
+# Testcontainers Python
+
+`testcontainers-python` facilitates the use of Docker containers for functional and integration testing.
+
+For more information, see [the docs][readthedocs].
+
+[readthedocs]: https://testcontainers-python.readthedocs.io/en/latest/
+
+## Getting Started
+
+```pycon
+>>> from testcontainers.postgres import PostgresContainer
+>>> import sqlalchemy
+
+>>> with PostgresContainer("postgres:16") as postgres:
+...     engine = sqlalchemy.create_engine(postgres.get_connection_url())
+...     with engine.begin() as connection:
+...         result = connection.execute(sqlalchemy.text("select version()"))
+...         version, = result.fetchone()
+>>> version
+'PostgreSQL 16...'
+```
+
+The snippet above will spin up a postgres database in a container. The `get_connection_url()` convenience method returns a `sqlalchemy` compatible url we use to connect to the database and retrieve the database version.
+
+## Contributing / Development / Release
+
+See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for more details.
+
+## Configuration
+
+You can set environment variables to configure the library behaviour:
+
+| Env Variable                            | Example                     | Description                                                                        |
+| --------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------- |
+| `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE` | `/var/run/docker.sock`      | Path to Docker's socket used by ryuk                                               |
+| `TESTCONTAINERS_RYUK_PRIVILEGED`        | `false`                     | Run ryuk as a privileged container                                                 |
+| `TESTCONTAINERS_RYUK_DISABLED`          | `false`                     | Disable ryuk                                                                       |
+| `RYUK_CONTAINER_IMAGE`                  | `testcontainers/ryuk:0.8.1` | Custom image for ryuk                                                              |
+| `RYUK_RECONNECTION_TIMEOUT`             | `10s`                       | Reconnection timeout for Ryuk TCP socket before Ryuk reaps all dangling containers |
+
+Alternatively you can set the configuration during runtime:
+
+```python
+from testcontainers.core import testcontainers_config
+
+testcontainers_config.ryuk_docker_socket = "/home/user/docker.sock"
+```
+
