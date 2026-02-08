@@ -49,4 +49,6 @@ next-env.d.ts
 
 # local dev
 .venv_local/
+.venv_test/
+.venv/
 uploads/
