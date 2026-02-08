@@ -1,5 +1,0 @@
-.env**
-.venv**
-
-# CodeArtifact configuration
-.codeartifact-pip-conf

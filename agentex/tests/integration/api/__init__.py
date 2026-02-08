@@ -1,1 +1,0 @@
-# Integration API tests package
