@@ -27,11 +27,6 @@ class TaskMessageRepository(MongoDBCRUDRepository[TaskMessageEntity]):
             "description": "Compound index for querying messages by task_id and sorting by created_at",
         },
         {
-            "keys": [("task_id", pymongo.ASCENDING)],
-            "name": "task_id_idx",
-            "description": "Single index for task_id queries and delete operations",
-        },
-        {
             "keys": [
                 ("task_id", pymongo.ASCENDING),
                 ("streaming_status", pymongo.ASCENDING),
