@@ -72,6 +72,10 @@ def convert_filters_to_mongodb_query(
         return {}
 
 
+# NOTE: convert_filters_to_mongodb_query is still used by TaskMessageDualRepository
+# for the MongoDB backend during dual-write/dual-read phases.
+
+
 class MessagesUseCase:
     def __init__(
         self,
@@ -194,9 +198,6 @@ class MessagesUseCase:
         Note:
             When using before_id or after_id, page_number is ignored.
         """
-        converted_filters = (
-            convert_filters_to_mongodb_query(filters) if filters else None
-        )
         return await self.task_message_service.get_messages(
             task_id=task_id,
             limit=limit,
@@ -205,7 +206,7 @@ class MessagesUseCase:
             order_direction=order_direction,
             before_id=before_id,
             after_id=after_id,
-            filters=converted_filters,
+            filters=filters,
         )
 
 

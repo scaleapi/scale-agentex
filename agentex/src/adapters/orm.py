@@ -235,3 +235,28 @@ class TaskStateORM(BaseORM):
         Index("idx_task_states_agent_id", "agent_id"),
         UniqueConstraint("task_id", "agent_id", name="uq_task_states_task_agent"),
     )
+
+
+class TaskMessageORM(BaseORM):
+    """ORM model for task messages stored in PostgreSQL."""
+
+    __tablename__ = "task_messages"
+
+    id = Column(String, primary_key=True, default=orm_id)
+    task_id = Column(String, nullable=False)
+    content = Column(JSONB, nullable=False)
+    streaming_status = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_task_messages_task_id_created_at", "task_id", "created_at"),
+        Index("idx_task_messages_task_id", "task_id"),
+        Index(
+            "idx_task_messages_task_id_streaming_status",
+            "task_id",
+            "streaming_status",
+        ),
+    )

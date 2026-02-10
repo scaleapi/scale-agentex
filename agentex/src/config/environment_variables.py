@@ -56,6 +56,7 @@ class EnvVarKeys(str, Enum):
     ENABLE_HEALTH_CHECK_WORKFLOW = "ENABLE_HEALTH_CHECK_WORKFLOW"
     WEBHOOK_REQUEST_TIMEOUT = "WEBHOOK_REQUEST_TIMEOUT"
     TASK_STATE_STORAGE_PHASE = "TASK_STATE_STORAGE_PHASE"
+    TASK_MESSAGE_STORAGE_PHASE = "TASK_MESSAGE_STORAGE_PHASE"
 
 
 class Environment(str, Enum):
@@ -108,6 +109,9 @@ class EnvironmentVariables(BaseModel):
     ENABLE_HEALTH_CHECK_WORKFLOW: bool = False
     WEBHOOK_REQUEST_TIMEOUT: float = 15.0  # Webhook request timeout in seconds
     TASK_STATE_STORAGE_PHASE: str = (
+        "mongodb"  # mongodb | dual_write | dual_read | postgres
+    )
+    TASK_MESSAGE_STORAGE_PHASE: str = (
         "mongodb"  # mongodb | dual_write | dual_read | postgres
     )
 
@@ -192,6 +196,9 @@ class EnvironmentVariables(BaseModel):
             ),
             TASK_STATE_STORAGE_PHASE=os.environ.get(
                 EnvVarKeys.TASK_STATE_STORAGE_PHASE, "mongodb"
+            ),
+            TASK_MESSAGE_STORAGE_PHASE=os.environ.get(
+                EnvVarKeys.TASK_MESSAGE_STORAGE_PHASE, "mongodb"
             ),
         )
         refreshed_environment_variables = environment_variables
