@@ -195,10 +195,10 @@ class EnvironmentVariables(BaseModel):
                 os.environ.get(EnvVarKeys.WEBHOOK_REQUEST_TIMEOUT, "15.0")
             ),
             TASK_STATE_STORAGE_PHASE=os.environ.get(
-                EnvVarKeys.TASK_STATE_STORAGE_PHASE, "mongodb"
+                EnvVarKeys.TASK_STATE_STORAGE_PHASE, "postgres"
             ),
             TASK_MESSAGE_STORAGE_PHASE=os.environ.get(
-                EnvVarKeys.TASK_MESSAGE_STORAGE_PHASE, "mongodb"
+                EnvVarKeys.TASK_MESSAGE_STORAGE_PHASE, "postgres"
             ),
         )
         refreshed_environment_variables = environment_variables
