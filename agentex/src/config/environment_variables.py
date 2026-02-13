@@ -113,11 +113,19 @@ class EnvironmentVariables(BaseModel):
     ENABLE_HEALTH_CHECK_WORKFLOW: bool = False
     WEBHOOK_REQUEST_TIMEOUT: float = 15.0  # Webhook request timeout in seconds
     TASK_STATE_STORAGE_PHASE: str = (
-        "mongodb"  # mongodb | dual_write | dual_read | postgres
+        "postgres"  # mongodb | dual_write | dual_read | postgres
     )
     TASK_MESSAGE_STORAGE_PHASE: str = (
-        "mongodb"  # mongodb | dual_write | dual_read | postgres
+        "postgres"  # mongodb | dual_write | dual_read | postgres
     )
+
+    @property
+    def mongodb_required(self) -> bool:
+        """MongoDB is required if any storage phase needs it (not purely postgres)."""
+        return (
+            self.TASK_STATE_STORAGE_PHASE != "postgres"
+            or self.TASK_MESSAGE_STORAGE_PHASE != "postgres"
+        )
 
     @classmethod
     def refresh(cls, force_refresh: bool = False) -> EnvironmentVariables | None:

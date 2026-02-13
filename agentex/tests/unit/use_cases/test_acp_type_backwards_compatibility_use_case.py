@@ -18,7 +18,6 @@ from src.domain.entities.tasks import TaskEntity, TaskStatus
 from src.domain.repositories.agent_repository import AgentRepository
 from src.domain.repositories.event_repository import EventRepository
 from src.domain.repositories.task_repository import TaskRepository
-from src.domain.repositories.task_state_repository import TaskStateRepository
 from src.domain.services.agent_acp_service import AgentACPService
 from src.domain.services.task_service import AgentTaskService
 from src.domain.use_cases.agents_acp_use_case import AgentsACPUseCase
@@ -84,14 +83,12 @@ class TestACPTypeBackwardsCompatibility:
         """Verify AGENTIC agents forward tasks to ACP (not SYNC behavior)"""
         # Setup mocks
         acp_client = AsyncMock(spec=AgentACPService)
-        task_state_repo = AsyncMock(spec=TaskStateRepository)
         task_repo = AsyncMock(spec=TaskRepository)
         event_repo = AsyncMock(spec=EventRepository)
         stream_repo = AsyncMock()
 
         task_service = AgentTaskService(
             acp_client=acp_client,
-            task_state_repository=task_state_repo,
             task_repository=task_repo,
             event_repository=event_repo,
             stream_repository=stream_repo,
@@ -137,14 +134,12 @@ class TestACPTypeBackwardsCompatibility:
         """Verify SYNC agents skip ACP forwarding (baseline for comparison)"""
         # Setup mocks
         acp_client = AsyncMock(spec=AgentACPService)
-        task_state_repo = AsyncMock(spec=TaskStateRepository)
         task_repo = AsyncMock(spec=TaskRepository)
         event_repo = AsyncMock(spec=EventRepository)
         stream_repo = AsyncMock()
 
         task_service = AgentTaskService(
             acp_client=acp_client,
-            task_state_repository=task_state_repo,
             task_repository=task_repo,
             event_repository=event_repo,
             stream_repository=stream_repo,
@@ -184,14 +179,12 @@ class TestACPTypeBackwardsCompatibility:
         """Verify ASYNC agents forward tasks to ACP (same as AGENTIC)"""
         # Setup mocks
         acp_client = AsyncMock(spec=AgentACPService)
-        task_state_repo = AsyncMock(spec=TaskStateRepository)
         task_repo = AsyncMock(spec=TaskRepository)
         event_repo = AsyncMock(spec=EventRepository)
         stream_repo = AsyncMock()
 
         task_service = AgentTaskService(
             acp_client=acp_client,
-            task_state_repository=task_state_repo,
             task_repository=task_repo,
             event_repository=event_repo,
             stream_repository=stream_repo,

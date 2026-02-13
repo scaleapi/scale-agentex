@@ -47,4 +47,13 @@ class TaskStateRepository(MongoDBCRUDRepository[StateEntity]):
         return self._deserialize(doc) if doc else None
 
 
-DTaskStateRepository = Annotated[TaskStateRepository, Depends(TaskStateRepository)]
+def _get_task_state_repository(db: DMongoDBDatabase) -> TaskStateRepository | None:
+    """Factory that returns None when MongoDB is disabled."""
+    if db is None:
+        return None
+    return TaskStateRepository(db=db)
+
+
+DTaskStateRepository = Annotated[
+    TaskStateRepository | None, Depends(_get_task_state_repository)
+]

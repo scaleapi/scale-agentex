@@ -12,7 +12,6 @@ from src.domain.entities.task_stream_events import TaskStreamTaskUpdatedEventEnt
 from src.domain.entities.tasks import TaskEntity, TaskRelationships, TaskStatus
 from src.domain.repositories.event_repository import DEventRepository
 from src.domain.repositories.task_repository import DTaskRepository
-from src.domain.repositories.task_state_repository import DTaskStateRepository
 from src.domain.services.agent_acp_service import DAgentACPService
 from src.utils.ids import orm_id
 from src.utils.logging import make_logger
@@ -29,13 +28,11 @@ class AgentTaskService:
     def __init__(
         self,
         acp_client: DAgentACPService,
-        task_state_repository: DTaskStateRepository,
         task_repository: DTaskRepository,
         event_repository: DEventRepository,
         stream_repository: DRedisStreamRepository,
     ):
         self.acp_client = acp_client
-        self.task_state_repository = task_state_repository
         self.task_repository = task_repository
         self.event_repository = event_repository
         self.stream_repository = stream_repository

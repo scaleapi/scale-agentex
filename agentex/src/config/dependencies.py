@@ -115,46 +115,54 @@ class GlobalDependencies(metaclass=Singleton):
             pool_recycle=3600,  # Recycle connections after 1 hour
         )
 
-        # Initialize MongoDB client and database
-        try:
-            mongodb_uri = self.environment_variables.MONGODB_URI
-            mongodb_database_name = self.environment_variables.MONGODB_DATABASE_NAME
-
-            logger.info("Connecting to MongoDB")
-
-            self.mongodb_client = pymongo.MongoClient(
-                mongodb_uri,
-                serverSelectionTimeoutMS=20000,
-                connectTimeoutMS=20000,
-                socketTimeoutMS=20000,
-                retryWrites=False,  # Disable retryable writes for AWS DocumentDB compatibility
-                maxPoolSize=self.environment_variables.MONGODB_MAX_POOL_SIZE,
-                minPoolSize=self.environment_variables.MONGODB_MIN_POOL_SIZE,
-                maxIdleTimeMS=30000,  # Close connections after 30 seconds of inactivity
-                waitQueueTimeoutMS=5000,  # Wait up to 5 seconds for a connection from pool
-            )
-            self.mongodb_database = self.mongodb_client[mongodb_database_name]
-
-            # Ping the database to verify connection
-            self.mongodb_client.admin.command("ping")
-            logger.info(
-                f"Successfully connected to MongoDB database '{mongodb_database_name}'"
-            )
-
-            # Create MongoDB indexes after successful connection
-            # This happens once at startup, not per request
-            from src.config.mongodb_indexes import ensure_mongodb_indexes
-
+        # Initialize MongoDB client and database (only if a storage phase needs it)
+        if self.environment_variables.mongodb_required:
             try:
-                ensure_mongodb_indexes(self.mongodb_database)
-                logger.info("MongoDB indexes ensured successfully")
-            except Exception as index_error:
-                # Don't fail startup if index creation fails
-                # The app can still work, just slower
-                logger.error(f"Failed to create MongoDB indexes: {index_error}")
+                mongodb_uri = self.environment_variables.MONGODB_URI
+                mongodb_database_name = self.environment_variables.MONGODB_DATABASE_NAME
 
-        except Exception as e:
-            logger.error(f"Failed to initialize MongoDB client: {e}")
+                logger.info("Connecting to MongoDB")
+
+                self.mongodb_client = pymongo.MongoClient(
+                    mongodb_uri,
+                    serverSelectionTimeoutMS=20000,
+                    connectTimeoutMS=20000,
+                    socketTimeoutMS=20000,
+                    retryWrites=False,  # Disable retryable writes for AWS DocumentDB compatibility
+                    maxPoolSize=self.environment_variables.MONGODB_MAX_POOL_SIZE,
+                    minPoolSize=self.environment_variables.MONGODB_MIN_POOL_SIZE,
+                    maxIdleTimeMS=30000,  # Close connections after 30 seconds of inactivity
+                    waitQueueTimeoutMS=5000,  # Wait up to 5 seconds for a connection from pool
+                )
+                self.mongodb_database = self.mongodb_client[mongodb_database_name]
+
+                # Ping the database to verify connection
+                self.mongodb_client.admin.command("ping")
+                logger.info(
+                    f"Successfully connected to MongoDB database '{mongodb_database_name}'"
+                )
+
+                # Create MongoDB indexes after successful connection
+                # This happens once at startup, not per request
+                from src.config.mongodb_indexes import ensure_mongodb_indexes
+
+                try:
+                    ensure_mongodb_indexes(self.mongodb_database)
+                    logger.info("MongoDB indexes ensured successfully")
+                except Exception as index_error:
+                    # Don't fail startup if index creation fails
+                    # The app can still work, just slower
+                    logger.error(f"Failed to create MongoDB indexes: {index_error}")
+
+            except Exception as e:
+                logger.error(f"Failed to initialize MongoDB client: {e}")
+                self.mongodb_client = None
+                self.mongodb_database = None
+        else:
+            logger.info(
+                "MongoDB: DISABLED (all storage phases set to 'postgres'). "
+                "Skipping MongoDB connection."
+            )
             self.mongodb_client = None
             self.mongodb_database = None
 
@@ -225,6 +233,17 @@ class GlobalDependencies(metaclass=Singleton):
                 environment=environment,
                 service_name=service_name,
             )
+
+        # Log MongoDB status summary
+        if self.environment_variables.mongodb_required:
+            if self.mongodb_database is not None:
+                logger.info(
+                    "MongoDB: ENABLED (task_state=%s, task_message=%s)",
+                    self.environment_variables.TASK_STATE_STORAGE_PHASE,
+                    self.environment_variables.TASK_MESSAGE_STORAGE_PHASE,
+                )
+            else:
+                logger.error("MongoDB: REQUIRED but connection FAILED")
 
         self._loaded = True
 

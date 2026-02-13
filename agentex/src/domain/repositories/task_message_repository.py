@@ -53,6 +53,13 @@ class TaskMessageRepository(MongoDBCRUDRepository[TaskMessageEntity]):
         )
 
 
+def _get_task_message_repository(db: DMongoDBDatabase) -> TaskMessageRepository | None:
+    """Factory that returns None when MongoDB is disabled."""
+    if db is None:
+        return None
+    return TaskMessageRepository(db=db)
+
+
 DTaskMessageRepository = Annotated[
-    TaskMessageRepository, Depends(TaskMessageRepository)
+    TaskMessageRepository | None, Depends(_get_task_message_repository)
 ]

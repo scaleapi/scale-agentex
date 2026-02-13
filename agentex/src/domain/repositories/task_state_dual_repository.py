@@ -57,6 +57,12 @@ class TaskStateDualRepository:
             if storage_phase_override
             else environment_variables.TASK_STATE_STORAGE_PHASE
         )
+        if self.phase != "postgres" and self.mongo_repo is None:
+            raise RuntimeError(
+                f"TaskStateDualRepository: storage phase is '{self.phase}' but MongoDB "
+                f"is not available. MongoDB is only initialized when a storage phase "
+                f"requires it (not 'postgres'). Check TASK_STATE_STORAGE_PHASE."
+            )
 
     async def create(self, item: StateEntity) -> StateEntity:
         """Create state in appropriate storage(s) based on phase."""

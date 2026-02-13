@@ -16,7 +16,6 @@ from src.domain.entities.tasks import TaskEntity, TaskStatus
 from src.domain.repositories.agent_repository import AgentRepository
 from src.domain.repositories.event_repository import EventRepository
 from src.domain.repositories.task_repository import TaskRepository
-from src.domain.repositories.task_state_repository import TaskStateRepository
 from src.domain.services.task_service import AgentTaskService
 
 
@@ -58,12 +57,6 @@ def agent_repository(postgres_session_maker):
 
 
 @pytest.fixture
-def task_state_repository(mongodb_database):
-    """Real TaskStateRepository using test MongoDB database"""
-    return TaskStateRepository(mongodb_database)
-
-
-@pytest.fixture
 def event_repository(postgres_session_maker):
     """Real EventRepository using test PostgreSQL database"""
     return EventRepository(postgres_session_maker, postgres_session_maker)
@@ -73,7 +66,6 @@ def event_repository(postgres_session_maker):
 def task_service(
     mock_acp_client,
     task_repository,
-    task_state_repository,
     event_repository,
     redis_stream_repository,
 ):
@@ -81,7 +73,6 @@ def task_service(
     return AgentTaskService(
         acp_client=mock_acp_client,
         task_repository=task_repository,
-        task_state_repository=task_state_repository,
         event_repository=event_repository,
         stream_repository=redis_stream_repository,
     )
