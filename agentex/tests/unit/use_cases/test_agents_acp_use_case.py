@@ -31,7 +31,6 @@ from src.domain.repositories.agent_repository import AgentRepository
 from src.domain.repositories.event_repository import EventRepository
 from src.domain.repositories.task_message_repository import TaskMessageRepository
 from src.domain.repositories.task_repository import TaskRepository
-from src.domain.repositories.task_state_repository import TaskStateRepository
 from src.domain.services.agent_acp_service import AgentACPService
 from src.domain.services.task_message_service import TaskMessageService
 from src.domain.services.task_service import AgentTaskService
@@ -97,12 +96,6 @@ def task_message_repository(mongodb_database):
 
 
 @pytest.fixture
-def task_state_repository(mongodb_database):
-    """Real TaskStateRepository using test MongoDB database"""
-    return TaskStateRepository(mongodb_database)
-
-
-@pytest.fixture
 def agent_acp_service(mock_http_gateway, agent_repository, agent_api_key_repository):
     """Real AgentACPService instance with mocked HTTP gateway"""
     return AgentACPService(
@@ -115,7 +108,6 @@ def agent_acp_service(mock_http_gateway, agent_repository, agent_api_key_reposit
 @pytest.fixture
 def task_service(
     task_repository,
-    task_state_repository,
     event_repository,
     agent_acp_service,
     redis_stream_repository,
@@ -123,7 +115,6 @@ def task_service(
     """Real AgentTaskService instance"""
     return AgentTaskService(
         task_repository=task_repository,
-        task_state_repository=task_state_repository,
         event_repository=event_repository,
         acp_client=agent_acp_service,
         stream_repository=redis_stream_repository,

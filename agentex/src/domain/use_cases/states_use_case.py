@@ -3,7 +3,7 @@ from typing import Annotated, Any
 from fastapi import Depends
 
 from src.domain.entities.states import StateEntity
-from src.domain.repositories.task_state_repository import DTaskStateRepository
+from src.domain.repositories.task_state_dual_repository import DTaskStateDualRepository
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
@@ -12,7 +12,7 @@ logger = make_logger(__name__)
 class StatesUseCase:
     def __init__(
         self,
-        task_state_repository: DTaskStateRepository,
+        task_state_repository: DTaskStateDualRepository,
     ):
         self.task_state_repository = task_state_repository
 

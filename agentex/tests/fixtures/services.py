@@ -32,7 +32,6 @@ def create_agent_acp_service(http_gateway, agent_repository, agent_api_key_repos
 
 def create_task_service(
     task_repository,
-    task_state_repository,
     event_repository,
     agent_acp_service,
     redis_stream_repository,
@@ -42,7 +41,6 @@ def create_task_service(
 
     return AgentTaskService(
         task_repository=task_repository,
-        task_state_repository=task_state_repository,
         event_repository=event_repository,
         acp_client=agent_acp_service,
         stream_repository=redis_stream_repository,
@@ -128,7 +126,6 @@ def agent_acp_service(mock_http_gateway, agent_repository, agent_api_key_reposit
 @pytest.fixture
 def task_service(
     task_repository,
-    task_state_repository,
     event_repository,
     agent_acp_service,
     redis_stream_repository,
@@ -136,7 +133,6 @@ def task_service(
     """Task service for unit tests"""
     return create_task_service(
         task_repository,
-        task_state_repository,
         event_repository,
         agent_acp_service,
         redis_stream_repository,

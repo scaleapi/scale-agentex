@@ -128,22 +128,18 @@ class HealthCheckInterceptor:
 
         deps = GlobalDependencies()
 
-        # Run all checks concurrently
-        postgres_task = self._check_postgres(deps)
-        redis_task = self._check_redis(deps)
-        mongodb_task = self._check_mongodb(deps)
+        check_names = ["postgres", "redis"]
+        check_tasks = [self._check_postgres(deps), self._check_redis(deps)]
 
-        results = await asyncio.gather(
-            postgres_task,
-            redis_task,
-            mongodb_task,
-            return_exceptions=True,
-        )
+        # Only check MongoDB if it was initialized
+        if deps.mongodb_client is not None:
+            check_names.append("mongodb")
+            check_tasks.append(self._check_mongodb(deps))
 
+        results = await asyncio.gather(*check_tasks, return_exceptions=True)
         return {
-            "postgres": self._format_check_result(results[0]),
-            "redis": self._format_check_result(results[1]),
-            "mongodb": self._format_check_result(results[2]),
+            name: self._format_check_result(result)
+            for name, result in zip(check_names, results, strict=False)
         }
 
     def _format_check_result(

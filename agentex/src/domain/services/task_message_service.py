@@ -1,13 +1,16 @@
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from fastapi import Depends
 
 from src.domain.entities.task_messages import (
     TaskMessageContentEntity,
     TaskMessageEntity,
+    TaskMessageEntityFilter,
 )
-from src.domain.repositories.task_message_repository import DTaskMessageRepository
+from src.domain.repositories.task_message_dual_repository import (
+    DTaskMessageDualRepository,
+)
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
@@ -18,12 +21,12 @@ class TaskMessageService:
     Service for handling task message operations.
     """
 
-    def __init__(self, message_repository: DTaskMessageRepository):
+    def __init__(self, message_repository: DTaskMessageDualRepository):
         """
         Initialize the service with required dependencies.
 
         Args:
-            message_repository: Repository for storing and retrieving messages
+            message_repository: Dual repository for storing and retrieving messages
         """
         self.repository = message_repository
 
@@ -51,7 +54,7 @@ class TaskMessageService:
         order_direction: str = "desc",
         before_id: str | None = None,
         after_id: str | None = None,
-        filters: dict[str, Any] | None = None,
+        filters: list[TaskMessageEntityFilter] | None = None,
     ) -> list[TaskMessageEntity]:
         """
         Get all messages for a specific task with optional cursor-based pagination.
