@@ -21,12 +21,8 @@ class TaskStateRepository(MongoDBCRUDRepository[StateEntity]):
         {
             "keys": [("task_id", pymongo.ASCENDING), ("agent_id", pymongo.ASCENDING)],
             "name": "task_agent_compound_idx",
-            "description": "Compound index for get_by_task_and_agent queries",
-        },
-        {
-            "keys": [("task_id", pymongo.ASCENDING)],
-            "name": "task_id_idx",
-            "description": "Single index for task_id queries",
+            "unique": True,
+            "description": "Unique compound index for get_by_task_and_agent queries",
         },
         {
             "keys": [("agent_id", pymongo.ASCENDING)],
