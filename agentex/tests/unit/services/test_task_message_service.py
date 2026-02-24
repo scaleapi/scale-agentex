@@ -20,9 +20,12 @@ def task_message_repository(mongodb_database):
 
 
 @pytest.fixture
-def task_message_service(task_message_repository):
+def task_message_service(task_message_repository, redis_stream_repository):
     """Create TaskMessageService instance with real repository"""
-    return TaskMessageService(message_repository=task_message_repository)
+    return TaskMessageService(
+        message_repository=task_message_repository,
+        stream_repository=redis_stream_repository,
+    )
 
 
 @pytest.fixture
