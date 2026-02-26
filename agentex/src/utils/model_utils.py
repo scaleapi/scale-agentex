@@ -1,8 +1,8 @@
 import json
-from typing import Any, TypeVar
+from typing import Any, TypeVar, get_args, get_origin
 
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import ConfigDict, model_validator
+from pydantic import ConfigDict, Field, create_model, model_validator
 
 T = TypeVar("T", bound="BaseModel")
 
@@ -77,3 +77,50 @@ class BaseModel(PydanticBaseModel):
         if isinstance(value, str):
             return cls(**json.loads(value))
         return value
+
+
+def make_optional(
+    entity_model: type[BaseModel], model_name_suffix: str = "Optional"
+) -> type[BaseModel]:
+    """
+    Create a new model with all fields made optional (| None with default=None).
+
+    Args:
+        entity_model: The source entity model to make optional
+        model_name_suffix: Suffix for the generated model name (defaults to "Filter")
+
+    Returns:
+        A new Pydantic model class with all fields made optional
+
+    Example:
+        TaskMessageFilter = make_optional(TaskMessageEntity)
+        UserFilter = make_optional(UserEntity)
+    """
+    fields = {}
+    for field_name, field_info in entity_model.model_fields.items():
+        # Get the original type annotation
+        original_type = field_info.annotation
+
+        # Check if already optional (Union with None)
+        if get_origin(original_type) is not None:
+            args = get_args(original_type)
+            if type(None) in args:
+                # Already optional, keep as is
+                optional_type = original_type
+            else:
+                # Make it optional by adding | None
+                optional_type = original_type | None
+        else:
+            # Make it optional by adding | None
+            optional_type = original_type | None
+
+        # Create new field with optional type and default=None
+        new_field = Field(
+            default=None,
+            description=field_info.description,
+        )
+
+        fields[field_name] = (optional_type, new_field)
+
+    filter_model_name = f"{entity_model.__name__}{model_name_suffix}"
+    return create_model(filter_model_name, __base__=BaseModel, **fields)

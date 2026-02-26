@@ -17,7 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from src.adapters.temporal.adapter_temporal import TemporalAdapter
-from src.api.app import app
+from src.api.app import app, fastapi_app
 from src.api.authentication_cache import reset_auth_cache
 from src.config.dependencies import GlobalDependencies
 from src.config.environment_variables import EnvironmentVariables
@@ -229,9 +229,25 @@ async def isolated_repositories(isolated_test_schema):
     mongodb_database = isolated_test_schema["mongodb_database"]
     redis_client = isolated_test_schema["redis_client"]
 
-    # Create async session factory for PostgreSQL
-    async_session_factory = sessionmaker(
+    # Create read-write session factory for PostgreSQL
+    async_rw_session_factory = sessionmaker(
         postgres_engine, class_=AsyncSession, expire_on_commit=False
+    )
+
+    # Create read-only session factory that enforces no writes at DB level
+    # Any INSERT, UPDATE, DELETE will fail with PostgreSQL error:
+    # "cannot execute X in a read-only transaction"
+    class ReadOnlyAsyncSession(AsyncSession):
+        """AsyncSession that sets PostgreSQL transaction to read-only mode."""
+
+        async def __aenter__(self):
+            session = await super().__aenter__()
+            # Set transaction to read-only mode - PostgreSQL will reject any writes
+            await session.execute(text("SET TRANSACTION READ ONLY"))
+            return session
+
+    async_ro_session_factory = sessionmaker(
+        postgres_engine, class_=ReadOnlyAsyncSession, expire_on_commit=False
     )
 
     # Import all repository classes
@@ -250,12 +266,15 @@ async def isolated_repositories(isolated_test_schema):
     from src.domain.repositories.span_repository import SpanRepository
     from src.domain.repositories.task_message_repository import TaskMessageRepository
     from src.domain.repositories.task_repository import TaskRepository
+    from src.domain.repositories.checkpoint_repository import CheckpointRepository
     from src.domain.repositories.task_state_repository import TaskStateRepository
 
     # Create Redis repository with mock environment variables
     class MockEnvironmentVariables:
         def __init__(self, redis_url):
             self.REDIS_URL = redis_url
+            self.REDIS_STREAM_MAXLEN = 10000  # Default from EnvironmentVariables
+            self.ENVIRONMENT = "test"
 
     # Get Redis URL from client
     connection_kwargs = redis_client.connection_pool.connection_kwargs
@@ -267,27 +286,45 @@ async def isolated_repositories(isolated_test_schema):
     redis_stream_repository.redis = redis_client
 
     # Create repository instances with isolated databases
+    # Read-write factory for writes, read-only factory (DB-enforced) for reads
     repositories = {
-        # PostgreSQL repositories
-        "agent_repository": AgentRepository(async_session_factory),
-        "agent_api_key_repository": AgentAPIKeyRepository(async_session_factory),
-        "task_repository": TaskRepository(async_session_factory),
-        "event_repository": EventRepository(async_session_factory),
-        "span_repository": SpanRepository(async_session_factory),
+        # PostgreSQL repositories - using both rw and ro session factories
+        "agent_repository": AgentRepository(
+            async_rw_session_factory, async_ro_session_factory
+        ),
+        "agent_api_key_repository": AgentAPIKeyRepository(
+            async_rw_session_factory, async_ro_session_factory
+        ),
+        "task_repository": TaskRepository(
+            async_rw_session_factory, async_ro_session_factory
+        ),
+        "event_repository": EventRepository(
+            async_rw_session_factory, async_ro_session_factory
+        ),
+        "span_repository": SpanRepository(
+            async_rw_session_factory, async_ro_session_factory
+        ),
         "agent_task_tracker_repository": AgentTaskTrackerRepository(
-            async_session_factory
+            async_rw_session_factory, async_ro_session_factory
         ),
         "deployment_history_repository": DeploymentHistoryRepository(
-            async_session_factory
+            async_rw_session_factory, async_ro_session_factory
         ),
         # MongoDB repositories
         "task_message_repository": TaskMessageRepository(mongodb_database),
         "task_state_repository": TaskStateRepository(mongodb_database),
         # Redis repositories
         "redis_stream_repository": redis_stream_repository,
+        # Checkpoint repository
+        "checkpoint_repository": CheckpointRepository(
+            async_rw_session_factory, async_ro_session_factory
+        ),
         # Direct access for advanced use cases
-        "postgres_session_factory": async_session_factory,
+        "postgres_rw_session_factory": async_rw_session_factory,
+        "postgres_ro_session_factory": async_ro_session_factory,
+        "postgres_engine": postgres_engine,
         "mongodb_database": mongodb_database,
+        "mongodb_client": isolated_test_schema["mongodb_client"],
         "redis_client": redis_client,
         "test_id": isolated_test_schema["test_id"],
     }
@@ -319,6 +356,16 @@ async def isolated_integration_app(
     EnvironmentVariables.clear_cache()
     GlobalDependencies._instances = {}
 
+    # Configure GlobalDependencies singleton with test container connections
+    # This is required for HealthCheckInterceptor which directly accesses GlobalDependencies
+    deps = GlobalDependencies()
+    deps.database_async_read_write_engine = isolated_repositories["postgres_engine"]
+    deps.database_async_read_only_engine = isolated_repositories["postgres_engine"]
+    deps.mongodb_client = isolated_repositories["mongodb_client"]
+    deps.mongodb_database = isolated_repositories["mongodb_database"]
+    deps.redis_pool = isolated_repositories["redis_client"].connection_pool
+    deps._loaded = True
+
     # Import use case classes we can properly create with direct repositories
     from src.domain.use_cases.agent_api_keys_use_case import AgentAPIKeysUseCase
     from src.domain.use_cases.agent_task_tracker_use_case import AgentTaskTrackerUseCase
@@ -330,6 +377,7 @@ async def isolated_integration_app(
     from src.domain.use_cases.messages_use_case import MessagesUseCase
     from src.domain.use_cases.spans_use_case import SpanUseCase
     from src.domain.use_cases.states_use_case import StatesUseCase
+    from src.domain.use_cases.checkpoints_use_case import CheckpointsUseCase
     from src.domain.use_cases.tasks_use_case import TasksUseCase
 
     # Create use case factory functions with isolated repositories
@@ -397,6 +445,11 @@ async def isolated_integration_app(
 
         return TasksUseCase(task_service=task_service)
 
+    def create_checkpoints_use_case():
+        return CheckpointsUseCase(
+            checkpoint_repository=isolated_repositories["checkpoint_repository"],
+        )
+
     def create_messages_use_case():
         """Create MessagesUseCase for comprehensive testing"""
         from src.domain.services.task_message_service import TaskMessageService
@@ -410,9 +463,11 @@ async def isolated_integration_app(
     # Import dependency types and repository classes that need to be overridden
     from src.adapters.streams.adapter_redis import RedisStreamRepository
     from src.config.dependencies import (
+        DDatabaseAsyncReadOnlySessionMaker,
         DDatabaseAsyncReadWriteSessionMaker,
         DMongoDBDatabase,
     )
+    from src.domain.repositories.checkpoint_repository import CheckpointRepository
     from src.domain.repositories.agent_api_key_repository import AgentAPIKeyRepository
     from src.domain.repositories.agent_repository import AgentRepository
     from src.domain.repositories.agent_task_tracker_repository import (
@@ -428,14 +483,19 @@ async def isolated_integration_app(
     from src.domain.repositories.task_state_repository import TaskStateRepository
 
     # Override use cases AND core dependencies with isolated versions
-    app.dependency_overrides.update(
+    # Note: We use fastapi_app (not app) because app is the HealthCheckInterceptor wrapper
+    fastapi_app.dependency_overrides.update(
         {
             # Core dependencies - these must be overridden for isolation to work
             DMongoDBDatabase: lambda: isolated_repositories["mongodb_database"],
             DDatabaseAsyncReadWriteSessionMaker: lambda: isolated_repositories[
-                "postgres_session_factory"
+                "postgres_rw_session_factory"
+            ],
+            DDatabaseAsyncReadOnlySessionMaker: lambda: isolated_repositories[
+                "postgres_ro_session_factory"
             ],
             # Use cases
+            CheckpointsUseCase: create_checkpoints_use_case,
             AgentsUseCase: create_agents_use_case,
             EventUseCase: create_events_use_case,
             SpanUseCase: create_spans_use_case,
@@ -446,6 +506,9 @@ async def isolated_integration_app(
             AgentAPIKeysUseCase: create_agent_api_keys_use_case,
             DeploymentHistoryUseCase: create_deployment_history_use_case,
             # Repositories - these ensure consistent isolated instances
+            CheckpointRepository: lambda: isolated_repositories[
+                "checkpoint_repository"
+            ],
             TaskStateRepository: lambda: isolated_repositories["task_state_repository"],
             TaskMessageRepository: lambda: isolated_repositories[
                 "task_message_repository"
@@ -471,11 +534,11 @@ async def isolated_integration_app(
     )
 
     try:
-        # Return FastAPI app with isolated dependencies
+        # Return the wrapped app (HealthCheckInterceptor) for realistic testing
         yield app
     finally:
-        # Clear dependency overrides
-        app.dependency_overrides.clear()
+        # Clear dependency overrides on the FastAPI instance
+        fastapi_app.dependency_overrides.clear()
 
 
 @pytest_asyncio.fixture
@@ -496,9 +559,9 @@ def reset_dependency_overrides():
     Ensures dependency overrides are cleared before and after each test.
     This prevents test interference at the FastAPI level.
     """
-    app.dependency_overrides.clear()
+    fastapi_app.dependency_overrides.clear()
     yield
-    app.dependency_overrides.clear()
+    fastapi_app.dependency_overrides.clear()
 
 
 @pytest_asyncio.fixture
@@ -507,7 +570,7 @@ async def isolated_db_session(isolated_repositories):
     Function-scoped fixture that provides direct database session access.
     Useful for test setup/verification that needs direct database access.
     """
-    async with isolated_repositories["postgres_session_factory"]() as session:
+    async with isolated_repositories["postgres_rw_session_factory"]() as session:
         yield session
 
 

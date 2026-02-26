@@ -7,6 +7,7 @@ from src.adapters.temporal.exceptions import (
 )
 from src.config.dependencies import (
     GlobalDependencies,
+    database_async_read_only_session_maker,
     database_async_read_write_engine,
     database_async_read_write_session_maker,
 )
@@ -47,7 +48,8 @@ async def main() -> None:
     # Initialize repository and list agents
     engine = database_async_read_write_engine()
     session_maker = database_async_read_write_session_maker(engine)
-    agent_repo = AgentRepository(session_maker)
+    read_only_session_maker = database_async_read_only_session_maker(engine)
+    agent_repo = AgentRepository(session_maker, read_only_session_maker)
     agents = await agent_repo.list()
 
     adapter = TemporalAdapter(temporal_client=global_dependencies.temporal_client)

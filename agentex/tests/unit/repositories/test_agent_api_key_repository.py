@@ -61,8 +61,8 @@ async def test_agent_api_key_repository_crud_operations(
     async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
     # Create repositories
-    agent_api_key_repo = AgentAPIKeyRepository(async_session_maker)
-    agent_repo = AgentRepository(async_session_maker)
+    agent_api_key_repo = AgentAPIKeyRepository(async_session_maker, async_session_maker)
+    agent_repo = AgentRepository(async_session_maker, async_session_maker)
 
     # First, create an agent (required for api key creation)
     agent_id = orm_id()

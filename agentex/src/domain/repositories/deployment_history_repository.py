@@ -5,7 +5,10 @@ from fastapi import Depends
 from sqlalchemy import desc, select
 from src.adapters.crud_store.adapter_postgres import PostgresCRUDRepository
 from src.adapters.orm import AgentORM, DeploymentHistoryORM
-from src.config.dependencies import DDatabaseAsyncReadWriteSessionMaker
+from src.config.dependencies import (
+    DDatabaseAsyncReadOnlySessionMaker,
+    DDatabaseAsyncReadWriteSessionMaker,
+)
 from src.domain.entities.agents import AgentEntity
 from src.domain.entities.deployment_history import DeploymentHistoryEntity
 from src.utils.ids import orm_id
@@ -22,9 +25,11 @@ class DeploymentHistoryRepository(
     def __init__(
         self,
         async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker,
+        async_read_only_session_maker: DDatabaseAsyncReadOnlySessionMaker,
     ):
         super().__init__(
             async_read_write_session_maker,
+            async_read_only_session_maker,
             DeploymentHistoryORM,
             DeploymentHistoryEntity,
         )
@@ -80,7 +85,7 @@ class DeploymentHistoryRepository(
             .order_by(desc(DeploymentHistoryORM.deployment_timestamp))
             .limit(1)
         )
-        async with self.start_async_db_session(allow_writes=True) as session:
+        async with self.start_async_db_session(allow_writes=False) as session:
             result = await session.execute(query)
             orm_results = result.scalars().all()
             return (

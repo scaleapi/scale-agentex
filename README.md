@@ -103,6 +103,47 @@ To do this, you just need to spin up the [Agentex Server](https://github.com/sca
 
 > Each agent also ships with a `dev.ipynb` notebook for those uninterested in a UI, but more on that later
 
+### Quick Start (Recommended)
+
+Just run one command:
+
+```bash
+./dev.sh
+```
+
+That's it. This will automatically:
+- Install Homebrew, uv, Node.js, and agentex-sdk if missing (macOS)
+- Install all backend and frontend dependencies
+- Start all Docker services (Postgres, Redis, MongoDB, Temporal)
+- Start the backend API and frontend dev server
+- Wait for everything to be healthy
+
+> **Note:** Make sure Docker Desktop or Rancher Desktop is running before you start.
+
+Once ready:
+| Service | URL |
+|---------|-----|
+| Frontend UI | http://localhost:3000 |
+| Backend API | http://localhost:5003 |
+| Swagger Docs | http://localhost:5003/swagger |
+| Temporal UI | http://localhost:8080 |
+
+**Other commands:**
+```bash
+./dev.sh stop      # Stop all services
+./dev.sh status    # Check service status
+./dev.sh logs      # View all logs
+./dev.sh restart   # Restart all services
+```
+
+Then skip ahead to [Create Your First Agent](#create-your-first-agent).
+
+---
+
+### Manual Setup (Alternative)
+
+If you prefer to run services in separate terminals for more control, follow the steps below.
+
 ### Terminal 1 - Agentex Server
 
 First, open up a terminal. Then run the following commands.

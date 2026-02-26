@@ -53,8 +53,10 @@ export function useTaskMessages({
         task_id: taskId,
       });
 
+      // API returns messages in descending order (newest first),
+      // reverse to chronological order (oldest first) for display
       return {
-        messages,
+        messages: messages.slice().reverse(),
         deltaAccumulator: null,
         rpcStatus: 'idle',
       };
@@ -114,19 +116,27 @@ export function useSendMessage({
             throw new Error(response.error.message);
           }
 
-          queryClient.setQueryData<TaskMessagesData>(queryKey, data => ({
-            messages: data?.messages || [],
-            deltaAccumulator: data?.deltaAccumulator || null,
-            rpcStatus: 'pending',
-          }));
+          // Refetch messages and spans now that the agent has finished processing
+          await queryClient.invalidateQueries({ queryKey: taskMessagesKeys.byTaskId(taskId) });
+          queryClient.invalidateQueries({ queryKey: ['spans', taskId] });
 
-          return (
-            queryClient.getQueryData<TaskMessagesData>(queryKey) || {
-              messages: [],
-              deltaAccumulator: null,
-              rpcStatus: 'pending',
-            }
-          );
+          const finalMessages = await agentexClient.messages.list({
+            task_id: taskId,
+          });
+
+          const chronologicalMessages = finalMessages.slice().reverse();
+
+          queryClient.setQueryData<TaskMessagesData>(queryKey, {
+            messages: chronologicalMessages,
+            deltaAccumulator: null,
+            rpcStatus: 'success',
+          });
+
+          return {
+            messages: chronologicalMessages,
+            deltaAccumulator: null,
+            rpcStatus: 'success',
+          };
         }
 
         case 'sync': {
@@ -205,14 +215,18 @@ export function useSendMessage({
             task_id: taskId,
           });
 
+          // API returns messages in descending order (newest first),
+          // reverse to chronological order (oldest first) for display
+          const chronologicalMessages = finalMessages.slice().reverse();
+
           queryClient.setQueryData<TaskMessagesData>(queryKey, {
-            messages: finalMessages,
+            messages: chronologicalMessages,
             deltaAccumulator: null,
             rpcStatus: 'success',
           });
 
           return {
-            messages: finalMessages,
+            messages: chronologicalMessages,
             deltaAccumulator: null,
           };
         }

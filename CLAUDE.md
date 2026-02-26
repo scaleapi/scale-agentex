@@ -20,7 +20,33 @@ The platform integrates with the separate [agentex-python SDK](https://github.co
 - Node.js (for frontend)
 - uv (Python package manager)
 
-### Quick Start (3-Terminal Setup)
+### Quick Start (Recommended)
+
+One command does everything (auto-installs prerequisites if missing):
+
+```bash
+./dev.sh                    # Installs deps + starts backend + frontend
+```
+
+> Make sure Docker Desktop or Rancher Desktop is running first.
+
+Other commands:
+```bash
+./dev.sh stop               # Stop all services
+./dev.sh status             # Check service status
+./dev.sh logs               # View all logs
+./dev.sh restart            # Restart all services
+```
+
+**Then in a separate terminal - Agent Development:**
+```bash
+agentex init                # Create a new agent
+cd your-agent-name/
+uv venv && source .venv/bin/activate && uv sync
+agentex agents run --manifest manifest.yaml
+```
+
+### Manual Setup (Alternative - 3 Terminals)
 
 **Terminal 1 - Backend:**
 ```bash
@@ -37,9 +63,9 @@ npm run dev                 # Starts Next.js dev server
 
 **Terminal 3 - Agent Development:**
 ```bash
-export ENVIRONMENT=development
 agentex init                # Create a new agent
 cd your-agent-name/
+uv venv && source .venv/bin/activate && uv sync
 agentex agents run --manifest manifest.yaml
 ```
 
@@ -85,6 +111,12 @@ make test-unit                               # Unit tests shortcut
 make test-integration                        # Integration tests shortcut
 make test-cov                                # Run with coverage report
 make test-docker-check                       # Verify Docker setup for tests
+
+# Linting (ruff)
+uv run ruff check src/                       # Check for lint errors
+uv run ruff check src/ --fix                 # Auto-fix lint errors
+uv run ruff format src/                      # Format code
+uv run ruff check path/to/file.py            # Check specific file
 
 # Documentation
 make serve-docs           # Serve MkDocs on localhost:8001

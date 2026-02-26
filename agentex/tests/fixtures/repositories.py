@@ -24,6 +24,7 @@ def create_agent_repository(postgres_session):
 
     return AgentRepository(
         async_read_write_session_maker=session_maker,
+        async_read_only_session_maker=session_maker,
     )
 
 
@@ -39,6 +40,7 @@ def create_task_repository(postgres_session):
 
     return TaskRepository(
         async_read_write_session_maker=session_maker,
+        async_read_only_session_maker=session_maker,
     )
 
 
@@ -54,6 +56,7 @@ def create_event_repository(postgres_session):
 
     return EventRepository(
         async_read_write_session_maker=session_maker,
+        async_read_only_session_maker=session_maker,
     )
 
 
@@ -69,6 +72,7 @@ def create_span_repository(postgres_session):
 
     return SpanRepository(
         async_read_write_session_maker=session_maker,
+        async_read_only_session_maker=session_maker,
     )
 
 
@@ -91,6 +95,7 @@ def create_agent_api_key_repository(postgres_session):
 
     return AgentAPIKeyRepository(
         async_read_write_session_maker=session_maker,
+        async_read_only_session_maker=session_maker,
     )
 
 
@@ -108,6 +113,7 @@ def create_agent_task_tracker_repository(postgres_session):
 
     return AgentTaskTrackerRepository(
         async_read_write_session_maker=session_maker,
+        async_read_only_session_maker=session_maker,
     )
 
 
@@ -126,6 +132,8 @@ def create_redis_stream_repository(redis_client):
     class MockEnvironmentVariables:
         def __init__(self, redis_url):
             self.REDIS_URL = redis_url
+            self.REDIS_STREAM_MAXLEN = 10000  # Default from EnvironmentVariables
+            self.ENVIRONMENT = "test"
 
     # Get the Redis URL from the client connection pool
     connection_kwargs = redis_client.connection_pool.connection_kwargs

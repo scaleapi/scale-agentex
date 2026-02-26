@@ -1,0 +1,41 @@
+# OpenTelemetry Collector configuration for local development
+# Receives OTLP metrics and exports to console + Prometheus
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+exporters:
+  # Log metrics to console for debugging
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  # Expose Prometheus endpoint for scraping
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: agentex
+    send_timestamps: true
+    metric_expiration: 5m
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug, prometheus]

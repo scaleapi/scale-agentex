@@ -17,6 +17,7 @@ class EnvVarKeys(str, Enum):
     ENVIRONMENT = "ENVIRONMENT"
     OPENAI_API_KEY = "OPENAI_API_KEY"
     DATABASE_URL = "DATABASE_URL"
+    READ_ONLY_DATABASE_URL = "READ_ONLY_DATABASE_URL"
     TEMPORAL_ADDRESS = "TEMPORAL_ADDRESS"
     TEMPORAL_NAMESPACE = "TEMPORAL_NAMESPACE"
     REDIS_URL = "REDIS_URL"
@@ -39,10 +40,14 @@ class EnvVarKeys(str, Enum):
     REDIS_MAX_CONNECTIONS = "REDIS_MAX_CONNECTIONS"
     REDIS_CONNECTION_TIMEOUT = "REDIS_CONNECTION_TIMEOUT"
     REDIS_SOCKET_TIMEOUT = "REDIS_SOCKET_TIMEOUT"
+    REDIS_STREAM_MAXLEN = "REDIS_STREAM_MAXLEN"
     IMAGE_PULL_SECRET_NAME = "IMAGE_PULL_SECRET_NAME"
     AGENTEX_AUTH_URL = "AGENTEX_AUTH_URL"
+    ALLOWED_ORIGINS = "ALLOWED_ORIGINS"
     DD_AGENT_HOST = "DD_AGENT_HOST"
     DD_STATSD_PORT = "DD_STATSD_PORT"
+    HTTPX_MAX_CONNECTIONS = "HTTPX_MAX_CONNECTIONS"
+    HTTPX_MAX_KEEPALIVE_CONNECTIONS = "HTTPX_MAX_KEEPALIVE_CONNECTIONS"
     HTTPX_CONNECT_TIMEOUT = "HTTPX_CONNECT_TIMEOUT"
     HTTPX_READ_TIMEOUT = "HTTPX_READ_TIMEOUT"
     HTTPX_WRITE_TIMEOUT = "HTTPX_WRITE_TIMEOUT"
@@ -51,6 +56,7 @@ class EnvVarKeys(str, Enum):
     SSE_KEEPALIVE_PING_INTERVAL = "SSE_KEEPALIVE_PING_INTERVAL"
     AGENTEX_SERVER_TASK_QUEUE = "AGENTEX_SERVER_TASK_QUEUE"
     ENABLE_HEALTH_CHECK_WORKFLOW = "ENABLE_HEALTH_CHECK_WORKFLOW"
+    WEBHOOK_REQUEST_TIMEOUT = "WEBHOOK_REQUEST_TIMEOUT"
 
 
 class Environment(str, Enum):
@@ -66,6 +72,7 @@ class EnvironmentVariables(BaseModel):
     ENVIRONMENT: str | None = Environment.DEV
     OPENAI_API_KEY: str | None
     DATABASE_URL: str | None
+    READ_ONLY_DATABASE_URL: str | None = None
     TEMPORAL_ADDRESS: str | None
     TEMPORAL_NAMESPACE: str | None
     REDIS_URL: str | None
@@ -84,8 +91,14 @@ class EnvironmentVariables(BaseModel):
     REDIS_MAX_CONNECTIONS: int = 50  # Increased for SSE streaming
     REDIS_CONNECTION_TIMEOUT: int = 60  # Connection timeout in seconds
     REDIS_SOCKET_TIMEOUT: int = 30  # Socket timeout in seconds
+    REDIS_STREAM_MAXLEN: int = (
+        10000  # Max entries per Redis stream to prevent unbounded growth
+    )
     IMAGE_PULL_SECRET_NAME: str | None = None
     AGENTEX_AUTH_URL: str | None = None
+    ALLOWED_ORIGINS: str | None = None
+    HTTPX_MAX_CONNECTIONS: int = 200  # Max total connections allowed
+    HTTPX_MAX_KEEPALIVE_CONNECTIONS: int = 100  # Max connections to keep alive
     HTTPX_CONNECT_TIMEOUT: float = 10.0  # HTTPX connection timeout in seconds
     HTTPX_READ_TIMEOUT: float = 30.0  # HTTPX read timeout in seconds
     HTTPX_WRITE_TIMEOUT: float = 30.0  # HTTPX write timeout in seconds
@@ -96,6 +109,7 @@ class EnvironmentVariables(BaseModel):
     SSE_KEEPALIVE_PING_INTERVAL: int = 15  # SSE keepalive ping interval in seconds
     AGENTEX_SERVER_TASK_QUEUE: str | None = None
     ENABLE_HEALTH_CHECK_WORKFLOW: bool = False
+    WEBHOOK_REQUEST_TIMEOUT: float = 15.0  # Webhook request timeout in seconds
 
     @classmethod
     def refresh(cls, force_refresh: bool = False) -> EnvironmentVariables | None:
@@ -109,6 +123,7 @@ class EnvironmentVariables(BaseModel):
             ENVIRONMENT=os.environ.get(EnvVarKeys.ENVIRONMENT),
             OPENAI_API_KEY=os.environ.get(EnvVarKeys.OPENAI_API_KEY),
             DATABASE_URL=os.environ.get(EnvVarKeys.DATABASE_URL),
+            READ_ONLY_DATABASE_URL=os.environ.get(EnvVarKeys.READ_ONLY_DATABASE_URL),
             TEMPORAL_ADDRESS=os.environ.get(EnvVarKeys.TEMPORAL_ADDRESS),
             TEMPORAL_NAMESPACE=os.environ.get(EnvVarKeys.TEMPORAL_NAMESPACE),
             REDIS_URL=os.environ.get(EnvVarKeys.REDIS_URL),
@@ -139,10 +154,20 @@ class EnvironmentVariables(BaseModel):
             REDIS_SOCKET_TIMEOUT=int(
                 os.environ.get(EnvVarKeys.REDIS_SOCKET_TIMEOUT, "30")
             ),
+            REDIS_STREAM_MAXLEN=int(
+                os.environ.get(EnvVarKeys.REDIS_STREAM_MAXLEN, "10000")
+            ),
             IMAGE_PULL_SECRET_NAME=os.environ.get(EnvVarKeys.IMAGE_PULL_SECRET_NAME),
             AGENTEX_AUTH_URL=os.environ.get(EnvVarKeys.AGENTEX_AUTH_URL),
+            ALLOWED_ORIGINS=os.environ.get(EnvVarKeys.ALLOWED_ORIGINS, "*"),
             DD_AGENT_HOST=os.environ.get(EnvVarKeys.DD_AGENT_HOST),
             DD_STATSD_PORT=os.environ.get(EnvVarKeys.DD_STATSD_PORT),
+            HTTPX_MAX_CONNECTIONS=int(
+                os.environ.get(EnvVarKeys.HTTPX_MAX_CONNECTIONS, "200")
+            ),
+            HTTPX_MAX_KEEPALIVE_CONNECTIONS=int(
+                os.environ.get(EnvVarKeys.HTTPX_MAX_KEEPALIVE_CONNECTIONS, "100")
+            ),
             HTTPX_CONNECT_TIMEOUT=float(
                 os.environ.get(EnvVarKeys.HTTPX_CONNECT_TIMEOUT, "10.0")
             ),
@@ -167,6 +192,9 @@ class EnvironmentVariables(BaseModel):
             ENABLE_HEALTH_CHECK_WORKFLOW=(
                 os.environ.get(EnvVarKeys.ENABLE_HEALTH_CHECK_WORKFLOW, "false")
                 == "true"
+            ),
+            WEBHOOK_REQUEST_TIMEOUT=float(
+                os.environ.get(EnvVarKeys.WEBHOOK_REQUEST_TIMEOUT, "15.0")
             ),
         )
         refreshed_environment_variables = environment_variables
