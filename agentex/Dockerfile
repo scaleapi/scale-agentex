@@ -1,4 +1,5 @@
-FROM 022465994601.dkr.ecr.us-west-2.amazonaws.com/golden/chainguard/python:3.12-dev AS base
+ARG BASE_IMAGE=022465994601.dkr.ecr.us-west-2.amazonaws.com/golden/chainguard/python:3.12-dev
+FROM ${BASE_IMAGE} AS base
 ARG SOURCE_DIR=public/agentex
 
 # Install uv package manager
@@ -7,6 +8,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.6.9 /uv /uvx /bin/
 # Install system dependencies
 USER root
 RUN apk add --no-cache \
+    bash \
     curl \
     postgresql-client \
     build-base \
@@ -47,7 +49,8 @@ RUN cd docs && mkdocs build
 
 # Production stage
 # NOTE: -dev variant required at runtime for apk (libpq, postgresql-client needed by psycopg2)
-FROM 022465994601.dkr.ecr.us-west-2.amazonaws.com/golden/chainguard/python:3.12-dev AS production
+ARG BASE_IMAGE=022465994601.dkr.ecr.us-west-2.amazonaws.com/golden/chainguard/python:3.12-dev
+FROM ${BASE_IMAGE} AS production
 ENTRYPOINT []
 ARG INCLUDE_DOCS=false
 ARG SOURCE_DIR=public/agentex
