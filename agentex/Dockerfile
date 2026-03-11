@@ -20,15 +20,16 @@ WORKDIR /app
 # Copy dependency management files
 COPY ${SOURCE_DIR}/pyproject.toml ${SOURCE_DIR}/README.md ./
 
-# Install core dependencies directly to system Python
-RUN uv pip install --system -e .
+# Install core dependencies to system Python (Chainguard prefix is /usr)
+ENV UV_PROJECT_ENVIRONMENT=/usr
+RUN uv sync
 
 # Development stage (for docker-compose)
 FROM base AS dev
 ARG SOURCE_DIR=public/agentex
 
 # Install dev dependencies to system Python
-RUN uv pip install --system --group dev .
+RUN uv sync --group dev
 
 COPY ${SOURCE_DIR}/src/ ./src/
 EXPOSE 5003
@@ -40,7 +41,7 @@ FROM base AS docs-builder
 ARG SOURCE_DIR=public/agentex
 
 # Install docs dependencies to system Python
-RUN uv pip install --system --group docs .
+RUN uv sync --group docs
 
 COPY ${SOURCE_DIR}/docs/ docs/
 COPY ${SOURCE_DIR}/src/ src/
