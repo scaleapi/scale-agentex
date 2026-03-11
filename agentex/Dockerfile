@@ -38,12 +38,12 @@ CMD ["ddtrace-run", "uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port",
 FROM base AS docs-builder
 ARG SOURCE_DIR=public/agentex
 
-# Install docs dependencies
-RUN uv sync --group docs
+# Install docs dependencies to system Python
+RUN uv pip install --system --group docs .
 
 COPY ${SOURCE_DIR}/docs/ docs/
 COPY ${SOURCE_DIR}/src/ src/
-RUN cd docs && uv run mkdocs build
+RUN cd docs && mkdocs build
 
 # Production stage
 # NOTE: -dev variant required at runtime for apk (libpq, postgresql-client needed by psycopg2)
@@ -60,9 +60,13 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 
-# Copy Python packages from base stage (Chainguard installs to /usr/lib/python3.12)
+# Copy Python packages and console_scripts from base stage (Chainguard installs to /usr/lib/python3.12)
 COPY --from=base /usr/lib/python3.12 /usr/lib/python3.12
-COPY --from=base /usr/bin /usr/bin
+# Copy only the Python-installed console_scripts (e.g. uvicorn, ddtrace-run), not build tools
+COPY --from=base /usr/bin/uvicorn /usr/bin/uvicorn
+COPY --from=base /usr/bin/ddtrace-run /usr/bin/ddtrace-run
+COPY --from=base /usr/bin/python3 /usr/bin/python3
+COPY --from=base /usr/bin/python3.12 /usr/bin/python3.12
 
 # Copy application files
 COPY ${SOURCE_DIR}/pyproject.toml ${SOURCE_DIR}/README.md ./
