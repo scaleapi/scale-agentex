@@ -174,7 +174,7 @@ jobs:
       - name: Configure AWS credentials for ECR access
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::307185671274:role/github-action-agentex
+          role-to-assume: arn:aws:iam::307185671274:role/github-action-scale-agentex-ecr-read
           aws-region: us-west-2
 
       - name: Login to egp-prod ECR for golden base images
