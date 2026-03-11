@@ -1,5 +1,4 @@
-ARG BASE_IMAGE=022465994601.dkr.ecr.us-west-2.amazonaws.com/golden/chainguard/python:3.12-dev
-FROM ${BASE_IMAGE} AS base
+FROM 022465994601.dkr.ecr.us-west-2.amazonaws.com/golden/chainguard/python:3.12-dev AS base
 ARG SOURCE_DIR=public/agentex
 
 # Install uv package manager
@@ -49,8 +48,7 @@ RUN cd docs && mkdocs build
 
 # Production stage
 # NOTE: -dev variant required at runtime for apk (libpq, postgresql-client needed by psycopg2)
-ARG BASE_IMAGE=022465994601.dkr.ecr.us-west-2.amazonaws.com/golden/chainguard/python:3.12-dev
-FROM ${BASE_IMAGE} AS production
+FROM 022465994601.dkr.ecr.us-west-2.amazonaws.com/golden/chainguard/python:3.12-dev AS production
 ENTRYPOINT []
 ARG INCLUDE_DOCS=false
 ARG SOURCE_DIR=public/agentex

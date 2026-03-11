@@ -154,8 +154,6 @@ services:
       context: ..
       dockerfile: agentex/Dockerfile
       target: dev
-      args:
-        BASE_IMAGE: python:3.12-alpine
     environment:
       - ENVIRONMENT=development
       - UVICORN_PORT=5003
@@ -217,8 +215,6 @@ services:
       context: ..
       dockerfile: agentex/Dockerfile
       target: dev
-      args:
-        BASE_IMAGE: python:3.12-alpine
     environment:
       - ENVIRONMENT=development
       - DATABASE_URL=postgresql://postgres:postgres@agentex-postgres:5432/agentex
