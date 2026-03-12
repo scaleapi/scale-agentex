@@ -12,8 +12,7 @@ RUN apk add --no-cache \
     postgresql-client \
     build-base \
     libpq \
-    gcc \
-    busybox
+    gcc
 
 WORKDIR /app
 
