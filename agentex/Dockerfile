@@ -21,7 +21,7 @@ COPY ${SOURCE_DIR}/pyproject.toml ${SOURCE_DIR}/README.md ./
 
 # Install core dependencies to system Python (Chainguard prefix is /usr)
 ENV UV_PROJECT_ENVIRONMENT=/usr
-RUN uv sync
+RUN uv sync --no-dev
 
 # Development stage (for docker-compose)
 FROM base AS dev
