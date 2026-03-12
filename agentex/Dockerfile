@@ -26,6 +26,7 @@ RUN uv sync
 
 # Development stage (for docker-compose)
 FROM base AS dev
+ENTRYPOINT []
 ARG SOURCE_DIR=public/agentex
 
 # Install dev dependencies to system Python
