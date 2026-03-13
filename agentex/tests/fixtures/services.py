@@ -12,11 +12,14 @@ import pytest
 # =============================================================================
 
 
-def create_task_message_service(task_message_repository):
+def create_task_message_service(task_message_repository, stream_repository):
     """Factory function to create TaskMessageService with given repository"""
     from src.domain.services.task_message_service import TaskMessageService
 
-    return TaskMessageService(task_message_repository=task_message_repository)
+    return TaskMessageService(
+        message_repository=task_message_repository,
+        stream_repository=stream_repository,
+    )
 
 
 def create_agent_acp_service(http_gateway, agent_repository, agent_api_key_repository):
@@ -110,9 +113,9 @@ def mock_environment_variables():
 
 
 @pytest.fixture
-def task_message_service(task_message_repository):
+def task_message_service(task_message_repository, redis_stream_repository):
     """Task message service for unit tests"""
-    return create_task_message_service(task_message_repository)
+    return create_task_message_service(task_message_repository, redis_stream_repository)
 
 
 @pytest.fixture
