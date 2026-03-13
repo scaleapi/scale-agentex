@@ -6,7 +6,7 @@ authors = [{ name = "Felix Su", email = "felix.su@scale.com" }]
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "agentex-sdk==0.4.18",
+    "agentex-sdk==0.9.3",
     "temporalio>=1.18.0",
 ]
 
