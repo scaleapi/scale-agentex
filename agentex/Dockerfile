@@ -1,5 +1,5 @@
 FROM 022465994601.dkr.ecr.us-west-2.amazonaws.com/golden/chainguard/python:3.12-dev AS base
-ARG SOURCE_DIR=public/agentex
+ARG SOURCE_DIR=agentex
 
 # Install uv package manager
 COPY --from=ghcr.io/astral-sh/uv:0.6.9 /uv /uvx /bin/
@@ -28,7 +28,7 @@ RUN uv sync --frozen --no-dev --package agentex-backend
 # Development stage (for docker-compose)
 FROM base AS dev
 ENTRYPOINT []
-ARG SOURCE_DIR=public/agentex
+ARG SOURCE_DIR=agentex
 
 # Install dev dependencies to system Python
 RUN uv sync --frozen --group dev --package agentex-backend
@@ -40,7 +40,7 @@ CMD ["ddtrace-run", "uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port",
 
 # Docs builder stage
 FROM base AS docs-builder
-ARG SOURCE_DIR=public/agentex
+ARG SOURCE_DIR=agentex
 
 # Install docs dependencies to system Python
 RUN uv sync --frozen --group docs --package agentex-backend
@@ -54,7 +54,7 @@ RUN cd docs && mkdocs build
 FROM 022465994601.dkr.ecr.us-west-2.amazonaws.com/golden/chainguard/python:3.12-dev AS production
 ENTRYPOINT []
 ARG INCLUDE_DOCS=false
-ARG SOURCE_DIR=public/agentex
+ARG SOURCE_DIR=agentex
 
 # Install runtime system dependencies only (no build tools)
 USER root
