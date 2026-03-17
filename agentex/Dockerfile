@@ -16,12 +16,14 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 
-# Copy dependency management files
-COPY ${SOURCE_DIR}/pyproject.toml ${SOURCE_DIR}/README.md ./
+# Copy dependency management files (workspace root + member + lockfile for reproducible builds)
+COPY pyproject.toml /app/pyproject.toml
+COPY uv.lock /app/uv.lock
+COPY ${SOURCE_DIR}/pyproject.toml ${SOURCE_DIR}/README.md ./${SOURCE_DIR}/
 
 # Install core dependencies to system Python (Chainguard prefix is /usr)
 ENV UV_PROJECT_ENVIRONMENT=/usr
-RUN uv sync --no-dev
+RUN uv sync --frozen --no-dev --package agentex-backend
 
 # Development stage (for docker-compose)
 FROM base AS dev
@@ -29,7 +31,7 @@ ENTRYPOINT []
 ARG SOURCE_DIR=public/agentex
 
 # Install dev dependencies to system Python
-RUN uv sync --group dev
+RUN uv sync --frozen --group dev --package agentex-backend
 
 COPY ${SOURCE_DIR}/src/ ./src/
 EXPOSE 5003
@@ -41,7 +43,7 @@ FROM base AS docs-builder
 ARG SOURCE_DIR=public/agentex
 
 # Install docs dependencies to system Python
-RUN uv sync --group docs
+RUN uv sync --frozen --group docs --package agentex-backend
 
 COPY ${SOURCE_DIR}/docs/ docs/
 COPY ${SOURCE_DIR}/src/ src/
