@@ -9,6 +9,7 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write
 
 env:
   AGENTEX_SERVER_IMAGE_NAME: agentex
@@ -70,6 +71,18 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Authenticate to ECR for golden base images
+      - name: Configure AWS credentials for ECR access
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::307185671274:role/github-action-scale-agentex-ecr-read
+          aws-region: us-west-2
+
+      - name: Login to ECR for golden base images
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registries: "022465994601"
 
       # Build documentation
       - name: Build documentation
