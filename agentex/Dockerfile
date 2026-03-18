@@ -2,7 +2,7 @@ FROM python:3.12-slim-trixie AS base
 ARG SOURCE_DIR=agentex
 
 # Install uv package manager
-COPY --from=ghcr.io/astral-sh/uv:0.6.9 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.7.3 /uv /uvx /bin/
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
