@@ -26,6 +26,12 @@ environments = [
     "sys_platform == 'darwin'",
 ]
 
+# Override agentex-sdk's fastapi<0.116 pin to allow starlette CVE-2025-62727 fix
+override-dependencies = [
+    "fastapi>=0.135.0",
+    "starlette>=0.52.0",
+]
+
 [tool.uv.workspace]
 members = ["agentex"]
 

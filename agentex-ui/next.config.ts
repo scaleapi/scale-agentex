@@ -11,6 +11,10 @@ const nextConfig: NextConfig = {
     ];
   },
   devIndicators: false,
+  eslint: {
+    // ESLint runs in CI; skip during Docker build to avoid native binding issues
+    ignoreDuringBuilds: true,
+  },
 };
 
 export default nextConfig;

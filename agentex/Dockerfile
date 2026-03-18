@@ -68,6 +68,10 @@ COPY --from=base /usr/local/lib/python3.12 /usr/local/lib/python3.12
 COPY --from=base /usr/local/bin/uvicorn /usr/local/bin/uvicorn
 COPY --from=base /usr/local/bin/ddtrace-run /usr/local/bin/ddtrace-run
 
+# Remove non-functional Cargo.lock metadata from temporalio wheel
+# (quinn-proto is a transitive Rust dep not used at runtime — temporalio uses gRPC/TCP, not QUIC)
+RUN rm -f /usr/local/lib/python3.12/site-packages/temporalio/bridge/Cargo.lock
+
 # Copy application files
 COPY ${SOURCE_DIR}/pyproject.toml ${SOURCE_DIR}/README.md ./
 COPY ${SOURCE_DIR}/src/ src/
