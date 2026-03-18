@@ -69,7 +69,7 @@ RUN groupadd --system --gid 65532 nonroot && \
     chown -R nonroot:nonroot /app
 
 # Switch to non-root user
-USER nonroot
+USER 65532
 
 EXPOSE 3000
 
