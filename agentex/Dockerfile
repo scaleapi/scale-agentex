@@ -1,4 +1,4 @@
-FROM python:3.12-slim-bookworm AS base
+FROM python:3.12-slim-trixie AS base
 ARG SOURCE_DIR=agentex
 
 # Install uv package manager
@@ -50,7 +50,7 @@ COPY ${SOURCE_DIR}/src/ src/
 RUN cd docs && mkdocs build
 
 # Production stage
-FROM python:3.12-slim-bookworm AS production
+FROM python:3.12-slim-trixie AS production
 ENTRYPOINT []
 ARG INCLUDE_DOCS=false
 ARG SOURCE_DIR=agentex
