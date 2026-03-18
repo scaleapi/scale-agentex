@@ -2,9 +2,8 @@
 FROM node:20-trixie-slim AS builder
 ARG SOURCE_DIR=agentex-ui
 
-# Install system dependencies for Sharp (libvips) and native modules
+# Install system dependencies for native modules (node-gyp)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libvips-dev \
     python3 \
     make \
     g++ \
@@ -12,11 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Set Sharp to use system libvips during build
-ENV SHARP_IGNORE_GLOBAL_LIBVIPS=0
-
-# Set production environment
-ENV NODE_ENV=production
+# Disable telemetry during build
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Copy package files
@@ -32,6 +27,9 @@ RUN npm config set registry https://registry.npmjs.org/ && \
 # Copy source code
 COPY ${SOURCE_DIR} .
 COPY LICENSE /app/LICENSE
+
+# Set production environment for the build step
+ENV NODE_ENV=production
 
 # Build the application
 RUN npm run build
