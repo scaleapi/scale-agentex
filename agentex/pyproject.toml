@@ -6,7 +6,7 @@ authors = [{ name = "Felix Su", email = "felix.su@scale.com" }]
 requires-python = ">=3.12,<3.13"
 readme = "README.md"
 dependencies = [
-    "fastapi>=0.115.0,<0.116",
+    "fastapi>=0.115.0",
     "litellm>=1.48.2,<2",
     "python-dotenv>=1.0.1,<2",
     "temporalio>=1.18.0,<2",
@@ -17,7 +17,7 @@ dependencies = [
     "alembic>=1.13.3,<2",
     "psycopg2-binary>=2.9.9,<3",
     "docker>=7.1.0,<8",
-    "python-multipart>=0.0.12,<0.0.13",
+    "python-multipart>=0.0.22",
     "aiodocker>=0.23.0,<0.24",
     "kubernetes-asyncio>=31.1.0,<32",
     "aiohttp>=3.10.9,<4",
