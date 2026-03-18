@@ -153,10 +153,6 @@ jobs:
     name: "Run Integration Tests - ${{ matrix.agent.agent_name }}"
     runs-on: ubuntu-latest
     needs: discover-agent-images
-    permissions:
-      id-token: write
-      contents: read
-      packages: read
     strategy:
       fail-fast: false # Continue testing other agents even if one fails
       matrix:
@@ -173,17 +169,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configure AWS credentials for ECR access
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::307185671274:role/github-action-scale-agentex-ecr-read
-          aws-region: us-west-2
-
-      - name: Login to egp-prod ECR for golden base images
-        uses: aws-actions/amazon-ecr-login@v2
-        with:
-          registries: "022465994601"
 
       - name: Pull agent image
         run: |

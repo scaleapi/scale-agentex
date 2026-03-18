@@ -1,4 +1,4 @@
-FROM 022465994601.dkr.ecr.us-west-2.amazonaws.com/golden/chainguard/python:3.12-dev AS base
+FROM cgr.dev/chainguard/python:latest-dev AS base
 ARG SOURCE_DIR=agentex
 
 # Install uv package manager
@@ -21,9 +21,10 @@ COPY pyproject.toml /app/pyproject.toml
 COPY uv.lock /app/uv.lock
 COPY ${SOURCE_DIR}/pyproject.toml ${SOURCE_DIR}/README.md ./${SOURCE_DIR}/
 
-# Install core dependencies to system Python (Chainguard prefix is /usr)
-ENV UV_PROJECT_ENVIRONMENT=/usr
-RUN uv sync --frozen --no-dev --package agentex-backend
+# Install core dependencies into a venv
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+RUN uv venv /opt/venv && uv sync --frozen --no-dev --package agentex-backend
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Development stage (for docker-compose)
 FROM base AS dev
@@ -51,7 +52,7 @@ RUN cd docs && mkdocs build
 
 # Production stage
 # NOTE: -dev variant required at runtime for apk (libpq, postgresql-client needed by psycopg2)
-FROM 022465994601.dkr.ecr.us-west-2.amazonaws.com/golden/chainguard/python:3.12-dev AS production
+FROM cgr.dev/chainguard/python:latest-dev AS production
 ENTRYPOINT []
 ARG INCLUDE_DOCS=false
 ARG SOURCE_DIR=agentex
@@ -64,13 +65,9 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 
-# Copy Python packages and console_scripts from base stage (Chainguard installs to /usr/lib/python3.12)
-COPY --from=base /usr/lib/python3.12 /usr/lib/python3.12
-# Copy only the Python-installed console_scripts (e.g. uvicorn, ddtrace-run), not build tools
-COPY --from=base /usr/bin/uvicorn /usr/bin/uvicorn
-COPY --from=base /usr/bin/ddtrace-run /usr/bin/ddtrace-run
-COPY --from=base /usr/bin/python3 /usr/bin/python3
-COPY --from=base /usr/bin/python3.12 /usr/bin/python3.12
+# Copy the venv with all installed packages from base stage
+COPY --from=base /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy application files
 COPY ${SOURCE_DIR}/pyproject.toml ${SOURCE_DIR}/README.md ./
