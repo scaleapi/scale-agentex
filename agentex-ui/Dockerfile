@@ -50,7 +50,7 @@ RUN echo "=== Build verification ===" && \
 RUN chown -R 65532:65532 /app
 
 # Switch to non-root user
-USER nonroot
+USER 65532
 
 EXPOSE 3000
 
