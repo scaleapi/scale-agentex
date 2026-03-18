@@ -9,7 +9,7 @@ on:
 permissions:
   contents: read
   packages: write
-  id-token: write
+  security-events: write
 
 env:
   AGENTEX_SERVER_IMAGE_NAME: agentex
@@ -72,18 +72,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Authenticate to ECR for golden base images
-      - name: Configure AWS credentials for ECR access
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::307185671274:role/github-action-scale-agentex-ecr-read
-          aws-region: us-west-2
-
-      - name: Login to ECR for golden base images
-        uses: aws-actions/amazon-ecr-login@v2
-        with:
-          registries: "022465994601"
-
       # Build documentation
       - name: Build documentation
         working-directory: ./agentex
@@ -93,8 +81,40 @@ jobs:
           # Build documentation
           cd docs && uv run mkdocs build
 
-      # Build and push server image to GHCR
-      - name: Build and push AgentEx server image to GHCR
+      # Build image locally for scanning before push
+      - name: Build AgentEx server image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./agentex/Dockerfile
+          push: false
+          load: true
+          build-args: |
+            INCLUDE_DOCS=true
+          tags: agentex:scan
+          cache-from: type=gha,scope=${{ env.AGENTEX_SERVER_IMAGE_NAME }}-release
+          cache-to: type=gha,mode=max,scope=${{ env.AGENTEX_SERVER_IMAGE_NAME }}-release
+
+      # Trivy vulnerability scan (audit mode — non-fatal)
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          image-ref: agentex:scan
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: "0"
+          severity: CRITICAL,HIGH
+        continue-on-error: true
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+        continue-on-error: true
+
+      # Push image after scanning
+      - name: Push AgentEx server image to GHCR
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -110,7 +130,6 @@ jobs:
             ghcr.io/${{ github.repository }}/${{ env.AGENTEX_SERVER_IMAGE_NAME }}:${{ github.sha }}
             ghcr.io/${{ github.repository }}/${{ env.AGENTEX_SERVER_IMAGE_NAME }}:latest
           cache-from: type=gha,scope=${{ env.AGENTEX_SERVER_IMAGE_NAME }}-release
-          cache-to: type=gha,mode=max,scope=${{ env.AGENTEX_SERVER_IMAGE_NAME }}-release
 
       # Summary
       - name: Release Summary
