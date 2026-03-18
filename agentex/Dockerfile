@@ -1,18 +1,18 @@
-FROM 022465994601.dkr.ecr.us-west-2.amazonaws.com/golden/chainguard/python:3.12-dev AS base
+FROM python:3.12-slim-bookworm AS base
 ARG SOURCE_DIR=agentex
 
 # Install uv package manager
 COPY --from=ghcr.io/astral-sh/uv:0.6.9 /uv /uvx /bin/
 
 # Install system dependencies
-USER root
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     curl \
     postgresql-client \
-    build-base \
-    libpq \
-    gcc
+    build-essential \
+    libpq-dev \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -21,8 +21,8 @@ COPY pyproject.toml /app/pyproject.toml
 COPY uv.lock /app/uv.lock
 COPY ${SOURCE_DIR}/pyproject.toml ${SOURCE_DIR}/README.md ./${SOURCE_DIR}/
 
-# Install core dependencies to system Python (Chainguard prefix is /usr)
-ENV UV_PROJECT_ENVIRONMENT=/usr
+# Install core dependencies to system Python (Debian installs to /usr/local)
+ENV UV_PROJECT_ENVIRONMENT=/usr/local
 RUN uv sync --frozen --no-dev --package agentex-backend
 
 # Development stage (for docker-compose)
@@ -50,27 +50,23 @@ COPY ${SOURCE_DIR}/src/ src/
 RUN cd docs && mkdocs build
 
 # Production stage
-# NOTE: -dev variant required at runtime for apk (libpq, postgresql-client needed by psycopg2)
-FROM 022465994601.dkr.ecr.us-west-2.amazonaws.com/golden/chainguard/python:3.12-dev AS production
+FROM python:3.12-slim-bookworm AS production
 ENTRYPOINT []
 ARG INCLUDE_DOCS=false
 ARG SOURCE_DIR=agentex
 
 # Install runtime system dependencies only (no build tools)
-USER root
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
-    libpq
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy Python packages and console_scripts from base stage (Chainguard installs to /usr/lib/python3.12)
-COPY --from=base /usr/lib/python3.12 /usr/lib/python3.12
-# Copy only the Python-installed console_scripts (e.g. uvicorn, ddtrace-run), not build tools
-COPY --from=base /usr/bin/uvicorn /usr/bin/uvicorn
-COPY --from=base /usr/bin/ddtrace-run /usr/bin/ddtrace-run
-COPY --from=base /usr/bin/python3 /usr/bin/python3
-COPY --from=base /usr/bin/python3.12 /usr/bin/python3.12
+# Copy Python packages and console_scripts from base stage (Debian installs to /usr/local)
+COPY --from=base /usr/local/lib/python3.12 /usr/local/lib/python3.12
+COPY --from=base /usr/local/bin/uvicorn /usr/local/bin/uvicorn
+COPY --from=base /usr/local/bin/ddtrace-run /usr/local/bin/ddtrace-run
 
 # Copy application files
 COPY ${SOURCE_DIR}/pyproject.toml ${SOURCE_DIR}/README.md ./
@@ -82,8 +78,8 @@ COPY LICENSE /app/LICENSE
 # Conditionally copy docs from builder stage
 COPY --from=docs-builder /app/docs/site /app/docs/site
 
-# Set ownership to Chainguard's default nonroot user (UID 65532)
-RUN chown -R 65532:65532 /app
+# Create nonroot user and set ownership
+RUN adduser --disabled-password --gecos '' --uid 65532 nonroot && chown -R nonroot:nonroot /app
 
 USER nonroot
 
