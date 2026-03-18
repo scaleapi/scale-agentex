@@ -37,7 +37,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentex-sdk", specifier = "==0.9.4" },
+    { name = "agentex-sdk", specifier = ">=0.9.4" },
     { name = "temporalio", specifier = ">=1.18.0" },
 ]
 
