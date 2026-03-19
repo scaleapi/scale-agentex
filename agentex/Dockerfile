@@ -67,6 +67,7 @@ WORKDIR /app
 COPY --from=base /usr/local/lib/python3.12 /usr/local/lib/python3.12
 COPY --from=base /usr/local/bin/uvicorn /usr/local/bin/uvicorn
 COPY --from=base /usr/local/bin/ddtrace-run /usr/local/bin/ddtrace-run
+COPY --from=base /usr/local/bin/alembic /usr/local/bin/alembic
 
 # Remove non-functional Cargo.lock metadata from temporalio wheel
 # (quinn-proto is a transitive Rust dep not used at runtime — temporalio uses gRPC/TCP, not QUIC)
