@@ -1,22 +1,17 @@
-# NOTE: -dev variant required at runtime for libvips (Sharp image processing)
-FROM cgr.dev/chainguard/node:latest-dev
-ARG SOURCE_DIR=public/agentex-ui
-ENTRYPOINT []
+# Build stage — install build deps, build the Next.js app
+FROM node:20-trixie-slim AS builder
+ARG SOURCE_DIR=agentex-ui
 
-# Install dependencies as root
-USER root
-RUN apk add --no-cache \
-    libvips-dev \
+# Install system dependencies for native modules (node-gyp)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
-    build-base
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Set Sharp to use system libvips
-ENV SHARP_IGNORE_GLOBAL_LIBVIPS=0
-
-# Set production environment
+# Disable telemetry during build
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Copy package files
@@ -25,37 +20,56 @@ COPY ${SOURCE_DIR}/package.json ${SOURCE_DIR}/package-lock.json ./
 ENV npm_config_cache=/tmp/.npm
 RUN npm config set maxsockets 3
 
-# Install all dependencies (including dev) needed for build
+# Install all dependencies (including dev for build tooling)
 RUN npm config set registry https://registry.npmjs.org/ && \
     npm ci --verbose
 
-# Copy source code (node_modules and .next excluded by .dockerignore)
+# Copy source code
 COPY ${SOURCE_DIR} .
 COPY LICENSE /app/LICENSE
 
-# Build the application (creates fresh .next directory)
+# Set production environment for the build step
 ENV NODE_ENV=production
+
+# Build the application
 RUN npm run build
 
 # Remove dev dependencies after build
-RUN npm prune --omit=dev
+RUN npm prune --production
 
-# Verify build output exists and show final structure
-RUN echo "=== Build verification ===" && \
-    ls -la .next/ && \
-    echo "=== Final container structure ===" && \
-    ls -la /app/
+# Production stage — clean image without build tools
+FROM node:20-trixie-slim AS production
+ENTRYPOINT []
 
-# Use Chainguard's default nonroot user (65532)
-RUN chown -R 65532:65532 /app
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+# Remove npm and its bundled vulnerable deps (tar, glob, minimatch, cross-spawn)
+# npm is not needed at runtime — we run next start directly via node
+RUN npm cache clean --force && \
+    rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+
+# Copy built application from builder (no build tools, no dev deps)
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/next.config.ts ./
+COPY --from=builder /app/LICENSE ./LICENSE
+
+# Create nonroot user and set ownership
+RUN groupadd --system --gid 65532 nonroot && \
+    useradd --system --uid 65532 --gid nonroot nonroot && \
+    chown -R nonroot:nonroot /app
 
 # Switch to non-root user
 USER 65532
 
 EXPOSE 3000
 
-ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
-
-# Start the application
-CMD ["npm", "start"]
+# Start the application directly via node (no npm needed)
+CMD ["node", "node_modules/.bin/next", "start"]

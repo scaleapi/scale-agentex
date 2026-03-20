@@ -1,18 +1,18 @@
-FROM cgr.dev/chainguard/python:latest-dev AS base
+FROM python:3.12-slim-trixie AS base
 ARG SOURCE_DIR=agentex
 
 # Install uv package manager
-COPY --from=ghcr.io/astral-sh/uv:0.6.9 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.7.3 /uv /uvx /bin/
 
 # Install system dependencies
-USER root
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     curl \
     postgresql-client \
-    build-base \
-    libpq \
-    gcc
+    build-essential \
+    libpq-dev \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -21,10 +21,9 @@ COPY pyproject.toml /app/pyproject.toml
 COPY uv.lock /app/uv.lock
 COPY ${SOURCE_DIR}/pyproject.toml ${SOURCE_DIR}/README.md ./${SOURCE_DIR}/
 
-# Install core dependencies into a venv
-ENV UV_PROJECT_ENVIRONMENT=/opt/venv
-RUN uv venv /opt/venv && uv sync --frozen --no-dev --package agentex-backend
-ENV PATH="/opt/venv/bin:$PATH"
+# Install core dependencies to system Python (Debian installs to /usr/local)
+ENV UV_PROJECT_ENVIRONMENT=/usr/local
+RUN uv sync --frozen --no-dev --package agentex-backend
 
 # Development stage (for docker-compose)
 FROM base AS dev
@@ -51,23 +50,28 @@ COPY ${SOURCE_DIR}/src/ src/
 RUN cd docs && mkdocs build
 
 # Production stage
-# NOTE: -dev variant required at runtime for apk (libpq, postgresql-client needed by psycopg2)
-FROM cgr.dev/chainguard/python:latest-dev AS production
+FROM python:3.12-slim-trixie AS production
 ENTRYPOINT []
 ARG INCLUDE_DOCS=false
 ARG SOURCE_DIR=agentex
 
 # Install runtime system dependencies only (no build tools)
-USER root
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
-    libpq
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy the venv with all installed packages from base stage
-COPY --from=base /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# Copy Python packages and console_scripts from base stage (Debian installs to /usr/local)
+COPY --from=base /usr/local/lib/python3.12 /usr/local/lib/python3.12
+COPY --from=base /usr/local/bin/uvicorn /usr/local/bin/uvicorn
+COPY --from=base /usr/local/bin/ddtrace-run /usr/local/bin/ddtrace-run
+COPY --from=base /usr/local/bin/alembic /usr/local/bin/alembic
+
+# Remove non-functional Cargo.lock metadata from temporalio wheel
+# (quinn-proto is a transitive Rust dep not used at runtime — temporalio uses gRPC/TCP, not QUIC)
+RUN rm -f /usr/local/lib/python3.12/site-packages/temporalio/bridge/Cargo.lock
 
 # Copy application files
 COPY ${SOURCE_DIR}/pyproject.toml ${SOURCE_DIR}/README.md ./
@@ -79,8 +83,8 @@ COPY LICENSE /app/LICENSE
 # Conditionally copy docs from builder stage
 COPY --from=docs-builder /app/docs/site /app/docs/site
 
-# Set ownership to Chainguard's default nonroot user (UID 65532)
-RUN chown -R 65532:65532 /app
+# Create nonroot user and set ownership
+RUN adduser --disabled-password --gecos '' --uid 65532 nonroot && chown -R nonroot:nonroot /app
 
 USER nonroot
 
