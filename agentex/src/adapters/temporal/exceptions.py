@@ -49,12 +49,13 @@ class TemporalSignalError(ServiceError):
     code = 500
 
 
-class TemporalQueryError(ServiceError):
+class TemporalQueryError(ClientError):
     """
     Exception raised when querying a workflow fails.
+    This typically means the query doesn't exist on the workflow.
     """
 
-    code = 500
+    code = 400
 
 
 class TemporalCancelError(ServiceError):

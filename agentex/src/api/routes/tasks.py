@@ -1,8 +1,9 @@
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
+from src.adapters.temporal.adapter_temporal import DTemporalAdapter
 from src.api.schemas.authorization_types import (
     AgentexResource,
     AgentexResourceType,
@@ -215,3 +216,24 @@ async def stream_task_events_by_name(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get(
+    "/{task_id}/query/{query_name}",
+    summary="Query Task Workflow",
+    description="Query a Temporal workflow associated with a task for its current state.",
+)
+async def query_task_workflow(
+    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.read),
+    query_name: str,
+    temporal_adapter: DTemporalAdapter,
+) -> dict[str, Any]:
+    """
+    Query a Temporal workflow by task ID and query name.
+    Returns the query result from the workflow.
+    """
+    result = await temporal_adapter.query_workflow(
+        workflow_id=task_id,
+        query=query_name,
+    )
+    return {"task_id": task_id, "query": query_name, "result": result}
