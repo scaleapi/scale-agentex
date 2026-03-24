@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -22,6 +22,12 @@ class TaskStatus(str, Enum):
     TERMINATED = "TERMINATED"
     TIMED_OUT = "TIMED_OUT"
     DELETED = "DELETED"
+
+
+# Statuses that agents can transition a running task to via the update endpoint
+TerminalTaskStatus = Literal[
+    "COMPLETED", "FAILED", "CANCELED", "TERMINATED", "TIMED_OUT"
+]
 
 
 class Task(BaseModel):
@@ -72,4 +78,12 @@ class UpdateTaskRequest(BaseModel):
     task_metadata: dict[str, Any] | None = Field(
         None,
         title="If provided, replaces task_metadata with this value",
+    )
+    status: TerminalTaskStatus | None = Field(
+        None,
+        title="If provided, transitions the task to this status. Only RUNNING tasks can be transitioned.",
+    )
+    status_reason: str | None = Field(
+        None,
+        title="Optional reason for the status change",
     )
