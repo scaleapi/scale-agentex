@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from typing import Annotated, Literal
 
 from fastapi import Depends
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 from src.adapters.crud_store.adapter_postgres import (
     ColumnPrimitiveValue,
@@ -138,6 +138,38 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
 
             # Return with agents populated
             return TaskEntity.model_validate(modified_orm)
+
+    async def transition_status(
+        self,
+        task_id: str,
+        expected_status: TaskStatus,
+        new_status: TaskStatus,
+        status_reason: str,
+        task_metadata: dict | None = None,
+    ) -> TaskEntity | None:
+        """Atomically transition task status. Returns None if the expected status didn't match (i.e. lost the race)."""
+
+        async with (
+            self.start_async_db_session(True) as session,
+            async_sql_exception_handler(),
+        ):
+            values: dict = {"status": new_status, "status_reason": status_reason}
+            if task_metadata is not None:
+                values["task_metadata"] = task_metadata
+
+            stmt = (
+                update(TaskORM)
+                .where(TaskORM.id == task_id, TaskORM.status == expected_status)
+                .values(**values)
+            )
+            result = await session.execute(stmt)
+            await session.commit()
+
+            if result.rowcount == 0:
+                return None
+
+            refreshed = await session.get(TaskORM, task_id)
+            return TaskEntity.model_validate(refreshed)
 
 
 DTaskRepository = Annotated[TaskRepository, Depends(TaskRepository)]

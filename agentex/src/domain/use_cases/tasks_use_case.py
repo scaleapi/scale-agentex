@@ -103,23 +103,34 @@ class TasksUseCase:
             identifier = id or name
             raise ItemDoesNotExist(f"Task {identifier} not found")
 
-        # Handle status transition (valid target statuses are enforced by the API schema)
+        # If no mutations were provided, don't write
+        if status is None and task_metadata is None:
+            return task_entity
+
+        # Status transition uses an atomic conditional update to prevent race conditions
         if status is not None:
             if task_entity.status != TaskStatus.RUNNING:
                 raise ClientError(
                     f"Task {task_entity.id} is not running (current status: {task_entity.status}). "
                     f"Only running tasks can have their status updated."
                 )
-            task_entity.status = status
-            task_entity.status_reason = status_reason or f"Task {status.value.lower()}"
+            reason = status_reason or f"Task {status.value.lower()}"
+            updated = await self.task_service.transition_task_status(
+                task_id=task_entity.id,
+                expected_status=TaskStatus.RUNNING,
+                new_status=status,
+                status_reason=reason,
+                task_metadata=task_metadata,
+            )
+            if updated is None:
+                raise ClientError(
+                    f"Task {task_entity.id} status was concurrently modified. "
+                    f"Please retry the request."
+                )
+            return updated
 
-        if task_metadata is not None:
-            task_entity.task_metadata = task_metadata
-
-        # If no mutations were provided, don't write
-        if status is None and task_metadata is None:
-            return task_entity
-
+        # Metadata-only update (no status change)
+        task_entity.task_metadata = task_metadata
         return await self.task_service.update_task(task=task_entity)
 
 
