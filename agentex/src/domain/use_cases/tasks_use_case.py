@@ -90,48 +90,103 @@ class TasksUseCase:
         id: str | None = None,
         name: str | None = None,
         task_metadata: dict[str, Any] | None = None,
-        status: TaskStatus | None = None,
-        status_reason: str | None = None,
     ) -> TaskEntity:
         """Update mutable fields on a task entity. This is used by our API since not all fields should be mutable."""
 
         if not id and not name:
             raise ClientError("Either id or name must be provided")
 
+        # todo: make this a transaction?
         task_entity = await self.task_service.get_task(id=id, name=name)
         if task_entity.status == TaskStatus.DELETED:
-            identifier = id or name
-            raise ItemDoesNotExist(f"Task {identifier} not found")
+            if id:
+                raise ItemDoesNotExist(f"Task {id} not found")
+            else:
+                raise ItemDoesNotExist(f"Task {name} not found")
 
-        # If no mutations were provided, don't write
-        if status is None and task_metadata is None:
+        # if no mutations are provided, don't do anything
+        if task_metadata is None:
             return task_entity
 
-        # Status transition uses an atomic conditional update to prevent race conditions
-        if status is not None:
-            if task_entity.status != TaskStatus.RUNNING:
-                raise ClientError(
-                    f"Task {task_entity.id} is not running (current status: {task_entity.status}). "
-                    f"Only running tasks can have their status updated."
-                )
-            reason = status_reason or f"Task {status.value.lower()}"
-            updated = await self.task_service.transition_task_status(
-                task_id=task_entity.id,
-                expected_status=TaskStatus.RUNNING,
-                new_status=status,
-                status_reason=reason,
-                task_metadata=task_metadata,
-            )
-            if updated is None:
-                raise ClientError(
-                    f"Task {task_entity.id} status was concurrently modified. "
-                    f"Please retry the request."
-                )
-            return updated
+        if task_metadata is not None:
+            task_entity.task_metadata = task_metadata
 
-        # Metadata-only update (no status change)
-        task_entity.task_metadata = task_metadata
-        return await self.task_service.update_task(task=task_entity)
+        updated_task_entity = await self.task_service.update_task(task=task_entity)
+        return updated_task_entity
+
+    async def _transition_to_terminal(
+        self,
+        target_status: TaskStatus,
+        id: str | None = None,
+        name: str | None = None,
+        reason: str | None = None,
+    ) -> TaskEntity:
+        """Atomically transition a running task to a terminal status."""
+        if not id and not name:
+            raise ClientError("Either id or name must be provided")
+
+        task_entity = await self.task_service.get_task(id=id, name=name)
+        if task_entity.status == TaskStatus.DELETED:
+            raise ItemDoesNotExist(f"Task {id or name} not found")
+        if task_entity.status != TaskStatus.RUNNING:
+            raise ClientError(
+                f"Task {task_entity.id} is not running (current status: {task_entity.status}). "
+                f"Only running tasks can have their status updated."
+            )
+
+        status_reason = reason or f"Task {target_status.value.lower()}"
+        updated = await self.task_service.transition_task_status(
+            task_id=task_entity.id,
+            expected_status=TaskStatus.RUNNING,
+            new_status=target_status,
+            status_reason=status_reason,
+        )
+        if updated is None:
+            raise ClientError(
+                f"Task {task_entity.id} status was concurrently modified. "
+                f"Please retry the request."
+            )
+        return updated
+
+    async def complete_task(
+        self, id: str | None = None, name: str | None = None, reason: str | None = None
+    ) -> TaskEntity:
+        """Mark a running task as completed."""
+        return await self._transition_to_terminal(
+            TaskStatus.COMPLETED, id=id, name=name, reason=reason
+        )
+
+    async def fail_task(
+        self, id: str | None = None, name: str | None = None, reason: str | None = None
+    ) -> TaskEntity:
+        """Mark a running task as failed."""
+        return await self._transition_to_terminal(
+            TaskStatus.FAILED, id=id, name=name, reason=reason
+        )
+
+    async def cancel_task(
+        self, id: str | None = None, name: str | None = None, reason: str | None = None
+    ) -> TaskEntity:
+        """Mark a running task as canceled."""
+        return await self._transition_to_terminal(
+            TaskStatus.CANCELED, id=id, name=name, reason=reason
+        )
+
+    async def terminate_task(
+        self, id: str | None = None, name: str | None = None, reason: str | None = None
+    ) -> TaskEntity:
+        """Mark a running task as terminated."""
+        return await self._transition_to_terminal(
+            TaskStatus.TERMINATED, id=id, name=name, reason=reason
+        )
+
+    async def timeout_task(
+        self, id: str | None = None, name: str | None = None, reason: str | None = None
+    ) -> TaskEntity:
+        """Mark a running task as timed out."""
+        return await self._transition_to_terminal(
+            TaskStatus.TIMED_OUT, id=id, name=name, reason=reason
+        )
 
 
 DTaskUseCase = Annotated[TasksUseCase, Depends(TasksUseCase)]

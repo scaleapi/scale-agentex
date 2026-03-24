@@ -13,9 +13,9 @@ from src.api.schemas.tasks import (
     Task,
     TaskRelationships,
     TaskResponse,
+    TaskStatusReasonRequest,
     UpdateTaskRequest,
 )
-from src.domain.entities.tasks import TaskStatus as AgentexTaskStatus
 from src.domain.services.authorization_service import DAuthorizationService
 from src.domain.use_cases.streams_use_case import DStreamsUseCase
 from src.domain.use_cases.tasks_use_case import DTaskUseCase
@@ -145,12 +145,8 @@ async def update_task(
     task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.update),
     task_use_case: DTaskUseCase,
 ) -> Task:
-    domain_status = AgentexTaskStatus(request.status) if request.status else None
     updated_task_entity = await task_use_case.update_mutable_fields_on_task(
-        id=task_id,
-        task_metadata=request.task_metadata,
-        status=domain_status,
-        status_reason=request.status_reason,
+        id=task_id, task_metadata=request.task_metadata
     )
     return Task.model_validate(updated_task_entity)
 
@@ -168,14 +164,95 @@ async def update_task_by_name(
     ),
     task_use_case: DTaskUseCase,
 ) -> Task:
-    domain_status = AgentexTaskStatus(request.status) if request.status else None
     updated_task_entity = await task_use_case.update_mutable_fields_on_task(
-        name=task_name,
-        task_metadata=request.task_metadata,
-        status=domain_status,
-        status_reason=request.status_reason,
+        name=task_name, task_metadata=request.task_metadata
     )
     return Task.model_validate(updated_task_entity)
+
+
+@router.post(
+    "/{task_id}/complete",
+    response_model=Task,
+    summary="Complete Task",
+    description="Mark a running task as completed.",
+)
+async def complete_task(
+    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.update),
+    task_use_case: DTaskUseCase,
+    request: TaskStatusReasonRequest | None = None,
+) -> Task:
+    updated = await task_use_case.complete_task(
+        id=task_id, reason=request.reason if request else None
+    )
+    return Task.model_validate(updated)
+
+
+@router.post(
+    "/{task_id}/fail",
+    response_model=Task,
+    summary="Fail Task",
+    description="Mark a running task as failed.",
+)
+async def fail_task(
+    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.update),
+    task_use_case: DTaskUseCase,
+    request: TaskStatusReasonRequest | None = None,
+) -> Task:
+    updated = await task_use_case.fail_task(
+        id=task_id, reason=request.reason if request else None
+    )
+    return Task.model_validate(updated)
+
+
+@router.post(
+    "/{task_id}/cancel",
+    response_model=Task,
+    summary="Cancel Task",
+    description="Mark a running task as canceled.",
+)
+async def cancel_task(
+    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.update),
+    task_use_case: DTaskUseCase,
+    request: TaskStatusReasonRequest | None = None,
+) -> Task:
+    updated = await task_use_case.cancel_task(
+        id=task_id, reason=request.reason if request else None
+    )
+    return Task.model_validate(updated)
+
+
+@router.post(
+    "/{task_id}/terminate",
+    response_model=Task,
+    summary="Terminate Task",
+    description="Mark a running task as terminated.",
+)
+async def terminate_task(
+    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.update),
+    task_use_case: DTaskUseCase,
+    request: TaskStatusReasonRequest | None = None,
+) -> Task:
+    updated = await task_use_case.terminate_task(
+        id=task_id, reason=request.reason if request else None
+    )
+    return Task.model_validate(updated)
+
+
+@router.post(
+    "/{task_id}/timeout",
+    response_model=Task,
+    summary="Timeout Task",
+    description="Mark a running task as timed out.",
+)
+async def timeout_task(
+    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.update),
+    task_use_case: DTaskUseCase,
+    request: TaskStatusReasonRequest | None = None,
+) -> Task:
+    updated = await task_use_case.timeout_task(
+        id=task_id, reason=request.reason if request else None
+    )
+    return Task.model_validate(updated)
 
 
 @router.get(
