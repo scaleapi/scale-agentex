@@ -1381,3 +1381,111 @@ class TestTasksAPIIntegration:
         assert "agents" in task_data
         assert len(task_data["agents"]) == 1
         assert task_data["agents"][0]["name"] == "target-filter-agent"
+
+    async def test_update_task_status_to_completed(self, isolated_client, test_task):
+        """Test transitioning a RUNNING task to COMPLETED via PUT endpoint"""
+        # When
+        response = await isolated_client.put(
+            f"/tasks/{test_task.id}",
+            json={"status": "COMPLETED", "status_reason": "Agent finished"},
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "COMPLETED"
+        assert task_data["status_reason"] == "Agent finished"
+
+    async def test_update_task_status_to_terminated(self, isolated_client, test_task):
+        """Test transitioning a RUNNING task to TERMINATED via PUT endpoint"""
+        # When
+        response = await isolated_client.put(
+            f"/tasks/{test_task.id}",
+            json={"status": "TERMINATED", "status_reason": "Workflow killed"},
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "TERMINATED"
+        assert task_data["status_reason"] == "Workflow killed"
+
+    async def test_update_task_status_to_timed_out(self, isolated_client, test_task):
+        """Test transitioning a RUNNING task to TIMED_OUT via PUT endpoint"""
+        # When
+        response = await isolated_client.put(
+            f"/tasks/{test_task.id}",
+            json={"status": "TIMED_OUT"},
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "TIMED_OUT"
+        assert task_data["status_reason"] == "Task timed_out"
+
+    async def test_update_task_status_by_name(self, isolated_client, test_task):
+        """Test transitioning a task to COMPLETED by name"""
+        # When
+        response = await isolated_client.put(
+            f"/tasks/name/{test_task.name}",
+            json={"status": "COMPLETED", "status_reason": "Done by name"},
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "COMPLETED"
+        assert task_data["status_reason"] == "Done by name"
+
+    async def test_cannot_transition_non_running_task(self, isolated_client, test_task):
+        """Test that a completed task cannot be transitioned again"""
+        # Given - Complete the task first
+        response = await isolated_client.put(
+            f"/tasks/{test_task.id}",
+            json={"status": "COMPLETED"},
+        )
+        assert response.status_code == 200
+
+        # When - Try to transition again
+        response = await isolated_client.put(
+            f"/tasks/{test_task.id}",
+            json={"status": "TERMINATED"},
+        )
+
+        # Then - Should fail
+        assert response.status_code == 400
+
+    async def test_update_task_rejects_invalid_status(self, isolated_client, test_task):
+        """Test that RUNNING and DELETED are rejected as target statuses"""
+        # When - Try to set status to RUNNING
+        response = await isolated_client.put(
+            f"/tasks/{test_task.id}",
+            json={"status": "RUNNING"},
+        )
+
+        # Then - Should be rejected by schema validation (422)
+        assert response.status_code == 422
+
+        # When - Try to set status to DELETED
+        response = await isolated_client.put(
+            f"/tasks/{test_task.id}",
+            json={"status": "DELETED"},
+        )
+
+        # Then - Should be rejected by schema validation (422)
+        assert response.status_code == 422
+
+    async def test_update_metadata_still_works(self, isolated_client, test_task):
+        """Test that updating only metadata without status still works"""
+        # When
+        response = await isolated_client.put(
+            f"/tasks/{test_task.id}",
+            json={"task_metadata": {"key": "value"}},
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "RUNNING"
+        assert task_data["task_metadata"] == {"key": "value"}

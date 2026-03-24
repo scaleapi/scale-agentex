@@ -90,29 +90,37 @@ class TasksUseCase:
         id: str | None = None,
         name: str | None = None,
         task_metadata: dict[str, Any] | None = None,
+        status: TaskStatus | None = None,
+        status_reason: str | None = None,
     ) -> TaskEntity:
         """Update mutable fields on a task entity. This is used by our API since not all fields should be mutable."""
 
         if not id and not name:
             raise ClientError("Either id or name must be provided")
 
-        # todo: make this a transaction?
         task_entity = await self.task_service.get_task(id=id, name=name)
         if task_entity.status == TaskStatus.DELETED:
-            if id:
-                raise ItemDoesNotExist(f"Task {id} not found")
-            else:
-                raise ItemDoesNotExist(f"Task {name} not found")
+            identifier = id or name
+            raise ItemDoesNotExist(f"Task {identifier} not found")
 
-        # if no mutations are provided, don't do anything
-        if task_metadata is None:
-            return task_entity
+        # Handle status transition (valid target statuses are enforced by the API schema)
+        if status is not None:
+            if task_entity.status != TaskStatus.RUNNING:
+                raise ClientError(
+                    f"Task {task_entity.id} is not running (current status: {task_entity.status}). "
+                    f"Only running tasks can have their status updated."
+                )
+            task_entity.status = status
+            task_entity.status_reason = status_reason or f"Task {status.value.lower()}"
 
         if task_metadata is not None:
             task_entity.task_metadata = task_metadata
 
-        updated_task_entity = await self.task_service.update_task(task=task_entity)
-        return updated_task_entity
+        # If no mutations were provided, don't write
+        if status is None and task_metadata is None:
+            return task_entity
+
+        return await self.task_service.update_task(task=task_entity)
 
 
 DTaskUseCase = Annotated[TasksUseCase, Depends(TasksUseCase)]

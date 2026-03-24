@@ -15,6 +15,7 @@ from src.api.schemas.tasks import (
     TaskResponse,
     UpdateTaskRequest,
 )
+from src.domain.entities.tasks import TaskStatus as AgentexTaskStatus
 from src.domain.services.authorization_service import DAuthorizationService
 from src.domain.use_cases.streams_use_case import DStreamsUseCase
 from src.domain.use_cases.tasks_use_case import DTaskUseCase
@@ -144,8 +145,12 @@ async def update_task(
     task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.update),
     task_use_case: DTaskUseCase,
 ) -> Task:
+    domain_status = AgentexTaskStatus(request.status) if request.status else None
     updated_task_entity = await task_use_case.update_mutable_fields_on_task(
-        id=task_id, task_metadata=request.task_metadata
+        id=task_id,
+        task_metadata=request.task_metadata,
+        status=domain_status,
+        status_reason=request.status_reason,
     )
     return Task.model_validate(updated_task_entity)
 
@@ -163,8 +168,12 @@ async def update_task_by_name(
     ),
     task_use_case: DTaskUseCase,
 ) -> Task:
+    domain_status = AgentexTaskStatus(request.status) if request.status else None
     updated_task_entity = await task_use_case.update_mutable_fields_on_task(
-        name=task_name, task_metadata=request.task_metadata
+        name=task_name,
+        task_metadata=request.task_metadata,
+        status=domain_status,
+        status_reason=request.status_reason,
     )
     return Task.model_validate(updated_task_entity)
 
