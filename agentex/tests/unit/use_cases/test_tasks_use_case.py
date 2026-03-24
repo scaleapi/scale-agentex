@@ -1,6 +1,6 @@
 """
 Unit tests for TasksUseCase - specifically the status transition logic
-in update_mutable_fields_on_task.
+via explicit status methods (complete_task, fail_task, etc.).
 """
 
 from uuid import uuid4
@@ -59,7 +59,7 @@ def sample_agent():
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestTasksUseCaseStatusTransitions:
-    """Test suite for task status transitions via update_mutable_fields_on_task"""
+    """Test suite for task status transitions via explicit status methods"""
 
     async def test_complete_running_task(
         self, tasks_use_case, task_service, agent_repository, sample_agent
@@ -73,8 +73,8 @@ class TestTasksUseCaseStatusTransitions:
         assert task.status == TaskStatus.RUNNING
 
         # When
-        updated = await tasks_use_case.update_mutable_fields_on_task(
-            id=task.id, status=TaskStatus.COMPLETED, status_reason="Agent finished"
+        updated = await tasks_use_case.complete_task(
+            id=task.id, reason="Agent finished"
         )
 
         # Then
@@ -92,8 +92,8 @@ class TestTasksUseCaseStatusTransitions:
         )
 
         # When
-        updated = await tasks_use_case.update_mutable_fields_on_task(
-            id=task.id, status=TaskStatus.TERMINATED, status_reason="Workflow killed"
+        updated = await tasks_use_case.terminate_task(
+            id=task.id, reason="Workflow killed"
         )
 
         # Then
@@ -111,9 +111,7 @@ class TestTasksUseCaseStatusTransitions:
         )
 
         # When
-        updated = await tasks_use_case.update_mutable_fields_on_task(
-            id=task.id, status=TaskStatus.TIMED_OUT
-        )
+        updated = await tasks_use_case.timeout_task(id=task.id)
 
         # Then
         assert updated.status == TaskStatus.TIMED_OUT
@@ -130,9 +128,7 @@ class TestTasksUseCaseStatusTransitions:
         )
 
         # When
-        updated = await tasks_use_case.update_mutable_fields_on_task(
-            id=task.id, status=TaskStatus.COMPLETED
-        )
+        updated = await tasks_use_case.complete_task(id=task.id)
 
         # Then
         assert updated.status_reason == "Task completed"
@@ -146,15 +142,11 @@ class TestTasksUseCaseStatusTransitions:
         task = await task_service.create_task(
             agent=sample_agent, task_name="double-complete-test"
         )
-        await tasks_use_case.update_mutable_fields_on_task(
-            id=task.id, status=TaskStatus.COMPLETED
-        )
+        await tasks_use_case.complete_task(id=task.id)
 
         # When / Then
         with pytest.raises(ClientError, match="not running"):
-            await tasks_use_case.update_mutable_fields_on_task(
-                id=task.id, status=TaskStatus.TERMINATED
-            )
+            await tasks_use_case.terminate_task(id=task.id)
 
     async def test_cannot_transition_canceled_task(
         self, tasks_use_case, task_service, agent_repository, sample_agent
@@ -165,15 +157,11 @@ class TestTasksUseCaseStatusTransitions:
         task = await task_service.create_task(
             agent=sample_agent, task_name="cancel-block-test"
         )
-        await tasks_use_case.update_mutable_fields_on_task(
-            id=task.id, status=TaskStatus.CANCELED
-        )
+        await tasks_use_case.cancel_task(id=task.id)
 
         # When / Then
         with pytest.raises(ClientError, match="not running"):
-            await tasks_use_case.update_mutable_fields_on_task(
-                id=task.id, status=TaskStatus.COMPLETED
-            )
+            await tasks_use_case.complete_task(id=task.id)
 
     async def test_cannot_transition_failed_task(
         self, tasks_use_case, task_service, agent_repository, sample_agent
@@ -184,15 +172,11 @@ class TestTasksUseCaseStatusTransitions:
         task = await task_service.create_task(
             agent=sample_agent, task_name="fail-block-test"
         )
-        await tasks_use_case.update_mutable_fields_on_task(
-            id=task.id, status=TaskStatus.FAILED
-        )
+        await tasks_use_case.fail_task(id=task.id)
 
         # When / Then
         with pytest.raises(ClientError, match="not running"):
-            await tasks_use_case.update_mutable_fields_on_task(
-                id=task.id, status=TaskStatus.COMPLETED
-            )
+            await tasks_use_case.complete_task(id=task.id)
 
     async def test_cannot_transition_deleted_task(
         self, tasks_use_case, task_service, agent_repository, sample_agent
@@ -207,9 +191,7 @@ class TestTasksUseCaseStatusTransitions:
 
         # When / Then
         with pytest.raises(ItemDoesNotExist):
-            await tasks_use_case.update_mutable_fields_on_task(
-                id=task.id, status=TaskStatus.COMPLETED
-            )
+            await tasks_use_case.complete_task(id=task.id)
 
     async def test_update_metadata_without_status(
         self, tasks_use_case, task_service, agent_repository, sample_agent
@@ -222,48 +204,10 @@ class TestTasksUseCaseStatusTransitions:
         )
 
         # When
-        updated = await tasks_use_case.update_mutable_fields_on_task(
+        updated = await tasks_use_case.update_task_metadata(
             id=task.id, task_metadata={"key": "value"}
         )
 
         # Then
         assert updated.status == TaskStatus.RUNNING
         assert updated.task_metadata == {"key": "value"}
-
-    async def test_update_status_and_metadata_together(
-        self, tasks_use_case, task_service, agent_repository, sample_agent
-    ):
-        """Test that status and metadata can be updated in a single call"""
-        # Given
-        await create_or_get_agent(agent_repository, sample_agent)
-        task = await task_service.create_task(
-            agent=sample_agent, task_name="both-update-test"
-        )
-
-        # When
-        updated = await tasks_use_case.update_mutable_fields_on_task(
-            id=task.id,
-            status=TaskStatus.COMPLETED,
-            status_reason="Done",
-            task_metadata={"result": "success"},
-        )
-
-        # Then
-        assert updated.status == TaskStatus.COMPLETED
-        assert updated.status_reason == "Done"
-        assert updated.task_metadata == {"result": "success"}
-
-    async def test_no_op_when_nothing_provided(
-        self, tasks_use_case, task_service, agent_repository, sample_agent
-    ):
-        """Test that providing neither status nor metadata is a no-op"""
-        # Given
-        await create_or_get_agent(agent_repository, sample_agent)
-        task = await task_service.create_task(agent=sample_agent, task_name="noop-test")
-
-        # When
-        result = await tasks_use_case.update_mutable_fields_on_task(id=task.id)
-
-        # Then
-        assert result.status == TaskStatus.RUNNING
-        assert result.id == task.id
