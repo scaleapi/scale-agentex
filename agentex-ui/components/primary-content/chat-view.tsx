@@ -1,7 +1,8 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import { motion } from 'framer-motion';
 
+import { EvalCaptureModal } from '@/components/eval-capture/eval-capture-modal';
 import { TaskProvider, useAgentexClient } from '@/components/providers';
 import { TaskMessages } from '@/components/task-messages/task-messages';
 import { useAgents } from '@/hooks/use-agents';
@@ -9,6 +10,7 @@ import {
   SearchParamKey,
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
+import { useTaskMessages } from '@/hooks/use-task-messages';
 
 import { TaskHeader } from '../task-header/task-header';
 
@@ -29,9 +31,16 @@ export function ChatView({
 }: ChatViewProps) {
   const { agentexClient } = useAgentexClient();
   const { data: agents = [] } = useAgents(agentexClient);
-  const { updateParams } = useSafeSearchParams();
+  const { updateParams, agentName } = useSafeSearchParams();
+  const { data: queryData } = useTaskMessages({
+    agentexClient,
+    taskId: taskID,
+  });
 
   const headerRef = useRef<HTMLDivElement>(null);
+  const [isEvalModalOpen, setIsEvalModalOpen] = useState(false);
+
+  const selectedAgent = agents.find(a => a.name === agentName);
 
   const handleSelectAgent = useCallback(
     (agentName: string | undefined) => {
@@ -60,7 +69,17 @@ export function ChatView({
         toggleTracesSidebar={toggleTracesSidebar}
         agents={agents}
         onAgentChange={handleSelectAgent}
+        onCaptureEval={() => setIsEvalModalOpen(true)}
         ref={headerRef}
+      />
+
+      <EvalCaptureModal
+        open={isEvalModalOpen}
+        onClose={() => setIsEvalModalOpen(false)}
+        messages={queryData?.messages ?? []}
+        taskId={taskID}
+        agentName={agentName ?? ''}
+        agentId={selectedAgent?.id ?? ''}
       />
 
       <div className="flex w-full flex-col items-center px-4 sm:px-6 md:px-8">

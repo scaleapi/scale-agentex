@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Activity, Bot } from 'lucide-react';
+import { Activity, Bot, ClipboardCheck } from 'lucide-react';
 
 import { InvestigateTracesButton } from '@/components/task-header/investigate-traces-button';
 import { ThemeToggle } from '@/components/task-header/theme-toggle';
@@ -23,6 +23,7 @@ type TaskHeaderProps = {
   agents?: Agent[];
   selectedAgentName?: string;
   onAgentChange?: (agentName: string | undefined) => void;
+  onCaptureEval?: () => void;
   ref?: React.RefObject<HTMLDivElement | null>;
 };
 
@@ -32,6 +33,7 @@ export function TaskHeader({
   toggleTracesSidebar,
   agents = [],
   onAgentChange,
+  onCaptureEval,
   ref,
 }: TaskHeaderProps) {
   const displayTaskId = taskId ? taskId.split('-')[0] : '';
@@ -97,6 +99,14 @@ export function TaskHeader({
           className={`flex items-center gap-2 ${!taskId && 'pointer-events-none invisible'}`}
         >
           <ThemeToggle />
+          {onCaptureEval && (
+            <IconButton
+              variant="ghost"
+              onClick={onCaptureEval}
+              aria-label="Capture eval"
+              icon={ClipboardCheck}
+            />
+          )}
           {toggleTracesSidebar && (
             <IconButton
               variant="ghost"

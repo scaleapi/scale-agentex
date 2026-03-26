@@ -21,6 +21,7 @@ from src.api.routes import (
     agents,
     checkpoints,
     deployment_history,
+    evals,
     events,
     messages,
     schedules,
@@ -185,6 +186,7 @@ fastapi_app.include_router(agent_api_keys.router)
 fastapi_app.include_router(deployment_history.router)
 fastapi_app.include_router(schedules.router)
 fastapi_app.include_router(checkpoints.router)
+fastapi_app.include_router(evals.router)
 
 # Wrap FastAPI app with health check interceptor for sub-millisecond K8s probe responses.
 # This must be the outermost layer to bypass all middleware.
