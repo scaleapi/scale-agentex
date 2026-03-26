@@ -23,7 +23,7 @@ type TaskMessagesProps = {
 };
 type MessagePair = {
   id: string;
-  userMessage: TaskMessage;
+  userMessage: TaskMessage | null;
   agentMessages: TaskMessage[];
 };
 
@@ -58,36 +58,41 @@ function TaskMessagesImpl({ taskId, headerRef }: TaskMessagesProps) {
     const pairs: MessagePair[] = [];
     let currentUserMessage: TaskMessage | null = null;
     let currentAgentMessages: TaskMessage[] = [];
+    let pairStarted = false;
 
     for (const message of messages) {
       const isUserMessage = message.content.author === 'user';
 
       if (isUserMessage) {
-        if (currentUserMessage) {
+        if (pairStarted) {
           pairs.push({
-            id: currentUserMessage.id || `pair-${pairs.length}`,
+            id:
+              currentUserMessage?.id ||
+              currentAgentMessages[0]?.id ||
+              `pair-${pairs.length}`,
             userMessage: currentUserMessage,
             agentMessages: currentAgentMessages,
           });
         }
         currentUserMessage = message;
         currentAgentMessages = [];
+        pairStarted = true;
       } else {
-        if (currentUserMessage) {
-          currentAgentMessages.push(message);
-        } else {
-          pairs.push({
-            id: message.id || `pair-${pairs.length}`,
-            userMessage: message,
-            agentMessages: [],
-          });
+        if (!pairStarted) {
+          currentUserMessage = null;
+          currentAgentMessages = [];
+          pairStarted = true;
         }
+        currentAgentMessages.push(message);
       }
     }
 
-    if (currentUserMessage) {
+    if (pairStarted) {
       pairs.push({
-        id: currentUserMessage.id || `pair-${pairs.length}`,
+        id:
+          currentUserMessage?.id ||
+          currentAgentMessages[0]?.id ||
+          `pair-${pairs.length}`,
         userMessage: currentUserMessage,
         agentMessages: currentAgentMessages,
       });
@@ -101,10 +106,13 @@ function TaskMessagesImpl({ taskId, headerRef }: TaskMessagesProps) {
 
     const lastPair = messagePairs[messagePairs.length - 1]!;
     const hasNoAgentMessages = lastPair.agentMessages.length === 0;
+    const hasUserMessage = lastPair.userMessage !== null;
     const rpcStatus = queryData?.rpcStatus;
 
     return (
-      hasNoAgentMessages && (rpcStatus === 'pending' || rpcStatus === 'success')
+      hasUserMessage &&
+      hasNoAgentMessages &&
+      (rpcStatus === 'pending' || rpcStatus === 'success')
     );
   }, [messagePairs, queryData?.rpcStatus]);
 
@@ -191,7 +199,7 @@ function TaskMessagesImpl({ taskId, headerRef }: TaskMessagesProps) {
             containerHeight={containerHeight}
           >
             <AnimatePresence>
-              {renderMessage(pair.userMessage)}
+              {pair.userMessage && renderMessage(pair.userMessage)}
               {pair.agentMessages.map(agentMessage => (
                 <Fragment key={agentMessage.id}>
                   {renderMessage(agentMessage)}

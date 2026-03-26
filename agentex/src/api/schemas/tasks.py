@@ -73,3 +73,10 @@ class UpdateTaskRequest(BaseModel):
         None,
         title="If provided, replaces task_metadata with this value",
     )
+
+
+class TaskStatusReasonRequest(BaseModel):
+    reason: str | None = Field(
+        None,
+        title="Optional reason for the status change",
+    )
