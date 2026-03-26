@@ -188,7 +188,10 @@ class TemporalAdapter(TemporalGateway):
 
         try:
             handle = self.client.get_workflow_handle(workflow_id, run_id=run_id)
-            result = await handle.query(query, arg)
+            if arg is not None:
+                result = await handle.query(query, arg)
+            else:
+                result = await handle.query(query)
             logger.info(f"Queried workflow {workflow_id} with query '{query}'")
             return result
         except Exception as e:
