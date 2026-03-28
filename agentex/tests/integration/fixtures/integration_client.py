@@ -455,7 +455,8 @@ async def isolated_integration_app(
         from src.domain.services.task_message_service import TaskMessageService
 
         task_message_service = TaskMessageService(
-            message_repository=isolated_repositories["task_message_repository"]
+            message_repository=isolated_repositories["task_message_repository"],
+            stream_repository=isolated_repositories["redis_stream_repository"],
         )
 
         return MessagesUseCase(task_message_service=task_message_service)
