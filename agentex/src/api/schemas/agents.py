@@ -66,6 +66,9 @@ class Agent(BaseModel):
     agent_input_type: AgentInputType | None = Field(
         default=None, description="The type of input the agent expects."
     )
+    production_deployment_id: str | None = Field(
+        default=None, description="ID of the current production deployment."
+    )
 
     class Config:
         orm_mode = True

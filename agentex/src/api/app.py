@@ -21,6 +21,7 @@ from src.api.routes import (
     agents,
     checkpoints,
     deployment_history,
+    deployments,
     events,
     messages,
     schedules,
@@ -183,6 +184,7 @@ fastapi_app.include_router(events.router)
 fastapi_app.include_router(agent_task_tracker.router)
 fastapi_app.include_router(agent_api_keys.router)
 fastapi_app.include_router(deployment_history.router)
+fastapi_app.include_router(deployments.router)
 fastapi_app.include_router(schedules.router)
 fastapi_app.include_router(checkpoints.router)
 
