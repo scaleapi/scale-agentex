@@ -21,6 +21,7 @@ import {
 } from '@/hooks/use-safe-search-params';
 import { useSendMessage } from '@/hooks/use-task-messages';
 import { useTask } from '@/hooks/use-tasks';
+import { TaskStatusEnum } from '@/lib/types';
 
 type PromptInputProps = {
   prompt: string;
@@ -60,7 +61,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
 
   const isTaskTerminal = useMemo(() => {
     if (!taskID || !task) return false;
-    return task.status != null && task.status !== 'RUNNING';
+    return task.status != null && task.status !== TaskStatusEnum.RUNNING;
   }, [taskID, task]);
 
   const handleSetJson = useCallback(

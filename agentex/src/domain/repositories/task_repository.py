@@ -169,6 +169,8 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
                 return None
 
             refreshed = await session.get(TaskORM, task_id)
+            if refreshed is None:
+                return None
             return TaskEntity.model_validate(refreshed)
 
 
