@@ -95,6 +95,9 @@ class AgentsUseCase:
                     await self.maybe_update_agent_deployment_history(agent)
                 else:
                     logger.info(f"Agent {name} has not changed, skipping update")
+                await self.maybe_update_deployment(
+                    agent, acp_url, registration_metadata
+                )
                 await self.ensure_healthcheck_workflow(agent)
                 return agent
             except ItemDoesNotExist:
