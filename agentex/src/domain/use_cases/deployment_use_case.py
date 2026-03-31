@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends
@@ -110,8 +110,8 @@ class DeploymentUseCase:
                 "Cannot delete the current production deployment. "
                 "Promote a different deployment first."
             )
-        await self.deployment_repo.delete(id=deployment_id)
-        return deployment
+        deployment.expires_at = datetime.now(UTC)
+        return await self.deployment_repo.update(deployment)
 
 
 DDeploymentUseCase = Annotated[DeploymentUseCase, Depends(DeploymentUseCase)]

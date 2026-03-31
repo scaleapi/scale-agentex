@@ -36,6 +36,7 @@ def upgrade() -> None:
         sa.Column('helm_release_name', sa.String(), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
         sa.Column('promoted_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('expires_at', sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(['agent_id'], ['agents.id'], ),
         sa.PrimaryKeyConstraint('id')
     )

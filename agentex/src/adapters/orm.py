@@ -252,6 +252,7 @@ class DeploymentORM(BaseORM):
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     promoted_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("idx_deployments_agent_id", "agent_id"),

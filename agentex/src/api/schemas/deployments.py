@@ -34,6 +34,7 @@ class Deployment(BaseModel):
     promoted_at: datetime | None = Field(
         None, description="When promoted to production."
     )
+    expires_at: datetime | None = Field(None, description="When marked for cleanup.")
 
     class Config:
         orm_mode = True

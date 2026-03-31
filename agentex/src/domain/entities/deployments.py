@@ -51,3 +51,6 @@ class DeploymentEntity(BaseModel):
     promoted_at: datetime | None = Field(
         None, description="When the deployment was promoted to production."
     )
+    expires_at: datetime | None = Field(
+        None, description="When the deployment was marked for cleanup."
+    )
