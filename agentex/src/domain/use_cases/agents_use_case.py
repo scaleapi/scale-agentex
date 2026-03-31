@@ -46,10 +46,22 @@ class AgentsUseCase:
         registration_metadata: dict[str, Any] | None = None,
         agent_input_type: AgentInputType | None = None,
     ) -> AgentEntity:
+        deployment_id = (registration_metadata or {}).get("deployment_id")
+
         # If an agent_id is passed, then the agent expects that it is already in the db
         if agent_id:
             agent = await self.agent_repo.get(id=agent_id)
-            # Update the agent with potentially new name/description (acp_url should never change)
+
+            if deployment_id:
+                # Deployment-scoped registration: only update the deployment record,
+                # don't touch the agent row (acp_url changes only via promotion)
+                await self.maybe_update_deployment(
+                    agent, acp_url, registration_metadata
+                )
+                await self.ensure_healthcheck_workflow(agent)
+                return agent
+
+            # Legacy flow: update the agent directly
             agent.name = name
             agent.description = description
             agent.status = AgentStatus.READY
@@ -67,9 +79,19 @@ class AgentsUseCase:
             # If an agent_id is not passed, then its probably a new one. We should first validate by checking in the DB
             try:
                 agent = await self.agent_repo.get(name=name)
+
+                if deployment_id:
+                    # Deployment-scoped registration: only update the deployment record,
+                    # don't touch the agent row (acp_url changes only via promotion)
+                    await self.maybe_update_deployment(
+                        agent, acp_url, registration_metadata
+                    )
+                    await self.ensure_healthcheck_workflow(agent)
+                    return agent
+
+                # Legacy flow: update the agent directly
                 existing_agent_data = agent.model_dump()
 
-                # Update agent fields
                 agent.description = description
                 agent.acp_url = acp_url
                 agent.status = AgentStatus.READY
@@ -95,9 +117,6 @@ class AgentsUseCase:
                     await self.maybe_update_agent_deployment_history(agent)
                 else:
                     logger.info(f"Agent {name} has not changed, skipping update")
-                await self.maybe_update_deployment(
-                    agent, acp_url, registration_metadata
-                )
                 await self.ensure_healthcheck_workflow(agent)
                 return agent
             except ItemDoesNotExist:
