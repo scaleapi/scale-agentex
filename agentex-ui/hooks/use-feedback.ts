@@ -10,11 +10,14 @@ type SubmitFeedbackParams = {
   output: string;
   approval: 'approved' | 'rejected';
   comment?: string;
+  agentName?: string;
+  agentId?: string;
+  agentAcpType?: string;
 };
 
 type FeedbackResponse = {
   spanId: string;
-  assessmentId: string;
+  assessmentIds: string[];
 };
 
 export function useFeedback() {

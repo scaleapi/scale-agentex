@@ -21,6 +21,9 @@ type MessageFeedbackProps = {
   taskId: string;
   agentMessageContent: string;
   userMessageContent: string;
+  agentName?: string | undefined;
+  agentId?: string | undefined;
+  agentAcpType?: string | undefined;
 };
 
 export function MessageFeedback({
@@ -28,6 +31,9 @@ export function MessageFeedback({
   taskId,
   agentMessageContent,
   userMessageContent,
+  agentName,
+  agentId,
+  agentAcpType,
 }: MessageFeedbackProps) {
   const [selection, setSelection] = useState<'approved' | 'rejected' | null>(
     null
@@ -48,6 +54,9 @@ export function MessageFeedback({
           output: agentMessageContent,
           approval,
           ...(feedbackComment ? { comment: feedbackComment } : {}),
+          ...(agentName ? { agentName } : {}),
+          ...(agentId ? { agentId } : {}),
+          ...(agentAcpType ? { agentAcpType } : {}),
         });
         setSelection(approval);
         setShowCommentForm(false);
@@ -56,7 +65,16 @@ export function MessageFeedback({
         // Error handled by the hook's onError
       }
     },
-    [mutateAsync, taskId, messageId, userMessageContent, agentMessageContent]
+    [
+      mutateAsync,
+      taskId,
+      messageId,
+      userMessageContent,
+      agentMessageContent,
+      agentName,
+      agentId,
+      agentAcpType,
+    ]
   );
 
   const handleThumbsUp = useCallback(() => {
@@ -151,10 +169,20 @@ export function MessageFeedback({
               <textarea
                 value={comment}
                 onChange={e => setComment(e.target.value)}
+                onKeyDown={e => {
+                  if (
+                    e.key === 'Enter' &&
+                    (e.metaKey || e.ctrlKey) &&
+                    !isPending
+                  ) {
+                    handleCommentSubmit();
+                  }
+                }}
                 placeholder="What could be improved?"
                 maxLength={300}
                 rows={2}
-                className="border-input bg-background placeholder:text-muted-foreground focus-visible:ring-ring w-full resize-none rounded-md border px-3 py-2 text-sm focus-visible:ring-1 focus-visible:outline-none"
+                disabled={isPending}
+                className="border-input bg-background placeholder:text-muted-foreground focus-visible:ring-ring w-full resize-none rounded-md border px-3 py-2 text-sm focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
               />
               <div className="flex items-center gap-2">
                 <Button

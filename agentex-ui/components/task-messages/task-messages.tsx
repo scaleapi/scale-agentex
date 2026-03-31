@@ -10,6 +10,8 @@ import { TaskMessageScrollContainer } from '@/components/task-messages/task-mess
 import { TaskMessageTextContent } from '@/components/task-messages/task-message-text-content';
 import { TaskMessageToolPair } from '@/components/task-messages/task-message-tool-pair';
 import { ShimmeringText } from '@/components/ui/shimmering-text';
+import { useAgents } from '@/hooks/use-agents';
+import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 import { useTaskMessages } from '@/hooks/use-task-messages';
 
 import type {
@@ -34,6 +36,9 @@ function TaskMessagesImpl({ taskId, headerRef }: TaskMessagesProps) {
   const [containerHeight, setContainerHeight] = useState<number>(0);
 
   const { agentexClient, sgpAppURL } = useAgentexClient();
+  const { agentName } = useSafeSearchParams();
+  const { data: agents = [] } = useAgents(agentexClient);
+  const agent = agents.find(a => a.name === agentName);
 
   const { data: queryData } = useTaskMessages({ agentexClient, taskId });
 
@@ -215,10 +220,13 @@ function TaskMessagesImpl({ taskId, headerRef }: TaskMessagesProps) {
                           taskId={taskId}
                           agentMessageContent={agentMessage.content.content}
                           userMessageContent={
-                            pair.userMessage.content.type === 'text'
+                            pair.userMessage?.content.type === 'text'
                               ? pair.userMessage.content.content
                               : ''
                           }
+                          agentName={agent?.name}
+                          agentId={agent?.id}
+                          agentAcpType={agent?.acp_type}
                         />
                       )}
                   </div>
