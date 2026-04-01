@@ -144,6 +144,9 @@ class AgentsUseCase:
                 logger.info(
                     f"Agent {name} was likely created in parallel, skipping creation"
                 )
+                # Re-fetch the actual persisted agent so downstream code
+                # (maybe_update_deployment) uses the correct agent_id
+                agent = await self.agent_repo.get(name=name)
         await self.maybe_update_deployment(agent, acp_url, registration_metadata)
         await self.maybe_update_agent_deployment_history(agent)
 
@@ -161,40 +164,35 @@ class AgentsUseCase:
         if not deployment_id:
             return
 
-        try:
-            deployment = await self.deployment_repo.get_or_none(id=deployment_id)
-            if deployment:
-                deployment.acp_url = acp_url
-                deployment.status = DeploymentStatus.READY
-                await self.deployment_repo.update(deployment)
-            else:
-                deployment = DeploymentEntity(
-                    id=deployment_id,
-                    agent_id=agent.id,
-                    docker_image=registration_metadata.get("docker_image", "unknown"),
-                    commit_hash=registration_metadata.get("agent_commit"),
-                    branch_name=registration_metadata.get("branch_name"),
-                    author_name=registration_metadata.get("author_name"),
-                    author_email=registration_metadata.get("author_email"),
-                    status=DeploymentStatus.READY,
-                    acp_url=acp_url,
-                    is_production=False,
-                )
-                await self.deployment_repo.create(deployment)
+        deployment = await self.deployment_repo.get_or_none(id=deployment_id)
+        if deployment:
+            deployment.acp_url = acp_url
+            deployment.status = DeploymentStatus.READY
+            await self.deployment_repo.update(deployment)
+        else:
+            deployment = DeploymentEntity(
+                id=deployment_id,
+                agent_id=agent.id,
+                docker_image=registration_metadata.get("docker_image", "unknown"),
+                commit_hash=registration_metadata.get("agent_commit"),
+                branch_name=registration_metadata.get("branch_name"),
+                author_name=registration_metadata.get("author_name"),
+                author_email=registration_metadata.get("author_email"),
+                status=DeploymentStatus.READY,
+                acp_url=acp_url,
+                is_production=False,
+            )
+            await self.deployment_repo.create(deployment)
 
-            # Auto-promote if this is the first deployment for this agent
-            existing_production = await self.deployment_repo.get_production(agent.id)
-            if not existing_production:
-                logger.info(
-                    f"Auto-promoting first deployment {deployment_id} for agent {agent.id}"
-                )
-                await self.deployment_repo.promote(
-                    agent_id=agent.id,
-                    deployment_id=deployment_id,
-                )
-        except Exception as e:
-            logger.error(
-                f"Error updating deployment {deployment_id} for agent {agent.id}: {e}"
+        # Auto-promote if this is the first deployment for this agent.
+        # Uses a single transaction to avoid TOCTOU races between concurrent pods.
+        promoted = await self.deployment_repo.auto_promote_if_first(
+            agent_id=agent.id,
+            deployment_id=deployment_id,
+        )
+        if promoted:
+            logger.info(
+                f"Auto-promoted first deployment {deployment_id} for agent {agent.id}"
             )
 
     async def maybe_update_agent_deployment_history(self, agent: AgentEntity) -> None:

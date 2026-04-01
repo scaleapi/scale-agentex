@@ -54,8 +54,15 @@ class DeploymentUseCase:
         )
         return await self.deployment_repo.create(deployment)
 
-    async def get_deployment(self, deployment_id: str) -> DeploymentEntity:
-        return await self.deployment_repo.get(id=deployment_id)
+    async def get_deployment(
+        self, agent_id: str, deployment_id: str
+    ) -> DeploymentEntity:
+        deployment = await self.deployment_repo.get(id=deployment_id)
+        if deployment.agent_id != agent_id:
+            raise ItemDoesNotExist(
+                f"Deployment {deployment_id} not found for agent {agent_id}"
+            )
+        return deployment
 
     async def list_deployments(
         self,

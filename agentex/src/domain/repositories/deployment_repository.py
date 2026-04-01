@@ -55,7 +55,11 @@ class DeploymentRepository(PostgresCRUDRepository[DeploymentORM, DeploymentEntit
         order_by: str | None = None,
         order_direction: str = "desc",
     ) -> list[DeploymentEntity]:
-        query = select(DeploymentORM).where(DeploymentORM.agent_id == agent_id)
+        query = (
+            select(DeploymentORM)
+            .where(DeploymentORM.agent_id == agent_id)
+            .where(DeploymentORM.expires_at.is_(None))
+        )
         return await super().list(
             query=query,
             limit=limit,
@@ -121,6 +125,52 @@ class DeploymentRepository(PostgresCRUDRepository[DeploymentORM, DeploymentEntit
             await session.commit()
             await session.refresh(target_deployment)
             return DeploymentEntity.model_validate(target_deployment)
+
+    async def auto_promote_if_first(
+        self,
+        agent_id: str,
+        deployment_id: str,
+    ) -> bool:
+        """Atomically promote a deployment only if no production deployment exists.
+
+        Returns True if promotion happened, False if a production deployment already exists.
+        """
+        async with self.start_async_db_session(allow_writes=True) as session:
+            # Check for existing production deployment within the same transaction
+            existing = await session.execute(
+                select(DeploymentORM)
+                .where(DeploymentORM.agent_id == agent_id)
+                .where(DeploymentORM.is_production.is_(True))
+                .limit(1)
+            )
+            if existing.scalars().first():
+                return False
+
+            # No production deployment — promote this one
+            target = await session.execute(
+                select(DeploymentORM)
+                .where(DeploymentORM.id == deployment_id)
+                .where(DeploymentORM.agent_id == agent_id)
+            )
+            target_deployment = target.scalars().first()
+            if not target_deployment:
+                return False
+
+            now = datetime.now(UTC)
+            target_deployment.is_production = True
+            target_deployment.promoted_at = now
+
+            await session.execute(
+                update(AgentORM)
+                .where(AgentORM.id == agent_id)
+                .values(
+                    production_deployment_id=deployment_id,
+                    acp_url=target_deployment.acp_url,
+                )
+            )
+
+            await session.commit()
+            return True
 
 
 DDeploymentRepository = Annotated[DeploymentRepository, Depends(DeploymentRepository)]

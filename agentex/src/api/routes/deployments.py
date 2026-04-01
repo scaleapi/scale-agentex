@@ -14,6 +14,7 @@ from src.domain.entities.agents_rpc import (
     SendMessageRequestEntity,
 )
 from src.domain.entities.json_rpc import JSONRPCError
+from src.domain.exceptions import ClientError
 from src.domain.use_cases.agents_acp_use_case import DAgentsACPUseCase
 from src.domain.use_cases.deployment_use_case import DDeploymentUseCase
 from src.utils.authorization_shortcuts import DAuthorizedId
@@ -88,6 +89,7 @@ async def get_deployment(
     deployment_use_case: DDeploymentUseCase,
 ) -> Deployment:
     deployment_entity = await deployment_use_case.get_deployment(
+        agent_id=agent_id,
         deployment_id=deployment_id,
     )
     return Deployment.model_validate(deployment_entity)
@@ -164,9 +166,11 @@ async def handle_deployment_rpc(
     agents_acp_use_case: DAgentsACPUseCase,
     deployment_use_case: DDeploymentUseCase,
 ) -> AgentRPCResponse | StreamingResponse:
-    deployment = await deployment_use_case.get_deployment(deployment_id=deployment_id)
+    deployment = await deployment_use_case.get_deployment(
+        agent_id=agent_id, deployment_id=deployment_id
+    )
     if not deployment.acp_url:
-        raise ValueError(
+        raise ClientError(
             f"Deployment {deployment_id} does not have an ACP URL configured"
         )
 
