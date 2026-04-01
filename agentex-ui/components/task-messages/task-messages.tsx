@@ -3,12 +3,15 @@ import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 
 import { useAgentexClient } from '@/components/providers';
+import { MessageFeedback } from '@/components/task-messages/message-feedback';
 import { TaskMessageDataContent } from '@/components/task-messages/task-message-data-content';
 import { TaskMessageReasoning } from '@/components/task-messages/task-message-reasoning-content';
 import { TaskMessageScrollContainer } from '@/components/task-messages/task-message-scroll-container';
 import { TaskMessageTextContent } from '@/components/task-messages/task-message-text-content';
 import { TaskMessageToolPair } from '@/components/task-messages/task-message-tool-pair';
 import { ShimmeringText } from '@/components/ui/shimmering-text';
+import { useAgents } from '@/hooks/use-agents';
+import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 import { useTaskMessages } from '@/hooks/use-task-messages';
 
 import type {
@@ -32,7 +35,10 @@ function TaskMessagesImpl({ taskId, headerRef }: TaskMessagesProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerHeight, setContainerHeight] = useState<number>(0);
 
-  const { agentexClient } = useAgentexClient();
+  const { agentexClient, sgpAppURL } = useAgentexClient();
+  const { agentName } = useSafeSearchParams();
+  const { data: agents = [] } = useAgents(agentexClient);
+  const agent = agents.find(a => a.name === agentName);
 
   const { data: queryData } = useTaskMessages({ agentexClient, taskId });
 
@@ -202,7 +208,28 @@ function TaskMessagesImpl({ taskId, headerRef }: TaskMessagesProps) {
               {pair.userMessage && renderMessage(pair.userMessage)}
               {pair.agentMessages.map(agentMessage => (
                 <Fragment key={agentMessage.id}>
-                  {renderMessage(agentMessage)}
+                  <div className="group/feedback">
+                    {renderMessage(agentMessage)}
+                    {sgpAppURL &&
+                      agentMessage.id &&
+                      agentMessage.content.type === 'text' &&
+                      agentMessage.content.author === 'agent' &&
+                      agentMessage.streaming_status !== 'IN_PROGRESS' && (
+                        <MessageFeedback
+                          messageId={agentMessage.id}
+                          taskId={taskId}
+                          agentMessageContent={agentMessage.content.content}
+                          userMessageContent={
+                            pair.userMessage?.content.type === 'text'
+                              ? pair.userMessage.content.content
+                              : ''
+                          }
+                          agentName={agent?.name}
+                          agentId={agent?.id}
+                          agentAcpType={agent?.acp_type}
+                        />
+                      )}
+                  </div>
                 </Fragment>
               ))}
             </AnimatePresence>
