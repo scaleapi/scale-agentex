@@ -257,6 +257,12 @@ class DeploymentORM(BaseORM):
     __table_args__ = (
         Index("idx_deployments_agent_id", "agent_id"),
         Index("idx_deployments_agent_production", "agent_id", "is_production"),
+        Index(
+            "uq_deployments_one_production_per_agent",
+            "agent_id",
+            unique=True,
+            postgresql_where=(is_production.is_(True)),
+        ),
         Index("idx_deployments_sgp_deploy_id", "sgp_deploy_id"),
     )
 

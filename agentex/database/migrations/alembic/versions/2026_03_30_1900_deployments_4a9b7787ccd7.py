@@ -42,6 +42,13 @@ def upgrade() -> None:
     )
     op.create_index('idx_deployments_agent_id', 'deployments', ['agent_id'], unique=False)
     op.create_index('idx_deployments_agent_production', 'deployments', ['agent_id', 'is_production'], unique=False)
+    op.create_index(
+        'uq_deployments_one_production_per_agent',
+        'deployments',
+        ['agent_id'],
+        unique=True,
+        postgresql_where=sa.text('is_production = true'),
+    )
     op.create_index('idx_deployments_sgp_deploy_id', 'deployments', ['sgp_deploy_id'], unique=False)
 
     # 2. Add production_deployment_id to agents table
@@ -56,6 +63,7 @@ def downgrade() -> None:
 
     # Drop deployments table
     op.drop_index('idx_deployments_sgp_deploy_id', table_name='deployments')
+    op.drop_index('uq_deployments_one_production_per_agent', table_name='deployments')
     op.drop_index('idx_deployments_agent_production', table_name='deployments')
     op.drop_index('idx_deployments_agent_id', table_name='deployments')
     op.drop_table('deployments')

@@ -173,7 +173,9 @@ class AgentsUseCase:
             deployment = DeploymentEntity(
                 id=deployment_id,
                 agent_id=agent.id,
-                docker_image=registration_metadata.get("docker_image", "unknown"),
+                docker_image=registration_metadata.get(
+                    "docker_image", agent.docker_image or "unknown"
+                ),
                 commit_hash=registration_metadata.get("agent_commit"),
                 branch_name=registration_metadata.get("branch_name"),
                 author_name=registration_metadata.get("author_name"),
