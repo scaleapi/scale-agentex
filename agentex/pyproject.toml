@@ -60,6 +60,7 @@ docs = [
     "agentex-sdk",
     "griffe-pydantic>=1.1.4",
     "pymdown-extensions>=10.0,<11",
+    "Pygments>=2.19.2,<2.20",
     "agentex-sdk",
 ]
 
