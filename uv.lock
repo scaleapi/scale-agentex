@@ -101,6 +101,7 @@ docs = [
     { name = "mkdocs-macros-plugin", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "mkdocs-material", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "mkdocstrings-python", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "pygments", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "pymdown-extensions", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
 ]
 test = [
@@ -159,6 +160,7 @@ docs = [
     { name = "mkdocs-macros-plugin", specifier = ">=1.3.7,<2" },
     { name = "mkdocs-material", specifier = ">=9.6.14,<10" },
     { name = "mkdocstrings-python", specifier = ">=1.16.12" },
+    { name = "pygments", specifier = ">=2.19.2,<2.20" },
     { name = "pymdown-extensions", specifier = ">=10.0,<11" },
 ]
 test = [
@@ -519,8 +521,10 @@ dependencies = [
     { name = "anyio", marker = "sys_platform == 'darwin'" },
     { name = "mcp", marker = "sys_platform == 'darwin'" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/03/cf/2bd8d55bab57e458044a5e530a2320fecfcc91ec5546972b2c3db15fd09a/claude_agent_sdk-0.1.49.tar.gz", hash = "sha256:6a93f7e51951623d94c0b35172d1d25d7c44f8dd083568d3252a6ed3ac8719bf", size = 95079, upload-time = "2026-03-20T17:31:09.274Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/65/08/0e33ede7b3035ba953f5a59597b8cb94ea2f3fb3124e5d6f6e255bf9c025/claude_agent_sdk-0.1.49-py3-none-macosx_11_0_arm64.whl", hash = "sha256:a869330d4a15b12c96ae24144b8e29999ff25315267f248634986179e9536a04", size = 57620663, upload-time = "2026-03-17T00:44:27.792Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/dd/0c4fa243e5e1ac794193aeb3a48d834cbe896e9f91666b9d087ec560ff8e/claude_agent_sdk-0.1.49-py3-none-macosx_11_0_x86_64.whl", hash = "sha256:30a5039a0de6577fe15c568182e3f615e652eda5ef7cc247b5bdbc2d94dee391", size = 60418943, upload-time = "2026-03-20T17:30:49.513Z" },
 ]
 
 [[package]]
