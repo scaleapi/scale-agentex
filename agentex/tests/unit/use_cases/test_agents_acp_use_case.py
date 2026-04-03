@@ -147,8 +147,15 @@ def authorization_service():
 
 
 @pytest.fixture
+def deployment_repository():
+    """Mock deployment repository"""
+    return AsyncMock()
+
+
+@pytest.fixture
 def agents_acp_use_case(
     agent_repository,
+    deployment_repository,
     agent_acp_service,
     task_service,
     task_message_service,
@@ -157,6 +164,7 @@ def agents_acp_use_case(
     """Real AgentsACPUseCase instance with required services and mocked authorization"""
     return AgentsACPUseCase(
         agent_repository=agent_repository,
+        deployment_repository=deployment_repository,
         acp_client=agent_acp_service,
         task_service=task_service,
         task_message_service=task_message_service,
@@ -282,6 +290,7 @@ class TestAgentsACPUseCase:
         await agents_acp_use_case._handle_message_send_sync(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         )
 
     async def test_handle_message_send_sync_success(
@@ -337,6 +346,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_message_send_sync(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         )
 
         assert isinstance(result, list)
@@ -403,6 +413,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_message_send_sync(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         )
 
         assert isinstance(result, list)
@@ -502,6 +513,7 @@ class TestAgentsACPUseCase:
         async for update in agents_acp_use_case._handle_message_send_stream(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         ):
             updates.append(update)
 
@@ -627,6 +639,7 @@ class TestAgentsACPUseCase:
         async for update in agents_acp_use_case._handle_message_send_stream(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         ):
             updates.append(update)
 
@@ -782,6 +795,7 @@ class TestAgentsACPUseCase:
         async for update in agents_acp_use_case._handle_message_send_stream(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         ):
             updates.append(update)
 
@@ -866,6 +880,7 @@ class TestAgentsACPUseCase:
             await agents_acp_use_case._handle_task_create(
                 agent=sample_agent,
                 params=create_request,
+                acp_url=sample_agent.acp_url,
             )
 
         assert "ACP server connection failed" in str(exc_info.value)
@@ -904,6 +919,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_task_create(
             agent=sample_agent,
             params=create_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then
@@ -948,6 +964,7 @@ class TestAgentsACPUseCase:
             await agents_acp_use_case._handle_message_send_sync(
                 agent=sample_agent,
                 params=send_request,
+                acp_url=sample_agent.acp_url,
             )
 
         assert "ACP server connection failed" in str(exc_info.value)
@@ -1017,6 +1034,7 @@ class TestAgentsACPUseCase:
         async for update in agents_acp_use_case._handle_message_send_stream(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         ):
             updates.append(update)
 
@@ -1301,6 +1319,7 @@ class TestAgentsACPUseCase:
         async for update in agents_acp_use_case._handle_message_send_stream(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         ):
             updates.append(update)
 
@@ -1414,6 +1433,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_task_cancel(
             agent=sample_agent,
             params=cancel_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then
@@ -1459,6 +1479,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_task_cancel(
             agent=sample_agent,
             params=cancel_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then
@@ -1507,6 +1528,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_event_send(
             agent=sample_agent,
             params=event_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then
@@ -1581,6 +1603,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_event_send(
             agent=sample_agent,
             params=event_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then
@@ -1678,6 +1701,7 @@ class TestAgentsACPUseCase:
             agent=sample_agent,
             params=event_request,
             request_headers=request_headers,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then
@@ -1737,6 +1761,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_event_send(
             agent=sample_agent,
             params=event_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then
@@ -1827,6 +1852,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_message_send_sync(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then
@@ -1914,6 +1940,7 @@ class TestAgentsACPUseCase:
         async for update in agents_acp_use_case._handle_message_send_stream(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         ):
             updates.append(update)
 
@@ -2016,6 +2043,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_message_send_sync(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then
@@ -2112,6 +2140,7 @@ class TestAgentsACPUseCase:
         async for update in agents_acp_use_case._handle_message_send_stream(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         ):
             updates.append(update)
 
@@ -2221,6 +2250,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_message_send_sync(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then - params should be updated
@@ -2288,6 +2318,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_message_send_sync(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then - task should not be updated

@@ -113,12 +113,13 @@ class AgentTaskService:
         agent: AgentEntity,
         task: TaskEntity,
         task_params: dict[str, Any] | None = None,
+        acp_url: str | None = None,
     ) -> None:
         try:
             await self.acp_client.create_task(
                 agent=agent,
                 task=task,
-                acp_url=agent.acp_url,
+                acp_url=acp_url or agent.acp_url,
                 params=task_params,
             )
         except Exception as e:
