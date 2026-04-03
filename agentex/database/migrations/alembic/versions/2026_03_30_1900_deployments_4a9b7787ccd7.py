@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
 
 
 # revision identifiers, used by Alembic.
@@ -24,11 +25,7 @@ def upgrade() -> None:
         sa.Column('id', sa.String(), nullable=False),
         sa.Column('agent_id', sa.String(length=64), nullable=False),
         sa.Column('docker_image', sa.String(), nullable=False),
-        sa.Column('commit_hash', sa.String(), nullable=True),
-        sa.Column('branch_name', sa.String(), nullable=True),
-        sa.Column('author_name', sa.String(), nullable=True),
-        sa.Column('author_email', sa.String(), nullable=True),
-        sa.Column('build_timestamp', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('registration_metadata', JSONB, nullable=True),
         sa.Column('status', sa.Enum('Pending', 'Ready', 'Failed', name='deploymentstatus'), nullable=False, server_default='Pending'),
         sa.Column('acp_url', sa.String(), nullable=True),
         sa.Column('is_production', sa.Boolean(), nullable=False, server_default=sa.text('false')),

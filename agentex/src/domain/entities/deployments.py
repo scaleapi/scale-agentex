@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from pydantic import Field
 
@@ -16,14 +17,12 @@ class DeploymentEntity(BaseModel):
     id: str = Field(..., description="The unique identifier of the deployment.")
     agent_id: str = Field(..., description="The agent this deployment belongs to.")
 
-    # Image + git metadata (immutable after creation)
+    # Image (immutable after creation)
     docker_image: str = Field(..., description="Full Docker image URI.")
-    commit_hash: str | None = Field(None, description="Git commit hash.")
-    branch_name: str | None = Field(None, description="Git branch name.")
-    author_name: str | None = Field(None, description="Author of the deployment.")
-    author_email: str | None = Field(None, description="Author email.")
-    build_timestamp: datetime | None = Field(
-        None, description="When the build was created."
+
+    # Git/build metadata (commit_hash, branch_name, author_name, author_email, build_timestamp)
+    registration_metadata: dict[str, Any] | None = Field(
+        None, description="Registration metadata from the agent pod."
     )
 
     # Runtime state

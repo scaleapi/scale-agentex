@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends
 
@@ -27,13 +27,9 @@ class DeploymentUseCase:
         self,
         agent_id: str,
         docker_image: str,
-        commit_hash: str | None = None,
-        branch_name: str | None = None,
-        author_name: str | None = None,
-        author_email: str | None = None,
+        registration_metadata: dict[str, Any] | None = None,
         sgp_deploy_id: str | None = None,
         helm_release_name: str | None = None,
-        build_timestamp: datetime | None = None,
     ) -> DeploymentEntity:
         # Validate agent exists
         await self.agent_repo.get(id=agent_id)
@@ -42,11 +38,7 @@ class DeploymentUseCase:
             id=orm_id(),
             agent_id=agent_id,
             docker_image=docker_image,
-            commit_hash=commit_hash,
-            branch_name=branch_name,
-            author_name=author_name,
-            author_email=author_email,
-            build_timestamp=build_timestamp,
+            registration_metadata=registration_metadata,
             status=DeploymentStatus.PENDING,
             is_production=False,
             sgp_deploy_id=sgp_deploy_id,

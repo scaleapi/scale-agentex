@@ -42,13 +42,9 @@ async def create_deployment(
     deployment_entity = await deployment_use_case.create_deployment(
         agent_id=agent_id,
         docker_image=request.docker_image,
-        commit_hash=request.commit_hash,
-        branch_name=request.branch_name,
-        author_name=request.author_name,
-        author_email=request.author_email,
+        registration_metadata=request.registration_metadata,
         sgp_deploy_id=request.sgp_deploy_id,
         helm_release_name=request.helm_release_name,
-        build_timestamp=request.build_timestamp,
     )
     return Deployment.model_validate(deployment_entity)
 

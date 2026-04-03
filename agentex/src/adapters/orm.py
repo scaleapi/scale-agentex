@@ -228,13 +228,11 @@ class DeploymentORM(BaseORM):
     id = Column(String, primary_key=True, default=orm_id)
     agent_id = Column(String(64), ForeignKey("agents.id"), nullable=False)
 
-    # Image + git metadata (immutable after creation)
+    # Image (immutable after creation)
     docker_image = Column(String, nullable=False)
-    commit_hash = Column(String, nullable=True)
-    branch_name = Column(String, nullable=True)
-    author_name = Column(String, nullable=True)
-    author_email = Column(String, nullable=True)
-    build_timestamp = Column(DateTime(timezone=True), nullable=True)
+
+    # Git/build metadata (commit_hash, branch_name, author_name, author_email, build_timestamp)
+    registration_metadata = Column(JSONB, nullable=True)
 
     # Runtime state (updated during lifecycle)
     status = Column(

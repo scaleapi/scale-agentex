@@ -176,10 +176,7 @@ class AgentsUseCase:
                 docker_image=registration_metadata.get(
                     "docker_image", agent.docker_image or "unknown"
                 ),
-                commit_hash=registration_metadata.get("agent_commit"),
-                branch_name=registration_metadata.get("branch_name"),
-                author_name=registration_metadata.get("author_name"),
-                author_email=registration_metadata.get("author_email"),
+                registration_metadata=registration_metadata,
                 status=DeploymentStatus.READY,
                 acp_url=acp_url,
                 is_production=False,

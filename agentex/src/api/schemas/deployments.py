@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import Field
 
@@ -10,12 +11,8 @@ class Deployment(BaseModel):
     id: str = Field(..., description="The unique identifier of the deployment.")
     agent_id: str = Field(..., description="The agent this deployment belongs to.")
     docker_image: str = Field(..., description="Full Docker image URI.")
-    commit_hash: str | None = Field(None, description="Git commit hash.")
-    branch_name: str | None = Field(None, description="Git branch name.")
-    author_name: str | None = Field(None, description="Author of the deployment.")
-    author_email: str | None = Field(None, description="Author email.")
-    build_timestamp: datetime | None = Field(
-        None, description="When the build was created."
+    registration_metadata: dict[str, Any] | None = Field(
+        None, description="Git/build metadata from the agent pod."
     )
     status: DeploymentStatus = Field(..., description="Current deployment status.")
     acp_url: str | None = Field(None, description="ACP URL set when agent registers.")
@@ -42,12 +39,9 @@ class Deployment(BaseModel):
 
 class CreateDeploymentRequest(BaseModel):
     docker_image: str = Field(..., description="Full Docker image URI.")
-    commit_hash: str | None = Field(None, description="Git commit hash.")
-    branch_name: str | None = Field(None, description="Git branch name.")
-    author_name: str | None = Field(None, description="Author of the deployment.")
-    author_email: str | None = Field(None, description="Author email.")
+    registration_metadata: dict[str, Any] | None = Field(
+        None,
+        description="Git/build metadata (commit_hash, branch_name, author_name, author_email, build_timestamp).",
+    )
     sgp_deploy_id: str | None = Field(None, description="SGP deployment ID.")
     helm_release_name: str | None = Field(None, description="Helm release name.")
-    build_timestamp: datetime | None = Field(
-        None, description="When the build was created."
-    )
