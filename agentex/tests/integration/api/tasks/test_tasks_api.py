@@ -1381,3 +1381,101 @@ class TestTasksAPIIntegration:
         assert "agents" in task_data
         assert len(task_data["agents"]) == 1
         assert task_data["agents"][0]["name"] == "target-filter-agent"
+
+    async def test_complete_task_endpoint(self, isolated_client, test_task):
+        """Test POST /tasks/{task_id}/complete transitions RUNNING to COMPLETED"""
+        # When
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/complete",
+            json={"reason": "Agent finished"},
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "COMPLETED"
+        assert task_data["status_reason"] == "Agent finished"
+
+    async def test_fail_task_endpoint(self, isolated_client, test_task):
+        """Test POST /tasks/{task_id}/fail transitions RUNNING to FAILED"""
+        # When
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/fail",
+            json={"reason": "Something went wrong"},
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "FAILED"
+        assert task_data["status_reason"] == "Something went wrong"
+
+    async def test_cancel_task_endpoint(self, isolated_client, test_task):
+        """Test POST /tasks/{task_id}/cancel transitions RUNNING to CANCELED"""
+        # When
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/cancel",
+            json={"reason": "User requested cancellation"},
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "CANCELED"
+        assert task_data["status_reason"] == "User requested cancellation"
+
+    async def test_terminate_task_endpoint(self, isolated_client, test_task):
+        """Test POST /tasks/{task_id}/terminate transitions RUNNING to TERMINATED"""
+        # When
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/terminate",
+            json={"reason": "Workflow killed"},
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "TERMINATED"
+        assert task_data["status_reason"] == "Workflow killed"
+
+    async def test_timeout_task_endpoint(self, isolated_client, test_task):
+        """Test POST /tasks/{task_id}/timeout transitions RUNNING to TIMED_OUT"""
+        # When
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/timeout",
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "TIMED_OUT"
+        assert task_data["status_reason"] == "Task timed_out"
+
+    async def test_complete_task_with_default_reason(self, isolated_client, test_task):
+        """Test POST /tasks/{task_id}/complete without a reason uses default"""
+        # When
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/complete",
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "COMPLETED"
+        assert task_data["status_reason"] == "Task completed"
+
+    async def test_cannot_transition_non_running_task(self, isolated_client, test_task):
+        """Test that a completed task cannot be transitioned again"""
+        # Given - Complete the task first
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/complete",
+        )
+        assert response.status_code == 200
+
+        # When - Try to terminate the already-completed task
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/terminate",
+        )
+
+        # Then - Should fail
+        assert response.status_code == 400

@@ -116,19 +116,27 @@ export function useSendMessage({
             throw new Error(response.error.message);
           }
 
-          queryClient.setQueryData<TaskMessagesData>(queryKey, data => ({
-            messages: data?.messages || [],
-            deltaAccumulator: data?.deltaAccumulator || null,
-            rpcStatus: 'pending',
-          }));
+          // Refetch messages and spans now that the agent has finished processing
+          await queryClient.invalidateQueries({ queryKey: taskMessagesKeys.byTaskId(taskId) });
+          queryClient.invalidateQueries({ queryKey: ['spans', taskId] });
 
-          return (
-            queryClient.getQueryData<TaskMessagesData>(queryKey) || {
-              messages: [],
-              deltaAccumulator: null,
-              rpcStatus: 'pending',
-            }
-          );
+          const finalMessages = await agentexClient.messages.list({
+            task_id: taskId,
+          });
+
+          const chronologicalMessages = finalMessages.slice().reverse();
+
+          queryClient.setQueryData<TaskMessagesData>(queryKey, {
+            messages: chronologicalMessages,
+            deltaAccumulator: null,
+            rpcStatus: 'success',
+          });
+
+          return {
+            messages: chronologicalMessages,
+            deltaAccumulator: null,
+            rpcStatus: 'success',
+          };
         }
 
         case 'sync': {

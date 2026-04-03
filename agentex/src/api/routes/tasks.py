@@ -1,8 +1,9 @@
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
+from src.adapters.temporal.adapter_temporal import DTemporalAdapter
 from src.api.schemas.authorization_types import (
     AgentexResource,
     AgentexResourceType,
@@ -13,6 +14,7 @@ from src.api.schemas.tasks import (
     Task,
     TaskRelationships,
     TaskResponse,
+    TaskStatusReasonRequest,
     UpdateTaskRequest,
 )
 from src.domain.services.authorization_service import DAuthorizationService
@@ -169,6 +171,91 @@ async def update_task_by_name(
     return Task.model_validate(updated_task_entity)
 
 
+@router.post(
+    "/{task_id}/complete",
+    response_model=Task,
+    summary="Complete Task",
+    description="Mark a running task as completed.",
+)
+async def complete_task(
+    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.update),
+    task_use_case: DTaskUseCase,
+    request: TaskStatusReasonRequest | None = None,
+) -> Task:
+    updated = await task_use_case.complete_task(
+        id=task_id, reason=request.reason if request else None
+    )
+    return Task.model_validate(updated)
+
+
+@router.post(
+    "/{task_id}/fail",
+    response_model=Task,
+    summary="Fail Task",
+    description="Mark a running task as failed.",
+)
+async def fail_task(
+    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.update),
+    task_use_case: DTaskUseCase,
+    request: TaskStatusReasonRequest | None = None,
+) -> Task:
+    updated = await task_use_case.fail_task(
+        id=task_id, reason=request.reason if request else None
+    )
+    return Task.model_validate(updated)
+
+
+@router.post(
+    "/{task_id}/cancel",
+    response_model=Task,
+    summary="Cancel Task",
+    description="Mark a running task as canceled.",
+)
+async def cancel_task(
+    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.update),
+    task_use_case: DTaskUseCase,
+    request: TaskStatusReasonRequest | None = None,
+) -> Task:
+    updated = await task_use_case.cancel_task(
+        id=task_id, reason=request.reason if request else None
+    )
+    return Task.model_validate(updated)
+
+
+@router.post(
+    "/{task_id}/terminate",
+    response_model=Task,
+    summary="Terminate Task",
+    description="Mark a running task as terminated.",
+)
+async def terminate_task(
+    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.update),
+    task_use_case: DTaskUseCase,
+    request: TaskStatusReasonRequest | None = None,
+) -> Task:
+    updated = await task_use_case.terminate_task(
+        id=task_id, reason=request.reason if request else None
+    )
+    return Task.model_validate(updated)
+
+
+@router.post(
+    "/{task_id}/timeout",
+    response_model=Task,
+    summary="Timeout Task",
+    description="Mark a running task as timed out.",
+)
+async def timeout_task(
+    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.update),
+    task_use_case: DTaskUseCase,
+    request: TaskStatusReasonRequest | None = None,
+) -> Task:
+    updated = await task_use_case.timeout_task(
+        id=task_id, reason=request.reason if request else None
+    )
+    return Task.model_validate(updated)
+
+
 @router.get(
     "/{task_id}/stream",
     summary="Stream Task Events by ID",
@@ -215,3 +302,24 @@ async def stream_task_events_by_name(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get(
+    "/{task_id}/query/{query_name}",
+    summary="Query Task Workflow",
+    description="Query a Temporal workflow associated with a task for its current state.",
+)
+async def query_task_workflow(
+    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.read),
+    query_name: str,
+    temporal_adapter: DTemporalAdapter,
+) -> dict[str, Any]:
+    """
+    Query a Temporal workflow by task ID and query name.
+    Returns the query result from the workflow.
+    """
+    result = await temporal_adapter.query_workflow(
+        workflow_id=task_id,
+        query=query_name,
+    )
+    return {"task_id": task_id, "query": query_name, "result": result}

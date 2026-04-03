@@ -238,10 +238,12 @@ class TestACPTypeBackwardsCompatibility:
         # Setup mocks
         agent_repo = AsyncMock(spec=AgentRepository)
         deployment_history_repo = AsyncMock()
+        deployment_repo = AsyncMock()
 
         agents_use_case = AgentsUseCase(
             agent_repository=agent_repo,
             deployment_history_repository=deployment_history_repo,
+            deployment_repository=deployment_repo,
             # Not testing temporal adapter in this test
             temporal_adapter=TemporalAdapter(),
         )
@@ -278,10 +280,12 @@ class TestACPTypeBackwardsCompatibility:
         # Setup mocks
         agent_repo = AsyncMock(spec=AgentRepository)
         deployment_history_repo = AsyncMock()
+        deployment_repo = AsyncMock()
 
         agents_use_case = AgentsUseCase(
             agent_repository=agent_repo,
             deployment_history_repository=deployment_history_repo,
+            deployment_repository=deployment_repo,
             # Not testing temporal adapter in this test
             temporal_adapter=TemporalAdapter(),
         )

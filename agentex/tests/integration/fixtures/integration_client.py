@@ -266,6 +266,7 @@ async def isolated_repositories(isolated_test_schema):
     from src.domain.repositories.span_repository import SpanRepository
     from src.domain.repositories.task_message_repository import TaskMessageRepository
     from src.domain.repositories.task_repository import TaskRepository
+    from src.domain.repositories.checkpoint_repository import CheckpointRepository
     from src.domain.repositories.task_state_repository import TaskStateRepository
 
     # Create Redis repository with mock environment variables
@@ -314,6 +315,10 @@ async def isolated_repositories(isolated_test_schema):
         "task_state_repository": TaskStateRepository(mongodb_database),
         # Redis repositories
         "redis_stream_repository": redis_stream_repository,
+        # Checkpoint repository
+        "checkpoint_repository": CheckpointRepository(
+            async_rw_session_factory, async_ro_session_factory
+        ),
         # Direct access for advanced use cases
         "postgres_rw_session_factory": async_rw_session_factory,
         "postgres_ro_session_factory": async_ro_session_factory,
@@ -372,6 +377,7 @@ async def isolated_integration_app(
     from src.domain.use_cases.messages_use_case import MessagesUseCase
     from src.domain.use_cases.spans_use_case import SpanUseCase
     from src.domain.use_cases.states_use_case import StatesUseCase
+    from src.domain.use_cases.checkpoints_use_case import CheckpointsUseCase
     from src.domain.use_cases.tasks_use_case import TasksUseCase
 
     # Create use case factory functions with isolated repositories
@@ -439,6 +445,11 @@ async def isolated_integration_app(
 
         return TasksUseCase(task_service=task_service)
 
+    def create_checkpoints_use_case():
+        return CheckpointsUseCase(
+            checkpoint_repository=isolated_repositories["checkpoint_repository"],
+        )
+
     def create_messages_use_case():
         """Create MessagesUseCase for comprehensive testing"""
         from src.domain.services.task_message_service import TaskMessageService
@@ -456,6 +467,7 @@ async def isolated_integration_app(
         DDatabaseAsyncReadWriteSessionMaker,
         DMongoDBDatabase,
     )
+    from src.domain.repositories.checkpoint_repository import CheckpointRepository
     from src.domain.repositories.agent_api_key_repository import AgentAPIKeyRepository
     from src.domain.repositories.agent_repository import AgentRepository
     from src.domain.repositories.agent_task_tracker_repository import (
@@ -483,6 +495,7 @@ async def isolated_integration_app(
                 "postgres_ro_session_factory"
             ],
             # Use cases
+            CheckpointsUseCase: create_checkpoints_use_case,
             AgentsUseCase: create_agents_use_case,
             EventUseCase: create_events_use_case,
             SpanUseCase: create_spans_use_case,
@@ -493,6 +506,9 @@ async def isolated_integration_app(
             AgentAPIKeysUseCase: create_agent_api_keys_use_case,
             DeploymentHistoryUseCase: create_deployment_history_use_case,
             # Repositories - these ensure consistent isolated instances
+            CheckpointRepository: lambda: isolated_repositories[
+                "checkpoint_repository"
+            ],
             TaskStateRepository: lambda: isolated_repositories["task_state_repository"],
             TaskMessageRepository: lambda: isolated_repositories[
                 "task_message_repository"
