@@ -55,7 +55,7 @@ class AgentsUseCase:
             if deployment_id:
                 # Deployment-scoped registration: only update the deployment record,
                 # don't touch the agent row (acp_url changes only via promotion)
-                await self.maybe_update_deployment(
+                await self.complete_deployment_registration(
                     agent, acp_url, registration_metadata
                 )
                 await self.ensure_healthcheck_workflow(agent)
@@ -83,7 +83,7 @@ class AgentsUseCase:
                 if deployment_id:
                     # Deployment-scoped registration: only update the deployment record,
                     # don't touch the agent row (acp_url changes only via promotion)
-                    await self.maybe_update_deployment(
+                    await self.complete_deployment_registration(
                         agent, acp_url, registration_metadata
                     )
                     await self.ensure_healthcheck_workflow(agent)
@@ -145,15 +145,17 @@ class AgentsUseCase:
                     f"Agent {name} was likely created in parallel, skipping creation"
                 )
                 # Re-fetch the actual persisted agent so downstream code
-                # (maybe_update_deployment) uses the correct agent_id
+                # (complete_deployment_registration) uses the correct agent_id
                 agent = await self.agent_repo.get(name=name)
-        await self.maybe_update_deployment(agent, acp_url, registration_metadata)
+        await self.complete_deployment_registration(
+            agent, acp_url, registration_metadata
+        )
         await self.maybe_update_agent_deployment_history(agent)
 
         await self.ensure_healthcheck_workflow(agent)
         return agent
 
-    async def maybe_update_deployment(
+    async def complete_deployment_registration(
         self,
         agent: AgentEntity,
         acp_url: str,

@@ -81,11 +81,12 @@ class DeploymentRepository(PostgresCRUDRepository[DeploymentORM, DeploymentEntit
         3. Update Agent.production_deployment_id and Agent.acp_url
         """
         async with self.start_async_db_session(allow_writes=True) as session:
-            # Validate the target deployment exists and belongs to this agent
+            # Validate the target deployment exists, belongs to this agent, and is not soft-deleted
             target = await session.execute(
                 select(DeploymentORM)
                 .where(DeploymentORM.id == deployment_id)
                 .where(DeploymentORM.agent_id == agent_id)
+                .where(DeploymentORM.expires_at.is_(None))
             )
             target_deployment = target.scalars().first()
             if not target_deployment:
@@ -146,11 +147,12 @@ class DeploymentRepository(PostgresCRUDRepository[DeploymentORM, DeploymentEntit
             if existing.scalars().first():
                 return False
 
-            # No production deployment — promote this one
+            # No production deployment — promote this one (if not soft-deleted)
             target = await session.execute(
                 select(DeploymentORM)
                 .where(DeploymentORM.id == deployment_id)
                 .where(DeploymentORM.agent_id == agent_id)
+                .where(DeploymentORM.expires_at.is_(None))
             )
             target_deployment = target.scalars().first()
             if not target_deployment:
