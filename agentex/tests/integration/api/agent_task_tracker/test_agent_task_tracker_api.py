@@ -183,9 +183,8 @@ class TestAgentTaskTrackerAPIIntegration:
         self, isolated_client, isolated_repositories
     ):
         """Test that list trackers endpoint supports order_by parameter"""
-        # Given - Create an agent and multiple tasks with trackers
-        from datetime import datetime
-
+        # Given - Create an agent and multiple tasks
+        # Note: task_repo.create() auto-creates an associated tracker for each task
         agent_repo = isolated_repositories["agent_repository"]
         agent = AgentEntity(
             id=orm_id(),
@@ -197,9 +196,7 @@ class TestAgentTaskTrackerAPIIntegration:
         await agent_repo.create(agent)
 
         task_repo = isolated_repositories["task_repository"]
-        tracker_repo = isolated_repositories["agent_task_tracker_repository"]
 
-        trackers = []
         for i in range(3):
             task = TaskEntity(
                 id=orm_id(),
@@ -208,17 +205,6 @@ class TestAgentTaskTrackerAPIIntegration:
                 status_reason=f"Task {i}",
             )
             await task_repo.create(agent_id=agent.id, task=task)
-
-            tracker = AgentTaskTrackerEntity(
-                id=orm_id(),
-                agent_id=agent.id,
-                task_id=task.id,
-                status="PROCESSING",
-                status_reason=f"Tracker {i}",
-                last_processed_event_id=None,
-                created_at=datetime.now(UTC),
-            )
-            trackers.append(await tracker_repo.create(tracker))
 
         # When - Request trackers with order_by=created_at and order_direction=asc
         response_asc = await isolated_client.get(

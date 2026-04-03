@@ -113,12 +113,13 @@ class AgentTaskService:
         agent: AgentEntity,
         task: TaskEntity,
         task_params: dict[str, Any] | None = None,
+        acp_url: str | None = None,
     ) -> None:
         try:
             await self.acp_client.create_task(
                 agent=agent,
                 task=task,
-                acp_url=agent.acp_url,
+                acp_url=acp_url or agent.acp_url,
                 params=task_params,
             )
         except Exception as e:
@@ -143,6 +144,44 @@ class AgentTaskService:
         return await self.task_repository.get(
             id=id, name=name, relationships=relationships
         )
+
+    async def transition_task_status(
+        self,
+        task_id: str,
+        expected_status: TaskStatus,
+        new_status: TaskStatus,
+        status_reason: str,
+        task_metadata: dict | None = None,
+    ) -> TaskEntity | None:
+        """
+        Atomically transition task status. Returns None if the expected status didn't match.
+        Publishes a task_updated event on success.
+        """
+        updated_task = await self.task_repository.transition_status(
+            task_id=task_id,
+            expected_status=expected_status,
+            new_status=new_status,
+            status_reason=status_reason,
+            task_metadata=task_metadata,
+        )
+        if updated_task is None:
+            return None
+
+        try:
+            topic = get_task_event_stream_topic(task_id=task_id)
+            await self.stream_repository.send_data(
+                topic,
+                TaskStreamTaskUpdatedEventEntity(
+                    type="task_updated", task=updated_task
+                ).model_dump(mode="json"),
+            )
+            logger.info(f"task_updated event published to topic: {topic}")
+        except Exception as e:
+            logger.error(
+                f"Error sending task_updated event to stream: {e}", exc_info=True
+            )
+
+        return updated_task
 
     async def update_task(self, task: TaskEntity) -> TaskEntity:
         """

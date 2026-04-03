@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
+from src.adapters.http.adapter_httpx import HttpxGateway
 from src.api.authentication_middleware import AgentexAuthMiddleware
 from src.api.health_interceptor import HealthCheckInterceptor
 from src.api.logged_api_route import LoggedAPIRoute
@@ -18,7 +19,9 @@ from src.api.routes import (
     agent_api_keys,
     agent_task_tracker,
     agents,
+    checkpoints,
     deployment_history,
+    deployments,
     events,
     messages,
     schedules,
@@ -27,10 +30,14 @@ from src.api.routes import (
     tasks,
 )
 from src.config import dependencies
-from src.config.dependencies import resolve_environment_variable_dependency
+from src.config.dependencies import (
+    GlobalDependencies,
+    resolve_environment_variable_dependency,
+)
 from src.config.environment_variables import EnvVarKeys
 from src.domain.exceptions import GenericException
 from src.utils.logging import make_logger
+from src.utils.otel_metrics import init_otel_metrics, shutdown_otel_metrics
 
 logger = make_logger(__name__)
 
@@ -65,11 +72,26 @@ class HTTPExceptionWithMessage(HTTPException):
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # Initialize OpenTelemetry metrics first (before dependencies register instruments)
+    init_otel_metrics()
+
     await dependencies.startup_global_dependencies()
     configure_statsd()
+
+    # Start PostgreSQL metrics collection
+    global_deps = GlobalDependencies()
+    if global_deps.postgres_metrics_collector:
+        await global_deps.postgres_metrics_collector.start_collection()
+
     yield
+
+    # Clean up HTTP clients before other shutdown tasks
+    await HttpxGateway.close_clients()
     await dependencies.async_shutdown()
     dependencies.shutdown()
+
+    # Shutdown OTel metrics (flushes remaining data)
+    shutdown_otel_metrics()
 
 
 fastapi_app = FastAPI(
@@ -162,7 +184,9 @@ fastapi_app.include_router(events.router)
 fastapi_app.include_router(agent_task_tracker.router)
 fastapi_app.include_router(agent_api_keys.router)
 fastapi_app.include_router(deployment_history.router)
+fastapi_app.include_router(deployments.router)
 fastapi_app.include_router(schedules.router)
+fastapi_app.include_router(checkpoints.router)
 
 # Wrap FastAPI app with health check interceptor for sub-millisecond K8s probe responses.
 # This must be the outermost layer to bypass all middleware.

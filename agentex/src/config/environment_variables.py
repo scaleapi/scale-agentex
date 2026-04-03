@@ -40,11 +40,14 @@ class EnvVarKeys(str, Enum):
     REDIS_MAX_CONNECTIONS = "REDIS_MAX_CONNECTIONS"
     REDIS_CONNECTION_TIMEOUT = "REDIS_CONNECTION_TIMEOUT"
     REDIS_SOCKET_TIMEOUT = "REDIS_SOCKET_TIMEOUT"
+    REDIS_STREAM_MAXLEN = "REDIS_STREAM_MAXLEN"
     IMAGE_PULL_SECRET_NAME = "IMAGE_PULL_SECRET_NAME"
     AGENTEX_AUTH_URL = "AGENTEX_AUTH_URL"
     ALLOWED_ORIGINS = "ALLOWED_ORIGINS"
     DD_AGENT_HOST = "DD_AGENT_HOST"
     DD_STATSD_PORT = "DD_STATSD_PORT"
+    HTTPX_MAX_CONNECTIONS = "HTTPX_MAX_CONNECTIONS"
+    HTTPX_MAX_KEEPALIVE_CONNECTIONS = "HTTPX_MAX_KEEPALIVE_CONNECTIONS"
     HTTPX_CONNECT_TIMEOUT = "HTTPX_CONNECT_TIMEOUT"
     HTTPX_READ_TIMEOUT = "HTTPX_READ_TIMEOUT"
     HTTPX_WRITE_TIMEOUT = "HTTPX_WRITE_TIMEOUT"
@@ -88,9 +91,14 @@ class EnvironmentVariables(BaseModel):
     REDIS_MAX_CONNECTIONS: int = 50  # Increased for SSE streaming
     REDIS_CONNECTION_TIMEOUT: int = 60  # Connection timeout in seconds
     REDIS_SOCKET_TIMEOUT: int = 30  # Socket timeout in seconds
+    REDIS_STREAM_MAXLEN: int = (
+        10000  # Max entries per Redis stream to prevent unbounded growth
+    )
     IMAGE_PULL_SECRET_NAME: str | None = None
     AGENTEX_AUTH_URL: str | None = None
     ALLOWED_ORIGINS: str | None = None
+    HTTPX_MAX_CONNECTIONS: int = 200  # Max total connections allowed
+    HTTPX_MAX_KEEPALIVE_CONNECTIONS: int = 100  # Max connections to keep alive
     HTTPX_CONNECT_TIMEOUT: float = 10.0  # HTTPX connection timeout in seconds
     HTTPX_READ_TIMEOUT: float = 30.0  # HTTPX read timeout in seconds
     HTTPX_WRITE_TIMEOUT: float = 30.0  # HTTPX write timeout in seconds
@@ -146,11 +154,20 @@ class EnvironmentVariables(BaseModel):
             REDIS_SOCKET_TIMEOUT=int(
                 os.environ.get(EnvVarKeys.REDIS_SOCKET_TIMEOUT, "30")
             ),
+            REDIS_STREAM_MAXLEN=int(
+                os.environ.get(EnvVarKeys.REDIS_STREAM_MAXLEN, "10000")
+            ),
             IMAGE_PULL_SECRET_NAME=os.environ.get(EnvVarKeys.IMAGE_PULL_SECRET_NAME),
             AGENTEX_AUTH_URL=os.environ.get(EnvVarKeys.AGENTEX_AUTH_URL),
             ALLOWED_ORIGINS=os.environ.get(EnvVarKeys.ALLOWED_ORIGINS, "*"),
             DD_AGENT_HOST=os.environ.get(EnvVarKeys.DD_AGENT_HOST),
             DD_STATSD_PORT=os.environ.get(EnvVarKeys.DD_STATSD_PORT),
+            HTTPX_MAX_CONNECTIONS=int(
+                os.environ.get(EnvVarKeys.HTTPX_MAX_CONNECTIONS, "200")
+            ),
+            HTTPX_MAX_KEEPALIVE_CONNECTIONS=int(
+                os.environ.get(EnvVarKeys.HTTPX_MAX_KEEPALIVE_CONNECTIONS, "100")
+            ),
             HTTPX_CONNECT_TIMEOUT=float(
                 os.environ.get(EnvVarKeys.HTTPX_CONNECT_TIMEOUT, "10.0")
             ),

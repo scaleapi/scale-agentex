@@ -1,10 +1,13 @@
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
     Index,
+    Integer,
+    LargeBinary,
     String,
     Text,
     func,
@@ -18,6 +21,7 @@ from sqlalchemy.orm import relationship
 
 from src.domain.entities.agent_api_keys import AgentAPIKeyType
 from src.domain.entities.agents import AgentInputType, AgentStatus
+from src.domain.entities.deployments import DeploymentStatus
 from src.domain.entities.tasks import TaskStatus
 from src.utils.ids import orm_id
 
@@ -42,9 +46,18 @@ class AgentORM(BaseORM):
     registration_metadata = Column(JSONB, nullable=True)
     registered_at = Column(DateTime(timezone=True), nullable=True)
     agent_input_type = Column(SQLAlchemyEnum(AgentInputType), nullable=True)
+    production_deployment_id = Column(
+        String, ForeignKey("deployments.id"), nullable=True
+    )
 
     # Many-to-Many relationship with tasks
     tasks = relationship("TaskORM", secondary="task_agents", back_populates="agents")
+
+    # Indexes for efficient querying
+    __table_args__ = (
+        # Index for filtering agents by status (used in list queries)
+        Index("ix_agents_status", "status"),
+    )
 
 
 class TaskORM(BaseORM):
@@ -63,6 +76,12 @@ class TaskORM(BaseORM):
     task_metadata = Column(JSONB, nullable=True)
     # Many-to-Many relationship with agents
     agents = relationship("AgentORM", secondary="task_agents", back_populates="tasks")
+
+    # Indexes for efficient querying
+    __table_args__ = (
+        # Index for filtering tasks by status (used in list queries)
+        Index("ix_tasks_status", "status"),
+    )
 
 
 class TaskAgentORM(BaseORM):
@@ -139,6 +158,16 @@ class SpanORM(BaseORM):
     output = Column(JSON, nullable=True)
     data = Column(JSON, nullable=True)
 
+    # Indexes for efficient querying
+    __table_args__ = (
+        # Index for filtering spans by trace_id
+        Index("ix_spans_trace_id", "trace_id"),
+        # Composite index for filtering by trace_id and ordering by start_time
+        Index("ix_spans_trace_id_start_time", "trace_id", "start_time"),
+        # Index for traversing span hierarchy
+        Index("ix_spans_parent_id", "parent_id"),
+    )
+
 
 class AgentAPIKeyORM(BaseORM):
     __tablename__ = "agent_api_keys"
@@ -191,3 +220,93 @@ class DeploymentHistoryORM(BaseORM):
             "commit_hash",
         ),
     )
+
+
+class DeploymentORM(BaseORM):
+    __tablename__ = "deployments"
+
+    id = Column(String, primary_key=True, default=orm_id)
+    agent_id = Column(String(64), ForeignKey("agents.id"), nullable=False)
+
+    # Image (immutable after creation)
+    docker_image = Column(String, nullable=False)
+
+    # Git/build metadata (commit_hash, branch_name, author_name, author_email, build_timestamp)
+    registration_metadata = Column(JSONB, nullable=True)
+
+    # Runtime state (updated during lifecycle)
+    status = Column(
+        SQLAlchemyEnum(DeploymentStatus),
+        nullable=False,
+        default=DeploymentStatus.PENDING,
+    )
+    acp_url = Column(String, nullable=True)
+    is_production = Column(Boolean, nullable=False, default=False)
+
+    # Infra references
+    sgp_deploy_id = Column(String, nullable=True)
+    helm_release_name = Column(String, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    promoted_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("idx_deployments_agent_id", "agent_id"),
+        Index("idx_deployments_agent_production", "agent_id", "is_production"),
+        Index(
+            "uq_deployments_one_production_per_agent",
+            "agent_id",
+            unique=True,
+            postgresql_where=(is_production.is_(True)),
+        ),
+        Index("idx_deployments_sgp_deploy_id", "sgp_deploy_id"),
+    )
+
+
+# LangGraph checkpoint tables
+# These mirror the schema from langgraph.checkpoint.postgres so that
+# tables are created via Alembic migrations rather than at agent runtime.
+
+
+class CheckpointMigrationORM(BaseORM):
+    __tablename__ = "checkpoint_migrations"
+    v = Column(Integer, primary_key=True)
+
+
+class CheckpointORM(BaseORM):
+    __tablename__ = "checkpoints"
+    thread_id = Column(Text, nullable=False, primary_key=True)
+    checkpoint_ns = Column(Text, nullable=False, primary_key=True, server_default="")
+    checkpoint_id = Column(Text, nullable=False, primary_key=True)
+    parent_checkpoint_id = Column(Text, nullable=True)
+    type = Column(Text, nullable=True)
+    checkpoint = Column(JSONB, nullable=False)
+    metadata_ = Column("metadata", JSONB, nullable=False, server_default="{}")
+    __table_args__ = (Index("checkpoints_thread_id_idx", "thread_id"),)
+
+
+class CheckpointBlobORM(BaseORM):
+    __tablename__ = "checkpoint_blobs"
+    thread_id = Column(Text, nullable=False, primary_key=True)
+    checkpoint_ns = Column(Text, nullable=False, primary_key=True, server_default="")
+    channel = Column(Text, nullable=False, primary_key=True)
+    version = Column(Text, nullable=False, primary_key=True)
+    type = Column(Text, nullable=False)
+    blob = Column(LargeBinary, nullable=True)
+    __table_args__ = (Index("checkpoint_blobs_thread_id_idx", "thread_id"),)
+
+
+class CheckpointWriteORM(BaseORM):
+    __tablename__ = "checkpoint_writes"
+    thread_id = Column(Text, nullable=False, primary_key=True)
+    checkpoint_ns = Column(Text, nullable=False, primary_key=True, server_default="")
+    checkpoint_id = Column(Text, nullable=False, primary_key=True)
+    task_id = Column(Text, nullable=False, primary_key=True)
+    idx = Column(Integer, nullable=False, primary_key=True)
+    channel = Column(Text, nullable=False)
+    type = Column(Text, nullable=True)
+    blob = Column(LargeBinary, nullable=False)
+    task_path = Column(Text, nullable=False, server_default="")
+    __table_args__ = (Index("checkpoint_writes_thread_id_idx", "thread_id"),)
