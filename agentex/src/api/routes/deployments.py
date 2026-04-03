@@ -109,24 +109,6 @@ async def promote_deployment(
     return Deployment.model_validate(deployment_entity)
 
 
-@router.post(
-    "/{deployment_id}/rollback",
-    response_model=Deployment,
-    summary="Rollback to Deployment",
-    description="Rollback to a previous deployment (promotes it to production).",
-)
-async def rollback_deployment(
-    agent_id: DAuthorizedId(AgentexResourceType.agent, AuthorizedOperationType.execute),
-    deployment_id: str,
-    deployment_use_case: DDeploymentUseCase,
-) -> Deployment:
-    deployment_entity = await deployment_use_case.rollback_deployment(
-        agent_id=agent_id,
-        deployment_id=deployment_id,
-    )
-    return Deployment.model_validate(deployment_entity)
-
-
 @router.delete(
     "/{deployment_id}",
     response_model=DeleteResponse,

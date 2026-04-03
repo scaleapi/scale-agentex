@@ -83,17 +83,6 @@ class DeploymentUseCase:
             deployment_id=deployment_id,
         )
 
-    async def rollback_deployment(
-        self,
-        agent_id: str,
-        deployment_id: str,
-    ) -> DeploymentEntity:
-        logger.info(f"Rolling back to deployment {deployment_id} for agent {agent_id}")
-        return await self.deployment_repo.promote(
-            agent_id=agent_id,
-            deployment_id=deployment_id,
-        )
-
     async def delete_deployment(
         self,
         agent_id: str,
