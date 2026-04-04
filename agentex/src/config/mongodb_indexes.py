@@ -93,12 +93,22 @@ def ensure_mongodb_indexes(mongodb_database: MongoDBDatabase) -> None:
                     )
                     try:
                         collection.drop_index(index_name)
-                        collection.create_index(keys, **index_kwargs)
-                        logger.info(f"  ✓ Recreated index '{index_name}'")
+                        logger.info(f"  ✓ Dropped existing index '{index_name}'")
                     except Exception as drop_err:
                         logger.error(
-                            f"  ✗ Failed to recreate index '{index_name}': {drop_err}"
+                            f"  ✗ Failed to drop index '{index_name}': {drop_err}"
                         )
+                        continue
+
+                    try:
+                        collection.create_index(keys, **index_kwargs)
+                        logger.info(f"  ✓ Recreated index '{index_name}'")
+                    except Exception as create_err:
+                        logger.error(
+                            f"  ✗ Failed to recreate index '{index_name}' after dropping it: {create_err}. "
+                            f"The index is currently absent. Restart the application or recreate it manually."
+                        )
+                        raise
                 else:
                     logger.error(f"  ✗ Failed to create index: {e}")
             except Exception as e:
