@@ -84,12 +84,31 @@ def ensure_mongodb_indexes(mongodb_database: MongoDBDatabase) -> None:
                     logger.info(f"  ✓ Created index '{name or result}'")
 
             except OperationFailure as e:
-                # Index might already exist with different options
+                # Index already exists with different options — drop and recreate
                 if "already exists with different options" in str(e):
+                    index_name = index_spec.get("name", "unnamed")
                     logger.warning(
-                        f"  ⚠ Index '{index_spec.get('name', 'unnamed')}' already exists "
-                        f"with different options. You may need to drop and recreate it."
+                        f"  ⚠ Index '{index_name}' already exists "
+                        f"with different options. Dropping and recreating..."
                     )
+                    try:
+                        collection.drop_index(index_name)
+                        logger.info(f"  ✓ Dropped existing index '{index_name}'")
+                    except Exception as drop_err:
+                        logger.error(
+                            f"  ✗ Failed to drop index '{index_name}': {drop_err}"
+                        )
+                        continue
+
+                    try:
+                        collection.create_index(keys, **index_kwargs)
+                        logger.info(f"  ✓ Recreated index '{index_name}'")
+                    except Exception as create_err:
+                        logger.error(
+                            f"  ✗ Failed to recreate index '{index_name}' after dropping it: {create_err}. "
+                            f"The index is currently absent. Restart the application or recreate it manually."
+                        )
+                        raise
                 else:
                     logger.error(f"  ✗ Failed to create index: {e}")
             except Exception as e:
