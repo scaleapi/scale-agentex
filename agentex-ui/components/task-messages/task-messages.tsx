@@ -52,6 +52,13 @@ function TaskMessagesImpl({
   const previousLastPairIdRef = useRef<string | null>(null);
   const previousPagesScrollHeightRef = useRef<number | null>(null);
 
+  // Reset scroll state when switching tasks
+  useEffect(() => {
+    isInitialLoadRef.current = true;
+    previousLastPairIdRef.current = null;
+    previousPagesScrollHeightRef.current = null;
+  }, [taskId]);
+
   const { agentexClient, sgpAppURL } = useAgentexClient();
   const { agentName } = useSafeSearchParams();
   const { data: agents = [] } = useAgents(agentexClient);
@@ -190,15 +197,20 @@ function TaskMessagesImpl({
     const isInitial = isInitialLoadRef.current;
     previousLastPairIdRef.current = lastPairId;
 
-    if (!lastPairRef.current) return;
+    const container = scrollContainerRef.current;
 
     if (isInitial) {
-      lastPairRef.current.scrollIntoView({
-        behavior: 'instant',
-        block: 'start',
-      });
+      // On initial load, wait for the browser to paint all content, then
+      // jump to the absolute bottom of the scroll container. Using
+      // requestAnimationFrame ensures layout is complete — scrollIntoView
+      // on a specific element can misfire if content is still rendering.
       isInitialLoadRef.current = false;
-    } else {
+      requestAnimationFrame(() => {
+        if (container) {
+          container.scrollTop = container.scrollHeight;
+        }
+      });
+    } else if (lastPairRef.current) {
       setTimeout(() => {
         lastPairRef.current?.scrollIntoView({
           behavior: 'smooth',
@@ -206,7 +218,7 @@ function TaskMessagesImpl({
         });
       }, 100);
     }
-  }, [lastPairId]);
+  }, [lastPairId, scrollContainerRef]);
 
   // Scroll position preservation after older pages load
   useEffect(() => {
