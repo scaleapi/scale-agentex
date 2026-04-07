@@ -3,6 +3,8 @@ import { aggregateMessageEvents } from 'agentex/lib/aggregate-message-events';
 import { compareDateStrings } from 'agentex/lib/compare-date-strings';
 import { taskStreamEventGenerator } from 'agentex/lib/task-stream-event-generator';
 
+import { fetchMessagesPage } from '@/hooks/fetch-messages';
+
 import type { Agentex } from 'agentex';
 import type { Agent, Task, TaskMessage } from 'agentex/resources';
 
@@ -90,10 +92,13 @@ export async function subscribeTaskState(
   options?: {
     signal?: AbortSignal | undefined | null;
     taskStreamReconnectPolicy?: TaskStreamReconnectPolicy;
+    /** Return cached messages if available, avoiding a duplicate fetch on connect. */
+    getCachedMessages?: () => TaskMessage[] | null;
   }
 ): Promise<AbortedReturn | ErrorReturn> {
   const { taskID } = taskIdentifier;
-  const { signal, taskStreamReconnectPolicy } = options ?? {};
+  const { signal, taskStreamReconnectPolicy, getCachedMessages } =
+    options ?? {};
 
   const startBackoffOnErrorNum =
     taskStreamReconnectPolicy?.startBackoffOnErrorNum ?? 2;
@@ -130,25 +135,30 @@ export async function subscribeTaskState(
               continuousAPIErrorCount = 0;
 
               // pause reading from stream until we initialize state
-              [, , messages] = await Promise.all([
-                client.tasks.retrieve(taskID, null, { signal }).then(res => {
-                  eventListener.onTaskChange(res);
-                  return res;
-                }),
-                client.agents
-                  .list({ task_id: taskID }, { signal })
-                  .then(res => {
-                    eventListener.onAgentsChange(res);
+              {
+                const cachedMessages = getCachedMessages?.();
+                const messagesPromise =
+                  cachedMessages && cachedMessages.length > 0
+                    ? Promise.resolve(cachedMessages)
+                    : fetchMessagesPage(client, taskID, 1, { signal });
+
+                [, , messages] = await Promise.all([
+                  client.tasks.retrieve(taskID, null, { signal }).then(res => {
+                    eventListener.onTaskChange(res);
                     return res;
                   }),
-                client.messages
-                  .list({ task_id: taskID }, { signal })
-                  .then(res => {
-                    const chronologicalMessages = res.slice().reverse();
-                    eventListener.onMessagesChange(chronologicalMessages);
+                  client.agents
+                    .list({ task_id: taskID }, { signal })
+                    .then(res => {
+                      eventListener.onAgentsChange(res);
+                      return res;
+                    }),
+                  messagesPromise.then(res => {
+                    eventListener.onMessagesChange(res);
                     return res;
                   }),
-              ]);
+                ]);
+              }
 
               // reset delta accumulator on connected event
               deltaAccumulator = null;

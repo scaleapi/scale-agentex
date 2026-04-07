@@ -1,4 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
+
+import {
+  InfiniteData,
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+} from '@tanstack/react-query';
 import {
   agentRPCNonStreaming,
   agentRPCWithStreaming,
@@ -7,14 +14,14 @@ import {
 import { v4 } from 'uuid';
 
 import { toast } from '@/components/ui/toast';
+import { fetchMessagesPage, MESSAGES_PAGE_SIZE } from '@/hooks/fetch-messages';
 import { agentsKeys } from '@/hooks/use-agents';
 
 import type AgentexSDK from 'agentex';
 import type { IDeltaAccumulator } from 'agentex/lib';
 import type { Agent, TaskMessage, TaskMessageContent } from 'agentex/resources';
 
-export type TaskMessagesData = {
-  messages: TaskMessage[];
+export type TaskMessagesMetadata = {
   deltaAccumulator: IDeltaAccumulator | null;
   rpcStatus: 'idle' | 'pending' | 'success' | 'error';
 };
@@ -24,16 +31,15 @@ export const taskMessagesKeys = {
   byTaskId: (taskId: string) => [...taskMessagesKeys.all, taskId] as const,
 };
 
+export const taskMessagesMetaKeys = {
+  byTaskId: (taskId: string) => ['taskMessagesMeta', taskId] as const,
+};
+
 /**
- * Fetches the conversation messages for a specific task.
+ * Fetches conversation messages for a task using infinite scroll pagination.
  *
- * Returns all messages exchanged between the user and agent during task execution,
- * along with a delta accumulator for handling partial streaming updates and an RPC
- * status indicator. Refetching is disabled to prevent interrupting live message streams.
- *
- * @param agentexClient - AgentexSDK - The SDK client used to fetch messages
- * @param taskId - string - The unique ID of the task whose messages to retrieve
- * @returns UseQueryResult<TaskMessagesData> - Query result containing messages, delta accumulator, and RPC status
+ * Page 1 = newest messages from the API. Scrolling up loads page 2, 3, etc (older).
+ * Returns a flat, deduplicated, chronologically ordered messages array.
  */
 export function useTaskMessages({
   agentexClient,
@@ -42,29 +48,58 @@ export function useTaskMessages({
   agentexClient: AgentexSDK;
   taskId: string;
 }) {
-  return useQuery({
+  const queryClient = useQueryClient();
+
+  const infiniteQuery = useInfiniteQuery({
     queryKey: taskMessagesKeys.byTaskId(taskId),
-    queryFn: async (): Promise<TaskMessagesData> => {
-      if (!taskId) {
-        return { messages: [], deltaAccumulator: null, rpcStatus: 'idle' };
-      }
-
-      const messages = await agentexClient.messages.list({
-        task_id: taskId,
-      });
-
-      // API returns messages in descending order (newest first),
-      // reverse to chronological order (oldest first) for display
-      return {
-        messages: messages.slice().reverse(),
-        deltaAccumulator: null,
-        rpcStatus: 'idle',
-      };
+    queryFn: async ({ pageParam }): Promise<TaskMessage[]> => {
+      if (!taskId) return [];
+      return fetchMessagesPage(agentexClient, taskId, pageParam);
     },
+    getNextPageParam: (lastPage, allPages) => {
+      if (lastPage.length < MESSAGES_PAGE_SIZE) return undefined;
+      return allPages.length + 1;
+    },
+    initialPageParam: 1,
     enabled: !!taskId,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
   });
+
+  // Flatten pages into a single chronological array with deduplication.
+  // Pages are stored as [page1(newest), page2(older), page3(oldest), ...]
+  // Process newest-first so latest versions of messages win, then reverse.
+  const messages = useMemo(() => {
+    if (!infiniteQuery.data?.pages) return [];
+    const seen = new Set<string>();
+    const byPage: TaskMessage[][] = [];
+    for (const page of infiniteQuery.data.pages) {
+      const filtered: TaskMessage[] = [];
+      for (const msg of page) {
+        const id = msg.id ?? '';
+        if (!id || !seen.has(id)) {
+          if (id) seen.add(id);
+          filtered.push(msg);
+        }
+      }
+      byPage.push(filtered);
+    }
+    return byPage.reverse().flat();
+  }, [infiniteQuery.data?.pages]);
+
+  const metadata =
+    queryClient.getQueryData<TaskMessagesMetadata>(
+      taskMessagesMetaKeys.byTaskId(taskId)
+    ) ?? ({ deltaAccumulator: null, rpcStatus: 'idle' } as const);
+
+  return {
+    messages,
+    rpcStatus: metadata.rpcStatus,
+    fetchNextPage: infiniteQuery.fetchNextPage,
+    hasNextPage: infiniteQuery.hasNextPage,
+    isFetchingNextPage: infiniteQuery.isFetchingNextPage,
+    isLoading: infiniteQuery.isLoading,
+  };
 }
 
 type SendMessageParams = {
@@ -72,6 +107,20 @@ type SendMessageParams = {
   agentName: string;
   content: TaskMessageContent;
 };
+
+/** Helper to update just the first page (newest) of the infinite query cache. */
+function updateFirstPage(
+  oldData: InfiniteData<TaskMessage[]> | undefined,
+  updater: (firstPage: TaskMessage[]) => TaskMessage[]
+): InfiniteData<TaskMessage[]> {
+  if (!oldData) {
+    return { pages: [updater([])], pageParams: [1] };
+  }
+  return {
+    pages: [updater(oldData.pages[0] ?? []), ...oldData.pages.slice(1)],
+    pageParams: oldData.pageParams,
+  };
+}
 
 export function useSendMessage({
   agentexClient,
@@ -83,6 +132,7 @@ export function useSendMessage({
   return useMutation({
     mutationFn: async ({ taskId, agentName, content }: SendMessageParams) => {
       const queryKey = taskMessagesKeys.byTaskId(taskId);
+      const metaKey = taskMessagesMetaKeys.byTaskId(taskId);
 
       const agents = queryClient.getQueryData<Agent[]>(agentsKeys.all) || [];
       const agent = agents.find(a => a.name === agentName);
@@ -94,11 +144,10 @@ export function useSendMessage({
       switch (agent.acp_type) {
         case 'async':
         case 'agentic': {
-          queryClient.setQueryData<TaskMessagesData>(queryKey, data => ({
-            messages: data?.messages || [],
-            deltaAccumulator: data?.deltaAccumulator || null,
+          queryClient.setQueryData<TaskMessagesMetadata>(metaKey, {
+            deltaAccumulator: null,
             rpcStatus: 'pending',
-          }));
+          });
 
           const response = await agentRPCNonStreaming(
             agentexClient,
@@ -108,45 +157,41 @@ export function useSendMessage({
           );
 
           if (response.error != null) {
-            queryClient.setQueryData<TaskMessagesData>(queryKey, data => ({
-              messages: data?.messages || [],
-              deltaAccumulator: data?.deltaAccumulator || null,
+            queryClient.setQueryData<TaskMessagesMetadata>(metaKey, {
+              deltaAccumulator: null,
               rpcStatus: 'error',
-            }));
+            });
             throw new Error(response.error.message);
           }
 
-          // Refetch messages and spans now that the agent has finished processing
-          await queryClient.invalidateQueries({ queryKey: taskMessagesKeys.byTaskId(taskId) });
+          // Refetch spans now that the agent has finished processing
           queryClient.invalidateQueries({ queryKey: ['spans', taskId] });
 
-          const finalMessages = await agentexClient.messages.list({
-            task_id: taskId,
-          });
+          // Refetch just the newest page and update in place
+          const latestPage = await fetchMessagesPage(agentexClient, taskId, 1);
 
-          const chronologicalMessages = finalMessages.slice().reverse();
+          queryClient.setQueryData<InfiniteData<TaskMessage[]>>(queryKey, old =>
+            updateFirstPage(old, () => latestPage)
+          );
 
-          queryClient.setQueryData<TaskMessagesData>(queryKey, {
-            messages: chronologicalMessages,
+          queryClient.setQueryData<TaskMessagesMetadata>(metaKey, {
             deltaAccumulator: null,
             rpcStatus: 'success',
           });
 
-          return {
-            messages: chronologicalMessages,
-            deltaAccumulator: null,
-            rpcStatus: 'success',
-          };
+          return { messages: latestPage };
         }
 
         case 'sync': {
-          const currentData = queryClient.getQueryData<TaskMessagesData>(
-            queryKey
-          ) || {
-            messages: [],
-            deltaAccumulator: null,
-            rpcStatus: 'pending',
-          };
+          // Read current flattened messages from cache for streaming
+          const existingData =
+            queryClient.getQueryData<InfiniteData<TaskMessage[]>>(queryKey);
+          const existingMeta =
+            queryClient.getQueryData<TaskMessagesMetadata>(metaKey);
+
+          const flatMessages = existingData
+            ? [...existingData.pages].reverse().flat()
+            : [];
 
           const tempUserMessage: TaskMessage = {
             id: v4(),
@@ -157,11 +202,14 @@ export function useSendMessage({
             updated_at: new Date().toISOString(),
           };
 
-          let latestMessages = [...currentData.messages, tempUserMessage];
-          let latestDeltaAccumulator = currentData.deltaAccumulator;
+          let latestMessages = [...flatMessages, tempUserMessage];
+          let latestDeltaAccumulator = existingMeta?.deltaAccumulator ?? null;
 
-          queryClient.setQueryData<TaskMessagesData>(queryKey, {
-            messages: latestMessages,
+          // Optimistic: add user message to first page
+          queryClient.setQueryData<InfiniteData<TaskMessage[]>>(queryKey, old =>
+            updateFirstPage(old, firstPage => [...firstPage, tempUserMessage])
+          );
+          queryClient.setQueryData<TaskMessagesMetadata>(metaKey, {
             deltaAccumulator: latestDeltaAccumulator,
             rpcStatus: 'pending',
           });
@@ -176,19 +224,11 @@ export function useSendMessage({
             { signal: controller.signal }
           )) {
             if (response.error != null) {
-              queryClient.setQueryData<TaskMessagesData>(queryKey, data => ({
-                messages: data?.messages || [],
-                deltaAccumulator: data?.deltaAccumulator || null,
+              queryClient.setQueryData<TaskMessagesMetadata>(metaKey, {
+                deltaAccumulator: null,
                 rpcStatus: 'error',
-              }));
+              });
               throw new Error(response.error.message);
-            }
-
-            const cacheData =
-              queryClient.getQueryData<TaskMessagesData>(queryKey);
-            if (cacheData) {
-              latestMessages = cacheData.messages;
-              latestDeltaAccumulator = cacheData.deltaAccumulator;
             }
 
             const result = aggregateMessageEvents(
@@ -200,8 +240,12 @@ export function useSendMessage({
             latestMessages = result.messages;
             latestDeltaAccumulator = result.deltaAccumulator;
 
-            queryClient.setQueryData<TaskMessagesData>(queryKey, {
-              messages: latestMessages,
+            // Write streaming state to first page
+            queryClient.setQueryData<InfiniteData<TaskMessage[]>>(
+              queryKey,
+              old => updateFirstPage(old, () => latestMessages)
+            );
+            queryClient.setQueryData<TaskMessagesMetadata>(metaKey, {
               deltaAccumulator: latestDeltaAccumulator,
               rpcStatus: 'pending',
             });
@@ -211,24 +255,19 @@ export function useSendMessage({
             }
           }
 
-          const finalMessages = await agentexClient.messages.list({
-            task_id: taskId,
-          });
+          // Final reconciliation: refetch page 1
+          const latestPage = await fetchMessagesPage(agentexClient, taskId, 1);
 
-          // API returns messages in descending order (newest first),
-          // reverse to chronological order (oldest first) for display
-          const chronologicalMessages = finalMessages.slice().reverse();
+          queryClient.setQueryData<InfiniteData<TaskMessage[]>>(queryKey, old =>
+            updateFirstPage(old, () => latestPage)
+          );
 
-          queryClient.setQueryData<TaskMessagesData>(queryKey, {
-            messages: chronologicalMessages,
+          queryClient.setQueryData<TaskMessagesMetadata>(metaKey, {
             deltaAccumulator: null,
             rpcStatus: 'success',
           });
 
-          return {
-            messages: chronologicalMessages,
-            deltaAccumulator: null,
-          };
+          return { messages: latestPage };
         }
 
         default: {

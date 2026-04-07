@@ -1,6 +1,15 @@
-import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import { AnimatePresence, motion } from 'framer-motion';
+import { Loader2 } from 'lucide-react';
 
 import { useAgentexClient } from '@/components/providers';
 import { MessageFeedback } from '@/components/task-messages/message-feedback';
@@ -23,6 +32,7 @@ import type {
 type TaskMessagesProps = {
   taskId: string;
   headerRef: React.RefObject<HTMLDivElement | null>;
+  scrollContainerRef: React.RefObject<HTMLDivElement | null>;
 };
 type MessagePair = {
   id: string;
@@ -30,20 +40,37 @@ type MessagePair = {
   agentMessages: TaskMessage[];
 };
 
-function TaskMessagesImpl({ taskId, headerRef }: TaskMessagesProps) {
+function TaskMessagesImpl({
+  taskId,
+  headerRef,
+  scrollContainerRef,
+}: TaskMessagesProps) {
   const lastPairRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerHeight, setContainerHeight] = useState<number>(0);
+  const isInitialLoadRef = useRef(true);
+  const previousLastPairIdRef = useRef<string | null>(null);
+  const previousPagesScrollHeightRef = useRef<number | null>(null);
+
+  // Reset scroll state when switching tasks
+  useEffect(() => {
+    isInitialLoadRef.current = true;
+    previousLastPairIdRef.current = null;
+    previousPagesScrollHeightRef.current = null;
+  }, [taskId]);
 
   const { agentexClient, sgpAppURL } = useAgentexClient();
   const { agentName } = useSafeSearchParams();
   const { data: agents = [] } = useAgents(agentexClient);
   const agent = agents.find(a => a.name === agentName);
 
-  const { data: queryData } = useTaskMessages({ agentexClient, taskId });
-
-  const messages = useMemo(() => queryData?.messages ?? [], [queryData]);
-  const previousMessageCountRef = useRef(messages.length);
+  const {
+    messages,
+    rpcStatus,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useTaskMessages({ agentexClient, taskId });
 
   const toolCallIdToResponseMap = useMemo<
     Map<string, TaskMessage & { content: ToolResponseContent }>
@@ -107,21 +134,36 @@ function TaskMessagesImpl({ taskId, headerRef }: TaskMessagesProps) {
     return pairs;
   }, [messages]);
 
+  const pendingToolCallIds = useMemo(() => {
+    const pending = new Set<string>();
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]!;
+      if (msg.content.type === 'tool_request') {
+        if (!toolCallIdToResponseMap.has(msg.content.tool_call_id)) {
+          pending.add(msg.content.tool_call_id);
+        }
+      } else if (msg.content.type !== 'tool_response') {
+        break;
+      }
+    }
+    return pending;
+  }, [messages, toolCallIdToResponseMap]);
+
   const shouldShowThinkingForLastPair = useMemo(() => {
     if (messagePairs.length === 0) return false;
 
     const lastPair = messagePairs[messagePairs.length - 1]!;
     const hasNoAgentMessages = lastPair.agentMessages.length === 0;
     const hasUserMessage = lastPair.userMessage !== null;
-    const rpcStatus = queryData?.rpcStatus;
 
     return (
       hasUserMessage &&
       hasNoAgentMessages &&
       (rpcStatus === 'pending' || rpcStatus === 'success')
     );
-  }, [messagePairs, queryData?.rpcStatus]);
+  }, [messagePairs, rpcStatus]);
 
+  // Measure container height for last-pair min-height
   useEffect(() => {
     const measureHeight = () => {
       if (containerRef.current) {
@@ -140,16 +182,35 @@ function TaskMessagesImpl({ taskId, headerRef }: TaskMessagesProps) {
     };
 
     measureHeight();
-
     window.addEventListener('resize', measureHeight);
     return () => window.removeEventListener('resize', measureHeight);
   }, [headerRef, messages]);
 
-  useEffect(() => {
-    const previousCount = previousMessageCountRef.current;
-    const currentCount = messagePairs.length;
+  // Scroll to bottom when NEW messages arrive at the end.
+  // Track the last pair ID — only scroll when it changes (new messages),
+  // not when older messages load at the top (which also increases length).
+  const lastPairId = messagePairs[messagePairs.length - 1]?.id ?? null;
 
-    if (currentCount > previousCount && lastPairRef.current) {
+  useEffect(() => {
+    if (!lastPairId || lastPairId === previousLastPairIdRef.current) return;
+
+    const isInitial = isInitialLoadRef.current;
+    previousLastPairIdRef.current = lastPairId;
+
+    const container = scrollContainerRef.current;
+
+    if (isInitial) {
+      // On initial load, wait for the browser to paint all content, then
+      // jump to the absolute bottom of the scroll container. Using
+      // requestAnimationFrame ensures layout is complete — scrollIntoView
+      // on a specific element can misfire if content is still rendering.
+      isInitialLoadRef.current = false;
+      requestAnimationFrame(() => {
+        if (container) {
+          container.scrollTop = container.scrollHeight;
+        }
+      });
+    } else if (lastPairRef.current) {
       setTimeout(() => {
         lastPairRef.current?.scrollIntoView({
           behavior: 'smooth',
@@ -157,9 +218,45 @@ function TaskMessagesImpl({ taskId, headerRef }: TaskMessagesProps) {
         });
       }, 100);
     }
+  }, [lastPairId, scrollContainerRef]);
 
-    previousMessageCountRef.current = currentCount;
-  }, [messagePairs.length]);
+  // Scroll position preservation after older pages load
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || previousPagesScrollHeightRef.current === null) return;
+
+    const addedHeight =
+      container.scrollHeight - previousPagesScrollHeightRef.current;
+    if (addedHeight > 0) {
+      container.scrollTop += addedHeight;
+    }
+    previousPagesScrollHeightRef.current = null;
+  }, [messages, scrollContainerRef]);
+
+  const handleLoadOlder = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (container) {
+      previousPagesScrollHeightRef.current = container.scrollHeight;
+    }
+    fetchNextPage();
+  }, [fetchNextPage, scrollContainerRef]);
+
+  // Scroll event listener: fetch older messages when user scrolls near the top.
+  // Unlike IntersectionObserver, scroll events don't fire on mount — only on
+  // actual scroll actions (user or programmatic).
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const onScroll = () => {
+      if (container.scrollTop < 100 && hasNextPage && !isFetchingNextPage) {
+        handleLoadOlder();
+      }
+    };
+
+    container.addEventListener('scroll', onScroll, { passive: true });
+    return () => container.removeEventListener('scroll', onScroll);
+  }, [scrollContainerRef, hasNextPage, isFetchingNextPage, handleLoadOlder]);
 
   const renderMessage = (message: TaskMessage) => {
     switch (message.content.type) {
@@ -178,6 +275,7 @@ function TaskMessagesImpl({ taskId, headerRef }: TaskMessagesProps) {
             toolResponseMessage={toolCallIdToResponseMap.get(
               message.content.tool_call_id
             )}
+            isInProgress={pendingToolCallIds.has(message.content.tool_call_id)}
           />
         );
       case 'tool_response':
@@ -193,6 +291,12 @@ function TaskMessagesImpl({ taskId, headerRef }: TaskMessagesProps) {
       ref={containerRef}
       className="flex w-full flex-1 flex-col items-center"
     >
+      {isFetchingNextPage && (
+        <div className="flex w-full justify-center py-3">
+          <Loader2 className="text-muted-foreground size-5 animate-spin" />
+        </div>
+      )}
+
       {messagePairs.map((pair, index) => {
         const isLastPair = index === messagePairs.length - 1;
         const shouldShowThinking = isLastPair && shouldShowThinkingForLastPair;

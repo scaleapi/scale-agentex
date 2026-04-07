@@ -28,12 +28,13 @@ function TaskMessageReasoningImpl({ message }: TaskMessageReasoningProps) {
   const { taskID } = useSafeSearchParams();
   const { agentexClient } = useAgentexClient();
 
-  const { data: queryData } = useTaskMessages({
+  const { messages } = useTaskMessages({
     agentexClient,
     taskId: taskID ?? '',
   });
-  const messages = queryData?.messages ?? [];
-  const messageIndex = messages.findIndex(m => m.id === message.id);
+  const messageIndex = messages.findIndex(
+    (m: TaskMessage) => m.id === message.id
+  );
   const nextMessage = messageIndex !== -1 ? messages[messageIndex + 1] : null;
 
   const reasoningInProgress = useMemo(() => {
