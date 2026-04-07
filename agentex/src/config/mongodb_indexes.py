@@ -108,6 +108,9 @@ def ensure_mongodb_indexes(mongodb_database: MongoDBDatabase) -> None:
                             f"  ✗ Failed to recreate index '{index_name}' after dropping it: {create_err}. "
                             f"The index is currently absent. Restart the application or recreate it manually."
                         )
+                        # Re-raise to abort startup. Note: this propagates past the
+                        # sibling `except Exception` below — Python only routes exceptions
+                        # from the `try` block to sibling handlers, not from other handlers.
                         raise
                 else:
                     logger.error(f"  ✗ Failed to create index: {e}")
@@ -115,6 +118,25 @@ def ensure_mongodb_indexes(mongodb_database: MongoDBDatabase) -> None:
                 logger.error(
                     f"  ✗ Unexpected error creating index '{index_spec.get('name', 'unnamed')}': {e}"
                 )
+
+    # Clean up legacy indexes that were removed from INDEXES lists but may
+    # still exist on databases where they were previously created.
+    legacy_indexes: list[tuple[str, str]] = [
+        ("messages", "task_id_idx"),
+        ("task_states", "task_id_idx"),
+    ]
+    for collection_name, index_name in legacy_indexes:
+        try:
+            mongodb_database[collection_name].drop_index(index_name)
+            logger.info(
+                f"  ✓ Dropped legacy index '{index_name}' from '{collection_name}'"
+            )
+        except OperationFailure:
+            pass  # Index doesn't exist — already clean
+        except Exception as e:
+            logger.warning(
+                f"  ⚠ Failed to drop legacy index '{index_name}' from '{collection_name}': {e}"
+            )
 
     logger.info("MongoDB index creation completed.")
 
