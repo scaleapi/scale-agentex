@@ -9,7 +9,13 @@ from src.adapters.temporal.exceptions import (
     TemporalWorkflowAlreadyExistsError,
 )
 from src.config.environment_variables import EnvironmentVariables
-from src.domain.entities.agents import ACPType, AgentEntity, AgentInputType, AgentStatus
+from src.domain.entities.agents import (
+    ACPType,
+    AgentEntity,
+    AgentInputType,
+    AgentProtocol,
+    AgentStatus,
+)
 from src.domain.entities.deployments import DeploymentEntity, DeploymentStatus
 from src.domain.repositories.agent_repository import DAgentRepository
 from src.domain.repositories.deployment_history_repository import (
@@ -45,6 +51,7 @@ class AgentsUseCase:
         acp_type: ACPType = ACPType.ASYNC,
         registration_metadata: dict[str, Any] | None = None,
         agent_input_type: AgentInputType | None = None,
+        protocol: AgentProtocol = AgentProtocol.ACP,
     ) -> AgentEntity:
         deployment_id = (registration_metadata or {}).get("deployment_id")
 
@@ -67,6 +74,7 @@ class AgentsUseCase:
             agent.status = AgentStatus.READY
             agent.status_reason = "Agent registered successfully."
             agent.acp_type = acp_type
+            agent.protocol = protocol
             if agent_input_type:
                 agent.agent_input_type = agent_input_type
             if registration_metadata:
@@ -97,6 +105,7 @@ class AgentsUseCase:
                 agent.status = AgentStatus.READY
                 agent.status_reason = "Agent registered successfully."
                 agent.acp_type = acp_type
+                agent.protocol = protocol
                 if registration_metadata:
                     existing_metadata = agent.registration_metadata or {}
                     existing_metadata.update(registration_metadata)
@@ -132,6 +141,7 @@ class AgentsUseCase:
                 status_reason="Agent registered successfully.",
                 acp_url=acp_url,
                 acp_type=acp_type,
+                protocol=protocol,
                 registration_metadata=registration_metadata,
                 registered_at=datetime.now(UTC),
                 agent_input_type=agent_input_type,

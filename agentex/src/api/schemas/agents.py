@@ -34,6 +34,10 @@ class AgentInputType(str, Enum):
     JSON = "json"
 
 
+class AgentProtocol(str, Enum):
+    ACP = "acp"
+
+
 class Agent(BaseModel):
     id: str = Field(..., description="The unique identifier of the agent.")
     name: str = Field(..., description="The unique name of the agent.")
@@ -66,6 +70,10 @@ class Agent(BaseModel):
     agent_input_type: AgentInputType | None = Field(
         default=None, description="The type of input the agent expects."
     )
+    protocol: AgentProtocol = Field(
+        AgentProtocol.ACP,
+        description="The communication protocol used by this agent.",
+    )
     production_deployment_id: str | None = Field(
         default=None, description="ID of the current production deployment."
     )
@@ -94,6 +102,10 @@ class RegisterAgentRequest(BaseModel):
     )
     agent_input_type: AgentInputType | None = Field(
         default=None, description="The type of input the agent expects."
+    )
+    protocol: AgentProtocol = Field(
+        AgentProtocol.ACP,
+        description="The communication protocol used by this agent.",
     )
 
 

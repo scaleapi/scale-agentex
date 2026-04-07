@@ -125,7 +125,7 @@ def task_service(
         task_repository=task_repository,
         task_state_repository=task_state_repository,
         event_repository=event_repository,
-        acp_client=agent_acp_service,
+        protocol_gateway=agent_acp_service,
         stream_repository=redis_stream_repository,
     )
 
@@ -165,7 +165,7 @@ def agents_acp_use_case(
     return AgentsACPUseCase(
         agent_repository=agent_repository,
         deployment_repository=deployment_repository,
-        acp_client=agent_acp_service,
+        protocol_gateway=agent_acp_service,
         task_service=task_service,
         task_message_service=task_message_service,
         authorization_service=authorization_service,

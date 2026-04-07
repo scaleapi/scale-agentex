@@ -48,7 +48,7 @@ from src.domain.exceptions import ClientError
 from src.domain.mixins.task_messages.task_message_mixin import TaskMessageMixin
 from src.domain.repositories.agent_repository import DAgentRepository
 from src.domain.repositories.deployment_repository import DDeploymentRepository
-from src.domain.services.agent_acp_service import DAgentACPService
+from src.domain.services.agent_acp_service import DAgentProtocolGateway
 from src.domain.services.authorization_service import DAuthorizationService
 from src.domain.services.task_message_service import DTaskMessageService
 from src.domain.services.task_service import DAgentTaskService
@@ -189,14 +189,14 @@ class AgentsACPUseCase(TaskMessageMixin):
         self,
         agent_repository: DAgentRepository,
         deployment_repository: DDeploymentRepository,
-        acp_client: DAgentACPService,
+        protocol_gateway: DAgentProtocolGateway,
         task_service: DAgentTaskService,
         task_message_service: DTaskMessageService,
         authorization_service: DAuthorizationService,
     ):
         self.agent_repository = agent_repository
         self.deployment_repo = deployment_repository
-        self.acp_client = acp_client
+        self.protocol_gateway = protocol_gateway
         self.task_service = task_service
         self.task_message_service = task_message_service
         self.authorization_service = authorization_service
@@ -309,14 +309,14 @@ class AgentsACPUseCase(TaskMessageMixin):
         await self.grant_with_retry(task)
         return task
 
-    async def _resolve_acp_url(
+    async def _resolve_service_url(
         self,
         agent: AgentEntity,
-        acp_url_override: str | None = None,
+        service_url_override: str | None = None,
     ) -> str:
-        """Resolve the ACP URL for an agent, optionally overriding with a specific URL."""
-        if acp_url_override:
-            return acp_url_override
+        """Resolve the service URL for an agent, optionally overriding with a specific URL."""
+        if service_url_override:
+            return service_url_override
 
         # Resolve through production deployment if available
         if agent.production_deployment_id:
@@ -330,7 +330,7 @@ class AgentsACPUseCase(TaskMessageMixin):
         if agent.acp_url:
             return agent.acp_url
 
-        raise ClientError(f"Agent {agent.id} does not have an ACP URL configured")
+        raise ClientError(f"Agent {agent.id} does not have a service URL configured")
 
     async def handle_rpc_request(
         self,
@@ -342,7 +342,7 @@ class AgentsACPUseCase(TaskMessageMixin):
         agent_id: str | None = None,
         agent_name: str | None = None,
         request_headers: dict[str, str] | None = None,
-        acp_url_override: str | None = None,
+        service_url_override: str | None = None,
     ) -> (
         list[TaskMessageEntity]
         | AsyncIterator[TaskMessageUpdateEntity]
@@ -358,7 +358,7 @@ class AgentsACPUseCase(TaskMessageMixin):
             method: JSON-RPC method name
             params: JSON-RPC parameters
             request_headers: HTTP headers from the incoming request
-            acp_url_override: Override ACP URL (for preview deployment routing)
+            service_url_override: Override service URL (for preview deployment routing)
 
         Returns:
             - list[TaskMessageEntity] for synchronous MESSAGE_SEND
@@ -373,7 +373,7 @@ class AgentsACPUseCase(TaskMessageMixin):
         if agent.status == AgentStatus.DELETED:
             raise ClientError(f"Agent {agent_id} is deleted")
 
-        acp_url = await self._resolve_acp_url(agent, acp_url_override)
+        service_url = await self._resolve_service_url(agent, service_url_override)
 
         logger.info(
             f"[handle_rpc_request] Validating RPC method for ACP type: {agent.acp_type} - {method}"
@@ -382,20 +382,20 @@ class AgentsACPUseCase(TaskMessageMixin):
 
         # Handle different methods
         if method == AgentRPCMethod.MESSAGE_SEND:
-            return await self._handle_message_send(agent, params, acp_url)
+            return await self._handle_message_send(agent, params, service_url)
         elif method == AgentRPCMethod.TASK_CREATE:
-            return await self._handle_task_create(agent, params, acp_url)
+            return await self._handle_task_create(agent, params, service_url)
         elif method == AgentRPCMethod.TASK_CANCEL:
-            return await self._handle_task_cancel(agent, params, acp_url)
+            return await self._handle_task_cancel(agent, params, service_url)
         elif method == AgentRPCMethod.EVENT_SEND:
             return await self._handle_event_send(
-                agent, params, request_headers, acp_url
+                agent, params, request_headers, service_url
             )
         else:
             raise ValueError(f"Unsupported method: {method}")
 
     async def _handle_task_create(
-        self, agent: AgentEntity, params: CreateTaskRequestEntity, acp_url: str
+        self, agent: AgentEntity, params: CreateTaskRequestEntity, service_url: str
     ) -> TaskEntity:
         """
         Handle task/create method.
@@ -403,27 +403,27 @@ class AgentsACPUseCase(TaskMessageMixin):
         Args:
             agent: The agent to create the task for
             params: Parameters containing task and initial message
-            acp_url: Resolved ACP URL to route to
+            service_url: Resolved service URL to route to
 
         Returns:
             Task containing the created task info
         """
-        # This creates the task record then forwards the message to the ACP server
+        # This creates the task record then forwards the message to the agent server
         task = await self._get_or_create_task(
             agent=agent, task_name=params.name, task_params=params.params
         )
 
         if agent.acp_type in [ACPType.AGENTIC, ACPType.ASYNC]:
-            await self.task_service.forward_task_to_acp(
+            await self.task_service.forward_task(
                 agent=agent,
                 task=task,
                 task_params=params.params,
-                acp_url=acp_url,
+                service_url=service_url,
             )
         return task
 
     async def _handle_message_send(
-        self, agent: AgentEntity, params: SendMessageRequestEntity, acp_url: str
+        self, agent: AgentEntity, params: SendMessageRequestEntity, service_url: str
     ) -> list[TaskMessageEntity] | AsyncIterator[TaskMessageUpdateEntity]:
         """
         Handle message/send method.
@@ -431,18 +431,18 @@ class AgentsACPUseCase(TaskMessageMixin):
         Args:
             agent: The agent to send the message to
             params: Parameters containing task_id and message
-            acp_url: Resolved ACP URL to route to
+            service_url: Resolved service URL to route to
 
         Returns:
             TaskMessageEntry for synchronous requests or AsyncIterator[TaskMessage] for streaming
         """
         if params.stream:
-            return self._handle_message_send_stream(agent, params, acp_url)
+            return self._handle_message_send_stream(agent, params, service_url)
         else:
-            return await self._handle_message_send_sync(agent, params, acp_url)
+            return await self._handle_message_send_sync(agent, params, service_url)
 
     async def _handle_message_send_sync(
-        self, agent: AgentEntity, params: SendMessageRequestEntity, acp_url: str
+        self, agent: AgentEntity, params: SendMessageRequestEntity, service_url: str
     ) -> list[TaskMessageEntity]:
         task = await self._get_or_create_task(
             agent=agent,
@@ -494,7 +494,7 @@ class AgentsACPUseCase(TaskMessageMixin):
             agent=agent,
             task=task,
             content=params.content,
-            acp_url=acp_url,
+            service_url=service_url,
         ):
             logger.debug(
                 f"[message_send_stream] Received message chunk: {task_message_update}"
@@ -569,7 +569,7 @@ class AgentsACPUseCase(TaskMessageMixin):
         return new_task_message_entities
 
     async def _handle_message_send_stream(
-        self, agent: AgentEntity, params: SendMessageRequestEntity, acp_url: str
+        self, agent: AgentEntity, params: SendMessageRequestEntity, service_url: str
     ) -> AsyncIterator[TaskMessageUpdateEntity]:
         """Handle streaming message send - yields raw TaskMessage objects"""
 
@@ -647,7 +647,7 @@ class AgentsACPUseCase(TaskMessageMixin):
                 agent=agent,
                 task=task,
                 content=params.content,
-                acp_url=acp_url,
+                service_url=service_url,
             ):
                 logger.debug(
                     f"[message_send_stream] Received message chunk type: {type(task_message_update).__name__}"
@@ -769,7 +769,7 @@ class AgentsACPUseCase(TaskMessageMixin):
         return
 
     async def _handle_task_cancel(
-        self, agent: AgentEntity, params: CancelTaskRequestEntity, acp_url: str
+        self, agent: AgentEntity, params: CancelTaskRequestEntity, service_url: str
     ) -> TaskEntity:
         """
         Handle task/cancel method.
@@ -777,7 +777,7 @@ class AgentsACPUseCase(TaskMessageMixin):
         Args:
             agent: The agent to cancel the task for
             params: Parameters containing task_id
-            acp_url: Resolved ACP URL to route to
+            service_url: Resolved service URL to route to
 
         Returns:
             Dict containing the cancellation result
@@ -790,7 +790,7 @@ class AgentsACPUseCase(TaskMessageMixin):
         return await self.task_service.cancel_task(
             agent=agent,
             task=task,
-            acp_url=acp_url,
+            service_url=service_url,
         )
 
     async def _handle_event_send(
@@ -798,7 +798,7 @@ class AgentsACPUseCase(TaskMessageMixin):
         agent: AgentEntity,
         params: SendEventRequestEntity,
         request_headers: dict[str, str] | None = None,
-        acp_url: str = "",
+        service_url: str = "",
     ) -> EventEntity:
         """
         Handle event/send method
@@ -807,7 +807,7 @@ class AgentsACPUseCase(TaskMessageMixin):
             agent: The agent to send the event to
             params: Parameters containing task_id and event data
             request_headers: HTTP headers from the incoming request
-            acp_url: Resolved ACP URL to route to
+            service_url: Resolved service URL to route to
 
         Returns:
             EventEntity for the created and forwarded event
@@ -820,11 +820,11 @@ class AgentsACPUseCase(TaskMessageMixin):
             id=params.task_id, name=params.task_name
         )
         # Create the event in the DB
-        event_entity = await self.task_service.create_event_and_forward_to_acp(
+        event_entity = await self.task_service.create_event_and_forward(
             agent=agent,
             task=task,
             content=params.content,
-            acp_url=acp_url,
+            service_url=service_url,
             request_headers=request_headers,
         )
         return event_entity

@@ -276,7 +276,10 @@ class ScheduleService:
                             # Decode bytes to string if possible
                             try:
                                 import json
-                                workflow_params.append(json.loads(arg.data.decode("utf-8")))
+
+                                workflow_params.append(
+                                    json.loads(arg.data.decode("utf-8"))
+                                )
                             except (json.JSONDecodeError, UnicodeDecodeError):
                                 workflow_params.append(str(arg.data))
                         else:
@@ -314,7 +317,9 @@ class ScheduleService:
         if hasattr(info, "recent_actions") and info.recent_actions:
             # ScheduleActionResult has started_at (when action started) and scheduled_at (when it was scheduled)
             last_action = info.recent_actions[-1]
-            last_action_time = getattr(last_action, "started_at", None) or getattr(last_action, "scheduled_at", None)
+            last_action_time = getattr(last_action, "started_at", None) or getattr(
+                last_action, "scheduled_at", None
+            )
         created_at: datetime | None = (
             cast(datetime, info.create_time)
             if hasattr(info, "create_time") and info.create_time

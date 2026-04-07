@@ -85,6 +85,8 @@ class CancelTaskParams(BaseModel):
     task: TaskEntity = Field(..., description="The task that was cancelled")
 
 
+# Deprecated: canonical source is AgentACPService.get_allowed_methods().
+# Kept for backward compatibility with existing tests.
 ACP_TYPE_TO_ALLOWED_RPC_METHODS = {
     ACPType.SYNC: [AgentRPCMethod.MESSAGE_SEND, AgentRPCMethod.TASK_CREATE],
     ACPType.AGENTIC: [

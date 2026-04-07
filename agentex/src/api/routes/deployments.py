@@ -194,7 +194,7 @@ async def _handle_deployment_sync_rpc(
             method=request.method,
             params=request.params,
             request_headers=request_headers,
-            acp_url_override=acp_url,
+            service_url_override=acp_url,
         )
 
         if isinstance(result_entity, AsyncIterator):
@@ -231,7 +231,7 @@ async def _handle_deployment_streaming_rpc(
                 method=request.method,
                 params=request.params,
                 request_headers=request_headers,
-                acp_url_override=acp_url,
+                service_url_override=acp_url,
             )
 
             if not isinstance(result_entity_async_iterator, AsyncIterator):
