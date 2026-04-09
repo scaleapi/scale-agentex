@@ -34,6 +34,7 @@ override-dependencies = [
     "python-multipart>=0.0.24",
     "certifi>=2026.2.25",
     "cryptography>=46.0.7",
+    "temporalio>=1.18.0,<1.24",
 ]
 
 [tool.uv.workspace]
