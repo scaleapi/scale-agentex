@@ -262,6 +262,9 @@ async def isolated_repositories(isolated_test_schema):
     from src.domain.repositories.deployment_history_repository import (
         DeploymentHistoryRepository,
     )
+    from src.domain.repositories.deployment_repository import (
+        DeploymentRepository,
+    )
     from src.domain.repositories.event_repository import EventRepository
     from src.domain.repositories.span_repository import SpanRepository
     from src.domain.repositories.task_message_repository import TaskMessageRepository
@@ -308,6 +311,9 @@ async def isolated_repositories(isolated_test_schema):
             async_rw_session_factory, async_ro_session_factory
         ),
         "deployment_history_repository": DeploymentHistoryRepository(
+            async_rw_session_factory, async_ro_session_factory
+        ),
+        "deployment_repository": DeploymentRepository(
             async_rw_session_factory, async_ro_session_factory
         ),
         # MongoDB repositories
@@ -384,10 +390,13 @@ async def isolated_integration_app(
     def create_agents_use_case():
         return AgentsUseCase(
             agent_repository=isolated_repositories["agent_repository"],
-            temporal_adapter=isolated_temporal_adapter,
             deployment_history_repository=isolated_repositories[
                 "deployment_history_repository"
             ],
+            deployment_repository=isolated_repositories[
+                "deployment_repository"
+            ],
+            temporal_adapter=isolated_temporal_adapter,
         )
 
     def create_agent_api_keys_use_case():
