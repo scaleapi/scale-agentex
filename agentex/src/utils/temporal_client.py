@@ -10,7 +10,6 @@ from temporalio.converter import (
     DefaultPayloadConverter,
     JSONPlainPayloadConverter,
     JSONTypeConverter,
-    _JSONTypeConverterUnhandled,
 )
 from temporalio.runtime import OpenTelemetryConfig, Runtime, TelemetryConfig
 
@@ -25,7 +24,7 @@ class DateTimeJSONEncoder(AdvancedJSONEncoder):
 class DateTimeJSONTypeConverter(JSONTypeConverter):
     def to_typed_value(
         self, hint: type, value: Any
-    ) -> Any | None | _JSONTypeConverterUnhandled:
+    ) -> Any:
         if hint == datetime.datetime:
             return datetime.datetime.fromisoformat(value)
         return JSONTypeConverter.Unhandled
