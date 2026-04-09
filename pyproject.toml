@@ -6,7 +6,7 @@ authors = [{ name = "Felix Su", email = "felix.su@scale.com" }]
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "agentex-sdk>=0.9.4",
+    "agentex-sdk>=0.9.10",
     "temporalio>=1.18.0",
 ]
 
@@ -26,10 +26,14 @@ environments = [
     "sys_platform == 'darwin'",
 ]
 
-# Override agentex-sdk's fastapi<0.116 pin to allow starlette CVE-2025-62727 fix
+# Override agentex-sdk's fastapi<0.116 pin to allow security fixes
 override-dependencies = [
     "fastapi>=0.135.0",
-    "starlette>=0.52.0",
+    "starlette>=0.52.1,<2.0",
+    "aiohttp>=3.13.5",
+    "python-multipart>=0.0.24",
+    "certifi>=2026.2.25",
+    "cryptography>=46.0.7",
 ]
 
 [tool.uv.workspace]
