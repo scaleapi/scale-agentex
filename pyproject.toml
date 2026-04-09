@@ -37,7 +37,7 @@ override-dependencies = [
 ]
 
 [tool.uv.workspace]
-members = ["agentex"]
+members = ["agentex", "../agentex-auth"]
 
 [tool.ruff]
 target-version = "py311"
