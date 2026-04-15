@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
 
-from adapters.orm import BaseORM
+from adapters.orm import BaseORM, TaskORM
 from domain.entities.spans import SpanEntity
 from domain.repositories.span_repository import SpanRepository
 from utils.ids import orm_id
@@ -48,6 +48,12 @@ async def test_span_repository_crud_operations(postgres_url):
     async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
     span_repo = SpanRepository(async_session_maker, async_session_maker)
 
+    # Create a task row to satisfy the FK constraint on spans.task_id
+    task_id = orm_id()
+    async with async_session_maker() as session:
+        session.add(TaskORM(id=task_id, name="test-task"))
+        await session.commit()
+
     # Test CREATE operation with JSON fields
     now = datetime.now(UTC)
     span_id = orm_id()
@@ -56,6 +62,7 @@ async def test_span_repository_crud_operations(postgres_url):
     span = SpanEntity(
         id=span_id,
         trace_id=trace_id,
+        task_id=task_id,
         parent_id=None,
         name="test-span-operation",
         start_time=now,
@@ -68,6 +75,7 @@ async def test_span_repository_crud_operations(postgres_url):
     created_span = await span_repo.create(span)
     assert created_span.id == span_id
     assert created_span.trace_id == trace_id
+    assert created_span.task_id == task_id
     assert created_span.name == "test-span-operation"
     assert created_span.input["operation"] == "test"
     assert created_span.data["metadata"]["version"] == "1.0"
@@ -78,6 +86,7 @@ async def test_span_repository_crud_operations(postgres_url):
     updated_span = SpanEntity(
         id=span_id,
         trace_id=trace_id,
+        task_id=task_id,
         parent_id=None,
         name="test-span-operation",
         start_time=now,
@@ -108,6 +117,7 @@ async def test_span_repository_crud_operations(postgres_url):
     child_span = SpanEntity(
         id=child_span_id,
         trace_id=trace_id,
+        task_id=task_id,
         parent_id=span_id,  # Child of the first span
         name="child-span-operation",
         start_time=child_start_time,
