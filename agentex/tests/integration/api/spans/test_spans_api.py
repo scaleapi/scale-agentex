@@ -35,6 +35,7 @@ class TestSpansAPIIntegration:
         # Given - Span creation data
         span_data = {
             "trace_id": "test-trace-123",
+            "task_id": "test-task-456",
             "name": "test-operation",
             "start_time": "2024-01-01T10:00:00Z",
             "end_time": "2024-01-01T10:00:05Z",
@@ -53,6 +54,7 @@ class TestSpansAPIIntegration:
         # Validate response has required fields
         assert "id" in created_span
         assert created_span["trace_id"] == span_data["trace_id"]
+        assert created_span["task_id"] == span_data["task_id"]
         assert created_span["name"] == span_data["name"]
         span_id = created_span["id"]
 
@@ -64,9 +66,23 @@ class TestSpansAPIIntegration:
         # Validate POST/GET consistency
         assert retrieved_span["id"] == span_id
         assert retrieved_span["trace_id"] == span_data["trace_id"]
+        assert retrieved_span["task_id"] == span_data["task_id"]
         assert retrieved_span["name"] == span_data["name"]
         assert retrieved_span["input"] == span_data["input"]
         assert retrieved_span["output"] == span_data["output"]
+
+    async def test_create_span_without_task_id(self, isolated_client):
+        """Test span creation without task_id (should default to null)"""
+        span_data = {
+            "trace_id": "test-trace-no-task",
+            "name": "test-no-task",
+            "start_time": "2024-01-01T10:00:00Z",
+        }
+
+        create_response = await isolated_client.post("/spans", json=span_data)
+        assert create_response.status_code == 200
+        created_span = create_response.json()
+        assert created_span["task_id"] is None
 
     async def test_update_span_and_validate_changes(self, isolated_client):
         """Test span update and validate PATCH → GET consistency"""
@@ -80,9 +96,10 @@ class TestSpansAPIIntegration:
         assert create_response.status_code == 200
         span_id = create_response.json()["id"]
 
-        # When - Update the span
+        # When - Update the span including task_id
         update_data = {
             "name": "updated-name",
+            "task_id": "task-update-789",
             "parent_id": "parent-id",
             "start_time": "2024-01-01T10:10:00Z",
             "end_time": "2024-01-01T10:10:05Z",
@@ -104,6 +121,7 @@ class TestSpansAPIIntegration:
 
         # Validate changes were applied
         assert updated_span["name"] == "updated-name"
+        assert updated_span["task_id"] == "task-update-789"
         assert updated_span["output"]["status"] == "completed"
         assert updated_span["parent_id"] == "parent-id"
         assert updated_span["start_time"] == "2024-01-01T10:10:00Z"
@@ -123,6 +141,9 @@ class TestSpansAPIIntegration:
         assert patch_response.status_code == 200
         updated_span = patch_response.json()
         assert updated_span["name"] == "updated-name"
+        assert (
+            updated_span["task_id"] == "task-update-789"
+        )  # Still set from prior update
         assert updated_span["output"]["status"] == "completed"
         assert updated_span["parent_id"] == "parent-id"
         assert updated_span["start_time"] == "2024-01-01T10:10:00Z"
