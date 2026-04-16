@@ -150,7 +150,7 @@ class SpanORM(BaseORM):
     __tablename__ = "spans"
     id = Column(String, primary_key=True, default=orm_id)  # Using UUIDs for IDs
     trace_id = Column(String, nullable=False)
-    task_id = Column(String, ForeignKey("tasks.id"), nullable=True)
+    task_id = Column(String, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
     parent_id = Column(String, nullable=True)
     name = Column(String, nullable=False)
     start_time = Column(DateTime(timezone=True), nullable=False)

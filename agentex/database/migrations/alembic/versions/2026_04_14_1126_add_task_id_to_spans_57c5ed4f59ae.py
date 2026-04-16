@@ -39,6 +39,7 @@ def upgrade() -> None:
         'tasks',
         ['task_id'],
         ['id'],
+        ondelete='SET NULL',
     )
 
     # Add index for querying spans by task_id
