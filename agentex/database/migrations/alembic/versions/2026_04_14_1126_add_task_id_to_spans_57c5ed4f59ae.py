@@ -23,8 +23,7 @@ def upgrade() -> None:
     op.add_column('spans', sa.Column('task_id', sa.String(), nullable=True))
 
     # Backfill task_id from trace_id where trace_id is a valid task ID.
-    # Uses a JOIN instead of IN (subquery) to avoid a full scan of the tasks table per row,
-    # and batches updates to avoid long-held locks on large tables.
+    # Uses a JOIN instead of a subquery for efficient matching.
     op.execute("""
         UPDATE spans
         SET task_id = spans.trace_id

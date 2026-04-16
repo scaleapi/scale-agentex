@@ -37,7 +37,8 @@ export function useSpans(taskId: string | null): UseSpansState {
         return [];
       }
 
-      // Try querying by task_id first
+      // task_id is not yet in the SDK types (SDK update pending), but the
+      // server already accepts it — cast until the SDK is regenerated.
       const spansByTaskId = await agentexClient.spans.list(
         { task_id: taskId } as Parameters<typeof agentexClient.spans.list>[0],
         { signal }
