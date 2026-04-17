@@ -63,10 +63,12 @@ async def test_task_repository_crud_operations(postgres_url):
     agent_repo = AgentRepository(async_session_maker, async_session_maker)
 
     # First, create an agent (required for task creation)
+    # Use unique names to avoid collisions with other tests sharing the same session-scoped DB
     agent_id = orm_id()
+    unique_suffix = agent_id[:8]
     agent = AgentEntity(
         id=agent_id,
-        name="test-agent-for-tasks",
+        name=f"test-agent-for-tasks-{unique_suffix}",
         description="Test agent for task repository testing",
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
@@ -81,15 +83,16 @@ async def test_task_repository_crud_operations(postgres_url):
     task_id = orm_id()
     task = TaskEntity(
         id=task_id,
-        name="test-task",
+        name=f"test-task-{unique_suffix}",
         status=TaskStatus.RUNNING,
         status_reason="Task is running for testing",
     )
 
     # Test CREATE operation
+    task_name = f"test-task-{unique_suffix}"
     created_task = await task_repo.create(agent_id, task)
     assert created_task.id == task_id
-    assert created_task.name == "test-task"
+    assert created_task.name == task_name
     assert created_task.status == TaskStatus.RUNNING
     assert created_task.status_reason == "Task is running for testing"
     assert created_task.created_at is not None
@@ -104,9 +107,9 @@ async def test_task_repository_crud_operations(postgres_url):
     print("✅ GET by ID operation successful")
 
     # Test GET operation by name
-    retrieved_task_by_name = await task_repo.get(name="test-task")
+    retrieved_task_by_name = await task_repo.get(name=task_name)
     assert retrieved_task_by_name.id == created_task.id
-    assert retrieved_task_by_name.name == "test-task"
+    assert retrieved_task_by_name.name == task_name
     print("✅ GET by name operation successful")
 
     # Test GET agent by task ID
@@ -118,7 +121,7 @@ async def test_task_repository_crud_operations(postgres_url):
     # Test UPDATE operation
     updated_task = TaskEntity(
         id=task_id,
-        name="test-task",  # Keep same name
+        name=task_name,  # Keep same name
         status=TaskStatus.COMPLETED,
         status_reason="Task completed successfully",
     )
@@ -140,7 +143,7 @@ async def test_task_repository_crud_operations(postgres_url):
     task_id_2 = orm_id()
     task_2 = TaskEntity(
         id=task_id_2,
-        name="test-task-2",
+        name=f"test-task-2-{unique_suffix}",
         status=TaskStatus.FAILED,
         status_reason="Second test task",
     )
@@ -211,10 +214,12 @@ async def test_task_repository_params_support(postgres_url):
     agent_repo = AgentRepository(async_session_maker, async_session_maker)
 
     # First, create an agent (required for task creation)
+    # Use unique names to avoid collisions with other tests sharing the same session-scoped DB
     agent_id = orm_id()
+    unique_suffix = agent_id[:8]
     agent = AgentEntity(
         id=agent_id,
-        name="test-agent-params",
+        name=f"test-agent-params-{unique_suffix}",
         description="Test agent for params testing",
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
@@ -233,9 +238,10 @@ async def test_task_repository_params_support(postgres_url):
         "max_tokens": 1000,
         "nested": {"key": "value", "number": 42},
     }
+    task_name = f"test-task-with-params-{unique_suffix}"
     task = TaskEntity(
         id=task_id,
-        name="test-task-with-params",
+        name=task_name,
         status=TaskStatus.RUNNING,
         status_reason="Task with params for testing",
         params=task_params,
@@ -244,7 +250,7 @@ async def test_task_repository_params_support(postgres_url):
     # Create task with params
     created_task = await task_repo.create(agent_id, task)
     assert created_task.id == task_id
-    assert created_task.name == "test-task-with-params"
+    assert created_task.name == task_name
     assert created_task.params == task_params
     print("✅ CREATE operation with params successful")
 
@@ -256,7 +262,7 @@ async def test_task_repository_params_support(postgres_url):
     print("✅ GET by ID operation preserves params")
 
     # Test GET operation by name preserves params
-    retrieved_task_by_name = await task_repo.get(name="test-task-with-params")
+    retrieved_task_by_name = await task_repo.get(name=task_name)
     assert retrieved_task_by_name.id == created_task.id
     assert retrieved_task_by_name.params == task_params
     print("✅ GET by name operation preserves params")
@@ -270,7 +276,7 @@ async def test_task_repository_params_support(postgres_url):
     }
     updated_task = TaskEntity(
         id=task_id,
-        name="test-task-with-params",
+        name=task_name,
         status=TaskStatus.COMPLETED,
         status_reason="Task completed with updated params",
         params=updated_params,
@@ -293,7 +299,7 @@ async def test_task_repository_params_support(postgres_url):
     task_id_null = orm_id()
     task_null_params = TaskEntity(
         id=task_id_null,
-        name="test-task-null-params",
+        name=f"test-task-null-params-{unique_suffix}",
         status=TaskStatus.RUNNING,
         status_reason="Task with null params",
         params=None,
@@ -349,10 +355,12 @@ async def test_task_repository_task_metadata_support(postgres_url):
     agent_repo = AgentRepository(async_session_maker, async_session_maker)
 
     # First, create an agent (required for task creation)
+    # Use unique names to avoid collisions with other tests sharing the same session-scoped DB
     agent_id = orm_id()
+    unique_suffix = agent_id[:8]
     agent = AgentEntity(
         id=agent_id,
-        name="test-agent-metadata",
+        name=f"test-agent-metadata-{unique_suffix}",
         description="Test agent for task_metadata testing",
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
@@ -397,9 +405,10 @@ async def test_task_repository_task_metadata_support(postgres_url):
             "numeric_precision": 123.456789,
         },
     }
+    task_name = f"test-task-with-metadata-{unique_suffix}"
     task = TaskEntity(
         id=task_id,
-        name="test-task-with-metadata",
+        name=task_name,
         status=TaskStatus.RUNNING,
         status_reason="Task with task_metadata for testing",
         task_metadata=task_metadata,
@@ -408,7 +417,7 @@ async def test_task_repository_task_metadata_support(postgres_url):
     # Create task with task_metadata
     created_task = await task_repo.create(agent_id, task)
     assert created_task.id == task_id
-    assert created_task.name == "test-task-with-metadata"
+    assert created_task.name == task_name
     assert created_task.task_metadata == task_metadata
     print("✅ CREATE operation with task_metadata successful")
 
@@ -420,7 +429,7 @@ async def test_task_repository_task_metadata_support(postgres_url):
     print("✅ GET by ID operation preserves task_metadata")
 
     # Test GET operation by name preserves task_metadata
-    retrieved_task_by_name = await task_repo.get(name="test-task-with-metadata")
+    retrieved_task_by_name = await task_repo.get(name=task_name)
     assert retrieved_task_by_name.id == created_task.id
     assert retrieved_task_by_name.task_metadata == task_metadata
     print("✅ GET by name operation preserves task_metadata")
@@ -461,7 +470,7 @@ async def test_task_repository_task_metadata_support(postgres_url):
     }
     updated_task = TaskEntity(
         id=task_id,
-        name="test-task-with-metadata",
+        name=task_name,
         status=TaskStatus.COMPLETED,
         status_reason="Task completed with updated task_metadata",
         task_metadata=updated_metadata,
@@ -484,7 +493,7 @@ async def test_task_repository_task_metadata_support(postgres_url):
     task_id_null = orm_id()
     task_null_metadata = TaskEntity(
         id=task_id_null,
-        name="test-task-null-metadata",
+        name=f"test-task-null-metadata-{unique_suffix}",
         status=TaskStatus.RUNNING,
         status_reason="Task with null task_metadata",
         task_metadata=None,
@@ -540,10 +549,12 @@ async def test_task_repository_null_task_metadata_handling(postgres_url):
     agent_repo = AgentRepository(async_session_maker, async_session_maker)
 
     # First, create an agent (required for task creation)
+    # Use unique names to avoid collisions with other tests sharing the same session-scoped DB
     agent_id = orm_id()
+    unique_suffix = agent_id[:8]
     agent = AgentEntity(
         id=agent_id,
-        name="test-agent-null-metadata",
+        name=f"test-agent-null-metadata-{unique_suffix}",
         description="Test agent for null task_metadata testing",
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
@@ -556,9 +567,10 @@ async def test_task_repository_null_task_metadata_handling(postgres_url):
 
     # Test CREATE with task_metadata=None
     task_id_null = orm_id()
+    task_name = f"test-task-null-metadata-handling-{unique_suffix}"
     task_null = TaskEntity(
         id=task_id_null,
-        name="test-task-null-metadata-handling",
+        name=task_name,
         status=TaskStatus.RUNNING,
         status_reason="Task with null task_metadata",
         task_metadata=None,
@@ -575,9 +587,7 @@ async def test_task_repository_null_task_metadata_handling(postgres_url):
     assert retrieved_null_task.task_metadata is None
     print("✅ Retrieval preserves null task_metadata")
 
-    retrieved_null_by_name = await task_repo.get(
-        name="test-task-null-metadata-handling"
-    )
+    retrieved_null_by_name = await task_repo.get(name=task_name)
     assert retrieved_null_by_name.id == task_id_null
     assert retrieved_null_by_name.task_metadata is None
     print("✅ Retrieval by name preserves null task_metadata")
@@ -594,7 +604,7 @@ async def test_task_repository_null_task_metadata_handling(postgres_url):
     }
     updated_task = TaskEntity(
         id=task_id_null,
-        name="test-task-null-metadata-handling",
+        name=task_name,
         status=TaskStatus.RUNNING,
         status_reason="Task updated with populated task_metadata",
         task_metadata=populated_metadata,
@@ -613,7 +623,7 @@ async def test_task_repository_null_task_metadata_handling(postgres_url):
     # Test UPDATE from populated back to null task_metadata
     updated_back_to_null = TaskEntity(
         id=task_id_null,
-        name="test-task-null-metadata-handling",
+        name=task_name,
         status=TaskStatus.COMPLETED,
         status_reason="Task updated back to null task_metadata",
         task_metadata=None,
@@ -686,10 +696,13 @@ async def test_list_with_join_includes_task_metadata(postgres_url):
     task_repo = TaskRepository(async_session_maker, async_session_maker)
     agent_repo = AgentRepository(async_session_maker, async_session_maker)
 
+    # Use unique names to avoid collisions with other tests sharing the same session-scoped DB
+    unique_suffix = orm_id()[:8]
+
     # Create test agents
     agent_1 = AgentEntity(
         id=orm_id(),
-        name="agent-with-metadata-tasks",
+        name=f"agent-with-metadata-tasks-{unique_suffix}",
         description="Test agent for task metadata join testing",
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
@@ -700,7 +713,7 @@ async def test_list_with_join_includes_task_metadata(postgres_url):
 
     agent_2 = AgentEntity(
         id=orm_id(),
-        name="agent-with-null-metadata-tasks",
+        name=f"agent-with-null-metadata-tasks-{unique_suffix}",
         description="Test agent for null task metadata join testing",
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
@@ -712,7 +725,7 @@ async def test_list_with_join_includes_task_metadata(postgres_url):
     # Create tasks with task_metadata
     task_with_metadata_1 = TaskEntity(
         id=orm_id(),
-        name="task-with-metadata-1",
+        name=f"task-with-metadata-1-{unique_suffix}",
         status=TaskStatus.RUNNING,
         status_reason="Task with metadata for join testing",
         task_metadata={
@@ -726,7 +739,7 @@ async def test_list_with_join_includes_task_metadata(postgres_url):
 
     task_with_metadata_2 = TaskEntity(
         id=orm_id(),
-        name="task-with-metadata-2",
+        name=f"task-with-metadata-2-{unique_suffix}",
         status=TaskStatus.FAILED,
         status_reason="Another task with metadata",
         task_metadata={
@@ -741,7 +754,7 @@ async def test_list_with_join_includes_task_metadata(postgres_url):
     # Create tasks without task_metadata (null)
     task_without_metadata_1 = TaskEntity(
         id=orm_id(),
-        name="task-without-metadata-1",
+        name=f"task-without-metadata-1-{unique_suffix}",
         status=TaskStatus.RUNNING,
         status_reason="Task without metadata",
         task_metadata=None,
@@ -750,7 +763,7 @@ async def test_list_with_join_includes_task_metadata(postgres_url):
 
     task_without_metadata_2 = TaskEntity(
         id=orm_id(),
-        name="task-without-metadata-2",
+        name=f"task-without-metadata-2-{unique_suffix}",
         status=TaskStatus.COMPLETED,
         status_reason="Another task without metadata",
         task_metadata=None,
@@ -765,25 +778,25 @@ async def test_list_with_join_includes_task_metadata(postgres_url):
     tasks_by_name = {task.name: task for task in all_tasks}
 
     # Verify tasks with metadata
-    assert "task-with-metadata-1" in tasks_by_name
-    metadata_task_1 = tasks_by_name["task-with-metadata-1"]
+    assert task_with_metadata_1.name in tasks_by_name
+    metadata_task_1 = tasks_by_name[task_with_metadata_1.name]
     assert metadata_task_1.task_metadata is not None
     assert metadata_task_1.task_metadata["priority"] == "high"
     assert metadata_task_1.task_metadata["category"] == "testing"
 
-    assert "task-with-metadata-2" in tasks_by_name
-    metadata_task_2 = tasks_by_name["task-with-metadata-2"]
+    assert task_with_metadata_2.name in tasks_by_name
+    metadata_task_2 = tasks_by_name[task_with_metadata_2.name]
     assert metadata_task_2.task_metadata is not None
     assert metadata_task_2.task_metadata["priority"] == "medium"
     assert metadata_task_2.task_metadata["category"] == "integration"
 
     # Verify tasks without metadata (null)
-    assert "task-without-metadata-1" in tasks_by_name
-    null_task_1 = tasks_by_name["task-without-metadata-1"]
+    assert task_without_metadata_1.name in tasks_by_name
+    null_task_1 = tasks_by_name[task_without_metadata_1.name]
     assert null_task_1.task_metadata is None
 
-    assert "task-without-metadata-2" in tasks_by_name
-    null_task_2 = tasks_by_name["task-without-metadata-2"]
+    assert task_without_metadata_2.name in tasks_by_name
+    null_task_2 = tasks_by_name[task_without_metadata_2.name]
     assert null_task_2.task_metadata is None
 
     print("✅ list_with_join returns task_metadata for all tasks")
@@ -801,7 +814,7 @@ async def test_list_with_join_includes_task_metadata(postgres_url):
 
     # Test filtering by agent_name
     agent_2_tasks = await task_repo.list_with_join(
-        agent_name="agent-with-null-metadata-tasks", order_direction="asc"
+        agent_name=agent_2.name, order_direction="asc"
     )
     assert len(agent_2_tasks) == 2
     for task in agent_2_tasks:
@@ -828,9 +841,9 @@ async def test_list_with_join_includes_task_metadata(postgres_url):
     )
     assert len(ordered_by_name) == 4
     # Verify ordering is correct and task_metadata is preserved
-    assert ordered_by_name[0].name == "task-with-metadata-1"
+    assert ordered_by_name[0].name == task_with_metadata_1.name
     assert ordered_by_name[0].task_metadata is not None
-    assert ordered_by_name[3].name == "task-without-metadata-2"
+    assert ordered_by_name[3].name == task_without_metadata_2.name
     assert ordered_by_name[3].task_metadata is None
 
     print("✅ Ordering works correctly with task_metadata present")
@@ -890,9 +903,12 @@ async def test_list_with_join(postgres_url):
     task_repo = TaskRepository(async_session_maker, async_session_maker)
     agent_repo = AgentRepository(async_session_maker, async_session_maker)
 
+    # Use unique names to avoid collisions with other tests sharing the same session-scoped DB
+    unique_suffix = orm_id()[:8]
+
     agent_1 = AgentEntity(
         id=orm_id(),
-        name="agent-1",
+        name=f"agent-1-{unique_suffix}",
         description="Test agent for task repository testing",
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
@@ -903,7 +919,7 @@ async def test_list_with_join(postgres_url):
 
     agent_2 = AgentEntity(
         id=orm_id(),
-        name="agent-2",
+        name=f"agent-2-{unique_suffix}",
         description="Test agent for task repository testing",
         docker_image="test/agent:latest",
         status=AgentStatus.READY,
@@ -914,7 +930,7 @@ async def test_list_with_join(postgres_url):
 
     task_1_1 = TaskEntity(
         id=orm_id(),
-        name="agent-1-task-1",
+        name=f"agent-1-task-1-{unique_suffix}",
         status=TaskStatus.RUNNING,
         status_reason="status reason b",
     )
@@ -922,7 +938,7 @@ async def test_list_with_join(postgres_url):
 
     task_1_2 = TaskEntity(
         id=orm_id(),
-        name="agent-1-task-2",
+        name=f"agent-1-task-2-{unique_suffix}",
         status=TaskStatus.FAILED,
         status_reason="status reason a",
     )
@@ -930,7 +946,7 @@ async def test_list_with_join(postgres_url):
 
     task_2_1 = TaskEntity(
         id=orm_id(),
-        name="agent-2-task-1",
+        name=f"agent-2-task-1-{unique_suffix}",
         status=TaskStatus.RUNNING,
         status_reason="status reason a",
     )
@@ -976,7 +992,7 @@ async def test_list_with_join(postgres_url):
     assert_task_lists_by_name(
         expected=[task_1_1, task_1_2],
         received=await task_repo.list_with_join(
-            agent_name="agent-1",
+            agent_name=agent_1.name,
             order_direction="asc",
         ),
     )
@@ -1086,7 +1102,7 @@ async def test_list_with_join(postgres_url):
     assert_task_lists_by_name(
         expected=[task_1_2],
         received=await task_repo.list_with_join(
-            agent_name="agent-1",
+            agent_name=agent_1.name,
             task_filters={"status": TaskStatus.FAILED},
             order_direction="asc",
         ),

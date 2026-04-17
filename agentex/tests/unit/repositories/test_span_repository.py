@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
 
-from adapters.orm import BaseORM
+from adapters.orm import BaseORM, TaskORM
 from domain.entities.spans import SpanEntity
 from domain.repositories.span_repository import SpanRepository
 from utils.ids import orm_id
@@ -48,6 +48,12 @@ async def test_span_repository_crud_operations(postgres_url):
     async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
     span_repo = SpanRepository(async_session_maker, async_session_maker)
 
+    # Create a task row to satisfy the FK constraint on spans.task_id
+    task_id = orm_id()
+    async with async_session_maker() as session:
+        session.add(TaskORM(id=task_id, name="test-task"))
+        await session.commit()
+
     # Test CREATE operation with JSON fields
     now = datetime.now(UTC)
     span_id = orm_id()
@@ -56,6 +62,7 @@ async def test_span_repository_crud_operations(postgres_url):
     span = SpanEntity(
         id=span_id,
         trace_id=trace_id,
+        task_id=task_id,
         parent_id=None,
         name="test-span-operation",
         start_time=now,
@@ -68,6 +75,7 @@ async def test_span_repository_crud_operations(postgres_url):
     created_span = await span_repo.create(span)
     assert created_span.id == span_id
     assert created_span.trace_id == trace_id
+    assert created_span.task_id == task_id
     assert created_span.name == "test-span-operation"
     assert created_span.input["operation"] == "test"
     assert created_span.data["metadata"]["version"] == "1.0"
@@ -78,6 +86,7 @@ async def test_span_repository_crud_operations(postgres_url):
     updated_span = SpanEntity(
         id=span_id,
         trace_id=trace_id,
+        task_id=task_id,
         parent_id=None,
         name="test-span-operation",
         start_time=now,
@@ -108,6 +117,7 @@ async def test_span_repository_crud_operations(postgres_url):
     child_span = SpanEntity(
         id=child_span_id,
         trace_id=trace_id,
+        task_id=task_id,
         parent_id=span_id,  # Child of the first span
         name="child-span-operation",
         start_time=child_start_time,
@@ -145,3 +155,49 @@ async def test_span_repository_crud_operations(postgres_url):
 
     print("✅ Test isolation provided by session-scoped PostgreSQL container")
     print("🎉 ALL SPAN REPOSITORY TESTS PASSED!")
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_span_task_id_set_null_on_task_delete(postgres_url):
+    """Deleting a referenced task should null out spans.task_id, not fail with FK violation."""
+
+    sqlalchemy_asyncpg_url = postgres_url.replace(
+        "postgresql+psycopg2://", "postgresql+asyncpg://"
+    )
+
+    engine = create_async_engine(sqlalchemy_asyncpg_url, echo=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(BaseORM.metadata.create_all)
+
+    async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    span_repo = SpanRepository(async_session_maker, async_session_maker)
+
+    # Seed a task and a span referencing it
+    task_id = orm_id()
+    span_id = orm_id()
+    async with async_session_maker() as session:
+        session.add(TaskORM(id=task_id, name="task-to-delete"))
+        await session.commit()
+
+    await span_repo.create(
+        SpanEntity(
+            id=span_id,
+            trace_id=orm_id(),
+            task_id=task_id,
+            parent_id=None,
+            name="span-with-task-fk",
+            start_time=datetime.now(UTC),
+        )
+    )
+
+    # Delete the task — should succeed, not raise a FK violation
+    async with async_session_maker() as session:
+        task = await session.get(TaskORM, task_id)
+        await session.delete(task)
+        await session.commit()
+
+    # Span should survive with task_id set to NULL
+    retrieved = await span_repo.get(id=span_id)
+    assert retrieved is not None
+    assert retrieved.task_id is None

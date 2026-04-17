@@ -17,6 +17,11 @@ class CreateSpanRequest(BaseModel):
         title="The trace ID for this span",
         description="Unique identifier for the trace this span belongs to",
     )
+    task_id: str | None = Field(
+        None,
+        title="The task ID this span is associated with",
+        description="ID of the task this span belongs to",
+    )
     parent_id: str | None = Field(
         None,
         title="The parent span ID if this is a child span",
@@ -55,6 +60,11 @@ class UpdateSpanRequest(BaseModel):
         None,
         title="The trace ID for this span",
         description="Unique identifier for the trace this span belongs to",
+    )
+    task_id: str | None = Field(
+        None,
+        title="The task ID this span is associated with",
+        description="ID of the task this span belongs to",
     )
     parent_id: str | None = Field(
         None,

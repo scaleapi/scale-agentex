@@ -59,10 +59,9 @@ function TaskMessageReasoningImpl({ message }: TaskMessageReasoningProps) {
     if (message.content.type !== 'reasoning') {
       throw new Error('Message content is not a ReasoningContent');
     }
-    return [
-      ...(message.content.content ?? []),
-      ...(message.content.summary ?? []),
-    ].join('\n\n');
+    const content = message.content.content ?? [];
+    const summary = message.content.summary ?? [];
+    return (content.length > 0 ? content : summary).join('\n\n');
   }, [message.content]);
 
   const updateBlurEffects = () => {

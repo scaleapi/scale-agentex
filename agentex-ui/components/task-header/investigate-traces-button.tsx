@@ -10,15 +10,15 @@ import { cn } from '@/lib/utils';
 type InvestigateTracesButtonProps = {
   className?: string;
   disabled?: boolean;
-  taskId: string;
+  traceId: string;
 };
 
 export const InvestigateTracesButton = forwardRef<
   HTMLAnchorElement,
   InvestigateTracesButtonProps
->(({ className, disabled = false, taskId, ...props }, ref) => {
+>(({ className, disabled = false, traceId, ...props }, ref) => {
   const { sgpAppURL } = useAgentexClient();
-  const sgpTracesURL = `${sgpAppURL}/beta/monitor?trace_id=${taskId}&tt-trace-id=${taskId}`;
+  const sgpTracesURL = `${sgpAppURL}/beta/monitor?trace_id=${traceId}&tt-trace-id=${traceId}`;
 
   if (!sgpAppURL) {
     return null;
