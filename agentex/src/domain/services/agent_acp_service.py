@@ -7,7 +7,7 @@ from fastapi import Depends
 from pydantic import BaseModel
 
 from src.adapters.http.adapter_httpx import DHttpxGateway
-from src.domain.entities.agents import AgentEntity
+from src.domain.entities.agents import ACPType, AgentEntity
 from src.domain.entities.agents_rpc import (
     AgentRPCMethod,
     CancelTaskParams,
@@ -39,6 +39,7 @@ from src.domain.entities.tasks import TaskEntity
 from src.domain.mixins.task_messages.task_message_mixin import TaskMessageMixin
 from src.domain.repositories.agent_api_key_repository import DAgentAPIKeyRepository
 from src.domain.repositories.agent_repository import DAgentRepository
+from src.domain.services.agent_protocol_gateway import AgentProtocolGateway
 from src.utils.logging import ctx_var_request_id, make_logger
 
 logger = make_logger(__name__)
@@ -107,7 +108,7 @@ def filter_request_headers(headers: dict[str, str] | None) -> dict[str, str]:
     }
 
 
-class AgentACPService(TaskMessageMixin):
+class AgentACPService(AgentProtocolGateway, TaskMessageMixin):
     """
     Client service for communicating with downstream ACP servers.
     Handles JSON-RPC 2.0 communication with agent ACP servers.
@@ -279,7 +280,7 @@ class AgentACPService(TaskMessageMixin):
         self,
         agent: AgentEntity,
         task: TaskEntity,
-        acp_url: str,
+        service_url: str,
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Create a new task"""
@@ -290,7 +291,7 @@ class AgentACPService(TaskMessageMixin):
         )
         headers = await self.get_headers(agent)
         return await self._call_jsonrpc(
-            url=acp_url,
+            url=service_url,
             method=AgentRPCMethod.TASK_CREATE,
             params=params,
             request_id=f"{AgentRPCMethod.TASK_CREATE}-{task.id}",  # Use create-specific request ID
@@ -302,7 +303,7 @@ class AgentACPService(TaskMessageMixin):
         agent: AgentEntity,
         task: TaskEntity,
         content: TaskMessageContentEntity,
-        acp_url: str,
+        service_url: str,
     ) -> TaskMessageContentEntity:
         """Send a message to a running task"""
         params = SendMessageParams(
@@ -319,7 +320,7 @@ class AgentACPService(TaskMessageMixin):
                     f"Agent {agent.id} already processing message send for task {task.id}"
                 )
             result = await self._call_jsonrpc(
-                url=acp_url,
+                url=service_url,
                 method=AgentRPCMethod.MESSAGE_SEND,
                 params=params,
                 request_id=f"{AgentRPCMethod.MESSAGE_SEND}-{task.id}",  # Use message-specific request ID
@@ -333,7 +334,7 @@ class AgentACPService(TaskMessageMixin):
         agent: AgentEntity,
         task: TaskEntity,
         content: TaskMessageContentEntity,
-        acp_url: str,
+        service_url: str,
     ) -> AsyncIterator[TaskMessageUpdateEntity]:
         """Send a message to a running task and stream the response"""
         params = SendMessageParams(
@@ -357,7 +358,7 @@ class AgentACPService(TaskMessageMixin):
                         f"Agent {agent.id} already processing message send for task {task.id}"
                     )
                 async for chunk in self._call_jsonrpc_stream(
-                    url=acp_url,
+                    url=service_url,
                     method=AgentRPCMethod.MESSAGE_SEND,
                     params=params,
                     request_id=f"{AgentRPCMethod.MESSAGE_SEND}-{task.id}",
@@ -366,7 +367,7 @@ class AgentACPService(TaskMessageMixin):
                     yield self._parse_task_message_update(chunk)
         else:
             async for chunk in self._call_jsonrpc_stream(
-                url=acp_url,
+                url=service_url,
                 method=AgentRPCMethod.MESSAGE_SEND,
                 params=params,
                 request_id=f"{AgentRPCMethod.MESSAGE_SEND}-{task.id}",
@@ -375,13 +376,13 @@ class AgentACPService(TaskMessageMixin):
                 yield self._parse_task_message_update(chunk)
 
     async def cancel_task(
-        self, agent: AgentEntity, task: TaskEntity, acp_url: str
+        self, agent: AgentEntity, task: TaskEntity, service_url: str
     ) -> dict[str, Any]:
         """Cancel a running task"""
         params = CancelTaskParams(agent=agent, task=task)
         headers = await self.get_headers(agent)
         return await self._call_jsonrpc(
-            url=acp_url,
+            url=service_url,
             method=AgentRPCMethod.TASK_CANCEL,
             params=params,
             request_id=f"{AgentRPCMethod.TASK_CANCEL}-{task.id}",  # Use cancel-specific request ID
@@ -393,7 +394,7 @@ class AgentACPService(TaskMessageMixin):
         agent: AgentEntity,
         event: EventEntity,
         task: TaskEntity,
-        acp_url: str,
+        service_url: str,
         request_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Send an event to a running task"""
@@ -418,12 +419,60 @@ class AgentACPService(TaskMessageMixin):
         headers.update(auth_headers)
 
         return await self._call_jsonrpc(
-            url=acp_url,
+            url=service_url,
             method=AgentRPCMethod.EVENT_SEND,
             params=params,
             request_id=f"{AgentRPCMethod.EVENT_SEND}-{task.id}",  # Use event-specific request ID
             default_headers=headers,
         )
 
+    async def check_health(
+        self,
+        agent_id: str,
+        service_url: str,
+    ) -> bool:
+        """Check if the agent server is healthy via its /healthz endpoint."""
+        try:
+            response = await self._http_gateway.async_call(
+                method="GET",
+                url=f"{service_url}/healthz",
+                timeout=5,
+            )
+            if response.get("status") != "healthy":
+                logger.error(
+                    f"Agent {agent_id} returned non-healthy status: {response.get('status')}"
+                )
+                return False
+            response_agent_id = response.get("agent_id")
+            if response_agent_id and response_agent_id != agent_id:
+                logger.error(
+                    f"Agent {agent_id} returned unexpected agent ID: {response_agent_id}"
+                )
+                return False
+            return True
+        except Exception as e:
+            logger.error(f"Failed to check health of agent {agent_id}: {e}")
+            return False
+
+    # ACP-specific: maps agent type to allowed RPC methods
+    ACP_ALLOWED_METHODS: dict[ACPType, list[AgentRPCMethod]] = {
+        ACPType.SYNC: [AgentRPCMethod.MESSAGE_SEND, AgentRPCMethod.TASK_CREATE],
+        ACPType.AGENTIC: [
+            AgentRPCMethod.TASK_CREATE,
+            AgentRPCMethod.TASK_CANCEL,
+            AgentRPCMethod.EVENT_SEND,
+        ],
+        ACPType.ASYNC: [
+            AgentRPCMethod.TASK_CREATE,
+            AgentRPCMethod.TASK_CANCEL,
+            AgentRPCMethod.EVENT_SEND,
+        ],
+    }
+
+    def get_allowed_methods(self, acp_type: ACPType) -> list[AgentRPCMethod]:
+        """Return the list of RPC methods allowed for the given ACP type."""
+        return self.ACP_ALLOWED_METHODS.get(acp_type, [])
+
 
 DAgentACPService = Annotated[AgentACPService, Depends(AgentACPService)]
+DAgentProtocolGateway = Annotated[AgentProtocolGateway, Depends(AgentACPService)]

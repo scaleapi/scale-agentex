@@ -248,9 +248,7 @@ class CheckpointRepository:
             self.async_ro_session_maker() as session,
             async_sql_exception_handler(),
         ):
-            query = select(CheckpointORM).where(
-                CheckpointORM.thread_id == thread_id
-            )
+            query = select(CheckpointORM).where(CheckpointORM.thread_id == thread_id)
 
             if checkpoint_ns is not None:
                 query = query.where(CheckpointORM.checkpoint_ns == checkpoint_ns)

@@ -259,6 +259,7 @@ async def isolated_repositories(isolated_test_schema):
     from src.domain.repositories.agent_task_tracker_repository import (
         AgentTaskTrackerRepository,
     )
+    from src.domain.repositories.checkpoint_repository import CheckpointRepository
     from src.domain.repositories.deployment_history_repository import (
         DeploymentHistoryRepository,
     )
@@ -266,7 +267,6 @@ async def isolated_repositories(isolated_test_schema):
     from src.domain.repositories.span_repository import SpanRepository
     from src.domain.repositories.task_message_repository import TaskMessageRepository
     from src.domain.repositories.task_repository import TaskRepository
-    from src.domain.repositories.checkpoint_repository import CheckpointRepository
     from src.domain.repositories.task_state_repository import TaskStateRepository
 
     # Create Redis repository with mock environment variables
@@ -370,6 +370,7 @@ async def isolated_integration_app(
     from src.domain.use_cases.agent_api_keys_use_case import AgentAPIKeysUseCase
     from src.domain.use_cases.agent_task_tracker_use_case import AgentTaskTrackerUseCase
     from src.domain.use_cases.agents_use_case import AgentsUseCase
+    from src.domain.use_cases.checkpoints_use_case import CheckpointsUseCase
     from src.domain.use_cases.deployment_history_use_case import (
         DeploymentHistoryUseCase,
     )
@@ -377,7 +378,6 @@ async def isolated_integration_app(
     from src.domain.use_cases.messages_use_case import MessagesUseCase
     from src.domain.use_cases.spans_use_case import SpanUseCase
     from src.domain.use_cases.states_use_case import StatesUseCase
-    from src.domain.use_cases.checkpoints_use_case import CheckpointsUseCase
     from src.domain.use_cases.tasks_use_case import TasksUseCase
 
     # Create use case factory functions with isolated repositories
@@ -436,7 +436,7 @@ async def isolated_integration_app(
                 pass
 
         task_service = AgentTaskService(
-            acp_client=MockAgentACPService(),
+            protocol_gateway=MockAgentACPService(),
             task_state_repository=isolated_repositories["task_state_repository"],
             task_repository=isolated_repositories["task_repository"],
             event_repository=isolated_repositories["event_repository"],
@@ -467,12 +467,12 @@ async def isolated_integration_app(
         DDatabaseAsyncReadWriteSessionMaker,
         DMongoDBDatabase,
     )
-    from src.domain.repositories.checkpoint_repository import CheckpointRepository
     from src.domain.repositories.agent_api_key_repository import AgentAPIKeyRepository
     from src.domain.repositories.agent_repository import AgentRepository
     from src.domain.repositories.agent_task_tracker_repository import (
         AgentTaskTrackerRepository,
     )
+    from src.domain.repositories.checkpoint_repository import CheckpointRepository
     from src.domain.repositories.deployment_history_repository import (
         DeploymentHistoryRepository,
     )

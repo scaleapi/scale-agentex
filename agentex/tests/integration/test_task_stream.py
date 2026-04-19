@@ -71,7 +71,7 @@ class TestTaskEventStream:
                 pass
 
         task_service = AgentTaskService(
-            acp_client=MockAgentACPService(),
+            protocol_gateway=MockAgentACPService(),
             task_state_repository=isolated_repositories["task_state_repository"],
             task_repository=isolated_repositories["task_repository"],
             event_repository=isolated_repositories["event_repository"],
@@ -98,7 +98,7 @@ class TestTaskEventStream:
                 pass
 
         task_service = AgentTaskService(
-            acp_client=MockAgentACPService(),
+            protocol_gateway=MockAgentACPService(),
             task_state_repository=isolated_repositories["task_state_repository"],
             task_repository=isolated_repositories["task_repository"],
             event_repository=isolated_repositories["event_repository"],

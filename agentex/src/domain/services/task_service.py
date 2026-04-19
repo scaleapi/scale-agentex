@@ -13,7 +13,7 @@ from src.domain.entities.tasks import TaskEntity, TaskRelationships, TaskStatus
 from src.domain.repositories.event_repository import DEventRepository
 from src.domain.repositories.task_repository import DTaskRepository
 from src.domain.repositories.task_state_repository import DTaskStateRepository
-from src.domain.services.agent_acp_service import DAgentACPService
+from src.domain.services.agent_acp_service import DAgentProtocolGateway
 from src.utils.ids import orm_id
 from src.utils.logging import make_logger
 from src.utils.stream_topics import get_task_event_stream_topic
@@ -23,18 +23,18 @@ logger = make_logger(__name__)
 
 class AgentTaskService:
     """
-    Service for managing agent tasks and forwarding operations to ACP servers.
+    Service for managing agent tasks and forwarding operations to agent servers.
     """
 
     def __init__(
         self,
-        acp_client: DAgentACPService,
+        protocol_gateway: DAgentProtocolGateway,
         task_state_repository: DTaskStateRepository,
         task_repository: DTaskRepository,
         event_repository: DEventRepository,
         stream_repository: DRedisStreamRepository,
     ):
-        self.acp_client = acp_client
+        self.protocol_gateway = protocol_gateway
         self.task_state_repository = task_state_repository
         self.task_repository = task_repository
         self.event_repository = event_repository
@@ -63,13 +63,13 @@ class AgentTaskService:
                 id=orm_id(),
                 name=task_name,
                 status=TaskStatus.RUNNING,
-                status_reason="Task created, forwarding to ACP server",
+                status_reason="Task created, forwarding to agent server",
                 params=task_params,
             ),
         )
         return task_entity
 
-    async def create_task_and_forward_to_acp(
+    async def create_task_and_forward(
         self,
         agent: AgentEntity,
         task_name: str | None = None,
@@ -77,11 +77,11 @@ class AgentTaskService:
     ) -> TaskEntity:
         """
         Create a new task record in the repository with single agent (maintains existing interface).
-        Then, forward the task to the ACP server.
+        Then, forward the task to the agent server.
 
         Args:
             agent: The agent to create the task for
-            task_params: The parameters for the task to be sent to the ACP server
+            task_params: The parameters for the task to be sent to the agent server
 
         Returns:
             Task containing the created task info
@@ -92,38 +92,38 @@ class AgentTaskService:
 
         if agent.acp_type == ACPType.SYNC:
             logger.info(
-                "For sync agents, there are no initialization handlers, skipping ACP call"
+                "For sync agents, there are no initialization handlers, skipping forwarding"
             )
             return task_entity
         try:
-            await self.acp_client.create_task(
+            await self.protocol_gateway.create_task(
                 agent=agent,
                 task=task_entity,
-                acp_url=agent.acp_url,
+                service_url=agent.acp_url,
                 params=task_params,
             )
             return task_entity
         except Exception as e:
-            logger.error(f"Error creating task in ACP: {e}")
+            logger.error(f"Error creating task: {e}")
             await self.fail_task(task_entity, str(e))
             raise e from e
 
-    async def forward_task_to_acp(
+    async def forward_task(
         self,
         agent: AgentEntity,
         task: TaskEntity,
         task_params: dict[str, Any] | None = None,
-        acp_url: str | None = None,
+        service_url: str | None = None,
     ) -> None:
         try:
-            await self.acp_client.create_task(
+            await self.protocol_gateway.create_task(
                 agent=agent,
                 task=task,
-                acp_url=acp_url or agent.acp_url,
+                service_url=service_url or agent.acp_url,
                 params=task_params,
             )
         except Exception as e:
-            logger.error(f"Error creating task in ACP: {e}")
+            logger.error(f"Error creating task: {e}")
             await self.fail_task(task, str(e))
             raise e from e
 
@@ -244,14 +244,14 @@ class AgentTaskService:
         agent: AgentEntity,
         task: TaskEntity,
         content: TaskMessageContentEntity,
-        acp_url: str,
+        service_url: str,
     ) -> TaskMessageContentEntity:
         """Send a message to a running task"""
-        return await self.acp_client.send_message(
+        return await self.protocol_gateway.send_message(
             agent=agent,
             task=task,
             content=content,
-            acp_url=acp_url,
+            service_url=service_url,
         )
 
     async def send_message_stream(
@@ -259,49 +259,51 @@ class AgentTaskService:
         agent: AgentEntity,
         task: TaskEntity,
         content: TaskMessageContentEntity,
-        acp_url: str,
+        service_url: str,
     ) -> AsyncIterator[TaskMessageUpdateEntity]:
         """Send a message to a running task and stream the response"""
         logger.info(f"TaskService: Sending message stream for task {task.id}")
-        async for chunk in self.acp_client.send_message_stream(
+        async for chunk in self.protocol_gateway.send_message_stream(
             agent=agent,
             task=task,
             content=content,
-            acp_url=acp_url,
+            service_url=service_url,
         ):
             yield chunk
 
     async def cancel_task(
-        self, agent: AgentEntity, task: TaskEntity, acp_url: str
+        self, agent: AgentEntity, task: TaskEntity, service_url: str
     ) -> TaskEntity:
         """Cancel a running task"""
-        await self.acp_client.cancel_task(agent=agent, task=task, acp_url=acp_url)
+        await self.protocol_gateway.cancel_task(
+            agent=agent, task=task, service_url=service_url
+        )
 
         task = await self.task_repository.get(id=task.id)
         task.status = TaskStatus.CANCELED
         task.status_reason = "Task canceled by user"
         return await self.task_repository.update(task)
 
-    async def create_event_and_forward_to_acp(
+    async def create_event_and_forward(
         self,
         agent: AgentEntity,
         task: TaskEntity,
-        acp_url: str,
+        service_url: str,
         content: TaskMessageContentEntity | None = None,
         request_headers: dict[str, str] | None = None,
     ) -> EventEntity:
-        """Create an event and forward it to the ACP server"""
+        """Create an event and forward it to the agent server"""
         event = await self.event_repository.create(
             id=orm_id(),
             task_id=task.id,
             agent_id=agent.id,
             content=content,
         )
-        await self.acp_client.send_event(
+        await self.protocol_gateway.send_event(
             agent=agent,
             event=event,
             task=task,
-            acp_url=acp_url,
+            service_url=service_url,
             request_headers=request_headers,
         )
         return event

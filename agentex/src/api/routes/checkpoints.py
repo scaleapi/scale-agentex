@@ -2,6 +2,10 @@ import base64
 
 from fastapi import APIRouter, Response
 
+from src.api.schemas.authorization_types import (
+    AgentexResourceType,
+    AuthorizedOperationType,
+)
 from src.api.schemas.checkpoints import (
     BlobResponse,
     CheckpointListItem,
@@ -13,10 +17,6 @@ from src.api.schemas.checkpoints import (
     PutCheckpointResponse,
     PutWritesRequest,
     WriteResponse,
-)
-from src.api.schemas.authorization_types import (
-    AgentexResourceType,
-    AuthorizedOperationType,
 )
 from src.domain.use_cases.checkpoints_use_case import DCheckpointsUseCase
 from src.utils.authorization_shortcuts import DAuthorizedBodyId
@@ -95,7 +95,9 @@ async def put_checkpoint(
     request: PutCheckpointRequest,
     checkpoints_use_case: DCheckpointsUseCase,
     _authorized_task_id: DAuthorizedBodyId(
-        AgentexResourceType.task, AuthorizedOperationType.execute, field_name="thread_id"
+        AgentexResourceType.task,
+        AuthorizedOperationType.execute,
+        field_name="thread_id",
     ),
 ) -> PutCheckpointResponse:
     blobs = [
@@ -133,7 +135,9 @@ async def put_writes(
     request: PutWritesRequest,
     checkpoints_use_case: DCheckpointsUseCase,
     _authorized_task_id: DAuthorizedBodyId(
-        AgentexResourceType.task, AuthorizedOperationType.execute, field_name="thread_id"
+        AgentexResourceType.task,
+        AuthorizedOperationType.execute,
+        field_name="thread_id",
     ),
 ) -> Response:
     writes = [

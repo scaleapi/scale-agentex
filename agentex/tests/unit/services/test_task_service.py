@@ -34,8 +34,8 @@ async def create_or_get_agent(agent_repository, agent):
 
 
 @pytest.fixture
-def mock_acp_client():
-    """Mock ACP client for testing service interactions (external dependency)"""
+def mock_protocol_gateway():
+    """Mock protocol gateway for testing service interactions (external dependency)"""
     mock = AsyncMock()
     mock.create_task = AsyncMock()
     mock.send_message = AsyncMock()
@@ -71,15 +71,15 @@ def event_repository(postgres_session_maker):
 
 @pytest.fixture
 def task_service(
-    mock_acp_client,
+    mock_protocol_gateway,
     task_repository,
     task_state_repository,
     event_repository,
     redis_stream_repository,
 ):
-    """Create TaskService instance with real repositories and mocked ACP client"""
+    """Create TaskService instance with real repositories and mocked protocol gateway"""
     return AgentTaskService(
-        acp_client=mock_acp_client,
+        protocol_gateway=mock_protocol_gateway,
         task_repository=task_repository,
         task_state_repository=task_state_repository,
         event_repository=event_repository,
@@ -154,7 +154,7 @@ class TestAgentTaskService:
         assert result.id is not None
         assert result.name == "integration-test"
         assert result.status == TaskStatus.RUNNING
-        assert result.status_reason == "Task created, forwarding to ACP server"
+        assert result.status_reason == "Task created, forwarding to agent server"
 
     async def test_create_task_without_name(
         self, task_service, task_repository, agent_repository, sample_agent
@@ -171,7 +171,7 @@ class TestAgentTaskService:
         assert result.id is not None
         assert result.name is None
         assert result.status == TaskStatus.RUNNING
-        assert result.status_reason == "Task created, forwarding to ACP server"
+        assert result.status_reason == "Task created, forwarding to agent server"
 
     async def test_create_task_with_params(
         self, task_service, agent_repository, sample_agent
@@ -197,7 +197,7 @@ class TestAgentTaskService:
         assert result.name == "task-with-params"
         assert result.params == task_params
         assert result.status == TaskStatus.RUNNING
-        assert result.status_reason == "Task created, forwarding to ACP server"
+        assert result.status_reason == "Task created, forwarding to agent server"
 
     async def test_create_task_with_params_retrieval(
         self, task_service, agent_repository, sample_agent
@@ -248,10 +248,10 @@ class TestAgentTaskService:
         retrieved_task = await task_service.get_task(id=result.id)
         assert retrieved_task.params is None
 
-    async def test_create_task_and_forward_to_acp_success(
+    async def test_create_task_and_forward_success(
         self,
         task_service,
-        mock_acp_client,
+        mock_protocol_gateway,
         task_repository,
         agent_repository,
         sample_agent,
@@ -260,10 +260,10 @@ class TestAgentTaskService:
         # Given - Persist the agent first to satisfy foreign key constraints
         await create_or_get_agent(agent_repository, sample_agent)
         task_params = {"param1": "value1", "param2": "value2"}
-        mock_acp_client.create_task.return_value = None
+        mock_protocol_gateway.create_task.return_value = None
 
         # When
-        result = await task_service.create_task_and_forward_to_acp(
+        result = await task_service.create_task_and_forward(
             agent=sample_agent, task_name="forwarded-task", task_params=task_params
         )
 
@@ -273,20 +273,20 @@ class TestAgentTaskService:
         assert result.name == "forwarded-task"
         assert result.params == task_params  # Verify params are stored in the task
         assert result.status == TaskStatus.RUNNING
-        assert result.status_reason == "Task created, forwarding to ACP server"
+        assert result.status_reason == "Task created, forwarding to agent server"
 
-        # Verify ACP client was called with correct parameters
-        mock_acp_client.create_task.assert_called_once_with(
+        # Verify protocol gateway was called with correct parameters
+        mock_protocol_gateway.create_task.assert_called_once_with(
             agent=sample_agent,
             task=result,  # Use the actual created task
-            acp_url=sample_agent.acp_url,
+            service_url=sample_agent.acp_url,
             params=task_params,
         )
 
     async def test_create_task_and_forward_sync_agent_skips_acp(
         self,
         task_service,
-        mock_acp_client,
+        mock_protocol_gateway,
         task_repository,
         agent_repository,
         sample_sync_agent,
@@ -296,7 +296,7 @@ class TestAgentTaskService:
         await create_or_get_agent(agent_repository, sample_sync_agent)
 
         # When
-        result = await task_service.create_task_and_forward_to_acp(
+        result = await task_service.create_task_and_forward(
             agent=sample_sync_agent, task_name="sync-task"
         )
 
@@ -305,15 +305,15 @@ class TestAgentTaskService:
         assert result.id is not None
         assert result.name == "sync-task"
         assert result.status == TaskStatus.RUNNING
-        assert result.status_reason == "Task created, forwarding to ACP server"
+        assert result.status_reason == "Task created, forwarding to agent server"
 
         # Verify ACP client was NOT called for sync agents
-        mock_acp_client.create_task.assert_not_called()
+        mock_protocol_gateway.create_task.assert_not_called()
 
     async def test_create_task_and_forward_acp_error_handling(
         self,
         task_service,
-        mock_acp_client,
+        mock_protocol_gateway,
         task_repository,
         agent_repository,
         sample_agent,
@@ -322,16 +322,16 @@ class TestAgentTaskService:
         # Given - Persist the agent first to satisfy foreign key constraints
         await create_or_get_agent(agent_repository, sample_agent)
         acp_error = Exception("ACP server unavailable")
-        mock_acp_client.create_task.side_effect = acp_error
+        mock_protocol_gateway.create_task.side_effect = acp_error
 
         # When / Then
         with pytest.raises(Exception) as exc_info:
-            await task_service.create_task_and_forward_to_acp(agent=sample_agent)
+            await task_service.create_task_and_forward(agent=sample_agent)
 
         assert str(exc_info.value) == "ACP server unavailable"
 
         # Verify task was created but then marked as failed due to ACP error
-        mock_acp_client.create_task.assert_called_once()
+        mock_protocol_gateway.create_task.assert_called_once()
 
     async def test_fail_task(
         self, task_service, task_repository, agent_repository, sample_agent
@@ -519,7 +519,7 @@ class TestAgentTaskService:
     async def test_send_message(
         self,
         task_service,
-        mock_acp_client,
+        mock_protocol_gateway,
         sample_agent,
         sample_task,
         sample_message_content,
@@ -527,30 +527,30 @@ class TestAgentTaskService:
         """Test sending message to task"""
         # Given
         acp_url = "http://test-acp.example.com"
-        mock_acp_client.send_message.return_value = sample_message_content
+        mock_protocol_gateway.send_message.return_value = sample_message_content
 
         # When
         result = await task_service.send_message(
             agent=sample_agent,
             task=sample_task,
             content=sample_message_content,
-            acp_url=acp_url,
+            service_url=acp_url,
         )
 
         # Then
         assert result == sample_message_content
-        mock_acp_client.send_message.assert_called_once_with(
+        mock_protocol_gateway.send_message.assert_called_once_with(
             agent=sample_agent,
             task=sample_task,
             content=sample_message_content,
-            acp_url=acp_url,
+            service_url=acp_url,
         )
 
     #
     async def test_send_message_stream(
         self,
         task_service,
-        mock_acp_client,
+        mock_protocol_gateway,
         sample_agent,
         sample_task,
         sample_message_content,
@@ -574,7 +574,7 @@ class TestAgentTaskService:
                 yield update
 
         # Replace the entire method with our async generator
-        mock_acp_client.send_message_stream = mock_stream_method
+        mock_protocol_gateway.send_message_stream = mock_stream_method
 
         # When
         updates = []
@@ -582,7 +582,7 @@ class TestAgentTaskService:
             agent=sample_agent,
             task=sample_task,
             content=sample_message_content,
-            acp_url=acp_url,
+            service_url=acp_url,
         ):
             updates.append(update)
 
@@ -601,7 +601,7 @@ class TestAgentTaskService:
     async def test_cancel_task(
         self,
         task_service,
-        mock_acp_client,
+        mock_protocol_gateway,
         task_repository,
         agent_repository,
         sample_agent,
@@ -616,7 +616,7 @@ class TestAgentTaskService:
 
         # When
         result = await task_service.cancel_task(
-            agent=sample_agent, task=created_task, acp_url=acp_url
+            agent=sample_agent, task=created_task, service_url=acp_url
         )
 
         # Then
@@ -624,8 +624,8 @@ class TestAgentTaskService:
         assert result.status_reason == "Task canceled by user"
 
         # Verify ACP client was called to cancel the task
-        mock_acp_client.cancel_task.assert_called_once_with(
-            agent=sample_agent, task=created_task, acp_url=acp_url
+        mock_protocol_gateway.cancel_task.assert_called_once_with(
+            agent=sample_agent, task=created_task, service_url=acp_url
         )
 
         # Verify task status is updated in the database
@@ -633,10 +633,10 @@ class TestAgentTaskService:
         assert updated_task.status == TaskStatus.CANCELED
         assert updated_task.status_reason == "Task canceled by user"
 
-    async def test_create_event_and_forward_to_acp(
+    async def test_create_event_and_forward(
         self,
         task_service,
-        mock_acp_client,
+        mock_protocol_gateway,
         event_repository,
         agent_repository,
         sample_agent,
@@ -651,10 +651,10 @@ class TestAgentTaskService:
         acp_url = "http://test-acp.example.com"
 
         # When
-        result = await task_service.create_event_and_forward_to_acp(
+        result = await task_service.create_event_and_forward(
             agent=sample_agent,
             task=created_task,
-            acp_url=acp_url,
+            service_url=acp_url,
             content=sample_message_content,
         )
 
@@ -669,18 +669,18 @@ class TestAgentTaskService:
             assert result.content.content == sample_message_content.content
 
         # Verify ACP client was called to send the event
-        mock_acp_client.send_event.assert_called_once_with(
+        mock_protocol_gateway.send_event.assert_called_once_with(
             agent=sample_agent,
             event=result,  # Use the actual created event
             task=created_task,
-            acp_url=acp_url,
+            service_url=acp_url,
             request_headers=None,
         )
 
-    async def test_create_event_and_forward_to_acp_with_headers(
+    async def test_create_event_and_forward_with_headers(
         self,
         task_service,
-        mock_acp_client,
+        mock_protocol_gateway,
         event_repository,
         agent_repository,
         sample_agent,
@@ -699,10 +699,10 @@ class TestAgentTaskService:
         }
 
         # When
-        result = await task_service.create_event_and_forward_to_acp(
+        result = await task_service.create_event_and_forward(
             agent=sample_agent,
             task=created_task,
-            acp_url=acp_url,
+            service_url=acp_url,
             content=sample_message_content,
             request_headers=request_headers,
         )
@@ -715,11 +715,11 @@ class TestAgentTaskService:
         assert result.content is not None
 
         # Verify ACP client was called with request_headers
-        mock_acp_client.send_event.assert_called_once_with(
+        mock_protocol_gateway.send_event.assert_called_once_with(
             agent=sample_agent,
             event=result,
             task=created_task,
-            acp_url=acp_url,
+            service_url=acp_url,
             request_headers=request_headers,
         )
 
