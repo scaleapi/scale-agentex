@@ -131,10 +131,11 @@ def task_service(
 
 
 @pytest.fixture
-def task_message_service(task_message_repository):
+def task_message_service(task_message_repository, redis_stream_repository):
     """Real TaskMessageService instance"""
     return TaskMessageService(
         message_repository=task_message_repository,
+        stream_repository=redis_stream_repository,
     )
 
 
