@@ -128,7 +128,7 @@ requires-dist = [
     { name = "httpx", extras = ["http2"], specifier = ">=0.27.2" },
     { name = "json-log-formatter", specifier = ">=1.1.1" },
     { name = "kubernetes-asyncio", specifier = ">=31.1.0,<32" },
-    { name = "litellm", specifier = ">=1.48.2,<2" },
+    { name = "litellm", specifier = ">=1.48.2,<1.82.7" },
     { name = "opentelemetry-api", specifier = ">=1.28.0" },
     { name = "opentelemetry-exporter-otlp", specifier = ">=1.28.0" },
     { name = "opentelemetry-sdk", specifier = ">=1.28.0" },
