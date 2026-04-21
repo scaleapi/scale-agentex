@@ -151,17 +151,34 @@ function TaskMessagesImpl({
 
   const shouldShowThinkingForLastPair = useMemo(() => {
     if (messagePairs.length === 0) return false;
+    if (rpcStatus !== 'pending' && rpcStatus !== 'success') return false;
 
     const lastPair = messagePairs[messagePairs.length - 1]!;
-    const hasNoAgentMessages = lastPair.agentMessages.length === 0;
-    const hasUserMessage = lastPair.userMessage !== null;
 
-    return (
-      hasUserMessage &&
-      hasNoAgentMessages &&
-      (rpcStatus === 'pending' || rpcStatus === 'success')
-    );
-  }, [messagePairs, rpcStatus]);
+    // No agent messages yet — waiting for first response
+    if (lastPair.agentMessages.length === 0) {
+      return lastPair.userMessage !== null;
+    }
+
+    const lastAgentMessage =
+      lastPair.agentMessages[lastPair.agentMessages.length - 1]!;
+    const lastType = lastAgentMessage.content.type;
+
+    // Already have text streaming or complete — not "thinking"
+    if (lastType === 'text') return false;
+
+    // Tool or reasoning still in progress — show their own indicator, not "Thinking..."
+    if (lastAgentMessage.streaming_status === 'IN_PROGRESS') return false;
+    if (
+      lastType === 'tool_request' &&
+      pendingToolCallIds.has(lastAgentMessage.content.tool_call_id)
+    )
+      return false;
+
+    // Last message is a completed tool_request, tool_response, reasoning, or data
+    // with no following text — agent is thinking about the next step
+    return true;
+  }, [messagePairs, rpcStatus, pendingToolCallIds]);
 
   // Measure container height for last-pair min-height
   useEffect(() => {

@@ -150,6 +150,7 @@ class SpanORM(BaseORM):
     __tablename__ = "spans"
     id = Column(String, primary_key=True, default=orm_id)  # Using UUIDs for IDs
     trace_id = Column(String, nullable=False)
+    task_id = Column(String, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
     parent_id = Column(String, nullable=True)
     name = Column(String, nullable=False)
     start_time = Column(DateTime(timezone=True), nullable=False)
@@ -166,6 +167,8 @@ class SpanORM(BaseORM):
         Index("ix_spans_trace_id_start_time", "trace_id", "start_time"),
         # Index for traversing span hierarchy
         Index("ix_spans_parent_id", "parent_id"),
+        # Index for filtering spans by task_id
+        Index("ix_spans_task_id", "task_id"),
     )
 
 

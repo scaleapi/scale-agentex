@@ -8,8 +8,8 @@ import type { Span } from 'agentex/resources';
 
 export const spansKeys = {
   all: ['spans'] as const,
-  byTraceId: (traceId: string | null) =>
-    traceId ? ([...spansKeys.all, traceId] as const) : spansKeys.all,
+  byTaskId: (taskId: string | null) =>
+    taskId ? ([...spansKeys.all, 'task', taskId] as const) : spansKeys.all,
 };
 
 type UseSpansState = {
@@ -21,24 +21,37 @@ type UseSpansState = {
 /**
  * Fetches execution spans for observability and debugging of task execution.
  *
- * Spans are OpenTelemetry-style trace records that show the execution flow of an agent task.
- * The query is automatically disabled when no traceId is provided.
+ * Queries by task_id first. Falls back to trace_id=taskId for backward
+ * compatibility with spans created before the task_id column was added.
  *
- * @param traceId - string | null - The trace ID to fetch spans for, or null to disable the query
+ * @param taskId - string | null - The task ID to fetch spans for, or null to disable the query
  * @returns UseSpansState - Object containing the spans array, loading state, and any error message
  */
-export function useSpans(traceId: string | null): UseSpansState {
+export function useSpans(taskId: string | null): UseSpansState {
   const { agentexClient } = useAgentexClient();
 
   const { data, isLoading, error } = useQuery<Span[], Error>({
-    queryKey: spansKeys.byTraceId(traceId),
+    queryKey: spansKeys.byTaskId(taskId),
     queryFn: async ({ signal }) => {
-      if (!traceId) {
+      if (!taskId) {
         return [];
       }
-      return await agentexClient.spans.list({ trace_id: traceId }, { signal });
+
+      // task_id is not yet in the SDK types (SDK update pending), but the
+      // server already accepts it — cast until the SDK is regenerated.
+      const spansByTaskId = await agentexClient.spans.list(
+        { task_id: taskId } as Parameters<typeof agentexClient.spans.list>[0],
+        { signal }
+      );
+
+      if (spansByTaskId.length > 0) {
+        return spansByTaskId;
+      }
+
+      // Fallback: query by trace_id=taskId for backward compat with old spans
+      return await agentexClient.spans.list({ trace_id: taskId }, { signal });
     },
-    enabled: traceId !== null,
+    enabled: taskId !== null,
   });
 
   return {

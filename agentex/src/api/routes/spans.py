@@ -23,6 +23,7 @@ async def create_span(
     return await span_use_case.create(
         id=request.id,
         trace_id=request.trace_id,
+        task_id=request.task_id,
         name=request.name,
         parent_id=request.parent_id,
         start_time=request.start_time,
@@ -48,6 +49,7 @@ async def partial_update_span(
     return await span_use_case.partial_update(
         id=span_id,
         trace_id=request.trace_id,
+        task_id=request.task_id,
         name=request.name,
         parent_id=request.parent_id,
         start_time=request.start_time,
@@ -80,17 +82,19 @@ async def get_span(
 async def list_spans(
     span_use_case: DSpanUseCase,
     trace_id: str | None = None,
+    task_id: str | None = None,
     limit: int = Query(default=50, ge=1, le=1000),
     page_number: int = Query(default=1, ge=1),
     order_by: str | None = None,
     order_direction: str = "desc",
 ) -> list[Span]:
     """
-    List all spans for a given trace ID
+    List spans, optionally filtered by trace_id and/or task_id
     """
-    logger.info(f"Listing spans for trace ID: {trace_id}")
+    logger.info(f"Listing spans for trace_id={trace_id}, task_id={task_id}")
     spans = await span_use_case.list(
         trace_id=trace_id,
+        task_id=task_id,
         limit=limit,
         page_number=page_number,
         order_by=order_by,
