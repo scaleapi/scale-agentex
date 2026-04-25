@@ -7,7 +7,7 @@ requires-python = ">=3.12,<3.13"
 readme = "README.md"
 dependencies = [
     "fastapi>=0.115.0",
-    "litellm>=1.48.2,<2",
+    "litellm>=1.83.7,<2", # GHSA-xqmj-j6mv-4862 (SSTI in /prompts/test) — patched in 1.83.7
     "python-dotenv>=1.0.1,<2",
     "temporalio>=1.18.0,<2",
     "uvicorn[standard]>=0.35.0,<0.36",
@@ -47,7 +47,7 @@ test = [
     "pytest-asyncio>=1.0.0,<2",
     "pytest-cov>=5.0.0,<6",
     "testcontainers>=4.0.0,<5",
-    "httpx[http2]>=0.27.0,<0.28", # for test client
+    "httpx[http2]>=0.27.0,<0.29", # for test client (widened: litellm>=1.83.7 requires httpx==0.28.1)
     "factory-boy>=3.3.0,<4", # for test data factories
     "greenlet>=3.2.3",
     "asyncpg>=0.29.0",
