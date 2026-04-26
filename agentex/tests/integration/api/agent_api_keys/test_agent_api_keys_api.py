@@ -557,7 +557,7 @@ class TestAgentAPIKeysIntegration:
         assert (
             call_args[0][1] == "http://test-acp:8000/some/path"
         )  # URL should match agent's ACP URL
-        assert call_args[1]["content"] == b'{"key": "value"}'  # Body should match
+        assert call_args[1]["content"] == b'{"key":"value"}'  # Body should match (httpx 0.28+ uses compact JSON serialization)
 
         isolated_api_key_http_client.send.assert_called_once()
         call_args = isolated_api_key_http_client.send.call_args
@@ -806,7 +806,7 @@ class TestAgentAPIKeysIntegration:
 
         # Good Slack signature
         request_timestamp = int(time.time())
-        payload_body = b'{"api_app_id": "test-api-app-id"}'
+        payload_body = b'{"api_app_id":"test-api-app-id"}'  # compact JSON (httpx 0.28+ default)
         hash_object = hmac.new(
             test_agent_api_key_slack.api_key.encode("utf-8"),
             msg=f"v0:{request_timestamp}:".encode() + payload_body,
