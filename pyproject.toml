@@ -27,7 +27,6 @@ environments = [
 ]
 
 # Override agentex-sdk's fastapi<0.116 pin to allow starlette CVE-2025-62727 fix
-# Override agentex-sdk's httpx<0.28 pin to allow litellm>=1.83.7 (GHSA-xqmj-j6mv-4862, requires httpx==0.28.1)
 override-dependencies = [
     "fastapi>=0.135.0",
     "starlette>=0.52.0",
