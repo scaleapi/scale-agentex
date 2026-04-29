@@ -5,6 +5,7 @@ Tests the full HTTP request → FastAPI → response cycle with API-first valida
 
 import hashlib
 import hmac
+import json
 import time
 
 import pytest
@@ -557,7 +558,7 @@ class TestAgentAPIKeysIntegration:
         assert (
             call_args[0][1] == "http://test-acp:8000/some/path"
         )  # URL should match agent's ACP URL
-        assert call_args[1]["content"] == b'{"key": "value"}'  # Body should match
+        assert json.loads(call_args[1]["content"]) == {"key": "value"}
 
         isolated_api_key_http_client.send.assert_called_once()
         call_args = isolated_api_key_http_client.send.call_args
@@ -814,8 +815,9 @@ class TestAgentAPIKeysIntegration:
         )
         forward_response = await isolated_client.post(
             "/agents/forward/name/test-agent/some/path",
-            json={"api_app_id": test_agent_api_key_slack.name},
+            content=payload_body,
             headers={
+                "content-type": "application/json",
                 "x-slack-signature": "v0=" + hash_object.hexdigest(),
                 "x-slack-request-timestamp": str(request_timestamp),
             },
