@@ -21,7 +21,6 @@ from src.domain.repositories.task_repository import TaskRepository
 from src.domain.repositories.task_state_repository import TaskStateRepository
 from src.domain.services.agent_acp_service import AgentACPService
 from src.domain.services.task_service import AgentTaskService
-from src.domain.use_cases.agents_acp_use_case import AgentsACPUseCase
 from src.domain.use_cases.agents_use_case import AgentsUseCase
 
 
@@ -56,28 +55,24 @@ class TestACPTypeBackwardsCompatibility:
         assert ACPType.SYNC in ACP_TYPE_TO_ALLOWED_RPC_METHODS
 
     @pytest.mark.asyncio
+    @pytest.mark.asyncio
     async def test_validate_rpc_method_accepts_agentic_for_task_create(self):
-        """Verify AGENTIC agents can use task/create method"""
-        # Should not raise an error
-        AgentsACPUseCase._validate_rpc_method_for_acp_type(
-            ACPType.AGENTIC, AgentRPCMethod.TASK_CREATE
-        )
+        """Verify AGENTIC agents can use task/create method via gateway"""
+        # Use the static ACP_TYPE_TO_ALLOWED_RPC_METHODS for backward compat validation
+        allowed = ACP_TYPE_TO_ALLOWED_RPC_METHODS[ACPType.AGENTIC]
+        assert AgentRPCMethod.TASK_CREATE in allowed
 
     @pytest.mark.asyncio
     async def test_validate_rpc_method_accepts_agentic_for_event_send(self):
-        """Verify AGENTIC agents can use event/send method"""
-        # Should not raise an error
-        AgentsACPUseCase._validate_rpc_method_for_acp_type(
-            ACPType.AGENTIC, AgentRPCMethod.EVENT_SEND
-        )
+        """Verify AGENTIC agents can use event/send method via gateway"""
+        allowed = ACP_TYPE_TO_ALLOWED_RPC_METHODS[ACPType.AGENTIC]
+        assert AgentRPCMethod.EVENT_SEND in allowed
 
     @pytest.mark.asyncio
     async def test_validate_rpc_method_accepts_agentic_for_task_cancel(self):
-        """Verify AGENTIC agents can use task/cancel method"""
-        # Should not raise an error
-        AgentsACPUseCase._validate_rpc_method_for_acp_type(
-            ACPType.AGENTIC, AgentRPCMethod.TASK_CANCEL
-        )
+        """Verify AGENTIC agents can use task/cancel method via gateway"""
+        allowed = ACP_TYPE_TO_ALLOWED_RPC_METHODS[ACPType.AGENTIC]
+        assert AgentRPCMethod.TASK_CANCEL in allowed
 
     @pytest.mark.asyncio
     async def test_agentic_agent_forwards_task_to_acp(self):
@@ -90,7 +85,7 @@ class TestACPTypeBackwardsCompatibility:
         stream_repo = AsyncMock()
 
         task_service = AgentTaskService(
-            acp_client=acp_client,
+            protocol_gateway=acp_client,
             task_state_repository=task_state_repo,
             task_repository=task_repo,
             event_repository=event_repo,
@@ -117,7 +112,7 @@ class TestACPTypeBackwardsCompatibility:
         acp_client.create_task.return_value = None
 
         # Execute
-        result = await task_service.create_task_and_forward_to_acp(
+        result = await task_service.create_task_and_forward(
             agent=agentic_agent,
             task_name="test-task",
             task_params={"test": "params"},
@@ -127,7 +122,7 @@ class TestACPTypeBackwardsCompatibility:
         acp_client.create_task.assert_called_once_with(
             agent=agentic_agent,
             task=task,
-            acp_url=agentic_agent.acp_url,
+            service_url=agentic_agent.acp_url,
             params={"test": "params"},
         )
         assert result == task
@@ -143,7 +138,7 @@ class TestACPTypeBackwardsCompatibility:
         stream_repo = AsyncMock()
 
         task_service = AgentTaskService(
-            acp_client=acp_client,
+            protocol_gateway=acp_client,
             task_state_repository=task_state_repo,
             task_repository=task_repo,
             event_repository=event_repo,
@@ -169,7 +164,7 @@ class TestACPTypeBackwardsCompatibility:
         task_repo.create.return_value = task
 
         # Execute
-        result = await task_service.create_task_and_forward_to_acp(
+        result = await task_service.create_task_and_forward(
             agent=sync_agent,
             task_name="test-task",
             task_params={"test": "params"},
@@ -190,7 +185,7 @@ class TestACPTypeBackwardsCompatibility:
         stream_repo = AsyncMock()
 
         task_service = AgentTaskService(
-            acp_client=acp_client,
+            protocol_gateway=acp_client,
             task_state_repository=task_state_repo,
             task_repository=task_repo,
             event_repository=event_repo,
@@ -217,7 +212,7 @@ class TestACPTypeBackwardsCompatibility:
         acp_client.create_task.return_value = None
 
         # Execute
-        result = await task_service.create_task_and_forward_to_acp(
+        result = await task_service.create_task_and_forward(
             agent=async_agent,
             task_name="test-task",
             task_params={"test": "params"},
@@ -227,7 +222,7 @@ class TestACPTypeBackwardsCompatibility:
         acp_client.create_task.assert_called_once_with(
             agent=async_agent,
             task=task,
-            acp_url=async_agent.acp_url,
+            service_url=async_agent.acp_url,
             params={"test": "params"},
         )
         assert result == task

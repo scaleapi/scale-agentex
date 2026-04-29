@@ -27,6 +27,10 @@ class AgentInputType(str, Enum):
     JSON = "json"
 
 
+class AgentProtocol(str, Enum):
+    ACP = "acp"
+
+
 class AgentEntity(BaseModel):
     id: str = Field(..., description="The unique identifier of the agent.")
     docker_image: str | None = Field(
@@ -64,6 +68,10 @@ class AgentEntity(BaseModel):
     )
     agent_input_type: AgentInputType | None = Field(
         None, description="The type of input the agent expects."
+    )
+    protocol: AgentProtocol = Field(
+        AgentProtocol.ACP,
+        description="The communication protocol used by this agent.",
     )
     production_deployment_id: str | None = Field(
         None, description="ID of the current production deployment."

@@ -150,7 +150,7 @@ class TestAgentACPService:
         result = await agent_acp_service.create_task(
             agent=sample_agent,
             task=sample_task,
-            acp_url="http://test-acp.example.com",
+            service_url="http://test-acp.example.com",
             params={"test_param": "value"},
         )
 
@@ -208,7 +208,7 @@ class TestAgentACPService:
             agent=sample_agent,
             task=sample_task,
             content=sample_text_content,
-            acp_url="http://test-acp.example.com",
+            service_url="http://test-acp.example.com",
         )
 
         # Then
@@ -264,7 +264,7 @@ class TestAgentACPService:
             agent=sample_agent,
             task=sample_task,
             content=sample_text_content,
-            acp_url="http://test-acp.example.com",
+            service_url="http://test-acp.example.com",
         )
 
         # Then
@@ -320,7 +320,7 @@ class TestAgentACPService:
             agent=sample_agent,
             task=sample_task,
             content=sample_text_content,
-            acp_url="http://test-acp.example.com",
+            service_url="http://test-acp.example.com",
         )
 
         # Then
@@ -382,7 +382,7 @@ class TestAgentACPService:
             agent=sample_agent,
             task=sample_task,
             content=sample_text_content,
-            acp_url="http://test-acp.example.com",
+            service_url="http://test-acp.example.com",
         )
 
         # Then
@@ -426,7 +426,7 @@ class TestAgentACPService:
         result = await agent_acp_service.cancel_task(
             agent=sample_agent,
             task=sample_task,
-            acp_url="http://test-acp.example.com",
+            service_url="http://test-acp.example.com",
         )
 
         # Then
@@ -468,7 +468,7 @@ class TestAgentACPService:
             agent=sample_agent,
             event=sample_event,
             task=sample_task,
-            acp_url="http://test-acp.example.com",
+            service_url="http://test-acp.example.com",
         )
 
         # Then
@@ -522,7 +522,7 @@ class TestAgentACPService:
                 agent=sample_agent,
                 event=sample_event,
                 task=sample_task,
-                acp_url="http://test-acp.example.com",
+                service_url="http://test-acp.example.com",
                 request_headers=request_headers,
             )
 
@@ -581,7 +581,7 @@ class TestAgentACPService:
             agent=sample_agent,
             event=sample_event,
             task=sample_task,
-            acp_url="http://test-acp.example.com",
+            service_url="http://test-acp.example.com",
         )
 
         # Then
@@ -629,7 +629,7 @@ class TestAgentACPService:
             await agent_acp_service.create_task(
                 agent=sample_agent,
                 task=sample_task,
-                acp_url="http://test-acp.example.com",
+                service_url="http://test-acp.example.com",
             )
 
         assert "RPC error" in str(exc_info.value)
@@ -655,7 +655,7 @@ class TestAgentACPService:
             await agent_acp_service.create_task(
                 agent=sample_agent,
                 task=sample_task,
-                acp_url="http://test-acp.example.com",
+                service_url="http://test-acp.example.com",
             )
 
         assert "Connection timeout" in str(exc_info.value)

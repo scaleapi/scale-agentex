@@ -6,11 +6,9 @@ Each activity has a single responsibility, allowing the workflow to orchestrate
 the status checks and the database updates.
 """
 
-import json
-
-import httpx
 from src.domain.entities.agents import AgentStatus
 from src.domain.repositories.agent_repository import AgentRepository
+from src.domain.services.agent_protocol_gateway import AgentProtocolGateway
 from src.utils.logging import make_logger
 from temporalio import activity
 
@@ -37,10 +35,12 @@ class HealthCheckActivities:
     - Updating agent status in the database
     """
 
-    def __init__(self, agent_repo: AgentRepository, http_client: httpx.AsyncClient):
-        """Initialize with session maker and http client."""
+    def __init__(
+        self, agent_repo: AgentRepository, protocol_gateway: AgentProtocolGateway
+    ):
+        """Initialize with agent repository and protocol gateway."""
         self.agent_repo = agent_repo
-        self.http_client = http_client
+        self.protocol_gateway = protocol_gateway
 
     @activity.defn(name=CHECK_STATUS_ACTIVITY)
     async def check_status_activity(self, agent_id: str, acp_url: str) -> bool:
@@ -55,36 +55,9 @@ class HealthCheckActivities:
             bool: True if the agent is healthy, False otherwise
         """
         logger.info(f"Checking status of agent {agent_id} via {acp_url}")
-        try:
-            response = await self.http_client.get(f"{acp_url}/healthz", timeout=5)
-            if response.status_code != 200:
-                logger.error(
-                    f"Agent {agent_id} returned non-200 status: {response.status_code}"
-                )
-                return False
-            try:
-                parsed_response = response.json()
-                status = parsed_response.get("status")
-                if status != "healthy":
-                    logger.error(
-                        f"Agent {agent_id} returned non-healthy status: {status}"
-                    )
-                    return False
-                response_agent_id = parsed_response.get("agent_id")
-                if response_agent_id and response_agent_id != agent_id:
-                    logger.error(
-                        f"Agent {agent_id} returned unexpected agent ID: {response_agent_id}"
-                    )
-                    return False
-            except json.JSONDecodeError:
-                logger.error(
-                    f"Agent {agent_id} returned non-JSON response: {response.text}"
-                )
-                return False
-            return True
-        except Exception as e:
-            logger.error(f"Failed to check status of agent {agent_id}: {e}")
-        return False
+        return await self.protocol_gateway.check_health(
+            agent_id=agent_id, service_url=acp_url
+        )
 
     @activity.defn(name=UPDATE_AGENT_STATUS_ACTIVITY)
     async def update_agent_status_activity(self, agent_id: str, status: str) -> None:

@@ -9,19 +9,20 @@ import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
-import httpx
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
+from src.adapters.http.adapter_httpx import HttpxGateway
 from src.adapters.temporal.client_factory import TemporalClientFactory
 from src.config.dependencies import (
     database_async_read_only_session_maker,
     database_async_read_write_engine,
     database_async_read_write_session_maker,
-    httpx_client,
     startup_global_dependencies,
 )
 from src.config.environment_variables import EnvironmentVariables
+from src.domain.repositories.agent_api_key_repository import AgentAPIKeyRepository
 from src.domain.repositories.agent_repository import AgentRepository
+from src.domain.services.agent_acp_service import AgentACPService
 from src.temporal.activities.healthcheck_activities import HealthCheckActivities
 from src.temporal.workflows.healthcheck_workflow import HealthCheckWorkflow
 from src.utils.logging import make_logger
@@ -122,7 +123,8 @@ async def run_worker(
 
 
 def create_health_check_worker(
-    agent_repo: AgentRepository, http_client: httpx.AsyncClient
+    agent_repo: AgentRepository,
+    agent_api_key_repo: AgentAPIKeyRepository,
 ) -> asyncio.Task:
     """
     Create a Health Check worker.
@@ -133,10 +135,19 @@ def create_health_check_worker(
     logger.info("Starting Temporal Health Check Worker")
     logger.info(f"Task queue: {task_queue}")
 
+    # Construct protocol gateway
+    environment_variables = EnvironmentVariables.refresh()
+    http_gateway = HttpxGateway(environment_variables=environment_variables)
+    protocol_gateway = AgentACPService(
+        agent_repository=agent_repo,
+        agent_api_key_repository=agent_api_key_repo,
+        http_gateway=http_gateway,
+    )
+
     # Create activities instance with dependencies
     health_check_activities = HealthCheckActivities(
         agent_repo=agent_repo,
-        http_client=httpx_client(),
+        protocol_gateway=protocol_gateway,
     )
 
     # Extract activity methods
@@ -169,9 +180,12 @@ async def main() -> None:
         session_maker = database_async_read_write_session_maker(engine)
         read_only_session_maker = database_async_read_only_session_maker(engine)
         agent_repo = AgentRepository(session_maker, read_only_session_maker)
+        agent_api_key_repo = AgentAPIKeyRepository(
+            session_maker, read_only_session_maker
+        )
         health_check_worker_task = create_health_check_worker(
             agent_repo=agent_repo,
-            http_client=httpx_client(),
+            agent_api_key_repo=agent_api_key_repo,
         )
         # Wait for the worker to complete
         await health_check_worker_task

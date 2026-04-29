@@ -44,7 +44,7 @@ def create_task_service(
         task_repository=task_repository,
         task_state_repository=task_state_repository,
         event_repository=event_repository,
-        acp_client=agent_acp_service,
+        protocol_gateway=agent_acp_service,
         stream_repository=redis_stream_repository,
     )
 
