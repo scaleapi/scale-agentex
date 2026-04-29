@@ -1,4 +1,6 @@
-d1a6cde41b3f -> 4a9b7787ccd7 (head), deployments table + agents.production_deployment_id + data migration from deployment_history
+57c5ed4f59ae -> 9ff3ee32c81b (head), uppercase deployment status
+4a9b7787ccd7 -> 57c5ed4f59ae, add_task_id_to_spans
+d1a6cde41b3f -> 4a9b7787ccd7, deployments
 d024851e790c -> d1a6cde41b3f, add_langgraph_checkpoint_tables
 24429f13b8bd -> d024851e790c, add_performance_indexes
 a5d67f2d7356 -> 24429f13b8bd, add agent input type
