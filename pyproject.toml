@@ -30,6 +30,7 @@ environments = [
 override-dependencies = [
     "fastapi>=0.135.0",
     "starlette>=0.52.0",
+    "httpx[http2]>=0.28.1,<0.29",
 ]
 
 [tool.uv.workspace]
