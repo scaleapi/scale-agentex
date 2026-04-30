@@ -309,16 +309,16 @@ For a human user identity:
 ```yaml
 auth:
   principal:
-    user_id: "my-dev-cluster-user-id"        # SGP user UUID
-    account_id: "my-dev-cluster-account-id"  # Account/tenant ID the agent registers into
+    user_id: "my-dev-cluster-user-id"        # Unique identifier for the user who is deploying the agent
+    account_id: "my-dev-cluster-account-id"  # Account/tenant identifier
 ```
 
-For a service-account identity (machine identity created via the IAM dashboard):
+For a service-account identity (a machine identity intended for automated/non-interactive deploys):
 ```yaml
 auth:
   principal:
-    service_account_id: "my-service-account-uuid"  # SGP service account UUID
-    account_id: "my-account-id"                    # Account where the SA has manager/admin role
+    service_account_id: "my-service-account-uuid"  # Unique identifier for the service account that is deploying the agent
+    account_id: "my-account-id"                    # Account/tenant identifier
 ```
 
 **Auth Principal Purpose:**
@@ -332,7 +332,7 @@ auth:
 
 - **Pick one ID type**: never set both `user_id` and `service_account_id`. The platform rejects requests carrying both.
 - **For automated/non-interactive deploys**, prefer `service_account_id` — it's a long-lived machine identity that can outlive any individual user.
-- **Match the role on the target account**: whichever identity you reference must have `manager` or `admin` role on `account_id` for registration to succeed.
+- **Match permissions on the target account**: whichever identity you reference must have permissions on `account_id` sufficient to register agents.
 - **Environment-specific**: Use different IDs for dev vs prod deployment contexts.
 
 #### Helm Overrides
