@@ -300,26 +300,40 @@ kubernetes:
 - Keep under 63 characters (Kubernetes limit)
 
 #### Auth Principal Configuration
+
+The `principal` block identifies the calling identity used for authorization on
+agent registration. **Set exactly one of `user_id` or `service_account_id`** —
+they're mutually exclusive.
+
+For a human user identity:
 ```yaml
 auth:
   principal:
-    user_id: "my-dev-cluster-user-id"    # Unique identifier for the user who is deploying the agent
+    user_id: "my-dev-cluster-user-id"        # Unique identifier for the user who is deploying the agent
     account_id: "my-dev-cluster-account-id"  # Account/tenant identifier
+```
+
+For a service-account identity (a machine identity intended for automated/non-interactive deploys):
+```yaml
+auth:
+  principal:
+    service_account_id: "my-service-account-uuid"  # Unique identifier for the service account that is deploying the agent
+    account_id: "my-account-id"                    # Account/tenant identifier
 ```
 
 **Auth Principal Purpose:**
 
-- **User Identification**: Identifies the user/service account deploying the agent
-- **Deployment Authorization**: Controls who can deploy agents to specific environments
-- **Account/Tenant Isolation**: Associates deployments with specific accounts or tenants
-- **Audit Trail**: Tracks who deployed which agents and when
+- **Identity selection**: Tells the registration call who is acting — a user or a service account.
+- **Deployment Authorization**: Controls who can register agents on a given account.
+- **Account/Tenant Isolation**: Associates the registered agent with a specific account/tenant.
+- **Audit Trail**: Tracks who registered which agents and when.
 
 **Best Practices:**
 
-- **Unique per environment**: Use different user_id for dev vs prod deployment contexts
-- **Environment-specific**: `my-dev-cluster-user-id` vs `my-prod-cluster-user-id`
-- **Consistent format**: Use same naming pattern across your organization
-- **Proper identifiers**: user_id should identify the deploying user/service, account_id should identify the account_id that the agent should be created in.
+- **Pick one ID type**: never set both `user_id` and `service_account_id`. The platform rejects requests carrying both.
+- **For automated/non-interactive deploys**, prefer `service_account_id` — it's a long-lived machine identity that can outlive any individual user.
+- **Match permissions on the target account**: whichever identity you reference must have permissions on `account_id` sufficient to register agents.
+- **Environment-specific**: Use different IDs for dev vs prod deployment contexts.
 
 #### Helm Overrides
 ```yaml
