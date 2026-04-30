@@ -28,12 +28,7 @@ export function AgentexProvider({
     () =>
       new AgentexSDK({
         baseURL: agentexAPIBaseURL,
-        fetch: (input: RequestInfo | URL, init?: RequestInit) => {
-          return fetch(input, {
-            ...init,
-            credentials: 'include',
-          });
-        },
+        fetchOptions: { credentials: 'include' },
       }),
     [agentexAPIBaseURL]
   );

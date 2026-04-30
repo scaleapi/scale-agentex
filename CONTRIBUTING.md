@@ -47,27 +47,28 @@ To set up your development environment for Agentex, please refer to the [README.
 
 ---
 
-## Best Practices for Writing Commit Messages
+## Commit and PR Title Guidelines
 
-- **Separate subject from body with a blank line**.
-- **Limit the subject line to 50 characters**.
-- **Capitalize the subject line**.
-- **Do not end the subject line with a period**.
-- **Use the imperative mood in the subject line**  
-  (e.g., “Fix bug” not “Fixed bug” or “Fixes bug”).
-- **Wrap the body at 72 characters**.
+This project enforces [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) on PR titles. A CI check will validate your PR title before it can be merged.
+
+**Format:** `type: description` or `type(scope): description`
+
+**Allowed types:** `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `ci`, `build`, `perf`, `revert`
+
+**Examples:**
+```
+feat: add user authentication middleware
+fix(api): handle empty request body gracefully
+docs: update contributing guidelines
+chore: bump dependency versions
+```
+
+### General commit message best practices
+
+- **Use the imperative mood** (e.g., “Add feature” not “Added feature”).
+- **Keep the subject line under 72 characters**.
 - **Use the body to explain what and why vs. how** (if needed).
 - **Reference relevant issues/PRs** (e.g., `Fixes #123`).
-
-**Example:**
-```
-Add user authentication middleware
-
-This middleware intercepts requests to check authentication tokens
-and ensures only valid users can access protected routes.
-
-Fixes #42
-```
 
 For more, see: [Chris Beams' guide to writing great commit messages](https://cbea.ms/git-commit/).
 

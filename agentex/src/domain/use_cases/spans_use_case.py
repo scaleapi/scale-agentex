@@ -21,6 +21,7 @@ class SpanUseCase:
         name: str,
         trace_id: str,
         id: str | None = None,
+        task_id: str | None = None,
         parent_id: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
@@ -38,6 +39,7 @@ class SpanUseCase:
         span = SpanEntity(
             id=id,
             trace_id=trace_id,
+            task_id=task_id,
             parent_id=parent_id,
             name=name,
             start_time=start_time,
@@ -52,6 +54,7 @@ class SpanUseCase:
         self,
         id: str,
         trace_id: str | None = None,
+        task_id: str | None = None,
         name: str | None = None,
         parent_id: str | None = None,
         start_time: datetime | None = None,
@@ -69,6 +72,9 @@ class SpanUseCase:
         # Apply partial updates for all fields
         if trace_id is not None:
             span.trace_id = trace_id
+
+        if task_id is not None:
+            span.task_id = task_id
 
         if name is not None:
             span.name = name
@@ -108,19 +114,20 @@ class SpanUseCase:
         limit: int,
         page_number: int,
         trace_id: str | None = None,
+        task_id: str | None = None,
         order_by: str | None = None,
         order_direction: str = "desc",
     ) -> list[SpanEntity]:
         """
-        List all spans for a given trace ID
+        List spans, optionally filtered by trace_id and/or task_id
         """
-        # Note: This would require custom implementation in the repository
-        # or filtering after fetching all spans
-
-        if trace_id:
-            filters = {"trace_id": trace_id}
-        else:
-            filters = None
+        filters: dict[str, str] | None = None
+        if trace_id or task_id:
+            filters = {}
+            if trace_id:
+                filters["trace_id"] = trace_id
+            if task_id:
+                filters["task_id"] = task_id
         return await self.span_repo.list(
             filters=filters,
             limit=limit,

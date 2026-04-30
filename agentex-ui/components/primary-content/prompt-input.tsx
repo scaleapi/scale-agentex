@@ -20,6 +20,8 @@ import {
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
 import { useSendMessage } from '@/hooks/use-task-messages';
+import { useTask } from '@/hooks/use-tasks';
+import { TaskStatusEnum } from '@/lib/types';
 
 type PromptInputProps = {
   prompt: string;
@@ -52,9 +54,15 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
 
   const createTaskMutation = useCreateTask({ agentexClient });
   const sendMessageMutation = useSendMessage({ agentexClient });
+  const { data: task } = useTask({ agentexClient, taskId: taskID ?? '' });
 
   const textInputRef = useRef<HTMLInputElement>(null);
   const codeMirrorViewRef = useRef<EditorView | null>(null);
+
+  const isTaskTerminal = useMemo(() => {
+    if (!taskID || !task) return false;
+    return task.status != null && task.status !== TaskStatusEnum.RUNNING;
+  }, [taskID, task]);
 
   const handleSetJson = useCallback(
     (value: boolean) => {
@@ -86,8 +94,8 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
   }, [taskID, isClient, isSendingJSON]);
 
   const isDisabled = useMemo(
-    () => !agentName || !isClient,
-    [agentName, isClient]
+    () => !agentName || !isClient || isTaskTerminal,
+    [agentName, isClient, isTaskTerminal]
   );
 
   const handleSendPrompt = useCallback(async () => {
@@ -171,6 +179,8 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
             prompt={prompt}
             setPrompt={setPrompt}
             isDisabled={isDisabled}
+            isTaskTerminal={isTaskTerminal}
+            taskStatus={task?.status}
             handleSendPrompt={handleSendPrompt}
             inputRef={textInputRef}
           />
@@ -205,12 +215,16 @@ const TextInput = ({
   prompt,
   setPrompt,
   isDisabled,
+  isTaskTerminal,
+  taskStatus,
   handleSendPrompt,
   inputRef,
 }: {
   prompt: string;
   setPrompt: (prompt: string) => void;
   isDisabled: boolean;
+  isTaskTerminal: boolean;
+  taskStatus: string | null | undefined;
   handleSendPrompt: () => void;
   inputRef: React.RefObject<HTMLInputElement | null>;
 }) => {
@@ -230,7 +244,11 @@ const TextInput = ({
       }}
       disabled={isDisabled}
       placeholder={
-        isDisabled ? 'Select an agent to start' : 'Enter your prompt'
+        isTaskTerminal
+          ? `Task ${taskStatus?.toLowerCase() ?? 'ended'}`
+          : isDisabled
+            ? 'Select an agent to start'
+            : 'Enter your prompt'
       }
       className="mr-2 flex-1 outline-none focus:ring-0 focus:outline-none"
       style={{

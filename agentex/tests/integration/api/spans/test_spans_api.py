@@ -7,7 +7,9 @@ from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
+from src.domain.entities.agents import ACPType, AgentEntity
 from src.domain.entities.spans import SpanEntity
+from src.domain.entities.tasks import TaskEntity
 from src.utils.ids import orm_id
 
 
@@ -16,8 +18,42 @@ class TestSpansAPIIntegration:
     """Integration tests for span endpoints using API-first validation"""
 
     @pytest_asyncio.fixture
+    async def test_agent(self, isolated_repositories):
+        """Create a test agent for task creation."""
+        agent_repo = isolated_repositories["agent_repository"]
+        return await agent_repo.create(
+            AgentEntity(
+                id=orm_id(),
+                name="spans-test-agent",
+                description="Agent for span integration tests",
+                acp_url="http://test:8000",
+                acp_type=ACPType.SYNC,
+            )
+        )
+
+    @pytest_asyncio.fixture
+    async def test_tasks(self, isolated_repositories, test_agent):
+        """Create test tasks that can be referenced by spans via FK."""
+        task_repo = isolated_repositories["task_repository"]
+        tasks = {}
+        for name in [
+            "task-a",
+            "task-b",
+            "task-x",
+            "task-y",
+            "task-create",
+            "task-update",
+        ]:
+            task = await task_repo.create(
+                agent_id=test_agent.id,
+                task=TaskEntity(id=orm_id(), name=name),
+            )
+            tasks[name] = task
+        return tasks
+
+    @pytest_asyncio.fixture
     async def test_pagination_spans(self, isolated_repositories):
-        """Create a test task for message creation"""
+        """Create spans for pagination tests"""
         span_repo = isolated_repositories["span_repository"]
         spans = []
         for i in range(60):
@@ -30,11 +66,16 @@ class TestSpansAPIIntegration:
             spans.append(await span_repo.create(span))
         return spans
 
-    async def test_create_and_retrieve_span_consistency(self, isolated_client):
+    async def test_create_and_retrieve_span_consistency(
+        self, isolated_client, test_tasks
+    ):
         """Test span creation and validate POST → GET consistency (API-first)"""
+        task_id = test_tasks["task-create"].id
+
         # Given - Span creation data
         span_data = {
             "trace_id": "test-trace-123",
+            "task_id": task_id,
             "name": "test-operation",
             "start_time": "2024-01-01T10:00:00Z",
             "end_time": "2024-01-01T10:00:05Z",
@@ -53,6 +94,7 @@ class TestSpansAPIIntegration:
         # Validate response has required fields
         assert "id" in created_span
         assert created_span["trace_id"] == span_data["trace_id"]
+        assert created_span["task_id"] == task_id
         assert created_span["name"] == span_data["name"]
         span_id = created_span["id"]
 
@@ -64,12 +106,28 @@ class TestSpansAPIIntegration:
         # Validate POST/GET consistency
         assert retrieved_span["id"] == span_id
         assert retrieved_span["trace_id"] == span_data["trace_id"]
+        assert retrieved_span["task_id"] == task_id
         assert retrieved_span["name"] == span_data["name"]
         assert retrieved_span["input"] == span_data["input"]
         assert retrieved_span["output"] == span_data["output"]
 
-    async def test_update_span_and_validate_changes(self, isolated_client):
+    async def test_create_span_without_task_id(self, isolated_client):
+        """Test span creation without task_id (should default to null)"""
+        span_data = {
+            "trace_id": "test-trace-no-task",
+            "name": "test-no-task",
+            "start_time": "2024-01-01T10:00:00Z",
+        }
+
+        create_response = await isolated_client.post("/spans", json=span_data)
+        assert create_response.status_code == 200
+        created_span = create_response.json()
+        assert created_span["task_id"] is None
+
+    async def test_update_span_and_validate_changes(self, isolated_client, test_tasks):
         """Test span update and validate PATCH → GET consistency"""
+        task_id = test_tasks["task-update"].id
+
         # Given - Create a span first
         initial_data = {
             "trace_id": "update-trace-456",
@@ -80,9 +138,10 @@ class TestSpansAPIIntegration:
         assert create_response.status_code == 200
         span_id = create_response.json()["id"]
 
-        # When - Update the span
+        # When - Update the span including task_id
         update_data = {
             "name": "updated-name",
+            "task_id": task_id,
             "parent_id": "parent-id",
             "start_time": "2024-01-01T10:10:00Z",
             "end_time": "2024-01-01T10:10:05Z",
@@ -104,6 +163,7 @@ class TestSpansAPIIntegration:
 
         # Validate changes were applied
         assert updated_span["name"] == "updated-name"
+        assert updated_span["task_id"] == task_id
         assert updated_span["output"]["status"] == "completed"
         assert updated_span["parent_id"] == "parent-id"
         assert updated_span["start_time"] == "2024-01-01T10:10:00Z"
@@ -123,6 +183,7 @@ class TestSpansAPIIntegration:
         assert patch_response.status_code == 200
         updated_span = patch_response.json()
         assert updated_span["name"] == "updated-name"
+        assert updated_span["task_id"] == task_id  # Still set from prior update
         assert updated_span["output"]["status"] == "completed"
         assert updated_span["parent_id"] == "parent-id"
         assert updated_span["start_time"] == "2024-01-01T10:10:00Z"
@@ -131,7 +192,7 @@ class TestSpansAPIIntegration:
         assert updated_span["trace_id"] == "updated-trace-789"
         assert updated_span["data"] == {"test": True, "version": "2.0.0"}
 
-    async def test_list_spans_with_filtering(self, isolated_client):
+    async def test_list_spans_with_trace_id_filtering(self, isolated_client):
         """Test list spans endpoint with trace_id filtering"""
         # Given - Create spans with different trace_ids
         trace_id_1 = "list-trace-001"
@@ -172,6 +233,114 @@ class TestSpansAPIIntegration:
         # Validate filtering worked
         for span in spans:
             assert span["trace_id"] == trace_id_1
+
+    async def test_list_spans_with_task_id_filtering(self, isolated_client, test_tasks):
+        """Test list spans endpoint with task_id filtering"""
+        task_id_a = test_tasks["task-a"].id
+        task_id_b = test_tasks["task-b"].id
+
+        for i in range(3):
+            resp = await isolated_client.post(
+                "/spans",
+                json={
+                    "trace_id": f"trace-task-filter-{i}",
+                    "task_id": task_id_a,
+                    "name": f"span-task-a-{i}",
+                    "start_time": "2024-01-01T10:00:00Z",
+                },
+            )
+            assert resp.status_code == 200
+
+        for i in range(2):
+            resp = await isolated_client.post(
+                "/spans",
+                json={
+                    "trace_id": f"trace-task-filter-b-{i}",
+                    "task_id": task_id_b,
+                    "name": f"span-task-b-{i}",
+                    "start_time": "2024-01-01T10:00:00Z",
+                },
+            )
+            assert resp.status_code == 200
+
+        # One span with no task_id
+        resp = await isolated_client.post(
+            "/spans",
+            json={
+                "trace_id": "trace-no-task",
+                "name": "span-no-task",
+                "start_time": "2024-01-01T10:00:00Z",
+            },
+        )
+        assert resp.status_code == 200
+
+        # When - Filter by task_id_a
+        response = await isolated_client.get(f"/spans?task_id={task_id_a}")
+        assert response.status_code == 200
+        spans = response.json()
+        assert len(spans) == 3
+        for span in spans:
+            assert span["task_id"] == task_id_a
+
+        # When - Filter by task_id_b
+        response = await isolated_client.get(f"/spans?task_id={task_id_b}")
+        assert response.status_code == 200
+        spans = response.json()
+        assert len(spans) == 2
+        for span in spans:
+            assert span["task_id"] == task_id_b
+
+        # When - No filter returns all 6
+        response = await isolated_client.get("/spans")
+        assert response.status_code == 200
+        assert len(response.json()) == 6
+
+    async def test_list_spans_with_combined_trace_and_task_filtering(
+        self, isolated_client, test_tasks
+    ):
+        """Test list spans with both trace_id and task_id filters"""
+        shared_trace = "combined-trace"
+        task_id_x = test_tasks["task-x"].id
+        task_id_y = test_tasks["task-y"].id
+
+        await isolated_client.post(
+            "/spans",
+            json={
+                "trace_id": shared_trace,
+                "task_id": task_id_x,
+                "name": "span-match",
+                "start_time": "2024-01-01T10:00:00Z",
+            },
+        )
+        await isolated_client.post(
+            "/spans",
+            json={
+                "trace_id": shared_trace,
+                "task_id": task_id_y,
+                "name": "span-same-trace-diff-task",
+                "start_time": "2024-01-01T10:00:00Z",
+            },
+        )
+        await isolated_client.post(
+            "/spans",
+            json={
+                "trace_id": "other-trace",
+                "task_id": task_id_x,
+                "name": "span-diff-trace-same-task",
+                "start_time": "2024-01-01T10:00:00Z",
+            },
+        )
+
+        # When - Filter by both trace_id and task_id
+        response = await isolated_client.get(
+            f"/spans?trace_id={shared_trace}&task_id={task_id_x}"
+        )
+        assert response.status_code == 200
+        spans = response.json()
+        assert len(spans) == 1
+        assert spans[0]["name"] == "span-match"
+        assert spans[0]["trace_id"] == shared_trace
+        assert spans[0]["task_id"] == task_id_x
 
     async def test_get_span_non_existent(self, isolated_client):
         """Test getting a non-existent span returns 404"""

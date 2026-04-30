@@ -1,6 +1,7 @@
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -20,6 +21,7 @@ from sqlalchemy.orm import relationship
 
 from src.domain.entities.agent_api_keys import AgentAPIKeyType
 from src.domain.entities.agents import AgentInputType, AgentStatus
+from src.domain.entities.deployments import DeploymentStatus
 from src.domain.entities.tasks import TaskStatus
 from src.utils.ids import orm_id
 
@@ -44,6 +46,9 @@ class AgentORM(BaseORM):
     registration_metadata = Column(JSONB, nullable=True)
     registered_at = Column(DateTime(timezone=True), nullable=True)
     agent_input_type = Column(SQLAlchemyEnum(AgentInputType), nullable=True)
+    production_deployment_id = Column(
+        String, ForeignKey("deployments.id"), nullable=True
+    )
 
     # Many-to-Many relationship with tasks
     tasks = relationship("TaskORM", secondary="task_agents", back_populates="agents")
@@ -145,6 +150,7 @@ class SpanORM(BaseORM):
     __tablename__ = "spans"
     id = Column(String, primary_key=True, default=orm_id)  # Using UUIDs for IDs
     trace_id = Column(String, nullable=False)
+    task_id = Column(String, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
     parent_id = Column(String, nullable=True)
     name = Column(String, nullable=False)
     start_time = Column(DateTime(timezone=True), nullable=False)
@@ -161,6 +167,8 @@ class SpanORM(BaseORM):
         Index("ix_spans_trace_id_start_time", "trace_id", "start_time"),
         # Index for traversing span hierarchy
         Index("ix_spans_parent_id", "parent_id"),
+        # Index for filtering spans by task_id
+        Index("ix_spans_task_id", "task_id"),
     )
 
 
@@ -217,6 +225,49 @@ class DeploymentHistoryORM(BaseORM):
     )
 
 
+class DeploymentORM(BaseORM):
+    __tablename__ = "deployments"
+
+    id = Column(String, primary_key=True, default=orm_id)
+    agent_id = Column(String(64), ForeignKey("agents.id"), nullable=False)
+
+    # Image (immutable after creation)
+    docker_image = Column(String, nullable=False)
+
+    # Git/build metadata (commit_hash, branch_name, author_name, author_email, build_timestamp)
+    registration_metadata = Column(JSONB, nullable=True)
+
+    # Runtime state (updated during lifecycle)
+    status = Column(
+        SQLAlchemyEnum(DeploymentStatus),
+        nullable=False,
+        default=DeploymentStatus.PENDING,
+    )
+    acp_url = Column(String, nullable=True)
+    is_production = Column(Boolean, nullable=False, default=False)
+
+    # Infra references
+    sgp_deploy_id = Column(String, nullable=True)
+    helm_release_name = Column(String, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    promoted_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("idx_deployments_agent_id", "agent_id"),
+        Index("idx_deployments_agent_production", "agent_id", "is_production"),
+        Index(
+            "uq_deployments_one_production_per_agent",
+            "agent_id",
+            unique=True,
+            postgresql_where=(is_production.is_(True)),
+        ),
+        Index("idx_deployments_sgp_deploy_id", "sgp_deploy_id"),
+    )
+
+
 # LangGraph checkpoint tables
 # These mirror the schema from langgraph.checkpoint.postgres so that
 # tables are created via Alembic migrations rather than at agent runtime.
@@ -236,9 +287,7 @@ class CheckpointORM(BaseORM):
     type = Column(Text, nullable=True)
     checkpoint = Column(JSONB, nullable=False)
     metadata_ = Column("metadata", JSONB, nullable=False, server_default="{}")
-    __table_args__ = (
-        Index("checkpoints_thread_id_idx", "thread_id"),
-    )
+    __table_args__ = (Index("checkpoints_thread_id_idx", "thread_id"),)
 
 
 class CheckpointBlobORM(BaseORM):
@@ -249,9 +298,7 @@ class CheckpointBlobORM(BaseORM):
     version = Column(Text, nullable=False, primary_key=True)
     type = Column(Text, nullable=False)
     blob = Column(LargeBinary, nullable=True)
-    __table_args__ = (
-        Index("checkpoint_blobs_thread_id_idx", "thread_id"),
-    )
+    __table_args__ = (Index("checkpoint_blobs_thread_id_idx", "thread_id"),)
 
 
 class CheckpointWriteORM(BaseORM):
@@ -265,6 +312,4 @@ class CheckpointWriteORM(BaseORM):
     type = Column(Text, nullable=True)
     blob = Column(LargeBinary, nullable=False)
     task_path = Column(Text, nullable=False, server_default="")
-    __table_args__ = (
-        Index("checkpoint_writes_thread_id_idx", "thread_id"),
-    )
+    __table_args__ = (Index("checkpoint_writes_thread_id_idx", "thread_id"),)

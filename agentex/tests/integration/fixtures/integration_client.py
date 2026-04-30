@@ -259,14 +259,15 @@ async def isolated_repositories(isolated_test_schema):
     from src.domain.repositories.agent_task_tracker_repository import (
         AgentTaskTrackerRepository,
     )
+    from src.domain.repositories.checkpoint_repository import CheckpointRepository
     from src.domain.repositories.deployment_history_repository import (
         DeploymentHistoryRepository,
     )
+    from src.domain.repositories.deployment_repository import DeploymentRepository
     from src.domain.repositories.event_repository import EventRepository
     from src.domain.repositories.span_repository import SpanRepository
     from src.domain.repositories.task_message_repository import TaskMessageRepository
     from src.domain.repositories.task_repository import TaskRepository
-    from src.domain.repositories.checkpoint_repository import CheckpointRepository
     from src.domain.repositories.task_state_repository import TaskStateRepository
 
     # Create Redis repository with mock environment variables
@@ -308,6 +309,9 @@ async def isolated_repositories(isolated_test_schema):
             async_rw_session_factory, async_ro_session_factory
         ),
         "deployment_history_repository": DeploymentHistoryRepository(
+            async_rw_session_factory, async_ro_session_factory
+        ),
+        "deployment_repository": DeploymentRepository(
             async_rw_session_factory, async_ro_session_factory
         ),
         # MongoDB repositories
@@ -370,6 +374,7 @@ async def isolated_integration_app(
     from src.domain.use_cases.agent_api_keys_use_case import AgentAPIKeysUseCase
     from src.domain.use_cases.agent_task_tracker_use_case import AgentTaskTrackerUseCase
     from src.domain.use_cases.agents_use_case import AgentsUseCase
+    from src.domain.use_cases.checkpoints_use_case import CheckpointsUseCase
     from src.domain.use_cases.deployment_history_use_case import (
         DeploymentHistoryUseCase,
     )
@@ -377,7 +382,6 @@ async def isolated_integration_app(
     from src.domain.use_cases.messages_use_case import MessagesUseCase
     from src.domain.use_cases.spans_use_case import SpanUseCase
     from src.domain.use_cases.states_use_case import StatesUseCase
-    from src.domain.use_cases.checkpoints_use_case import CheckpointsUseCase
     from src.domain.use_cases.tasks_use_case import TasksUseCase
 
     # Create use case factory functions with isolated repositories
@@ -388,6 +392,7 @@ async def isolated_integration_app(
             deployment_history_repository=isolated_repositories[
                 "deployment_history_repository"
             ],
+            deployment_repository=isolated_repositories["deployment_repository"],
         )
 
     def create_agent_api_keys_use_case():
@@ -467,15 +472,16 @@ async def isolated_integration_app(
         DDatabaseAsyncReadWriteSessionMaker,
         DMongoDBDatabase,
     )
-    from src.domain.repositories.checkpoint_repository import CheckpointRepository
     from src.domain.repositories.agent_api_key_repository import AgentAPIKeyRepository
     from src.domain.repositories.agent_repository import AgentRepository
     from src.domain.repositories.agent_task_tracker_repository import (
         AgentTaskTrackerRepository,
     )
+    from src.domain.repositories.checkpoint_repository import CheckpointRepository
     from src.domain.repositories.deployment_history_repository import (
         DeploymentHistoryRepository,
     )
+    from src.domain.repositories.deployment_repository import DeploymentRepository
     from src.domain.repositories.event_repository import EventRepository
     from src.domain.repositories.span_repository import SpanRepository
     from src.domain.repositories.task_message_repository import TaskMessageRepository
@@ -525,6 +531,9 @@ async def isolated_integration_app(
             ],
             DeploymentHistoryRepository: lambda: isolated_repositories[
                 "deployment_history_repository"
+            ],
+            DeploymentRepository: lambda: isolated_repositories[
+                "deployment_repository"
             ],
             # Redis repositories
             RedisStreamRepository: lambda: isolated_repositories[

@@ -28,12 +28,13 @@ function TaskMessageReasoningImpl({ message }: TaskMessageReasoningProps) {
   const { taskID } = useSafeSearchParams();
   const { agentexClient } = useAgentexClient();
 
-  const { data: queryData } = useTaskMessages({
+  const { messages } = useTaskMessages({
     agentexClient,
     taskId: taskID ?? '',
   });
-  const messages = queryData?.messages ?? [];
-  const messageIndex = messages.findIndex(m => m.id === message.id);
+  const messageIndex = messages.findIndex(
+    (m: TaskMessage) => m.id === message.id
+  );
   const nextMessage = messageIndex !== -1 ? messages[messageIndex + 1] : null;
 
   const reasoningInProgress = useMemo(() => {
@@ -58,10 +59,9 @@ function TaskMessageReasoningImpl({ message }: TaskMessageReasoningProps) {
     if (message.content.type !== 'reasoning') {
       throw new Error('Message content is not a ReasoningContent');
     }
-    return [
-      ...(message.content.content ?? []),
-      ...(message.content.summary ?? []),
-    ].join('\n\n');
+    const content = message.content.content ?? [];
+    const summary = message.content.summary ?? [];
+    return (content.length > 0 ? content : summary).join('\n\n');
   }, [message.content]);
 
   const updateBlurEffects = () => {
