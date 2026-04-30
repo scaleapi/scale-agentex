@@ -41,6 +41,7 @@ class EnvVarKeys(str, Enum):
     REDIS_CONNECTION_TIMEOUT = "REDIS_CONNECTION_TIMEOUT"
     REDIS_SOCKET_TIMEOUT = "REDIS_SOCKET_TIMEOUT"
     REDIS_STREAM_MAXLEN = "REDIS_STREAM_MAXLEN"
+    REDIS_STREAM_TTL_SECONDS = "REDIS_STREAM_TTL_SECONDS"
     IMAGE_PULL_SECRET_NAME = "IMAGE_PULL_SECRET_NAME"
     AGENTEX_AUTH_URL = "AGENTEX_AUTH_URL"
     ALLOWED_ORIGINS = "ALLOWED_ORIGINS"
@@ -93,6 +94,9 @@ class EnvironmentVariables(BaseModel):
     REDIS_SOCKET_TIMEOUT: int = 30  # Socket timeout in seconds
     REDIS_STREAM_MAXLEN: int = (
         10000  # Max entries per Redis stream to prevent unbounded growth
+    )
+    REDIS_STREAM_TTL_SECONDS: int = (
+        3600  # Sliding TTL on stream keys (seconds). 0 disables.
     )
     IMAGE_PULL_SECRET_NAME: str | None = None
     AGENTEX_AUTH_URL: str | None = None
@@ -156,6 +160,9 @@ class EnvironmentVariables(BaseModel):
             ),
             REDIS_STREAM_MAXLEN=int(
                 os.environ.get(EnvVarKeys.REDIS_STREAM_MAXLEN, "10000")
+            ),
+            REDIS_STREAM_TTL_SECONDS=int(
+                os.environ.get(EnvVarKeys.REDIS_STREAM_TTL_SECONDS, "3600")
             ),
             IMAGE_PULL_SECRET_NAME=os.environ.get(EnvVarKeys.IMAGE_PULL_SECRET_NAME),
             AGENTEX_AUTH_URL=os.environ.get(EnvVarKeys.AGENTEX_AUTH_URL),

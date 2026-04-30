@@ -133,6 +133,7 @@ def create_redis_stream_repository(redis_client):
         def __init__(self, redis_url):
             self.REDIS_URL = redis_url
             self.REDIS_STREAM_MAXLEN = 10000  # Default from EnvironmentVariables
+            self.REDIS_STREAM_TTL_SECONDS = 3600  # Default from EnvironmentVariables
             self.ENVIRONMENT = "test"
 
     # Get the Redis URL from the client connection pool
