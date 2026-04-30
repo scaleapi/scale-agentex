@@ -327,32 +327,35 @@ function TaskMessagesImpl({
           >
             <AnimatePresence>
               {pair.userMessage && renderMessage(pair.userMessage)}
-              {pair.agentMessages.map(agentMessage => (
-                <Fragment key={agentMessage.id}>
-                  <div className="group/feedback">
-                    {renderMessage(agentMessage)}
-                    {sgpAppURL &&
-                      agentMessage.id &&
-                      agentMessage.content.type === 'text' &&
-                      agentMessage.content.author === 'agent' &&
-                      agentMessage.streaming_status !== 'IN_PROGRESS' && (
-                        <MessageFeedback
-                          messageId={agentMessage.id}
-                          taskId={taskId}
-                          agentMessageContent={agentMessage.content.content}
-                          userMessageContent={
-                            pair.userMessage?.content.type === 'text'
-                              ? pair.userMessage.content.content
-                              : ''
-                          }
-                          agentName={agent?.name}
-                          agentId={agent?.id}
-                          agentAcpType={agent?.acp_type}
-                        />
-                      )}
-                  </div>
-                </Fragment>
-              ))}
+              {pair.agentMessages.map(agentMessage => {
+                if (agentMessage.content.type === 'tool_response') return null;
+                return (
+                  <Fragment key={agentMessage.id}>
+                    <div className="group/feedback">
+                      {renderMessage(agentMessage)}
+                      {sgpAppURL &&
+                        agentMessage.id &&
+                        agentMessage.content.type === 'text' &&
+                        agentMessage.content.author === 'agent' &&
+                        agentMessage.streaming_status !== 'IN_PROGRESS' && (
+                          <MessageFeedback
+                            messageId={agentMessage.id}
+                            taskId={taskId}
+                            agentMessageContent={agentMessage.content.content}
+                            userMessageContent={
+                              pair.userMessage?.content.type === 'text'
+                                ? pair.userMessage.content.content
+                                : ''
+                            }
+                            agentName={agent?.name}
+                            agentId={agent?.id}
+                            agentAcpType={agent?.acp_type}
+                          />
+                        )}
+                    </div>
+                  </Fragment>
+                );
+              })}
             </AnimatePresence>
             <AnimatePresence>
               {shouldShowThinking && (
