@@ -1,5 +1,5 @@
 # Public versioned Chainguard language images require org access; install Python 3.12 from Wolfi instead.
-FROM cgr.dev/chainguard/wolfi-base:latest AS base
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:3258be472764337fd13095bcbb3182da170243b5819fd67ad4c0754590588b31 AS base
 ARG SOURCE_DIR=agentex
 
 # Install uv package manager
@@ -13,7 +13,6 @@ RUN apk add --no-cache \
     postgresql-client \
     build-base \
     libpq \
-    gcc \
     python-3.12-dev \
     py3.12-pip
 
@@ -54,7 +53,7 @@ RUN cd docs && mkdocs build
 
 # Production stage
 # Public versioned Chainguard language images require org access; install Python 3.12 from Wolfi instead.
-FROM cgr.dev/chainguard/wolfi-base:latest AS production
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:3258be472764337fd13095bcbb3182da170243b5819fd67ad4c0754590588b31 AS production
 ENTRYPOINT []
 ARG INCLUDE_DOCS=false
 ARG SOURCE_DIR=agentex

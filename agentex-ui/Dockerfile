@@ -1,6 +1,6 @@
 # Build stage — install build deps, build the Next.js app
 # Public versioned Chainguard language images require org access; install Node 20 from Wolfi instead.
-FROM cgr.dev/chainguard/wolfi-base:latest AS builder
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:3258be472764337fd13095bcbb3182da170243b5819fd67ad4c0754590588b31 AS builder
 ARG SOURCE_DIR=agentex-ui
 ENTRYPOINT []
 
@@ -42,7 +42,7 @@ RUN npm prune --production
 
 # Production stage — clean image without build tools
 # Public versioned Chainguard language images require org access; install Node 20 from Wolfi instead.
-FROM cgr.dev/chainguard/wolfi-base:latest AS production
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:3258be472764337fd13095bcbb3182da170243b5819fd67ad4c0754590588b31 AS production
 ENTRYPOINT []
 
 USER root
