@@ -24,3 +24,20 @@ class TestRedisStreamTTL:
 
         # Cleanup
         await repo.redis.delete(topic)
+
+    async def test_send_data_skips_ttl_when_disabled(self, isolated_repositories):
+        """With REDIS_STREAM_TTL_SECONDS=0, no TTL is set on the stream key."""
+        repo = isolated_repositories["redis_stream_repository"]
+        repo.environment_variables.REDIS_STREAM_TTL_SECONDS = 0
+        topic = "test:stream:ttl:disabled"
+
+        try:
+            await repo.send_data(topic, {"hello": "world"})
+
+            ttl = await repo.redis.ttl(topic)
+            # -1 means key exists but has no TTL.
+            assert ttl == -1, f"Expected no TTL (-1), got {ttl}"
+        finally:
+            # Restore default + cleanup so other tests aren't affected.
+            repo.environment_variables.REDIS_STREAM_TTL_SECONDS = 3600
+            await repo.redis.delete(topic)
