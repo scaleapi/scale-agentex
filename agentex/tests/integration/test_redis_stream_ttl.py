@@ -56,6 +56,7 @@ class TestRedisStreamTTL:
             length = await repo.redis.xlen(topic)
             # `approximate=True` (XADD ~) lets length exceed MAXLEN slightly,
             # but should be in the same order of magnitude (well under 200).
+            assert length >= 1, f"Expected at least 1 entry in stream, got {length}"
             assert length <= 100, f"Expected length <= 100 with MAXLEN=50, got {length}"
         finally:
             repo.environment_variables.REDIS_STREAM_MAXLEN = 10000
