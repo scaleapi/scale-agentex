@@ -41,3 +41,22 @@ class TestRedisStreamTTL:
             # Restore default + cleanup so other tests aren't affected.
             repo.environment_variables.REDIS_STREAM_TTL_SECONDS = 3600
             await repo.redis.delete(topic)
+
+    async def test_send_data_still_applies_maxlen(self, isolated_repositories):
+        """Stream length stays bounded near MAXLEN after many writes."""
+        repo = isolated_repositories["redis_stream_repository"]
+        # Tighten MAXLEN for this test so we can verify trimming without 10k writes.
+        repo.environment_variables.REDIS_STREAM_MAXLEN = 50
+        topic = "test:stream:ttl:maxlen"
+
+        try:
+            for i in range(200):
+                await repo.send_data(topic, {"i": i})
+
+            length = await repo.redis.xlen(topic)
+            # `approximate=True` (XADD ~) lets length exceed MAXLEN slightly,
+            # but should be in the same order of magnitude (well under 200).
+            assert length <= 100, f"Expected length <= 100 with MAXLEN=50, got {length}"
+        finally:
+            repo.environment_variables.REDIS_STREAM_MAXLEN = 10000
+            await repo.redis.delete(topic)
