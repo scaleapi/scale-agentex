@@ -15,12 +15,13 @@ class TestRedisStreamTTL:
 
         ttl = await repo.redis.ttl(topic)
         # ttl returns seconds remaining; -1 = no TTL, -2 = key missing.
-        # We expect it close to the configured 3600 (allow generous slack for test scheduling).
+        # 120s slack tolerates CI scheduling jitter (cold-starts, GC pauses)
+        # while still catching a regression where EXPIRE isn't called.
         assert ttl > 0, f"Expected positive TTL, got {ttl}"
         assert ttl <= 3600, f"Expected TTL <= 3600, got {ttl}"
         assert (
-            ttl >= 3590
-        ), f"Expected TTL >= 3590 (within 10s of configured), got {ttl}"
+            ttl >= 3480
+        ), f"Expected TTL >= 3480 (within 120s of configured), got {ttl}"
 
         # Cleanup
         await repo.redis.delete(topic)

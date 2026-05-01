@@ -71,9 +71,21 @@ class RedisStreamRepository(StreamRepository):
                         approximate=True,
                     )
                     pipe.expire(name=topic, time=ttl_seconds)
-                    results = await pipe.execute()
-                    # results[0] = xadd message ID, results[1] = expire bool
+                    # raise_on_error=False so an EXPIRE failure does not surface
+                    # to the caller after XADD already succeeded — that would
+                    # risk callers retrying and duplicating messages. A failed
+                    # TTL refresh is recoverable: MAXLEN still caps RAM and the
+                    # next write resets the clock.
+                    results = await pipe.execute(raise_on_error=False)
+                    # results[0] = xadd message ID (or Exception)
+                    # results[1] = expire bool (or Exception)
                     message_id = results[0]
+                    if isinstance(message_id, Exception):
+                        raise message_id
+                    if isinstance(results[1], Exception):
+                        logger.warning(
+                            f"Failed to refresh TTL on stream {topic}: {results[1]}"
+                        )
             else:
                 message_id = await self.redis.xadd(
                     name=topic,
