@@ -164,8 +164,8 @@ function TaskMessagesImpl({
       lastPair.agentMessages[lastPair.agentMessages.length - 1]!;
     const lastType = lastAgentMessage.content.type;
 
-    // Already have text streaming or complete — not "thinking"
-    if (lastType === 'text') return false;
+    // Already have a terminal response (text or data) — not "thinking"
+    if (lastType === 'text' || lastType === 'data') return false;
 
     // Tool or reasoning still in progress — show their own indicator, not "Thinking..."
     if (lastAgentMessage.streaming_status === 'IN_PROGRESS') return false;

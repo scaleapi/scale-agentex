@@ -170,7 +170,9 @@ export function useSendMessage({
           // Refetch all loaded pages so the cache stays consistent when the
           // user has scrolled up and loaded older pages — refetching only
           // page 1 leaves a stale gap at the page boundary as the thread grows.
-          await queryClient.invalidateQueries({ queryKey });
+          // Use refetchQueries (not invalidateQueries) so the fetch runs even
+          // when there are no active observers (e.g. component unmounted mid-RPC).
+          await queryClient.refetchQueries({ queryKey });
 
           queryClient.setQueryData<TaskMessagesMetadata>(metaKey, {
             deltaAccumulator: null,
@@ -258,7 +260,9 @@ export function useSendMessage({
           // Final reconciliation: refetch all loaded pages so the cache stays
           // consistent when older pages have been loaded — refetching only
           // page 1 leaves a stale gap at the page boundary as the thread grows.
-          await queryClient.invalidateQueries({ queryKey });
+          // Use refetchQueries (not invalidateQueries) so the fetch runs even
+          // when there are no active observers (e.g. component unmounted mid-stream).
+          await queryClient.refetchQueries({ queryKey });
 
           queryClient.setQueryData<TaskMessagesMetadata>(metaKey, {
             deltaAccumulator: null,
