@@ -72,6 +72,7 @@ class RedisStreamRepository(StreamRepository):
                     )
                     pipe.expire(name=topic, time=ttl_seconds)
                     results = await pipe.execute()
+                    # results[0] = xadd message ID, results[1] = expire bool
                     message_id = results[0]
             else:
                 message_id = await self.redis.xadd(
