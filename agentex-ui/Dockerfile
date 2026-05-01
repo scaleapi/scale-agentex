@@ -1,13 +1,16 @@
 # Build stage — install build deps, build the Next.js app
-FROM node:20-trixie-slim AS builder
+# Public versioned Chainguard language images require org access; install Node 20 from Wolfi instead.
+FROM cgr.dev/chainguard/wolfi-base:latest AS builder
 ARG SOURCE_DIR=agentex-ui
+ENTRYPOINT []
 
 # Install system dependencies for native modules (node-gyp)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    make \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
+USER root
+RUN apk add --no-cache \
+    build-base \
+    nodejs-20 \
+    npm \
+    python-3.12
 
 WORKDIR /app
 
@@ -38,8 +41,12 @@ RUN npm run build
 RUN npm prune --production
 
 # Production stage — clean image without build tools
-FROM node:20-trixie-slim AS production
+# Public versioned Chainguard language images require org access; install Node 20 from Wolfi instead.
+FROM cgr.dev/chainguard/wolfi-base:latest AS production
 ENTRYPOINT []
+
+USER root
+RUN apk add --no-cache nodejs-20
 
 WORKDIR /app
 
@@ -48,26 +55,15 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# Remove npm and its bundled vulnerable deps (tar, glob, minimatch, cross-spawn)
-# npm is not needed at runtime — we run next start directly via node
-RUN npm cache clean --force && \
-    rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
-
 # Copy built application from builder (no build tools, no dev deps)
-COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/next.config.ts ./
-COPY --from=builder /app/LICENSE ./LICENSE
+COPY --from=builder --chown=65532:65532 /app/.next ./.next
+COPY --from=builder --chown=65532:65532 /app/node_modules ./node_modules
+COPY --from=builder --chown=65532:65532 /app/package.json ./
+COPY --from=builder --chown=65532:65532 /app/public ./public
+COPY --from=builder --chown=65532:65532 /app/next.config.ts ./
+COPY --from=builder --chown=65532:65532 /app/LICENSE ./LICENSE
 
-# Create nonroot user and set ownership
-RUN groupadd --system --gid 65532 nonroot && \
-    useradd --system --uid 65532 --gid nonroot nonroot && \
-    chown -R nonroot:nonroot /app
-
-# Switch to non-root user
-USER 65532
+USER nonroot
 
 EXPOSE 3000
 
