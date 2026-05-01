@@ -54,14 +54,32 @@ class RedisStreamRepository(StreamRepository):
 
             logger.info(f"Publishing data to stream {topic}, data: {data_json}")
 
-            # Add to Redis stream with maxlen to prevent unbounded growth
+            # Add to Redis stream with maxlen to prevent unbounded growth.
+            # Pipeline XADD + EXPIRE in one round-trip so the stream key gets
+            # a sliding TTL — orphaned streams (no writes for TTL window) self-delete.
             await self.send_redis_connection_metrics()
-            message_id = await self.redis.xadd(
-                name=topic,
-                fields={"data": data_json},
-                maxlen=self.environment_variables.REDIS_STREAM_MAXLEN,
-                approximate=True,  # Use ~ for better performance (O(1) vs O(N))
-            )
+
+            ttl_seconds = self.environment_variables.REDIS_STREAM_TTL_SECONDS
+            maxlen = self.environment_variables.REDIS_STREAM_MAXLEN
+
+            if ttl_seconds > 0:
+                async with self.redis.pipeline(transaction=False) as pipe:
+                    pipe.xadd(
+                        name=topic,
+                        fields={"data": data_json},
+                        maxlen=maxlen,
+                        approximate=True,
+                    )
+                    pipe.expire(name=topic, time=ttl_seconds)
+                    results = await pipe.execute()
+                    message_id = results[0]
+            else:
+                message_id = await self.redis.xadd(
+                    name=topic,
+                    fields={"data": data_json},
+                    maxlen=maxlen,
+                    approximate=True,
+                )
             return message_id
         except Exception as e:
             logger.error(f"Error publishing data to Redis stream {topic}: {e}")
