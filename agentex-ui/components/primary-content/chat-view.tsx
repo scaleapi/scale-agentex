@@ -49,7 +49,7 @@ export function ChatView({
       key="chat-view"
       layout
       ref={scrollContainerRef}
-      className="relative flex-1 flex-col overflow-y-auto"
+      className="relative flex-1 flex-col overflow-x-hidden overflow-y-auto"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.25, ease: 'easeInOut' }}

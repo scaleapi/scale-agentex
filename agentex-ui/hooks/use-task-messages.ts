@@ -167,19 +167,21 @@ export function useSendMessage({
           // Refetch spans now that the agent has finished processing
           queryClient.invalidateQueries({ queryKey: ['spans', taskId] });
 
-          // Refetch just the newest page and update in place
-          const latestPage = await fetchMessagesPage(agentexClient, taskId, 1);
-
-          queryClient.setQueryData<InfiniteData<TaskMessage[]>>(queryKey, old =>
-            updateFirstPage(old, () => latestPage)
-          );
+          // Refetch all loaded pages so the cache stays consistent when the
+          // user has scrolled up and loaded older pages — refetching only
+          // page 1 leaves a stale gap at the page boundary as the thread grows.
+          // Use refetchQueries (not invalidateQueries) so the fetch runs even
+          // when there are no active observers (e.g. component unmounted mid-RPC).
+          await queryClient.refetchQueries({ queryKey });
 
           queryClient.setQueryData<TaskMessagesMetadata>(metaKey, {
             deltaAccumulator: null,
             rpcStatus: 'success',
           });
 
-          return { messages: latestPage };
+          const latestData =
+            queryClient.getQueryData<InfiniteData<TaskMessage[]>>(queryKey);
+          return { messages: latestData?.pages[0] ?? [] };
         }
 
         case 'sync': {
@@ -255,19 +257,21 @@ export function useSendMessage({
             }
           }
 
-          // Final reconciliation: refetch page 1
-          const latestPage = await fetchMessagesPage(agentexClient, taskId, 1);
-
-          queryClient.setQueryData<InfiniteData<TaskMessage[]>>(queryKey, old =>
-            updateFirstPage(old, () => latestPage)
-          );
+          // Final reconciliation: refetch all loaded pages so the cache stays
+          // consistent when older pages have been loaded — refetching only
+          // page 1 leaves a stale gap at the page boundary as the thread grows.
+          // Use refetchQueries (not invalidateQueries) so the fetch runs even
+          // when there are no active observers (e.g. component unmounted mid-stream).
+          await queryClient.refetchQueries({ queryKey });
 
           queryClient.setQueryData<TaskMessagesMetadata>(metaKey, {
             deltaAccumulator: null,
             rpcStatus: 'success',
           });
 
-          return { messages: latestPage };
+          const latestData =
+            queryClient.getQueryData<InfiniteData<TaskMessage[]>>(queryKey);
+          return { messages: latestData?.pages[0] ?? [] };
         }
 
         default: {
