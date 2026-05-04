@@ -267,6 +267,7 @@ class AgentsACPUseCase(TaskMessageMixin):
         task_id: str | None = None,
         task_name: str | None = None,
         task_params: dict[str, Any] | None = None,
+        task_metadata: dict[str, Any] | None = None,
     ) -> TaskEntity:
         """Return the existing task if *task_id* is provided, otherwise create a new one.
 
@@ -303,7 +304,10 @@ class AgentsACPUseCase(TaskMessageMixin):
 
         # Create a new task if it doesn't exist
         task = await self.task_service.create_task(
-            agent=agent, task_name=task_name, task_params=task_params
+            agent=agent,
+            task_name=task_name,
+            task_params=task_params,
+            task_metadata=task_metadata,
         )
         logger.info(f"[agent_id={agent.id}] Created task {task.id}")
         await self.grant_with_retry(task)
@@ -408,9 +412,13 @@ class AgentsACPUseCase(TaskMessageMixin):
         Returns:
             Task containing the created task info
         """
-        # This creates the task record then forwards the message to the ACP server
+        # This creates the task record then forwards the message to the ACP server.
+        # task_metadata is persisted on the task row but never forwarded to the agent.
         task = await self._get_or_create_task(
-            agent=agent, task_name=params.name, task_params=params.params
+            agent=agent,
+            task_name=params.name,
+            task_params=params.params,
+            task_metadata=params.task_metadata,
         )
 
         if agent.acp_type in [ACPType.AGENTIC, ACPType.ASYNC]:

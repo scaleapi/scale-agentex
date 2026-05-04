@@ -45,6 +45,7 @@ class AgentTaskService:
         agent: AgentEntity,
         task_name: str | None = None,
         task_params: dict[str, Any] | None = None,
+        task_metadata: dict[str, Any] | None = None,
     ) -> TaskEntity:
         """
         Create a new task record in the repository with single agent (maintains existing interface).
@@ -53,6 +54,8 @@ class AgentTaskService:
             agent: The agent to create the task for
             task_name: The name of the task to be created
             task_params: The parameters for the task
+            task_metadata: Caller-provided metadata to persist on the task row.
+                Not forwarded to the agent.
         Returns:
             Task containing the created task info
         """
@@ -65,6 +68,7 @@ class AgentTaskService:
                 status=TaskStatus.RUNNING,
                 status_reason="Task created, forwarding to ACP server",
                 params=task_params,
+                task_metadata=task_metadata,
             ),
         )
         return task_entity

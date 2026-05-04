@@ -44,6 +44,16 @@ from src.utils.logging import ctx_var_request_id, make_logger
 logger = make_logger(__name__)
 
 
+def _task_for_acp(task: TaskEntity) -> TaskEntity:
+    """Return a copy of *task* safe to send to an agent's ACP server.
+
+    task_metadata is caller-side bookkeeping (e.g. who created the thread) and
+    must never reach the agent. Strip it here so individual call sites can't
+    forget.
+    """
+    return task.model_copy(update={"task_metadata": None})
+
+
 USE_STREAMING_ADVISORY_LOCK = os.environ.get(
     "USE_STREAMING_ADVISORY_LOCK", "false"
 ) in ["true", "1", "yes"]
@@ -285,7 +295,7 @@ class AgentACPService(TaskMessageMixin):
         """Create a new task"""
         params = CreateTaskParams(
             agent=agent,
-            task=task,
+            task=_task_for_acp(task),
             params=params,
         )
         headers = await self.get_headers(agent)
@@ -307,7 +317,7 @@ class AgentACPService(TaskMessageMixin):
         """Send a message to a running task"""
         params = SendMessageParams(
             agent=agent,
-            task=task,
+            task=_task_for_acp(task),
             content=content,
             stream=False,
         )
@@ -338,7 +348,7 @@ class AgentACPService(TaskMessageMixin):
         """Send a message to a running task and stream the response"""
         params = SendMessageParams(
             agent=agent,
-            task=task,
+            task=_task_for_acp(task),
             content=content,
             stream=True,
         )
@@ -378,7 +388,7 @@ class AgentACPService(TaskMessageMixin):
         self, agent: AgentEntity, task: TaskEntity, acp_url: str
     ) -> dict[str, Any]:
         """Cancel a running task"""
-        params = CancelTaskParams(agent=agent, task=task)
+        params = CancelTaskParams(agent=agent, task=_task_for_acp(task))
         headers = await self.get_headers(agent)
         return await self._call_jsonrpc(
             url=acp_url,
@@ -405,7 +415,7 @@ class AgentACPService(TaskMessageMixin):
         # This ensures single source of truth and avoids duplication
         params = SendEventParams(
             agent=agent,
-            task=task,
+            task=_task_for_acp(task),
             event=event,
             request=None,
         )

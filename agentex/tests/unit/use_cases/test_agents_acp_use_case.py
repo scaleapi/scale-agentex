@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -932,6 +933,98 @@ class TestAgentsACPUseCase:
 
         # Verify HTTP call was made
         mock_http_gateway.async_call.assert_called_once()
+
+    async def test_handle_task_create_persists_task_metadata(
+        self, agents_acp_use_case, mock_http_gateway, agent_repository, sample_agent
+    ):
+        """task_metadata on CreateTaskRequest is persisted on the row but not forwarded to ACP."""
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        from src.api.schemas.agents_rpc import CreateTaskRequest
+
+        async def mock_async_call(*args, **kwargs):
+            payload = kwargs.get("payload", {})
+            return {
+                "jsonrpc": "2.0",
+                "result": {"status": "created", "task_id": "new-task-id"},
+                "id": payload.get("id", ""),
+            }
+
+        mock_http_gateway.async_call.side_effect = mock_async_call
+
+        import uuid
+
+        unique_task_name = f"test-task-meta-{uuid.uuid4().hex[:8]}"
+        create_request = CreateTaskRequest(
+            name=unique_task_name,
+            params={"param1": "value1"},
+            task_metadata={"created_by_user_id": "user-a"},
+        )
+
+        result = await agents_acp_use_case._handle_task_create(
+            agent=sample_agent,
+            params=create_request,
+            acp_url=sample_agent.acp_url,
+        )
+
+        assert result.task_metadata == {"created_by_user_id": "user-a"}
+
+        # ACP forwarding must not leak task_metadata to the agent
+        mock_http_gateway.async_call.assert_called_once()
+        sent_payload = mock_http_gateway.async_call.call_args.kwargs["payload"]
+        assert sent_payload["params"]["task"]["task_metadata"] is None
+        assert "created_by_user_id" not in json.dumps(sent_payload)
+
+    async def test_handle_task_create_ignores_task_metadata_for_existing_task(
+        self, agents_acp_use_case, mock_http_gateway, agent_repository, sample_agent
+    ):
+        """task_metadata is only stamped at creation; a re-issued task/create with the
+        same name must not overwrite the existing row's metadata. Update-via-PUT is the
+        supported way to mutate metadata after creation."""
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        from src.api.schemas.agents_rpc import CreateTaskRequest
+
+        async def mock_async_call(*args, **kwargs):
+            payload = kwargs.get("payload", {})
+            return {
+                "jsonrpc": "2.0",
+                "result": {"status": "created", "task_id": "x"},
+                "id": payload.get("id", ""),
+            }
+
+        mock_http_gateway.async_call.side_effect = mock_async_call
+
+        import uuid
+
+        unique_task_name = f"test-task-existing-{uuid.uuid4().hex[:8]}"
+
+        # First create — metadata is stamped.
+        first_request = CreateTaskRequest(
+            name=unique_task_name,
+            params={"param1": "v1"},
+            task_metadata={"created_by_user_id": "user-a"},
+        )
+        first = await agents_acp_use_case._handle_task_create(
+            agent=sample_agent,
+            params=first_request,
+            acp_url=sample_agent.acp_url,
+        )
+        assert first.task_metadata == {"created_by_user_id": "user-a"}
+
+        # Second create with same name — metadata in the request must be ignored.
+        second_request = CreateTaskRequest(
+            name=unique_task_name,
+            params={"param1": "v1"},
+            task_metadata={"created_by_user_id": "user-b-attacker"},
+        )
+        second = await agents_acp_use_case._handle_task_create(
+            agent=sample_agent,
+            params=second_request,
+            acp_url=sample_agent.acp_url,
+        )
+        assert second.id == first.id
+        assert second.task_metadata == {"created_by_user_id": "user-a"}
 
     #
     async def test_handle_message_send_sync_error_handling(
