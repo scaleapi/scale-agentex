@@ -437,6 +437,12 @@ class TestTasksAPIIntegration:
         response = await isolated_client.get("/tasks", params={"status": "BOGUS"})
         assert response.status_code == 422
 
+    async def test_list_tasks_rejects_deleted_status(self, isolated_client):
+        """status=DELETED is contradictory with the always-on DELETED exclusion;
+        rejecting at the route avoids silently returning an empty list."""
+        response = await isolated_client.get("/tasks", params={"status": "DELETED"})
+        assert response.status_code == 400
+
     #
     async def test_get_task_by_id_returns_correct_task(
         self, isolated_client, test_task

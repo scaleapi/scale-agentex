@@ -81,7 +81,7 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
                 ).where(AgentORM.name == agent_name)
             if agent_id:
                 query = query.where(TaskAgentORM.agent_id == agent_id)
-        if task_metadata:
+        if task_metadata is not None:
             query = query.where(TaskORM.task_metadata.contains(task_metadata))
         query = query.where(TaskORM.status != TaskStatus.DELETED)
         return await self.list(

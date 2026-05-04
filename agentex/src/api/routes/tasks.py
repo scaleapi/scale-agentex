@@ -122,6 +122,13 @@ async def list_tasks(
                 detail="task_metadata cannot be empty; omit the parameter to skip filtering.",
             )
 
+    if status == TaskStatus.DELETED:
+        # list_tasks always excludes DELETED rows at the repository layer, so
+        # filtering on it would silently return an empty list. Reject explicitly.
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot filter by DELETED status; deleted tasks are not returned by list_tasks.",
+        )
     domain_status = DomainTaskStatus(status.value) if status is not None else None
 
     task_entities = await task_use_case.list_tasks(
