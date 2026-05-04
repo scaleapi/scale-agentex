@@ -49,6 +49,7 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
         | None = None,
         agent_id: str | None = None,
         agent_name: str | None = None,
+        task_metadata: dict | None = None,
         order_by: str | None = None,
         order_direction: Literal["asc", "desc"] = "desc",
         limit: int | None = None,
@@ -62,6 +63,8 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
             - task_filters: Filters on the task table itself
             - agent_id: Filter tasks by agent ID using the join table
             - agent_name: Filter tasks by agent name
+            - task_metadata: JSONB containment filter on `task_metadata`. Returns
+              tasks whose metadata is a JSON superset of the provided dict.
             - order_by: Column to order by
             - order_direction: Direction to order by
             - limit: Maximum number of results to return
@@ -78,6 +81,8 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
                 ).where(AgentORM.name == agent_name)
             if agent_id:
                 query = query.where(TaskAgentORM.agent_id == agent_id)
+        if task_metadata:
+            query = query.where(TaskORM.task_metadata.contains(task_metadata))
         query = query.where(TaskORM.status != TaskStatus.DELETED)
         return await self.list(
             filters=task_filters,

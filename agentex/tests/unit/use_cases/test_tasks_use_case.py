@@ -455,3 +455,40 @@ class TestTasksUseCaseMetadataUpdate:
             await tasks_use_case.update_mutable_fields_on_task(
                 task_metadata={"key": "value"}
             )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestTasksUseCaseListTasks:
+    """Test suite for list_tasks filtering"""
+
+    async def test_list_tasks_forwards_task_metadata_filter(
+        self, tasks_use_case, task_service, agent_repository, sample_agent
+    ):
+        """list_tasks should forward task_metadata filter to the service/repository."""
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        suffix = uuid4().hex[:8]
+        matching = await task_service.create_task(
+            agent=sample_agent, task_name=f"match-{suffix}"
+        )
+        other = await task_service.create_task(
+            agent=sample_agent, task_name=f"other-{suffix}"
+        )
+
+        await tasks_use_case.update_mutable_fields_on_task(
+            id=matching.id, task_metadata={"created_by_user_id": "user-a"}
+        )
+        await tasks_use_case.update_mutable_fields_on_task(
+            id=other.id, task_metadata={"created_by_user_id": "user-b"}
+        )
+
+        results = await tasks_use_case.list_tasks(
+            limit=100,
+            page_number=1,
+            task_metadata={"created_by_user_id": "user-a"},
+        )
+
+        result_ids = {t.id for t in results}
+        assert matching.id in result_ids
+        assert other.id not in result_ids

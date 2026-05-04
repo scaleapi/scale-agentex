@@ -1,6 +1,7 @@
+import json
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from src.adapters.temporal.adapter_temporal import DTemporalAdapter
@@ -14,9 +15,11 @@ from src.api.schemas.tasks import (
     Task,
     TaskRelationships,
     TaskResponse,
+    TaskStatus,
     TaskStatusReasonRequest,
     UpdateTaskRequest,
 )
+from src.domain.entities.tasks import TaskStatus as DomainTaskStatus
 from src.domain.services.authorization_service import DAuthorizationService
 from src.domain.use_cases.streams_use_case import DStreamsUseCase
 from src.domain.use_cases.tasks_use_case import DTaskUseCase
@@ -79,6 +82,19 @@ async def list_tasks(
     authorized_ids: DAuthorizedResourceIds(AgentexResourceType.task),
     agent_id: str | None = None,
     agent_name: str | None = None,
+    status: Annotated[
+        TaskStatus | None,
+        Query(description="Filter tasks by status (e.g. RUNNING, COMPLETED)."),
+    ] = None,
+    task_metadata: Annotated[
+        str | None,
+        Query(
+            description=(
+                "JSON-encoded object used to filter tasks via JSONB containment. "
+                'Example: {"created_by_user_id": "abc-123"}.'
+            )
+        ),
+    ] = None,
     limit: int = 50,
     page_number: int = 1,
     order_by: str | None = None,
@@ -86,11 +102,34 @@ async def list_tasks(
     relationships: Annotated[list[TaskRelationships], Query()] = None,
 ):
     """List all tasks."""
+    parsed_metadata: dict | None = None
+    if task_metadata is not None:
+        try:
+            parsed_metadata = json.loads(task_metadata)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid JSON in task_metadata query parameter: {exc.msg}",
+            ) from exc
+        if not isinstance(parsed_metadata, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="task_metadata must decode to a JSON object.",
+            )
+        if not parsed_metadata:
+            raise HTTPException(
+                status_code=400,
+                detail="task_metadata cannot be empty; omit the parameter to skip filtering.",
+            )
+
+    domain_status = DomainTaskStatus(status.value) if status is not None else None
 
     task_entities = await task_use_case.list_tasks(
         id=authorized_ids,
         agent_id=agent_id,
         agent_name=agent_name,
+        status=domain_status,
+        task_metadata=parsed_metadata,
         limit=limit,
         page_number=page_number,
         order_by=order_by,

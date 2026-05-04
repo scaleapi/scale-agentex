@@ -220,6 +220,8 @@ class AgentTaskService:
         id: str | list[str] | None = None,
         agent_id: str | None = None,
         agent_name: str | None = None,
+        status: TaskStatus | list[TaskStatus] | None = None,
+        task_metadata: dict | None = None,
         order_by: str | None = None,
         order_direction: str = "desc",
         relationships: list[TaskRelationships] | None = None,
@@ -227,11 +229,17 @@ class AgentTaskService:
         """
         List all tasks from the repository.
         """
+        task_filters: dict = {}
+        if id is not None:
+            task_filters["id"] = id
+        if status is not None:
+            task_filters["status"] = status
 
         return await self.task_repository.list_with_join(
-            task_filters={"id": id} if id is not None else None,
+            task_filters=task_filters or None,
             agent_id=agent_id,
             agent_name=agent_name,
+            task_metadata=task_metadata,
             order_by=order_by,
             order_direction=order_direction,
             limit=limit,

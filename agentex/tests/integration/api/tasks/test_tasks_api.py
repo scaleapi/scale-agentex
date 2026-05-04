@@ -340,6 +340,103 @@ class TestTasksAPIIntegration:
         assert len(tasks) == 1
         assert tasks[0]["id"] == target_task.id
 
+    async def test_list_tasks_with_task_metadata_filter(
+        self, isolated_client, isolated_repositories
+    ):
+        """list_tasks?task_metadata={...} should return only matching tasks."""
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="metadata-filter-agent",
+            description="agent for metadata filter test",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        matching = TaskEntity(
+            id=orm_id(),
+            name="matching-task",
+            status=TaskStatus.RUNNING,
+            task_metadata={"created_by_user_id": "user-a"},
+        )
+        other = TaskEntity(
+            id=orm_id(),
+            name="other-task",
+            status=TaskStatus.RUNNING,
+            task_metadata={"created_by_user_id": "user-b"},
+        )
+        await task_repo.create(agent_id=agent.id, task=matching)
+        await task_repo.create(agent_id=agent.id, task=other)
+
+        response = await isolated_client.get(
+            "/tasks",
+            params={"task_metadata": '{"created_by_user_id": "user-a"}'},
+        )
+        assert response.status_code == 200
+        ids = {t["id"] for t in response.json()}
+        assert matching.id in ids
+        assert other.id not in ids
+
+    async def test_list_tasks_rejects_malformed_task_metadata(self, isolated_client):
+        """Malformed JSON in task_metadata should yield a 400."""
+        response = await isolated_client.get(
+            "/tasks", params={"task_metadata": "not-json"}
+        )
+        assert response.status_code == 400
+
+    async def test_list_tasks_rejects_empty_task_metadata(self, isolated_client):
+        """Empty JSON object in task_metadata should yield a 400."""
+        response = await isolated_client.get("/tasks", params={"task_metadata": "{}"})
+        assert response.status_code == 400
+
+    async def test_list_tasks_rejects_non_object_task_metadata(self, isolated_client):
+        """Non-object JSON in task_metadata should yield a 400."""
+        response = await isolated_client.get(
+            "/tasks", params={"task_metadata": '"some-string"'}
+        )
+        assert response.status_code == 400
+
+    async def test_list_tasks_with_status_filter(
+        self, isolated_client, isolated_repositories
+    ):
+        """list_tasks?status=RUNNING should return only RUNNING tasks."""
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="status-filter-agent",
+            description="agent for status filter test",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        running = TaskEntity(
+            id=orm_id(),
+            name="status-filter-running",
+            status=TaskStatus.RUNNING,
+        )
+        completed = TaskEntity(
+            id=orm_id(),
+            name="status-filter-completed",
+            status=TaskStatus.COMPLETED,
+        )
+        await task_repo.create(agent_id=agent.id, task=running)
+        await task_repo.create(agent_id=agent.id, task=completed)
+
+        response = await isolated_client.get("/tasks", params={"status": "RUNNING"})
+        assert response.status_code == 200
+        ids = {t["id"] for t in response.json()}
+        assert running.id in ids
+        assert completed.id not in ids
+
+    async def test_list_tasks_rejects_invalid_status(self, isolated_client):
+        """Invalid status enum value should yield a 422."""
+        response = await isolated_client.get("/tasks", params={"status": "BOGUS"})
+        assert response.status_code == 422
+
     #
     async def test_get_task_by_id_returns_correct_task(
         self, isolated_client, test_task

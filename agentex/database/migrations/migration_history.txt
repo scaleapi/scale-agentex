@@ -1,4 +1,5 @@
-57c5ed4f59ae -> 9ff3ee32c81b (head), uppercase deployment status
+9ff3ee32c81b -> e9c4ff9e6542 (head), add_tasks_metadata_gin_index
+57c5ed4f59ae -> 9ff3ee32c81b, uppercase deployment status enum labels
 4a9b7787ccd7 -> 57c5ed4f59ae, add_task_id_to_spans
 d1a6cde41b3f -> 4a9b7787ccd7, deployments
 d024851e790c -> d1a6cde41b3f, add_langgraph_checkpoint_tables
