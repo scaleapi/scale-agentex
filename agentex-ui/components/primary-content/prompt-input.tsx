@@ -147,6 +147,8 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
       });
       currentTaskId = task.id;
       updateParams({ [SearchParamKey.TASK_ID]: currentTaskId });
+      setIsTaskParamsEnabled(false);
+      setTaskParamsPrompt('');
     }
 
     const content: TextContent | DataContent = isSendingJSON
