@@ -8,11 +8,10 @@ import { Prec } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import CodeMirror from '@uiw/react-codemirror';
 import { DataContent, TextContent } from 'agentex/resources';
-import { ArrowUp, ChevronDown } from 'lucide-react';
+import { ArrowUp } from 'lucide-react';
 
 import { useAgentexClient } from '@/components/providers';
 import { Button } from '@/components/ui/button';
-import { Collapsible } from '@/components/ui/collapsible';
 import { IconButton } from '@/components/ui/icon-button';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/toast';
@@ -52,7 +51,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
   const { taskID, agentName, updateParams } = useSafeSearchParams();
   const [isClient, setIsClient] = useState(false);
   const [isSendingJSON, setIsSendingJSON] = useState(false);
-  const [isTaskParamsOpen, setIsTaskParamsOpen] = useState(false);
+  const [isTaskParamsEnabled, setIsTaskParamsEnabled] = useState(false);
   const [taskParamsPrompt, setTaskParamsPrompt] = useState('');
 
   const { agentexClient } = useAgentexClient();
@@ -123,7 +122,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
     }
 
     let taskParams: Record<string, unknown> | undefined;
-    if (!currentTaskId) {
+    if (!currentTaskId && isTaskParamsEnabled) {
       try {
         taskParams = parseOptionalJsonObject(taskParamsPrompt);
       } catch (error) {
@@ -178,6 +177,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
     sendMessageMutation,
     setPrompt,
     isSendingJSON,
+    isTaskParamsEnabled,
     taskParamsPrompt,
   ]);
 
@@ -187,8 +187,8 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
         <TaskCreationParamsEditor
           value={taskParamsPrompt}
           setValue={setTaskParamsPrompt}
-          isOpen={isTaskParamsOpen}
-          setIsOpen={setIsTaskParamsOpen}
+          isEnabled={isTaskParamsEnabled}
+          setIsEnabled={setIsTaskParamsEnabled}
           isDisabled={isDisabled}
           codeMirrorViewRef={taskParamsCodeMirrorViewRef}
         />
@@ -244,22 +244,34 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
 const TaskCreationParamsEditor = ({
   value,
   setValue,
-  isOpen,
-  setIsOpen,
+  isEnabled,
+  setIsEnabled,
   isDisabled,
   codeMirrorViewRef,
 }: {
   value: string;
   setValue: (value: string) => void;
-  isOpen: boolean;
-  setIsOpen: (isOpen: boolean) => void;
+  isEnabled: boolean;
+  setIsEnabled: (isEnabled: boolean) => void;
   isDisabled: boolean;
   codeMirrorViewRef: React.MutableRefObject<EditorView | null>;
 }) => {
-  const handleToggle = useCallback(() => {
-    const nextIsOpen = !isOpen;
-    setIsOpen(nextIsOpen);
-  }, [isOpen, setIsOpen]);
+  const handleAdd = useCallback(() => {
+    setIsEnabled(true);
+  }, [setIsEnabled]);
+
+  const handleRemove = useCallback(() => {
+    setIsEnabled(false);
+    setValue('');
+  }, [setIsEnabled, setValue]);
+
+  useEffect(() => {
+    if (!isEnabled) return;
+
+    requestAnimationFrame(() => {
+      codeMirrorViewRef.current?.focus();
+    });
+  }, [codeMirrorViewRef, isEnabled]);
 
   return (
     <div
@@ -269,22 +281,21 @@ const TaskCreationParamsEditor = ({
         transition: 'opacity 0.2s',
       }}
     >
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="text-muted-foreground hover:text-foreground h-auto w-fit gap-1 px-0 py-0 text-xs"
-        onClick={handleToggle}
-        disabled={isDisabled}
-        aria-expanded={isOpen}
-      >
-        <ChevronDown
-          className={`size-3 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-        />
-        Task creation params
-      </Button>
-      <Collapsible collapsed={!isOpen}>
+      {isEnabled ? (
         <div className="border-input bg-background dark:bg-input/30 rounded-xl border p-2 shadow-sm">
+          <div className="mb-2 flex items-center justify-between px-1">
+            <span className="text-xs font-medium">Task creation params</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground hover:text-foreground h-auto px-0 py-0 text-xs"
+              onClick={handleRemove}
+              disabled={isDisabled}
+            >
+              Remove
+            </Button>
+          </div>
           <CodeMirror
             className="text-sm"
             value={value}
@@ -304,13 +315,22 @@ const TaskCreationParamsEditor = ({
             theme="none"
             maxHeight="180px"
           />
+          <p className="text-muted-foreground mt-2 px-1 text-xs">
+            Optional JSON object sent only when this GUI starts a new task.
+          </p>
         </div>
-        <p className="mt-1 text-xs">
-          Optional JSON object sent as task/create params only when this GUI
-          starts a new task. Leave empty to use the prompt as the default
-          params.
-        </p>
-      </Collapsible>
+      ) : (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground hover:text-foreground h-auto w-fit px-0 py-0 text-xs"
+          onClick={handleAdd}
+          disabled={isDisabled}
+        >
+          + Add task creation params
+        </Button>
+      )}
     </div>
   );
 };
