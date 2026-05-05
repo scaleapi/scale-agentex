@@ -18,3 +18,10 @@ repos:
         files: ^agentex-ui/.*\.(ts|tsx|js|jsx)$
         pass_filenames: true
 
+      - id: agentex-openapi-spec
+        name: Regenerate AgentEx OpenAPI spec
+        entry: bash -c 'cd agentex && make gen-openapi && git add openapi.yaml'
+        language: system
+        files: ^agentex/(src/.*|scripts/generate_openapi_spec\.py)$
+        pass_filenames: false
+
