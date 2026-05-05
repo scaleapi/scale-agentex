@@ -73,7 +73,7 @@ apply-migrations: ## Apply database migrations
 #
 
 gen-openapi: ## Regenerate openapi.yaml from the FastAPI app
-	@uv run python scripts/generate_openapi_spec.py --output openapi.yaml
+	@uv run --frozen python scripts/generate_openapi_spec.py --output openapi.yaml
 
 #
 # Documentation
