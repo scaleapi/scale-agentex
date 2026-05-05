@@ -1,9 +1,4 @@
-"""Generate the AgentEx OpenAPI spec to a YAML file for Stainless ingestion.
-
-Imports the FastAPI app and dumps its OpenAPI schema. The lifespan context
-(DB / Temporal / Redis startup) is intentionally not run — we only need the
-schema produced by route registration and Pydantic models.
-"""
+"""Dump the FastAPI app's OpenAPI schema to a YAML file."""
 
 from __future__ import annotations
 
@@ -11,8 +6,6 @@ import argparse
 import os
 from pathlib import Path
 
-# Provide non-empty defaults for env vars consulted at import time so module
-# evaluation does not fail in the CI runner where nothing is configured.
 os.environ.setdefault("ENVIRONMENT", "development")
 os.environ.setdefault("ALLOWED_ORIGINS", "*")
 
