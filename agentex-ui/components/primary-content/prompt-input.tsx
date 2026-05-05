@@ -128,7 +128,8 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
       } catch (error) {
         toast.error({
           title: 'Invalid task creation params',
-          message: error instanceof Error ? error.message : 'Invalid JSON object',
+          message:
+            error instanceof Error ? error.message : 'Invalid JSON object',
         });
         return;
       }

@@ -97,7 +97,9 @@ describe('parseOptionalJsonObject', () => {
   });
 
   it('rejects arrays', () => {
-    expect(() => parseOptionalJsonObject('[]')).toThrow('Expected a JSON object');
+    expect(() => parseOptionalJsonObject('[]')).toThrow(
+      'Expected a JSON object'
+    );
   });
 
   it('rejects null', () => {
