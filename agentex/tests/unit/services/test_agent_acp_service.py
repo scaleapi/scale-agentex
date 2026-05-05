@@ -710,22 +710,27 @@ class _AsyncStreamMock:
 
 @pytest.fixture
 def task_with_metadata():
-    """Task carrying caller-side metadata that must NEVER reach the agent."""
+    """Task carrying caller-side metadata that is forwarded as-is to the agent."""
     return TaskEntity(
         id=str(uuid4()),
-        name="task-with-secret-meta",
+        name="task-with-meta",
         status=TaskStatus.RUNNING,
         status_reason="Test",
-        task_metadata={"created_by_user_id": "secret-user-value"},
+        task_metadata={"created_by_user_id": "user-value"},
     )
 
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-class TestACPPayloadScrubsTaskMetadata:
-    """task_metadata is caller-side bookkeeping and must never appear in any ACP-bound payload."""
+class TestACPPayloadForwardsTaskMetadata:
+    """task_metadata is forwarded to the agent unchanged.
 
-    async def test_create_task_payload_scrubs_metadata(
+    Pre-existing agents may rely on reading task_metadata that callers set via
+    PUT /tasks/{id}, so we keep the pass-through behaviour for backward
+    compatibility.
+    """
+
+    async def test_create_task_payload_forwards_metadata(
         self,
         agent_acp_service,
         mock_http_gateway,
@@ -747,14 +752,11 @@ class TestACPPayloadScrubsTaskMetadata:
         )
 
         payload = mock_http_gateway.async_call.call_args[1]["payload"]
-        assert payload["params"]["task"]["task_metadata"] is None
-        assert "secret-user-value" not in str(payload)
-        # Sanity: the task we passed in is unchanged (scrub returns a copy)
-        assert task_with_metadata.task_metadata == {
-            "created_by_user_id": "secret-user-value"
+        assert payload["params"]["task"]["task_metadata"] == {
+            "created_by_user_id": "user-value"
         }
 
-    async def test_send_message_payload_scrubs_metadata(
+    async def test_send_message_payload_forwards_metadata(
         self,
         agent_acp_service,
         mock_http_gateway,
@@ -785,10 +787,11 @@ class TestACPPayloadScrubsTaskMetadata:
         )
 
         payload = mock_http_gateway.async_call.call_args[1]["payload"]
-        assert payload["params"]["task"]["task_metadata"] is None
-        assert "secret-user-value" not in str(payload)
+        assert payload["params"]["task"]["task_metadata"] == {
+            "created_by_user_id": "user-value"
+        }
 
-    async def test_send_message_stream_payload_scrubs_metadata(
+    async def test_send_message_stream_payload_forwards_metadata(
         self,
         agent_acp_service,
         mock_http_gateway,
@@ -816,10 +819,11 @@ class TestACPPayloadScrubsTaskMetadata:
             pass
 
         payload = captured["payload"]
-        assert payload["params"]["task"]["task_metadata"] is None
-        assert "secret-user-value" not in str(payload)
+        assert payload["params"]["task"]["task_metadata"] == {
+            "created_by_user_id": "user-value"
+        }
 
-    async def test_cancel_task_payload_scrubs_metadata(
+    async def test_cancel_task_payload_forwards_metadata(
         self,
         agent_acp_service,
         mock_http_gateway,
@@ -841,10 +845,11 @@ class TestACPPayloadScrubsTaskMetadata:
         )
 
         payload = mock_http_gateway.async_call.call_args[1]["payload"]
-        assert payload["params"]["task"]["task_metadata"] is None
-        assert "secret-user-value" not in str(payload)
+        assert payload["params"]["task"]["task_metadata"] == {
+            "created_by_user_id": "user-value"
+        }
 
-    async def test_send_event_payload_scrubs_metadata(
+    async def test_send_event_payload_forwards_metadata(
         self,
         agent_acp_service,
         mock_http_gateway,
@@ -874,5 +879,6 @@ class TestACPPayloadScrubsTaskMetadata:
         )
 
         payload = mock_http_gateway.async_call.call_args[1]["payload"]
-        assert payload["params"]["task"]["task_metadata"] is None
-        assert "secret-user-value" not in str(payload)
+        assert payload["params"]["task"]["task_metadata"] == {
+            "created_by_user_id": "user-value"
+        }
