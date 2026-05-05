@@ -209,12 +209,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
   /agents/forward/name/{agent_name}/{path}:
-    post:
+    get:
       tags:
       - Agents
-      summary: Forward request to agent by ID
-      description: Forward a request to an agent by its unique ID.
-      operationId: forward_request_to_agent_agents_forward_name__agent_name___path__post
+      summary: Forward GET request to agent by name
+      description: Forward a GET request to an agent by its name.
+      operationId: forward_get_request_to_agent_agents_forward_name__agent_name___path__get
       parameters:
       - name: agent_name
         in: path
@@ -240,12 +240,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-    get:
+    post:
       tags:
       - Agents
-      summary: Forward request to agent by ID
-      description: Forward a request to an agent by its unique ID.
-      operationId: forward_request_to_agent_agents_forward_name__agent_name___path__post
+      summary: Forward POST request to agent by name
+      description: Forward a POST request to an agent by its name.
+      operationId: forward_post_request_to_agent_agents_forward_name__agent_name___path__post
       parameters:
       - name: agent_name
         in: path
