@@ -216,13 +216,30 @@ async def register_agent(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.api_route(
+@router.get(
     "/forward/name/{agent_name}/{path:path}",
-    methods=["GET", "POST"],
-    summary="Forward request to agent by ID",
-    description="Forward a request to an agent by its unique ID.",
+    summary="Forward GET request to agent by name",
+    description="Forward a GET request to an agent by its name.",
 )
-async def forward_request_to_agent(
+async def forward_get_request_to_agent(
+    agent_name: str,
+    path: str,
+    request: Request,
+    agent_api_keys_use_case: DAgentAPIKeysUseCase,
+):
+    return await agent_api_keys_use_case.forward_agent_request(
+        agent_name=agent_name,
+        path=path,
+        request=request,
+    )
+
+
+@router.post(
+    "/forward/name/{agent_name}/{path:path}",
+    summary="Forward POST request to agent by name",
+    description="Forward a POST request to an agent by its name.",
+)
+async def forward_post_request_to_agent(
     agent_name: str,
     path: str,
     request: Request,
