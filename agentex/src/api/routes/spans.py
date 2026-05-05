@@ -10,7 +10,7 @@ router = APIRouter(prefix="/spans", tags=["Spans"])
 
 
 @router.post(
-    "REMOVE-ME",
+    "",
     response_model=Span,
 )
 async def create_span(

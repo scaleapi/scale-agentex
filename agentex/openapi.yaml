@@ -2011,19 +2011,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /spansREMOVE-ME:
+  /spans:
     post:
       tags:
       - Spans
       summary: Create Span
       description: Create a new span with the provided parameters
-      operationId: create_span_spansREMOVE_ME_post
+      operationId: create_span_spans_post
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateSpanRequest'
-        required: true
       responses:
         '200':
           description: Successful Response
@@ -2037,66 +2037,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /spans/{span_id}:
-    patch:
-      tags:
-      - Spans
-      summary: Partial Update Span
-      description: Update a span with the provided output data and mark it as complete
-      operationId: partial_update_span_spans__span_id__patch
-      parameters:
-      - name: span_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Span Id
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateSpanRequest'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Span'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    get:
-      tags:
-      - Spans
-      summary: Get Span
-      description: Get a span by ID
-      operationId: get_span_spans__span_id__get
-      parameters:
-      - name: span_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Span Id
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Span'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /spans:
     get:
       tags:
       - Spans
@@ -2162,6 +2102,65 @@ paths:
                 items:
                   $ref: '#/components/schemas/Span'
                 title: Response List Spans Spans Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /spans/{span_id}:
+    patch:
+      tags:
+      - Spans
+      summary: Partial Update Span
+      description: Update a span with the provided output data and mark it as complete
+      operationId: partial_update_span_spans__span_id__patch
+      parameters:
+      - name: span_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Span Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSpanRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Span'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Spans
+      summary: Get Span
+      description: Get a span by ID
+      operationId: get_span_spans__span_id__get
+      parameters:
+      - name: span_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Span Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Span'
         '422':
           description: Validation Error
           content:
