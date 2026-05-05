@@ -109,8 +109,8 @@ class CreateTaskRequestEntity(BaseModel):
         None,
         description=(
             "Caller-provided metadata to persist on the task row. Only applied at "
-            "task creation; ignored if a task with this name already exists. Not "
-            "forwarded to the agent."
+            "task creation; ignored if a task with this name already exists. "
+            "Forwarded to the agent inside the ACP payload for backward compatibility."
         ),
     )
 
