@@ -26,6 +26,14 @@ class CreateTaskRequest(BaseModel):
     params: dict[str, Any] | None = Field(
         None, description="The parameters for the task"
     )
+    task_metadata: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Caller-provided metadata to persist on the task row. Only applied at "
+            "task creation; ignored if a task with this name already exists. "
+            "Forwarded to the agent inside the ACP payload for backward compatibility."
+        ),
+    )
 
 
 class CancelTaskRequest(BaseModel):
