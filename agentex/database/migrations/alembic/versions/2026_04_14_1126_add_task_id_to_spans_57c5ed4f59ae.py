@@ -4,11 +4,26 @@ Revision ID: 57c5ed4f59ae
 Revises: 4a9b7787ccd7
 Create Date: 2026-04-14 11:26:45.193515
 
+The original version of this migration also ran a large UPDATE backfill,
+added a foreign key (which scanned the full table under AccessExclusiveLock),
+and created an index non-concurrently. On a sufficiently large spans table
+this can exhaust the connection pool while concurrent span writes pile up
+behind the lock.
+
+The backfill, FK and index are now handled out-of-band (see
+docs/runbooks/spans-task-id-backfill.md) and a follow-up tail migration
+finalizes the FK + index with non-blocking operations. This revision is
+reduced to the only safe in-band step: adding the nullable column. Adding a
+nullable column with no default is a metadata-only operation in PostgreSQL
+>= 11, so it is fast and does not block writes.
+
+The IF NOT EXISTS guard makes the migration safe to re-run on environments
+where the original (heavier) version of this migration already completed
+successfully.
 """
 from typing import Sequence, Union
 
 from alembic import op
-import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
@@ -19,34 +34,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Add nullable task_id column first (no FK yet, so backfill can run freely)
-    op.add_column('spans', sa.Column('task_id', sa.String(), nullable=True))
-
-    # Backfill task_id from trace_id where trace_id is a valid task ID.
-    # Uses a JOIN instead of a subquery for efficient matching.
-    op.execute("""
-        UPDATE spans
-        SET task_id = spans.trace_id
-        FROM tasks
-        WHERE spans.trace_id = tasks.id
-          AND spans.task_id IS NULL
-    """)
-
-    # Add FK constraint after backfill (NULL values are allowed by FK)
-    op.create_foreign_key(
-        'fk_spans_task_id_tasks',
-        'spans',
-        'tasks',
-        ['task_id'],
-        ['id'],
-        ondelete='SET NULL',
-    )
-
-    # Add index for querying spans by task_id
-    op.create_index('ix_spans_task_id', 'spans', ['task_id'])
+    op.execute("ALTER TABLE spans ADD COLUMN IF NOT EXISTS task_id VARCHAR")
 
 
 def downgrade() -> None:
-    op.drop_index('ix_spans_task_id', table_name='spans')
-    op.drop_constraint('fk_spans_task_id_tasks', 'spans', type_='foreignkey')
-    op.drop_column('spans', 'task_id')
+    op.execute("ALTER TABLE spans DROP COLUMN IF EXISTS task_id")
