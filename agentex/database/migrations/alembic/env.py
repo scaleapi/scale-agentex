@@ -140,8 +140,16 @@ def run_migrations_online() -> None:
             # Apply default migration timeouts at the session level so they
             # persist across per-migration transactions and any autocommit_block
             # boundaries opened by migrations (e.g. for CREATE INDEX CONCURRENTLY).
+            #
+            # exec_driver_sql autobegins a SQLAlchemy transaction. We commit it
+            # before configure() so alembic doesn't latch onto it as an
+            # "external" transaction — that mode disables transaction_per_migration
+            # and breaks autocommit_block (which asserts self._transaction is not
+            # None). Postgres SET is session-level, so the timeouts persist past
+            # the commit.
             for stmt in _format_set_statements(DEFAULT_MIGRATION_TIMEOUTS):
                 connection.exec_driver_sql(stmt)
+            connection.commit()
 
             # transaction_per_migration=True wraps each migration in its own
             # transaction (instead of a single outer transaction for all
