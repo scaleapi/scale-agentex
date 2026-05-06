@@ -135,9 +135,9 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
       const task = await createTaskMutation.mutateAsync({
         agentName: agentName,
         params: {
+          ...extraTaskParams,
           description: prompt,
           content: currentPrompt,
-          ...extraTaskParams,
         },
       });
       currentTaskId = task.id;
