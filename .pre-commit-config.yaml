@@ -25,3 +25,9 @@ repos:
         files: ^agentex/(src/.*|scripts/generate_openapi_spec\.py)$
         pass_filenames: false
 
+      - id: migration-safety-lint
+        name: 'lint Alembic migrations for dangerous Postgres patterns'
+        language: system
+        entry: agentex/scripts/git_hooks/migration_safety_lint.sh
+        files: ^agentex/database/migrations/alembic/versions/.*\.py$
+
