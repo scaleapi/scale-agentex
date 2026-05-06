@@ -198,11 +198,13 @@ WHERE s.task_id IS NULL;
 
 ```sql
 -- Sanity: no orphaned task_ids (FK is NOT VALID, so this is the only
--- way to verify referential cleanliness for backfilled rows).
+-- way to verify referential cleanliness for backfilled rows). NOT EXISTS
+-- with a correlated subquery uses the tasks(id) primary-key index and
+-- avoids materialising every tasks.id (which NOT IN would force).
 SELECT count(*) AS orphaned_task_ids
-FROM spans
-WHERE task_id IS NOT NULL
-  AND task_id NOT IN (SELECT id FROM tasks);
+FROM spans s
+WHERE s.task_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = s.task_id);
 ```
 
 Once both are zero, notify the operating team and restore normal traffic
