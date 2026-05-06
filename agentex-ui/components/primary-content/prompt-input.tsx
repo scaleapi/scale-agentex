@@ -50,7 +50,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
   const [isClient, setIsClient] = useState(false);
   const [isSendingJSON, setIsSendingJSON] = useState(false);
   const [isTaskParamsOpen, setIsTaskParamsOpen] = useState(false);
-  const [taskParams, setTaskParams] = useState('{}');
+  const [taskParams, setTaskParams] = useState('');
   const taskParamsViewRef = useRef<EditorView | null>(null);
 
   const { agentexClient } = useAgentexClient();
