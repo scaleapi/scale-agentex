@@ -123,7 +123,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
 
     if (!currentTaskId) {
       let extraTaskParams: Record<string, unknown> = {};
-      if (process.env.NODE_ENV === 'development' && taskParams.trim()) {
+      if (taskParams.trim()) {
         try {
           extraTaskParams = JSON.parse(taskParams);
         } catch {
@@ -178,7 +178,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
 
   return (
     <div className="flex w-full max-w-3xl flex-col gap-2">
-      {process.env.NODE_ENV === 'development' && !taskID && (
+      {!taskID && !isDisabled && (
         <div className="flex flex-col gap-1">
           <button
             type="button"
