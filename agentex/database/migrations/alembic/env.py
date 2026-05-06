@@ -10,7 +10,20 @@ sys.path.insert(0, project_root)
 print(f"Added {project_root} to Python path")
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, event, pool, text
+
+# Default per-migration timeouts. lock_timeout prevents migrations from
+# queueing behind active writes; statement_timeout caps total runtime so a
+# runaway migration aborts cleanly instead of blocking pod startup.
+#
+# These are SET LOCAL inside each migration's transaction, so they only apply
+# to in-transaction migration work. Migrations that run statements via
+# alembic's autocommit_block() (e.g. CREATE INDEX CONCURRENTLY, which cannot
+# run inside a transaction) bypass these timeouts deliberately — those
+# operations are inherently long but non-blocking. Migrations that need an
+# in-transaction override can SET LOCAL the values themselves.
+MIGRATION_LOCK_TIMEOUT = "3s"
+MIGRATION_STATEMENT_TIMEOUT = "30s"
 
 # Add explicit error handling to catch import errors
 try:
@@ -106,7 +119,30 @@ def run_migrations_online() -> None:
         )
 
         with connectable.connect() as connection:
-            context.configure(connection=connection, target_metadata=target_metadata)
+            # transaction_per_migration=True wraps each migration in its own
+            # transaction (instead of a single outer transaction for all
+            # migrations). This lets individual migrations opt into
+            # autocommit_block() for operations that cannot run inside a
+            # transaction, such as CREATE INDEX CONCURRENTLY.
+            context.configure(
+                connection=connection,
+                target_metadata=target_metadata,
+                transaction_per_migration=True,
+            )
+
+            # Apply the migration timeouts once per transaction. SET LOCAL
+            # scopes to the transaction only, so values reset automatically
+            # at COMMIT/ROLLBACK and never leak between migrations.
+            @event.listens_for(connection, "begin")
+            def _apply_migration_timeouts(conn):
+                conn.execute(
+                    text(f"SET LOCAL lock_timeout = '{MIGRATION_LOCK_TIMEOUT}'")
+                )
+                conn.execute(
+                    text(
+                        f"SET LOCAL statement_timeout = '{MIGRATION_STATEMENT_TIMEOUT}'"
+                    )
+                )
 
             with context.begin_transaction():
                 context.run_migrations()
