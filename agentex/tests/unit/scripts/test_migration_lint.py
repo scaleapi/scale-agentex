@@ -211,6 +211,80 @@ def test_concurrently_outside_autocommit_block_flagged(tmp_path: Path) -> None:
     assert any(f.rule == "transaction-nesting" for f in findings)
 
 
+def test_concurrently_mixed_one_outside_one_inside_flags_only_outside(
+    tmp_path: Path,
+) -> None:
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            op.create_index(
+                "ix_foo_a", "foo", ["a"], postgresql_concurrently=True
+            )
+            with op.get_context().autocommit_block():
+                op.create_index(
+                    "ix_foo_b", "foo", ["b"], postgresql_concurrently=True
+                )
+        """,
+    )
+    findings = [
+        f for f in migration_lint.lint_file(path) if f.rule == "transaction-nesting"
+    ]
+    assert len(findings) == 1, findings
+    # The flagged occurrence is the one outside the autocommit_block — i.e.
+    # the kwarg site of the first op.create_index, which is the lower-numbered
+    # of the two postgresql_concurrently=True positions in the source.
+    source_lines = path.read_text().splitlines()
+    flagged_line = source_lines[findings[0].line - 1]
+    assert "postgresql_concurrently=True" in flagged_line
+    inside_lines = [
+        i
+        for i, line in enumerate(source_lines, start=1)
+        if "postgresql_concurrently=True" in line
+    ]
+    assert findings[0].line == min(inside_lines)
+
+
+def test_in_band_update_backfill_flagged(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            op.execute("UPDATE foo SET x = 1 WHERE y IS NULL")
+        """,
+    )
+    findings = migration_lint.lint_file(path)
+    assert any(f.rule == "in-band-backfill" for f in findings)
+
+
+def test_in_band_delete_backfill_flagged(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            op.execute("DELETE FROM foo WHERE created_at < now()")
+        """,
+    )
+    findings = migration_lint.lint_file(path)
+    assert any(f.rule == "in-band-backfill" for f in findings)
+
+
+def test_in_band_backfill_select_not_flagged(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            op.execute("SELECT * FROM foo")
+        """,
+    )
+    findings = migration_lint.lint_file(path)
+    assert all(f.rule != "in-band-backfill" for f in findings)
+
+
 def test_set_lock_timeout_flagged(tmp_path: Path) -> None:
     path = _write(
         tmp_path,

@@ -80,7 +80,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS_DIR = REPO_ROOT / "database" / "migrations" / "alembic" / "versions"
-ENV_PY = REPO_ROOT / "database" / "migrations" / "alembic" / "env.py"
 ESCAPE_HATCH_ENV_VAR = "MIGRATION_UNSAFE_ACK"
 
 
@@ -127,6 +126,11 @@ _RESET_TIMEOUT = re.compile(
     r"(lock_timeout|statement_timeout|idle_in_transaction_session_timeout)\b",
     re.IGNORECASE,
 )
+_DATA_BACKFILL = re.compile(
+    r"\b(?:UPDATE\s+\w|DELETE\s+FROM\b)",
+    re.IGNORECASE,
+)
+_AUTOCOMMIT_OPENER = re.compile(r"\bwith\b[^#\n]*\bautocommit_block\s*\(")
 
 
 def _slice_call(source: str, start: int) -> str:
@@ -281,24 +285,67 @@ def _check_adding_required_field(path: Path, source: str) -> Iterable[Finding]:
             )
 
 
+def _autocommit_spans(source: str) -> list[tuple[int, int]]:
+    """Return (start, end) byte-offset ranges enclosed by ``with ... autocommit_block():`` blocks.
+
+    Computed from indentation: a ``with`` line introducing ``autocommit_block()``
+    opens a block; the block extends as long as subsequent non-blank lines are
+    indented strictly more than the opener.
+    """
+    lines = source.splitlines(keepends=True)
+    line_starts: list[int] = []
+    pos = 0
+    for ln in lines:
+        line_starts.append(pos)
+        pos += len(ln)
+    end_of_file = pos
+
+    spans: list[tuple[int, int]] = []
+    for i, line in enumerate(lines):
+        if not _AUTOCOMMIT_OPENER.search(line):
+            continue
+        opener_indent = len(line) - len(line.lstrip(" \t"))
+        body_start = line_starts[i + 1] if i + 1 < len(lines) else end_of_file
+        body_end = body_start
+        for j in range(i + 1, len(lines)):
+            li = lines[j]
+            if not li.strip():
+                body_end = line_starts[j + 1] if j + 1 < len(lines) else end_of_file
+                continue
+            indent = len(li) - len(li.lstrip(" \t"))
+            if indent <= opener_indent:
+                break
+            body_end = line_starts[j + 1] if j + 1 < len(lines) else end_of_file
+        spans.append((body_start, body_end))
+    return spans
+
+
 def _check_transaction_nesting(path: Path, source: str) -> Iterable[Finding]:
-    """Flag postgresql_concurrently=True used outside an autocommit_block."""
-    if "postgresql_concurrently=True" not in source:
-        return
-    if _AUTOCOMMIT_BLOCK.search(source) is None:
-        first = re.search(r"postgresql_concurrently\s*=\s*True", source)
-        line = _line_of(source, first.start()) if first else 1
-        if not _has_noqa(source, line):
-            yield Finding(
-                path=path,
-                line=line,
-                rule="transaction-nesting",
-                message=(
-                    "postgresql_concurrently=True must run outside the "
-                    "Alembic transaction. Wrap the call in "
-                    "`with op.get_context().autocommit_block():`."
-                ),
-            )
+    """Flag each ``postgresql_concurrently=True`` call site that is not inside an
+    ``autocommit_block``.
+
+    Scans every concurrent-index occurrence individually rather than just
+    asking whether ``autocommit_block`` appears anywhere in the file — a
+    migration with two concurrent indexes where only one is wrapped would
+    otherwise pass the linter and fail at runtime.
+    """
+    spans = _autocommit_spans(source)
+    for match in re.finditer(r"postgresql_concurrently\s*=\s*True", source):
+        line = _line_of(source, match.start())
+        if _has_noqa(source, line):
+            continue
+        if any(start <= match.start() < end for start, end in spans):
+            continue
+        yield Finding(
+            path=path,
+            line=line,
+            rule="transaction-nesting",
+            message=(
+                "postgresql_concurrently=True must run inside "
+                "`with op.get_context().autocommit_block():` — "
+                "CREATE INDEX CONCURRENTLY cannot run inside a transaction."
+            ),
+        )
 
 
 def _check_no_timeout_overrides(path: Path, source: str) -> Iterable[Finding]:
@@ -334,12 +381,40 @@ def _check_no_timeout_overrides(path: Path, source: str) -> Iterable[Finding]:
         )
 
 
+def _check_in_band_backfill(path: Path, source: str) -> Iterable[Finding]:
+    """Flag ``op.execute(...)`` calls whose SQL contains an UPDATE or DELETE FROM.
+
+    Data backfills run inside the migration transaction, hold row locks for
+    its full duration, and prevent autovacuum from reclaiming dead tuples.
+    They belong in an out-of-band operator runbook, not in the migration.
+    """
+    for match in _OP_EXECUTE.finditer(source):
+        line = _line_of(source, match.start())
+        if _has_noqa(source, line):
+            continue
+        call = _slice_call(source, match.start())
+        if _DATA_BACKFILL.search(call):
+            yield Finding(
+                path=path,
+                line=line,
+                rule="in-band-backfill",
+                message=(
+                    "op.execute() containing UPDATE / DELETE FROM holds row "
+                    "locks for the entire migration transaction and prevents "
+                    "autovacuum from cleaning up. Move data backfills to an "
+                    "out-of-band operator runbook and keep the migration "
+                    "schema-only."
+                ),
+            )
+
+
 _RULES = (
     _check_prefer_robust_stmts,
     _check_disallowed_unique_constraint,
     _check_adding_required_field,
     _check_transaction_nesting,
     _check_no_timeout_overrides,
+    _check_in_band_backfill,
 )
 
 
