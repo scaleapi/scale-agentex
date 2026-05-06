@@ -10,46 +10,36 @@ sys.path.insert(0, project_root)
 print(f"Added {project_root} to Python path")
 
 from alembic import context
-from sqlalchemy import engine_from_config, event, pool, text
+from sqlalchemy import engine_from_config, pool
 
-# Default per-migration timeouts. Three layers, each catching a different
-# failure mode:
+# Default Postgres timeouts applied to every migration. They keep a stuck
+# migration from queueing behind active writes and holding locks indefinitely.
 #
-#   * lock_timeout:                       fail fast if a migration's DDL would
-#                                         queue behind active writers (the
-#                                         classic "long migration takes the
-#                                         service down" path).
-#   * statement_timeout:                  cap the per-statement runtime so a
-#                                         runaway query aborts cleanly instead
-#                                         of blocking pod startup.
-#   * idle_in_transaction_session_timeout: kill a migration whose transaction
-#                                         is left open without progress (e.g.
-#                                         a connection that acquired
-#                                         AccessExclusiveLock and then stalled
-#                                         — without this the lock is held
-#                                         indefinitely until the connection
-#                                         drops).
+# - lock_timeout: how long a statement waits for a lock before aborting. 3s
+#   means a migration that cannot acquire its lock quickly gives up instead of
+#   blocking writers behind it.
+# - statement_timeout: maximum runtime for any single statement. 30s catches
+#   runaway DDL/UPDATEs; long index builds must use CREATE INDEX CONCURRENTLY
+#   in an autocommit_block, which runs outside the transaction-bound timeout.
+# - idle_in_transaction_session_timeout: kills a transaction that has gone
+#   idle while still holding locks (e.g. a stalled AccessExclusiveLock).
 #
-# These are SET LOCAL inside each migration's transaction, so they only apply
-# to in-transaction migration work. Migrations that run statements via
-# alembic's autocommit_block() (e.g. CREATE INDEX CONCURRENTLY, which cannot
-# run inside a transaction) bypass these timeouts deliberately — those
-# operations are inherently long but non-blocking.
-#
-# Escape hatch: a migration that legitimately needs longer runtime (a
-# pre-approved maintenance-window operation, for example) must declare it
-# explicitly with a top-of-file directive comment:
-#
-#     # migration-unsafe-ack: <one-line reason>
-#
-# The migration linter at agentex/scripts/lint_migrations.py enforces this:
-# any migration whose body contains `SET lock_timeout`, `SET statement_timeout`,
-# `SET idle_in_transaction_session_timeout`, or a `RESET` of those must carry
-# the directive, and the directive itself must be paired with a
-# `migration-unsafe-ack` PR label for the linter to run in warn-only mode.
-MIGRATION_LOCK_TIMEOUT = "3s"
-MIGRATION_STATEMENT_TIMEOUT = "30s"
-MIGRATION_IDLE_IN_TRANSACTION_TIMEOUT = "10s"
+# These are session-level so they persist across each per-migration
+# transaction and across autocommit_block boundaries on the same connection.
+# Migration authors must NOT override them with `SET lock_timeout` or
+# `SET statement_timeout` inside a migration file — the migration linter
+# (scripts/ci_tools/migration_lint.py) flags those, with the
+# `migration-unsafe-ack` PR label as the documented escape hatch for
+# genuinely-long migrations that need a maintenance window.
+DEFAULT_MIGRATION_TIMEOUTS: dict[str, str] = {
+    "lock_timeout": "3s",
+    "statement_timeout": "30s",
+    "idle_in_transaction_session_timeout": "10s",
+}
+
+
+def _format_set_statements(timeouts: dict[str, str]) -> list[str]:
+    return [f"SET {key} = '{value}'" for key, value in timeouts.items()]
 
 # Add explicit error handling to catch import errors
 try:
@@ -122,6 +112,8 @@ def run_migrations_offline() -> None:
         )
 
         with context.begin_transaction():
+            for stmt in _format_set_statements(DEFAULT_MIGRATION_TIMEOUTS):
+                context.execute(stmt)
             context.run_migrations()
     except Exception as e:
         print("ERROR IN OFFLINE MIGRATIONS:", str(e))
@@ -145,6 +137,12 @@ def run_migrations_online() -> None:
         )
 
         with connectable.connect() as connection:
+            # Apply default migration timeouts at the session level so they
+            # persist across per-migration transactions and any autocommit_block
+            # boundaries opened by migrations (e.g. for CREATE INDEX CONCURRENTLY).
+            for stmt in _format_set_statements(DEFAULT_MIGRATION_TIMEOUTS):
+                connection.exec_driver_sql(stmt)
+
             # transaction_per_migration=True wraps each migration in its own
             # transaction (instead of a single outer transaction for all
             # migrations). This lets individual migrations opt into
@@ -155,26 +153,6 @@ def run_migrations_online() -> None:
                 target_metadata=target_metadata,
                 transaction_per_migration=True,
             )
-
-            # Apply the migration timeouts once per transaction. SET LOCAL
-            # scopes to the transaction only, so values reset automatically
-            # at COMMIT/ROLLBACK and never leak between migrations.
-            @event.listens_for(connection, "begin")
-            def _apply_migration_timeouts(conn):
-                conn.execute(
-                    text(f"SET LOCAL lock_timeout = '{MIGRATION_LOCK_TIMEOUT}'")
-                )
-                conn.execute(
-                    text(
-                        f"SET LOCAL statement_timeout = '{MIGRATION_STATEMENT_TIMEOUT}'"
-                    )
-                )
-                conn.execute(
-                    text(
-                        "SET LOCAL idle_in_transaction_session_timeout = "
-                        f"'{MIGRATION_IDLE_IN_TRANSACTION_TIMEOUT}'"
-                    )
-                )
 
             with context.begin_transaction():
                 context.run_migrations()
