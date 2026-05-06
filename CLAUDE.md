@@ -2,6 +2,23 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Public Repository
+
+**This repository is public.** Everything that lands here — source code, comments, commit messages, file headers, runbooks, PR descriptions — is world-readable and indexed by search engines.
+
+When making changes (especially commits, PR descriptions, and any operational docs), keep all of the following **out** of anything that gets pushed:
+
+- Customer or account names (real or codename), and any identifying details about specific deployments, traffic patterns, or incidents tied to a customer.
+- Internal Slack channels, threads, or permalinks (e.g. `scaleapi.slack.com/...`, `#some-internal-channel`).
+- Internal ticket IDs and tracker URLs (Linear, Jira, etc.).
+- Names or handles of individual employees, including in attribution like "per Alice's notes" or `Co-Authored-By` lines pointing at internal emails.
+- Internal infrastructure references that aren't already documented publicly (internal hostnames, internal feature-flag system names, internal repo paths outside this one, etc.).
+- Anything you wouldn't want a competitor or a journalist to read.
+
+When describing motivation for a change, write generically: "on a sufficiently large table this exhausts the connection pool" rather than naming the specific table size, customer, or date. Describe the failure mode, not the incident.
+
+When in doubt, ask before pushing — a redaction after the fact does not remove content from git history without a force-push that rewrites the branch.
+
 ## Repository Overview
 
 Agentex is a comprehensive platform for building and deploying intelligent agents. This repository contains:
@@ -285,7 +302,33 @@ Always create migrations when changing models:
 3. Review generated migration in `database/migrations/versions/`
 4. Apply with `make apply-migrations`
 
-Migrations run automatically during `make dev` startup.
+Migrations run automatically during `make dev` startup, and they also run on **pod startup in deployed environments**. This means a long-running migration blocks the application from coming up — the migration runner and the request-serving pod are the same process.
+
+#### Migration safety on large or write-heavy tables
+
+The default Alembic ergonomics (`op.add_column`, `op.create_index`, `op.create_foreign_key`, `op.execute("UPDATE ...")`) are fine on small tables but dangerous on large or hot ones. Combining several of them in a single revision has historically caused multi-row UPDATEs to hold `AccessExclusiveLock` for long enough to exhaust the application's connection pool. Treat the following as required reading whenever a migration touches a table that already has meaningful production volume.
+
+**Rules of thumb:**
+
+1. **One concern per revision.** A single migration should do one of: add a column, add a constraint, add an index, run a backfill. Never combine `add_column` + `UPDATE` backfill + `create_foreign_key` + `create_index` in one revision — each of those is fast in isolation and ruinous in combination on a large table.
+
+2. **Never run a multi-million-row `UPDATE` in-band.** In-band backfills run inside Alembic's transaction, hold row locks, prevent autovacuum, and block pod startup. Use a separate, operator-driven runbook in `agentex/docs/runbooks/` that loops in batches with `COMMIT` between batches. See `spans-task-id-backfill.md` for the canonical pattern. The migration itself should add only the new column (nullable), and a follow-up migration should attach the FK/index after the backfill is done out-of-band.
+
+3. **Add foreign keys with `NOT VALID`.** `op.create_foreign_key` issues `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY` which scans the entire table under `AccessExclusiveLock`. On a large table this is the lock that takes the service down. Instead, write raw SQL with `NOT VALID` (skips the validation scan; FK still enforced on subsequent writes) and only run `VALIDATE CONSTRAINT` later if a fully validated state is actually needed (it is rarely needed; `VALIDATE CONSTRAINT` only takes `ShareUpdateExclusiveLock` so it is non-blocking but still scans the whole table).
+
+4. **Build indexes with `CREATE INDEX CONCURRENTLY`.** `op.create_index` is non-concurrent and blocks writes for the duration of the build. On a large table use raw SQL (`CREATE INDEX CONCURRENTLY IF NOT EXISTS ...`) and wrap the whole migration in `op.get_context().autocommit_block()` — `CONCURRENTLY` cannot run inside a transaction.
+
+5. **`autocommit_block()` requires per-migration transactions.** This repository's `env.py` already sets `transaction_per_migration=True`, but be aware: each migration is its own transaction, and `autocommit_block()` exits that transaction so individual statements (CREATE INDEX CONCURRENTLY, etc.) run with their own implicit transactions.
+
+6. **Default timeouts apply.** `env.py` applies `lock_timeout = '3s'` and `statement_timeout = '30s'` per migration via `SET LOCAL` inside the transaction. This is intentional: it makes a runaway migration fail fast rather than block pod startup. Statements run via `autocommit_block()` deliberately bypass these timeouts (so legitimate long-but-non-blocking operations like `CREATE INDEX CONCURRENTLY` still work). If an in-transaction statement legitimately needs more headroom, override per-statement with `SET LOCAL`.
+
+7. **Make migrations idempotent.** Use `IF NOT EXISTS` / `IF EXISTS` and catalog checks (`pg_constraint`, `pg_indexes`) so a migration is a no-op on environments where the operation has already run. This protects rollouts where some environments ran a previous (potentially broken) version of the migration and others did not.
+
+8. **Test on representative data sizes.** A migration that completes in milliseconds against a near-empty dev table can take tens of minutes against a production table with tens of millions of rows. If you cannot test against a realistic dataset, write the migration as if you can't, and use the patterns above by default.
+
+9. **Re-run, rollback, and forward-fix.** If a migration is rolled back in production, the `alembic_version` row reflects only what was committed. To recover from a partially-applied broken migration, reduce the broken revision to its safe minimum (idempotent column add, etc.) and add a follow-up migration that finalizes the rest under non-blocking operations. Do not silently rewrite history of a revision that has already been applied somewhere — always make the new behavior idempotent so it is safe on both already-applied and not-yet-applied environments.
+
+If a planned migration touches a table you suspect is large in production, ask before merging and route the change through a runbook PR alongside the migration PR.
 
 ### Redis Port Conflicts
 
