@@ -304,83 +304,37 @@ Always create migrations when changing models:
 
 Migrations run automatically during `make dev` startup, and they also run on **pod startup in deployed environments**. This means a long-running migration blocks the application from coming up — the migration runner and the request-serving pod are the same process.
 
-#### Database migration safety
+#### Database Migration Safety
 
-Default Alembic ergonomics — `op.add_column`, `op.create_index`, `op.create_foreign_key`, `op.execute("UPDATE ...")` — are fine on small tables and dangerous on large hot ones. The four anti-patterns below have all individually caused, or come close to causing, write outages. Read this section whenever a migration touches a table with meaningful production volume.
+Schema migrations on hot tables (e.g. `spans`, anything with steady ingest) must preserve write availability. The migration runner sets `lock_timeout=3s`, `statement_timeout=30s`, and `idle_in_transaction_session_timeout=10s` by default (`agentex/database/migrations/alembic/env.py`), and a PR-time linter (`agentex/scripts/ci_tools/migration_lint.py`, run by pre-commit and CI) catches the patterns below before merge. Authors and reviewers — including Greptile — should treat these rules as the canonical "why" so the linter's output is actionable rather than mysterious.
 
-##### The four anti-patterns
+Lead with schema-only changes, run data backfills out of band, and validate constraints in separate follow-up migrations.
 
-1. **Single unbatched `UPDATE` over the whole table.** Postgres MVCC means every updated row becomes a rewrite plus a new tuple, so a multi-million-row `UPDATE` doubles live-plus-dead tuples on the table, generates proportional WAL, and holds row locks for the entire duration. If it fails or is killed, the whole transaction rolls back and burns all that I/O for nothing. **Don't backfill in a migration.** Chunk by id range or hash in an out-of-band script and run the schema-only parts in the migration.
+| Anti-pattern | Why it is dangerous | Safer pattern | Linter rule |
+|--------------|---------------------|---------------|-------------|
+| Single unbatched `UPDATE` over a large table inside the migration transaction | Rewrites every touched row, creates proportional WAL/dead tuples, holds row locks until commit; rollback burns the same I/O again. | Move the backfill to an out-of-band script that chunks by id range or stable hash, sets `lock_timeout`, uses small batches, and sleeps between batches. | `no-timeout-overrides` (the runner's `statement_timeout` of 30s will also kill it) |
+| `op.create_foreign_key(...)` without `postgresql_not_valid=True` | Validates every existing row immediately, taking `ShareRowExclusiveLock` on the child table while it scans. | Add the FK with `postgresql_not_valid=True`, then `op.execute("ALTER TABLE ... VALIDATE CONSTRAINT ...")` in a follow-up migration. | `prefer-robust-stmts` |
+| Plain `op.create_index(...)` on a populated table | Takes `ShareLock` for the whole build and blocks `INSERT`/`UPDATE`/`DELETE`. | Use `postgresql_concurrently=True` inside `with op.get_context().autocommit_block():`. (Indexes on tables you `op.create_table` in the same migration are safe — the linter skips those automatically.) | `prefer-robust-stmts` |
+| Mixing long DDL, validation, backfills, and concurrent index ops in one transaction | Locks stack together, and `CREATE INDEX CONCURRENTLY` cannot run inside Alembic's default per-migration transaction. | Split the rollout across small migrations, with explicit `autocommit_block` only around the concurrent index statement. | `transaction-nesting` |
+| `op.create_unique_constraint(...)` directly on a hot table | Builds the supporting unique index while blocking writes. | Create a unique index concurrently, then attach it with `ADD CONSTRAINT ... USING INDEX` in a follow-up migration. | `disallowed-unique-constraint` |
+| `op.add_column(... nullable=False, server_default=...)` on a populated table | Postgres rewrites the table to populate the value (volatile defaults always rewrite; constants are cheap on PG11+ but the linter is conservative). | Add the column nullable, backfill out of band, then `ALTER TABLE ... SET NOT NULL` in a follow-up migration. | `adding-required-field` |
+| `SET lock_timeout`, `SET statement_timeout`, or `RESET` of either inside a migration file | Silently disables the runner's guardrails so the next slow migration takes a write outage. | Keep timeout policy in the runner; never override it per migration. | `no-timeout-overrides` |
 
-2. **`op.create_foreign_key` (validating).** Default Alembic FK creation issues `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY` which takes `ShareRowExclusiveLock` on the referencing table (and `AccessShare` on the referenced table) while it full-scans every row to prove the FK holds. **Two-step it:** add with `NOT VALID` first (cheap, metadata only), then `ALTER TABLE ... VALIDATE CONSTRAINT` in a follow-up migration (`ShareUpdateExclusiveLock`, scan-only, does not block writes). In Alembic: `op.create_foreign_key(..., postgresql_not_valid=True)` or write the raw `ALTER TABLE` with `NOT VALID`.
+Use this rollout shape for any change to a populated table:
 
-3. **`op.create_index` without `CONCURRENTLY`.** Plain `CREATE INDEX` takes a `ShareLock` on the table for the entire build, blocking every `INSERT` / `UPDATE` / `DELETE`. On a hot ingest table that's a write outage. Use `CREATE INDEX CONCURRENTLY` — which means the migration must run outside a transaction. In Alembic: `with op.get_context().autocommit_block(): op.execute("CREATE INDEX CONCURRENTLY ...")`.
+1. **M1** — schema only: `op.add_column(... nullable=True)`, FKs with `postgresql_not_valid=True`, indexes via `postgresql_concurrently=True` inside `with op.get_context().autocommit_block():`.
+2. **Out-of-band backfill** — a chunked script (id-range or hash-bucket pagination), with `lock_timeout` and a sleep between batches. Don't backfill inside a migration on a multi-million-row table — the runner's 30s `statement_timeout` will kill it, and the rollback burns all the I/O for nothing. Pattern: `agentex/docs/runbooks/spans-task-id-backfill.md`.
+3. **M2** — `op.execute("ALTER TABLE ... VALIDATE CONSTRAINT ...")` for the FK, `op.alter_column(... nullable=False)` for the column, etc., once the backfill is verified.
 
-4. **One transaction wrapping all of the above.** Alembic's default is one transaction per migration. With anti-patterns 1–3 stacked in a single revision the locks compound and every writer queues behind them. Use `transaction_per_migration=True` (already set in `env.py`) and `autocommit_block()` for `CONCURRENTLY` operations so the migration cannot accidentally hold compound locks.
+#### Linter escape hatch
 
-##### The correct shape: split into M1, out-of-band backfill, M2
-
-For any migration that adds a backfilled column with an FK and an index on a large table, ship three things in order:
-
-| Step | What | Why |
-|---|---|---|
-| **M1 (Alembic)** | `ADD COLUMN` (nullable) + `ADD CONSTRAINT ... NOT VALID` + `CREATE INDEX CONCURRENTLY` (in `autocommit_block()`) | Schema-only, all metadata-cheap or non-blocking. Each operation is idempotent (`IF NOT EXISTS` / `pg_constraint` guard) so the migration is safe to re-run on environments that already ran a previous (broken) version. |
-| **Out-of-band runbook** | Chunked backfill script with `lock_timeout`, small batches, `COMMIT` between batches, `pg_sleep` between batches | Operator-driven; runs during a low-traffic window, can be cancelled cleanly, doesn't block pod startup. Pattern: `agentex/docs/runbooks/spans-task-id-backfill.md`. |
-| **M2 (Alembic)** | `ALTER TABLE ... VALIDATE CONSTRAINT` (only if a fully validated FK state is actually needed) | Runs after the backfill so the scan finds no violations. `ShareUpdateExclusiveLock` is non-blocking against reads/writes but still scans the table — usually optional. |
-
-The application should also tolerate the partially-backfilled state at read time (e.g. ORing the new column against the legacy column where they overlap) so deployment of M1 is decoupled from the backfill's completion.
-
-##### Default runtime guardrails
-
-`env.py` applies three timeouts per migration via `SET LOCAL` inside the transaction:
-
-- `lock_timeout = '3s'` — fail fast if the migration's DDL would queue behind active writers.
-- `statement_timeout = '30s'` — cap per-statement runtime so a runaway query aborts cleanly.
-- `idle_in_transaction_session_timeout = '10s'` — kill a stalled transaction so it can't hold locks indefinitely.
-
-Statements run via `autocommit_block()` are outside the transaction and bypass these timeouts deliberately — that's the right behavior for `CREATE INDEX CONCURRENTLY` and similar long-but-non-blocking operations.
-
-##### Escape hatch: `migration-unsafe-ack`
-
-A migration that genuinely needs to override these guardrails (a pre-approved maintenance-window operation, for example) must:
-
-1. Open the migration file with a top-of-file directive comment:
-
-   ```python
-   # migration-unsafe-ack: <one-line reason>
-   ```
-
-2. Add the `migration-unsafe-ack` label on the PR.
-
-Both signals are required. The directive (with a non-empty reason on the same line) suppresses the linter's checks for that file; the PR label puts the linter into `--warn-only` mode in CI so violations still surface in logs but don't block merge. The combination tells the reviewer the override is intentional.
-
-Use the escape hatch for "this needs a maintenance window with traffic shifted away" — not for "I want to ship faster." If you find yourself reaching for it, the answer is almost always to split the migration into the M1 / out-of-band / M2 shape above.
-
-##### Anti-pattern → linter rule reference
-
-The migration linter at `agentex/scripts/lint_migrations.py` enforces these rules at PR time via `.github/workflows/migration-lint.yml`. It only checks files changed vs the PR base, so existing migrations are not retro-flagged. The mapping below is what the linter catches:
-
-| Anti-pattern | Linter rule |
-|---|---|
-| `op.create_index` without `postgresql_concurrently=True` (or raw `CREATE INDEX` outside `autocommit_block`) | `no-concurrently` |
-| `op.create_index(postgresql_concurrently=True)` not wrapped in `autocommit_block()` | `concurrently-outside-autocommit` |
-| `op.create_foreign_key` without `postgresql_not_valid=True` (or raw `ADD CONSTRAINT FOREIGN KEY` without `NOT VALID`) | `fk-without-not-valid` |
-| `op.execute("UPDATE ...")` / `DELETE` data backfills | `in-band-backfill` |
-| `SET` / `RESET` of `lock_timeout` / `statement_timeout` / `idle_in_transaction_session_timeout` | `forbidden-set` |
+The linter is mechanical and occasionally over-cautious. To bypass an individual finding, add `# noqa: migration-lint` on the offending line and explain *why* in the PR description. A wholesale bypass (e.g. for a migration that genuinely requires a maintenance window) is signaled by applying the **`migration-unsafe-ack`** PR label — reviewers should treat that label as a contract that the PR description documents the maintenance window plan, the expected blast radius, and how the migration will be run. Do not use the label to ship faster; use it when the safe shape genuinely cannot apply.
 
 Run the linter locally before pushing:
 
 ```bash
-agentex/scripts/lint_migrations.py --base-ref origin/main
+python agentex/scripts/ci_tools/migration_lint.py --base origin/main
 ```
-
-##### Other rules
-
-- **Make migrations idempotent.** Use `IF NOT EXISTS` / `IF EXISTS` and catalog checks (`pg_constraint`, `pg_indexes`) so a migration is a no-op on environments where the operation has already run.
-- **Test on representative data sizes.** A migration that finishes instantly against an empty dev table can take tens of minutes against a multi-million-row prod table.
-- **Forward-fix, don't quietly rewrite.** If a migration ships broken to any environment, reduce the broken revision to its safe minimum (idempotent column add) and add a follow-up migration that finalizes the rest under non-blocking operations. Don't rewrite a revision's body in a way that would skip work on environments where the original ran successfully.
-
-If a planned migration touches a table you suspect is large in production, ask before merging and route the change through a runbook PR alongside the migration PR.
 
 ### Redis Port Conflicts
 
