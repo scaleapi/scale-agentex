@@ -42,12 +42,11 @@ from sqlalchemy import engine_from_config, event, pool, text
 #
 #     # migration-unsafe-ack: <one-line reason>
 #
-# A migration linter (see SGP-5785) is expected to enforce this — any
-# migration whose body contains `SET lock_timeout`, `SET statement_timeout`,
+# The migration linter at agentex/scripts/lint_migrations.py enforces this:
+# any migration whose body contains `SET lock_timeout`, `SET statement_timeout`,
 # `SET idle_in_transaction_session_timeout`, or a `RESET` of those must carry
 # the directive, and the directive itself must be paired with a
-# `migration-unsafe-ack` PR label. Until the linter ships, treat this as the
-# convention to follow when writing migrations.
+# `migration-unsafe-ack` PR label for the linter to run in warn-only mode.
 MIGRATION_LOCK_TIMEOUT = "3s"
 MIGRATION_STATEMENT_TIMEOUT = "30s"
 MIGRATION_IDLE_IN_TRANSACTION_TIMEOUT = "10s"
