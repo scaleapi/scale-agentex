@@ -175,6 +175,14 @@ _RAW_FK_TARGET = re.compile(
     r"\bALTER\s+TABLE\s+(?:ONLY\s+)?[\"`]?([A-Za-z_][A-Za-z0-9_]*)[\"`]?",
     re.IGNORECASE,
 )
+# Kwarg detection regexes — tolerate whitespace around ``=`` so a migration
+# author who writes ``postgresql_concurrently = True`` doesn't get a spurious
+# finding. The previous literal-substring checks (``"x=True" in call``) would
+# silently fail on the spaced form.
+_KWARG_CONCURRENTLY_TRUE = re.compile(r"\bpostgresql_concurrently\s*=\s*True\b")
+_KWARG_NOT_VALID_TRUE = re.compile(r"\bpostgresql_not_valid\s*=\s*True\b")
+_KWARG_NULLABLE_FALSE = re.compile(r"\bnullable\s*=\s*False\b")
+_KWARG_SERVER_DEFAULT = re.compile(r"\bserver_default\s*=")
 
 
 def _slice_call(source: str, start: int) -> str:
@@ -260,7 +268,7 @@ def _check_prefer_robust_stmts(path: Path, source: str) -> Iterable[Finding]:
         if _has_noqa(source, line):
             continue
         call = _slice_call(source, match.start())
-        if "postgresql_concurrently=True" in call:
+        if _KWARG_CONCURRENTLY_TRUE.search(call):
             continue
         target = _second_quoted_name(call)
         if target and target in fresh_tables:
@@ -282,7 +290,7 @@ def _check_prefer_robust_stmts(path: Path, source: str) -> Iterable[Finding]:
         if _has_noqa(source, line):
             continue
         call = _slice_call(source, match.start())
-        if "postgresql_not_valid=True" in call:
+        if _KWARG_NOT_VALID_TRUE.search(call):
             continue
         target = _second_quoted_name(call)
         if target and target in fresh_tables:
@@ -366,12 +374,19 @@ def _check_disallowed_unique_constraint(path: Path, source: str) -> Iterable[Fin
 
 
 def _check_adding_required_field(path: Path, source: str) -> Iterable[Finding]:
+    fresh_tables = _tables_created(source)
     for match in _OP_ADD_COLUMN.finditer(source):
         line = _line_of(source, match.start())
         if _has_noqa(source, line):
             continue
         call = _slice_call(source, match.start())
-        if "nullable=False" in call and "server_default" in call:
+        # ``op.add_column("foo", sa.Column("x", ...))`` — the *first* quoted
+        # name is the target table; second is the column. New tables have no
+        # writers to block, so a NOT NULL + server_default add is safe there.
+        target_match = _QUOTED_NAME.search(call)
+        if target_match and target_match.group(1) in fresh_tables:
+            continue
+        if _KWARG_NULLABLE_FALSE.search(call) and _KWARG_SERVER_DEFAULT.search(call):
             yield Finding(
                 path=path,
                 line=line,
@@ -455,7 +470,7 @@ def _check_transaction_nesting(path: Path, source: str) -> Iterable[Finding]:
     otherwise pass the linter and fail at runtime.
     """
     spans = _autocommit_spans(source)
-    for match in re.finditer(r"postgresql_concurrently\s*=\s*True", source):
+    for match in _KWARG_CONCURRENTLY_TRUE.finditer(source):
         line = _line_of(source, match.start())
         if _has_noqa(source, line):
             continue

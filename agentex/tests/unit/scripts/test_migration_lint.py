@@ -196,6 +196,52 @@ def test_add_column_nullable_passes(tmp_path: Path) -> None:
     assert migration_lint.lint_file(path) == []
 
 
+def test_add_column_not_null_on_fresh_table_passes(tmp_path: Path) -> None:
+    """`op.add_column(..., nullable=False, server_default=...)` on a freshly-created
+    table is safe — there are no writers to block, so the table rewrite is free."""
+    path = _write(
+        tmp_path,
+        """
+        import sqlalchemy as sa
+        from alembic import op
+        def upgrade():
+            op.create_table("foo", sa.Column("id", sa.Integer(), primary_key=True))
+            op.add_column(
+                "foo",
+                sa.Column(
+                    "baz",
+                    sa.String(),
+                    nullable=False,
+                    server_default="x",
+                ),
+            )
+        """,
+    )
+    assert migration_lint.lint_file(path) == []
+
+
+def test_kwarg_checks_tolerate_whitespace(tmp_path: Path) -> None:
+    """Kwargs like `postgresql_concurrently = True` (with spaces around `=`) must
+    be recognized — substring-only checks would silently flag valid migrations.
+    """
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            with op.get_context().autocommit_block():
+                op.create_index(
+                    "ix_foo_bar", "foo", ["bar"], postgresql_concurrently = True
+                )
+            op.create_foreign_key(
+                "fk_foo_bar", "foo", "bar", ["x"], ["id"],
+                postgresql_not_valid = True,
+            )
+        """,
+    )
+    assert migration_lint.lint_file(path) == []
+
+
 def test_concurrently_outside_autocommit_block_flagged(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
