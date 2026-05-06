@@ -12,18 +12,45 @@ print(f"Added {project_root} to Python path")
 from alembic import context
 from sqlalchemy import engine_from_config, event, pool, text
 
-# Default per-migration timeouts. lock_timeout prevents migrations from
-# queueing behind active writes; statement_timeout caps total runtime so a
-# runaway migration aborts cleanly instead of blocking pod startup.
+# Default per-migration timeouts. Three layers, each catching a different
+# failure mode:
+#
+#   * lock_timeout:                       fail fast if a migration's DDL would
+#                                         queue behind active writers (the
+#                                         classic "long migration takes the
+#                                         service down" path).
+#   * statement_timeout:                  cap the per-statement runtime so a
+#                                         runaway query aborts cleanly instead
+#                                         of blocking pod startup.
+#   * idle_in_transaction_session_timeout: kill a migration whose transaction
+#                                         is left open without progress (e.g.
+#                                         a connection that acquired
+#                                         AccessExclusiveLock and then stalled
+#                                         — without this the lock is held
+#                                         indefinitely until the connection
+#                                         drops).
 #
 # These are SET LOCAL inside each migration's transaction, so they only apply
 # to in-transaction migration work. Migrations that run statements via
 # alembic's autocommit_block() (e.g. CREATE INDEX CONCURRENTLY, which cannot
 # run inside a transaction) bypass these timeouts deliberately — those
-# operations are inherently long but non-blocking. Migrations that need an
-# in-transaction override can SET LOCAL the values themselves.
+# operations are inherently long but non-blocking.
+#
+# Escape hatch: a migration that legitimately needs longer runtime (a
+# pre-approved maintenance-window operation, for example) must declare it
+# explicitly with a top-of-file directive comment:
+#
+#     # migration-unsafe-ack: <one-line reason>
+#
+# A migration linter (see SGP-5785) is expected to enforce this — any
+# migration whose body contains `SET lock_timeout`, `SET statement_timeout`,
+# `SET idle_in_transaction_session_timeout`, or a `RESET` of those must carry
+# the directive, and the directive itself must be paired with a
+# `migration-unsafe-ack` PR label. Until the linter ships, treat this as the
+# convention to follow when writing migrations.
 MIGRATION_LOCK_TIMEOUT = "3s"
 MIGRATION_STATEMENT_TIMEOUT = "30s"
+MIGRATION_IDLE_IN_TRANSACTION_TIMEOUT = "10s"
 
 # Add explicit error handling to catch import errors
 try:
@@ -141,6 +168,12 @@ def run_migrations_online() -> None:
                 conn.execute(
                     text(
                         f"SET LOCAL statement_timeout = '{MIGRATION_STATEMENT_TIMEOUT}'"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "SET LOCAL idle_in_transaction_session_timeout = "
+                        f"'{MIGRATION_IDLE_IN_TRANSACTION_TIMEOUT}'"
                     )
                 )
 
