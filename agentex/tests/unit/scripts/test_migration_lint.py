@@ -272,6 +272,101 @@ def test_in_band_delete_backfill_flagged(tmp_path: Path) -> None:
     assert any(f.rule == "in-band-backfill" for f in findings)
 
 
+def test_in_band_backfill_upsert_not_flagged(tmp_path: Path) -> None:
+    """ON CONFLICT DO UPDATE SET upserts are legitimate schema-init shape."""
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            op.execute(
+                "INSERT INTO foo (id, name) VALUES (1, 'x') "
+                "ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name"
+            )
+        """,
+    )
+    findings = migration_lint.lint_file(path)
+    assert all(f.rule != "in-band-backfill" for f in findings)
+
+
+def test_raw_sql_create_index_in_op_execute_flagged(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            op.execute("CREATE INDEX idx_foo_bar ON foo (bar)")
+        """,
+    )
+    findings = migration_lint.lint_file(path)
+    assert any(f.rule == "prefer-robust-stmts" for f in findings)
+
+
+def test_raw_sql_create_index_concurrently_in_op_execute_passes(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            with op.get_context().autocommit_block():
+                op.execute("CREATE INDEX CONCURRENTLY idx_foo_bar ON foo (bar)")
+        """,
+    )
+    findings = [
+        f for f in migration_lint.lint_file(path) if f.rule == "prefer-robust-stmts"
+    ]
+    assert findings == []
+
+
+def test_raw_sql_add_fk_without_not_valid_flagged(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            op.execute(
+                "ALTER TABLE foo ADD CONSTRAINT fk_foo_bar "
+                "FOREIGN KEY (bar_id) REFERENCES bar (id)"
+            )
+        """,
+    )
+    findings = migration_lint.lint_file(path)
+    assert any(f.rule == "prefer-robust-stmts" for f in findings)
+
+
+def test_raw_sql_add_fk_with_not_valid_passes(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            op.execute(
+                "ALTER TABLE foo ADD CONSTRAINT fk_foo_bar "
+                "FOREIGN KEY (bar_id) REFERENCES bar (id) NOT VALID"
+            )
+        """,
+    )
+    findings = [
+        f for f in migration_lint.lint_file(path) if f.rule == "prefer-robust-stmts"
+    ]
+    assert findings == []
+
+
+def test_set_timeout_in_python_comment_not_flagged(tmp_path: Path) -> None:
+    """A Python comment mentioning a forbidden SET shouldn't flag."""
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            # Previously we used: SET lock_timeout = '5s'
+            op.execute("SELECT 1")
+        """,
+    )
+    findings = migration_lint.lint_file(path)
+    assert all(f.rule != "no-timeout-overrides" for f in findings)
+
+
 def test_in_band_backfill_select_not_flagged(tmp_path: Path) -> None:
     path = _write(
         tmp_path,

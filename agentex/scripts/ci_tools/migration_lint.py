@@ -22,7 +22,10 @@ Rules
 - ``prefer-robust-stmts``: ``op.create_index`` without
   ``postgresql_concurrently=True`` and ``op.create_foreign_key`` without
   ``postgresql_not_valid=True`` on populated tables block writers for the
-  duration of the operation.
+  duration of the operation. Also catches the raw-SQL escape hatches
+  ``op.execute("CREATE INDEX ...")`` (without ``CONCURRENTLY``) and
+  ``op.execute("ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ...")``
+  (without ``NOT VALID``).
 - ``disallowed-unique-constraint``: ``op.create_unique_constraint`` builds the
   supporting index while blocking writes; create the index concurrently first
   and attach the constraint with ``USING INDEX``.
@@ -37,6 +40,10 @@ Rules
   ``SET statement_timeout``, ``SET idle_in_transaction_session_timeout``, and
   ``RESET`` of those, so a migration cannot quietly disable the runtime
   guardrails.
+- ``in-band-backfill``: ``op.execute("UPDATE ...")`` or ``DELETE FROM`` inside
+  a migration holds row locks for the entire transaction and prevents
+  autovacuum from cleaning up. Move data backfills to an out-of-band
+  operator runbook and keep migrations schema-only.
 
 Escape hatch
 ------------
@@ -127,8 +134,19 @@ _RESET_TIMEOUT = re.compile(
     re.IGNORECASE,
 )
 _DATA_BACKFILL = re.compile(
-    r"\b(?:UPDATE\s+\w|DELETE\s+FROM\b)",
+    # ``UPDATE\s+(?!SET\b)\w`` skips the ``UPDATE SET`` clause that appears
+    # inside ``INSERT ... ON CONFLICT DO UPDATE SET`` upserts (a legitimate
+    # schema-init pattern that should not flag in-band-backfill).
+    r"\b(?:UPDATE\s+(?!SET\b)\w|DELETE\s+FROM\b)",
     re.IGNORECASE,
+)
+_RAW_BLOCKING_INDEX = re.compile(
+    r"\bCREATE\s+(?:UNIQUE\s+)?INDEX\b(?!\s+CONCURRENTLY)",
+    re.IGNORECASE,
+)
+_RAW_VALIDATING_FK = re.compile(
+    r"\bADD\s+CONSTRAINT\b(?:[^;]*?\bFOREIGN\s+KEY\b)(?![^;]*?\bNOT\s+VALID\b)",
+    re.IGNORECASE | re.DOTALL,
 )
 _AUTOCOMMIT_OPENER = re.compile(r"\bwith\b[^#\n]*\bautocommit_block\s*\(")
 
@@ -162,6 +180,19 @@ def _has_noqa(source: str, line: int) -> bool:
     if 0 < line <= len(lines):
         return bool(_NOQA.search(lines[line - 1]))
     return False
+
+
+def _is_in_python_comment(source: str, pos: int) -> bool:
+    """Return True if ``pos`` falls after a ``#`` on the same source line.
+
+    Naive — does not account for ``#`` appearing inside a string literal — but
+    Alembic migrations rarely embed ``#`` in SQL, and any false negative here
+    just leaves the previous behavior unchanged. Used to keep regex-level
+    rules from flagging text inside Python comments (e.g. a comment referencing
+    a forbidden ``SET lock_timeout`` for documentation purposes).
+    """
+    line_start = source.rfind("\n", 0, pos) + 1
+    return "#" in source[line_start:pos]
 
 
 def _tables_created(source: str) -> set[str]:
@@ -241,6 +272,39 @@ def _check_prefer_robust_stmts(path: Path, source: str) -> Iterable[Finding]:
                 "then VALIDATE CONSTRAINT in a follow-up migration."
             ),
         )
+
+    # Catch the raw-SQL escape hatches: developers copying ``CREATE INDEX`` /
+    # ``ADD CONSTRAINT FOREIGN KEY`` from a DBA runbook into ``op.execute(...)``
+    # would otherwise bypass every helper-level check above.
+    for match in _OP_EXECUTE.finditer(source):
+        line = _line_of(source, match.start())
+        if _has_noqa(source, line):
+            continue
+        call = _slice_call(source, match.start())
+        if _RAW_BLOCKING_INDEX.search(call):
+            yield Finding(
+                path=path,
+                line=line,
+                rule="prefer-robust-stmts",
+                message=(
+                    'op.execute("CREATE INDEX ...") without CONCURRENTLY '
+                    "takes ShareLock for the whole build and blocks writes. "
+                    "Use CREATE INDEX CONCURRENTLY inside an "
+                    "op.get_context().autocommit_block()."
+                ),
+            )
+        if _RAW_VALIDATING_FK.search(call):
+            yield Finding(
+                path=path,
+                line=line,
+                rule="prefer-robust-stmts",
+                message=(
+                    'op.execute("ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ...") '
+                    "without NOT VALID takes ShareRowExclusiveLock and "
+                    "full-scans the child table to validate. Add NOT VALID, "
+                    "then VALIDATE CONSTRAINT in a follow-up migration."
+                ),
+            )
 
 
 def _check_disallowed_unique_constraint(path: Path, source: str) -> Iterable[Finding]:
@@ -353,6 +417,8 @@ def _check_no_timeout_overrides(path: Path, source: str) -> Iterable[Finding]:
         line = _line_of(source, match.start())
         if _has_noqa(source, line):
             continue
+        if _is_in_python_comment(source, match.start()):
+            continue
         yield Finding(
             path=path,
             line=line,
@@ -368,6 +434,8 @@ def _check_no_timeout_overrides(path: Path, source: str) -> Iterable[Finding]:
     for match in _RESET_TIMEOUT.finditer(source):
         line = _line_of(source, match.start())
         if _has_noqa(source, line):
+            continue
+        if _is_in_python_comment(source, match.start()):
             continue
         yield Finding(
             path=path,
