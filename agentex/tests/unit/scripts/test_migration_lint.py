@@ -335,6 +335,27 @@ def test_in_band_backfill_upsert_not_flagged(tmp_path: Path) -> None:
     assert all(f.rule != "in-band-backfill" for f in findings)
 
 
+def test_in_band_backfill_on_fresh_table_passes(tmp_path: Path) -> None:
+    """UPDATE/DELETE on a freshly-created table is safe — no other writers, and
+    the autovacuum concern is negligible. Covers seed-data and staging-cleanup
+    patterns that legitimately mutate a table created in the same migration."""
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        import sqlalchemy as sa
+        def upgrade():
+            op.create_table("staging_foo", sa.Column("id", sa.Integer()))
+            op.execute("UPDATE staging_foo SET id = 1 WHERE id IS NULL")
+            op.execute("DELETE FROM staging_foo WHERE id IS NULL")
+        """,
+    )
+    findings = [
+        f for f in migration_lint.lint_file(path) if f.rule == "in-band-backfill"
+    ]
+    assert findings == []
+
+
 def test_raw_sql_create_index_in_op_execute_flagged(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
@@ -381,21 +402,34 @@ def test_raw_sql_add_fk_on_fresh_table_passes(tmp_path: Path) -> None:
     assert migration_lint.lint_file(path) == []
 
 
-def test_commented_out_op_execute_not_flagged(tmp_path: Path) -> None:
-    """A commented-out `op.execute(...)` line isn't executed — must not produce findings.
+def test_commented_out_calls_not_flagged(tmp_path: Path) -> None:
+    """Commented-out lines must not produce findings on any rule.
 
     Mirrors the `_is_in_python_comment` guard already used by the timeout
     rule. Without this guard, removing dead code by commenting it out would
     require a `# noqa: migration-lint` on the comment, which is absurd.
+    Covers every full-source regex scan: op.execute, op.create_index,
+    op.create_foreign_key, op.create_unique_constraint, op.add_column, the
+    postgresql_concurrently=True kwarg sweep, and op.create_table (whose
+    matches feed `_tables_created` — a commented-out create_table must NOT
+    pollute the fresh-tables set and silently mask findings on the real
+    table elsewhere in the file).
     """
     path = _write(
         tmp_path,
         """
         from alembic import op
+        import sqlalchemy as sa
         def upgrade():
+            # op.create_table("ghost", sa.Column("id", sa.Integer()))
             # op.execute("UPDATE foo SET x = 1")
             # op.execute("CREATE INDEX idx_foo_bar ON foo (bar)")
             # op.execute("CREATE INDEX CONCURRENTLY idx_foo_baz ON foo (baz)")
+            # op.create_index("ix_foo_a", "foo", ["a"])
+            # op.create_foreign_key("fk_foo_bar", "foo", "bar", ["x"], ["id"])
+            # op.create_unique_constraint("uq_foo_b", "foo", ["b"])
+            # op.add_column("foo", sa.Column("c", sa.String(), nullable=False, server_default="x"))
+            # op.create_index("ix_foo_d", "foo", ["d"], postgresql_concurrently=True)
             op.execute("SELECT 1")
         """,
     )

@@ -175,6 +175,15 @@ _RAW_FK_TARGET = re.compile(
     r"\bALTER\s+TABLE\s+(?:ONLY\s+)?[\"`]?([A-Za-z_][A-Za-z0-9_]*)[\"`]?",
     re.IGNORECASE,
 )
+# Extract the target table from raw-SQL ``UPDATE tbl …`` and
+# ``DELETE FROM tbl …`` so the fresh-tables exclusion covers data backfills
+# on tables created in the same migration (a seed/cleanup pattern that has
+# no writers to block). Skips ``UPDATE SET`` (the upsert clause), matching
+# the behavior of ``_DATA_BACKFILL``.
+_RAW_BACKFILL_TARGET = re.compile(
+    r"\b(?:UPDATE\s+(?!SET\b)|DELETE\s+FROM\s+)(?:ONLY\s+)?[\"`]?([A-Za-z_][A-Za-z0-9_]*)[\"`]?",
+    re.IGNORECASE,
+)
 # Kwarg detection regexes — tolerate whitespace around ``=`` so a migration
 # author who writes ``postgresql_concurrently = True`` doesn't get a spurious
 # finding. The previous literal-substring checks (``"x=True" in call``) would
@@ -239,6 +248,11 @@ def _tables_created(source: str) -> set[str]:
     """
     names: set[str] = set()
     for match in _OP_CREATE_TABLE.finditer(source):
+        # Skip ``# op.create_table(...)`` shapes — a commented-out create_table
+        # would otherwise pollute fresh_tables and silently mask findings on
+        # the real table elsewhere in the file (false negative).
+        if _is_in_python_comment(source, match.start()):
+            continue
         call = _slice_call(source, match.start())
         first = _QUOTED_NAME.search(call)
         if first:
@@ -267,6 +281,8 @@ def _check_prefer_robust_stmts(path: Path, source: str) -> Iterable[Finding]:
         line = _line_of(source, match.start())
         if _has_noqa(source, line):
             continue
+        if _is_in_python_comment(source, match.start()):
+            continue
         call = _slice_call(source, match.start())
         if _KWARG_CONCURRENTLY_TRUE.search(call):
             continue
@@ -288,6 +304,8 @@ def _check_prefer_robust_stmts(path: Path, source: str) -> Iterable[Finding]:
     for match in _OP_CREATE_FK.finditer(source):
         line = _line_of(source, match.start())
         if _has_noqa(source, line):
+            continue
+        if _is_in_python_comment(source, match.start()):
             continue
         call = _slice_call(source, match.start())
         if _KWARG_NOT_VALID_TRUE.search(call):
@@ -357,6 +375,8 @@ def _check_disallowed_unique_constraint(path: Path, source: str) -> Iterable[Fin
         line = _line_of(source, match.start())
         if _has_noqa(source, line):
             continue
+        if _is_in_python_comment(source, match.start()):
+            continue
         call = _slice_call(source, match.start())
         target = _second_quoted_name(call)
         if target and target in fresh_tables:
@@ -378,6 +398,8 @@ def _check_adding_required_field(path: Path, source: str) -> Iterable[Finding]:
     for match in _OP_ADD_COLUMN.finditer(source):
         line = _line_of(source, match.start())
         if _has_noqa(source, line):
+            continue
+        if _is_in_python_comment(source, match.start()):
             continue
         call = _slice_call(source, match.start())
         # ``op.add_column("foo", sa.Column("x", ...))`` — the *first* quoted
@@ -472,6 +494,8 @@ def _check_transaction_nesting(path: Path, source: str) -> Iterable[Finding]:
     spans = _autocommit_spans(source)
     for match in _KWARG_CONCURRENTLY_TRUE.finditer(source):
         line = _line_of(source, match.start())
+        if _is_in_python_comment(source, match.start()):
+            continue
         if _has_noqa(source, line):
             continue
         if any(start <= match.start() < end for start, end in spans):
@@ -582,7 +606,12 @@ def _check_in_band_backfill(path: Path, source: str) -> Iterable[Finding]:
     Data backfills run inside the migration transaction, hold row locks for
     its full duration, and prevent autovacuum from reclaiming dead tuples.
     They belong in an out-of-band operator runbook, not in the migration.
+
+    Skips backfills targeting tables created in the same migration (seed-data
+    or staging-cleanup patterns) — there are no other writers to block, and
+    the autovacuum concern is negligible on a fresh table.
     """
+    fresh_tables = _tables_created(source)
     for match in _OP_EXECUTE.finditer(source):
         line = _line_of(source, match.start())
         if _has_noqa(source, line):
@@ -591,6 +620,10 @@ def _check_in_band_backfill(path: Path, source: str) -> Iterable[Finding]:
             continue
         call = _slice_call(source, match.start())
         if _DATA_BACKFILL.search(call):
+            target_match = _RAW_BACKFILL_TARGET.search(call)
+            target = target_match.group(1) if target_match else None
+            if target and target in fresh_tables:
+                continue
             yield Finding(
                 path=path,
                 line=line,
