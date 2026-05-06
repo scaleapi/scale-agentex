@@ -39,7 +39,16 @@ Rules
 - ``no-timeout-overrides`` (custom): forbids ``SET lock_timeout``,
   ``SET statement_timeout``, ``SET idle_in_transaction_session_timeout``, and
   ``RESET`` of those, so a migration cannot quietly disable the runtime
-  guardrails.
+  guardrails. Narrow exception: ``SET statement_timeout`` is permitted
+  *inside* an ``autocommit_block`` span — that is the supported escape valve
+  for long ``CREATE INDEX CONCURRENTLY`` builds, since the default 30s
+  session-level ``statement_timeout`` would otherwise abort the build and
+  leave an INVALID index behind. ``RESET statement_timeout`` is **not**
+  exempted: ``RESET`` falls back to the database / role / server default
+  (typically ``0``, i.e. no timeout), which strips the runner's 30s ceiling
+  for every later migration in the batch instead of restoring it. Authors
+  must restore the ceiling with an explicit ``SET statement_timeout = '30s'``
+  at the end of the block.
 - ``in-band-backfill``: ``op.execute("UPDATE ...")`` or ``DELETE FROM`` inside
   a migration holds row locks for the entire transaction and prevents
   autovacuum from cleaning up. Move data backfills to an out-of-band
@@ -77,6 +86,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import ast
 import os
 import re
 import subprocess
@@ -148,7 +158,10 @@ _RAW_VALIDATING_FK = re.compile(
     r"\bADD\s+CONSTRAINT\b(?:[^;]*?\bFOREIGN\s+KEY\b)(?![^;]*?\bNOT\s+VALID\b)",
     re.IGNORECASE | re.DOTALL,
 )
-_AUTOCOMMIT_OPENER = re.compile(r"\bwith\b[^#\n]*\bautocommit_block\s*\(")
+_RAW_CONCURRENT_INDEX = re.compile(
+    r"\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\b",
+    re.IGNORECASE,
+)
 
 
 def _slice_call(source: str, start: int) -> str:
@@ -349,38 +362,63 @@ def _check_adding_required_field(path: Path, source: str) -> Iterable[Finding]:
             )
 
 
+def _is_autocommit_call(node: ast.expr) -> bool:
+    """Return True if ``node`` is a call to ``autocommit_block``.
+
+    Matches both attribute access (``op.get_context().autocommit_block()``)
+    and bare name access (``autocommit_block()``) — the call site is the
+    relevant signal, not the receiver chain.
+    """
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if isinstance(func, ast.Attribute) and func.attr == "autocommit_block":
+        return True
+    if isinstance(func, ast.Name) and func.id == "autocommit_block":
+        return True
+    return False
+
+
 def _autocommit_spans(source: str) -> list[tuple[int, int]]:
     """Return (start, end) byte-offset ranges enclosed by ``with ... autocommit_block():`` blocks.
 
-    Computed from indentation: a ``with`` line introducing ``autocommit_block()``
-    opens a block; the block extends as long as subsequent non-blank lines are
-    indented strictly more than the opener.
+    Uses the AST so the body boundary is the parser's view of the block —
+    not an indentation heuristic that breaks on triple-quoted strings whose
+    content starts at column 0 (e.g. ``op.execute(\"\"\"\\nCREATE TABLE...\"\"\")``)
+    and would otherwise terminate the span early. Also handles the PEP 617
+    parenthesized ``with`` form correctly.
     """
-    lines = source.splitlines(keepends=True)
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+
     line_starts: list[int] = []
     pos = 0
-    for ln in lines:
+    for ln in source.splitlines(keepends=True):
         line_starts.append(pos)
         pos += len(ln)
-    end_of_file = pos
+    line_starts.append(pos)  # sentinel: end-of-file offset
 
     spans: list[tuple[int, int]] = []
-    for i, line in enumerate(lines):
-        if not _AUTOCOMMIT_OPENER.search(line):
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.With | ast.AsyncWith):
             continue
-        opener_indent = len(line) - len(line.lstrip(" \t"))
-        body_start = line_starts[i + 1] if i + 1 < len(lines) else end_of_file
-        body_end = body_start
-        for j in range(i + 1, len(lines)):
-            li = lines[j]
-            if not li.strip():
-                body_end = line_starts[j + 1] if j + 1 < len(lines) else end_of_file
-                continue
-            indent = len(li) - len(li.lstrip(" \t"))
-            if indent <= opener_indent:
-                break
-            body_end = line_starts[j + 1] if j + 1 < len(lines) else end_of_file
-        spans.append((body_start, body_end))
+        if not any(_is_autocommit_call(item.context_expr) for item in node.items):
+            continue
+        if not node.body:
+            continue
+        first = node.body[0]
+        last = node.body[-1]
+        start_lineno = first.lineno  # 1-based
+        end_lineno = getattr(last, "end_lineno", last.lineno) or last.lineno
+        start_offset = (
+            line_starts[start_lineno - 1]
+            if start_lineno - 1 < len(line_starts)
+            else pos
+        )
+        end_offset = line_starts[end_lineno] if end_lineno < len(line_starts) else pos
+        spans.append((start_offset, end_offset))
     return spans
 
 
@@ -411,13 +449,56 @@ def _check_transaction_nesting(path: Path, source: str) -> Iterable[Finding]:
             ),
         )
 
+    # Raw-SQL escape hatch: ``op.execute("CREATE INDEX CONCURRENTLY ...")``
+    # outside an autocommit_block also fails at runtime. The
+    # ``prefer-robust-stmts`` raw-SQL check correctly excludes CONCURRENTLY
+    # (since CONCURRENTLY is the *safe* form), so we'd otherwise miss it
+    # entirely.
+    for match in _OP_EXECUTE.finditer(source):
+        line = _line_of(source, match.start())
+        if _has_noqa(source, line):
+            continue
+        call = _slice_call(source, match.start())
+        if not _RAW_CONCURRENT_INDEX.search(call):
+            continue
+        if any(start <= match.start() < end for start, end in spans):
+            continue
+        yield Finding(
+            path=path,
+            line=line,
+            rule="transaction-nesting",
+            message=(
+                'op.execute("CREATE INDEX CONCURRENTLY ...") must run inside '
+                "`with op.get_context().autocommit_block():` — "
+                "CREATE INDEX CONCURRENTLY cannot run inside a transaction."
+            ),
+        )
+
 
 def _check_no_timeout_overrides(path: Path, source: str) -> Iterable[Finding]:
+    spans = _autocommit_spans(source)
+
+    def _inside_autocommit_block(offset: int) -> bool:
+        return any(start <= offset < end for start, end in spans)
+
     for match in _SET_TIMEOUT.finditer(source):
         line = _line_of(source, match.start())
         if _has_noqa(source, line):
             continue
         if _is_in_python_comment(source, match.start()):
+            continue
+        # `statement_timeout` may be overridden inside an autocommit_block —
+        # that is the supported escape valve for long CREATE INDEX
+        # CONCURRENTLY builds (the default 30s session ceiling applies inside
+        # autocommit blocks too, since `autocommit_block` only changes the
+        # transaction isolation, not session-level GUCs). Authors must
+        # restore the ceiling with an explicit `SET statement_timeout = '30s'`
+        # at the end of the block — RESET is intentionally not exempted
+        # because it falls back to the database / role default (typically 0).
+        timeout_name = (match.group(2) or "").lower()
+        if timeout_name == "statement_timeout" and _inside_autocommit_block(
+            match.start()
+        ):
             continue
         yield Finding(
             path=path,
@@ -427,7 +508,9 @@ def _check_no_timeout_overrides(path: Path, source: str) -> Iterable[Finding]:
                 "Migrations must not SET lock_timeout / statement_timeout / "
                 "idle_in_transaction_session_timeout — those are configured "
                 "by the migration runner. Apply the migration-unsafe-ack PR "
-                "label if a maintenance window genuinely requires it."
+                "label if a maintenance window genuinely requires it. "
+                "(Exception: SET statement_timeout is permitted inside an "
+                "autocommit_block for long CREATE INDEX CONCURRENTLY builds.)"
             ),
         )
 
@@ -444,7 +527,11 @@ def _check_no_timeout_overrides(path: Path, source: str) -> Iterable[Finding]:
             message=(
                 "Migrations must not RESET lock_timeout / statement_timeout / "
                 "idle_in_transaction_session_timeout — runtime guardrails "
-                "must remain in effect for the whole migration."
+                "must remain in effect for the whole migration. RESET falls "
+                "back to the database / role / server default (typically 0, "
+                "i.e. no timeout), so it does not restore the runner's 30s "
+                "ceiling. Inside an autocommit_block, restore the ceiling "
+                "with an explicit `SET statement_timeout = '30s'` instead."
             ),
         )
 
@@ -517,12 +604,17 @@ def _changed_migrations(base: str) -> list[Path]:
         # Fall back to two-dot diff if the merge base cannot be computed
         # (e.g. shallow clone in CI without that history).
         out = _git("diff", "--name-only", "--diff-filter=AM", base)
+    # `git diff --name-only` returns paths relative to the actual git
+    # top-level, not REPO_ROOT (which is the package root). Resolve the
+    # toplevel explicitly so this keeps working if the package is moved
+    # within the repo (instead of silently producing nonexistent
+    # candidates and linting nothing).
+    git_toplevel = Path(_git("rev-parse", "--show-toplevel").strip())
     paths: list[Path] = []
-    repo_root_parent = REPO_ROOT.parent
     for line in out.splitlines():
         if not line.strip():
             continue
-        candidate = (repo_root_parent / line).resolve()
+        candidate = (git_toplevel / line).resolve()
         if not candidate.exists():
             continue
         try:

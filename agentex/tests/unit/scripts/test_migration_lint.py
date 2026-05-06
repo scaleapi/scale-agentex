@@ -318,6 +318,73 @@ def test_raw_sql_create_index_concurrently_in_op_execute_passes(tmp_path: Path) 
     assert findings == []
 
 
+def test_raw_sql_create_index_concurrently_outside_autocommit_block_flagged(
+    tmp_path: Path,
+) -> None:
+    """Raw-SQL CIC outside autocommit_block fails at runtime — must be caught."""
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            op.execute("CREATE INDEX CONCURRENTLY idx_foo_bar ON foo (bar)")
+        """,
+    )
+    findings = [
+        f for f in migration_lint.lint_file(path) if f.rule == "transaction-nesting"
+    ]
+    assert len(findings) == 1
+
+
+def test_raw_sql_create_unique_index_concurrently_outside_autocommit_block_flagged(
+    tmp_path: Path,
+) -> None:
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            op.execute("CREATE UNIQUE INDEX CONCURRENTLY uq_foo ON foo (bar)")
+        """,
+    )
+    findings = [
+        f for f in migration_lint.lint_file(path) if f.rule == "transaction-nesting"
+    ]
+    assert len(findings) == 1
+
+
+def test_autocommit_block_with_unindented_multiline_sql_no_false_positive(
+    tmp_path: Path,
+) -> None:
+    """A triple-quoted string starting at column 0 must not truncate the autocommit_block span.
+
+    Indentation-based span detection would `break` on the column-0 line and
+    exclude the trailing `postgresql_concurrently=True` from the block,
+    producing a spurious `transaction-nesting` finding on a correct migration.
+    Written without the `_write` dedent helper so the column-0 SQL content
+    survives intact (dedent would otherwise leave leading whitespace on the
+    Python lines and produce a SyntaxError, masking the real bug).
+    """
+    path = tmp_path / "20260101_test.py"
+    path.write_text(
+        "from alembic import op\n"
+        "def upgrade():\n"
+        "    with op.get_context().autocommit_block():\n"
+        '        op.execute("""\n'
+        "CREATE TABLE staging_foo (\n"
+        "    id INT\n"
+        ");\n"
+        '""")\n'
+        "        op.create_index(\n"
+        '            "ix_foo_bar", "foo", ["bar"], postgresql_concurrently=True\n'
+        "        )\n"
+    )
+    findings = [
+        f for f in migration_lint.lint_file(path) if f.rule == "transaction-nesting"
+    ]
+    assert findings == []
+
+
 def test_raw_sql_add_fk_without_not_valid_flagged(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
@@ -430,6 +497,105 @@ def test_set_other_setting_not_flagged(tmp_path: Path) -> None:
     )
     findings = migration_lint.lint_file(path)
     assert all(f.rule != "no-timeout-overrides" for f in findings)
+
+
+def test_set_statement_timeout_inside_autocommit_block_allowed(tmp_path: Path) -> None:
+    """`SET statement_timeout` in an autocommit_block is the escape valve for long CIC.
+
+    The runner's 30s session-level statement_timeout applies inside autocommit
+    blocks too (autocommit_block only changes the txn isolation, not session
+    GUCs), so a CIC on a multi-million-row table needs to bump the ceiling.
+    The block must end with an explicit `SET statement_timeout = '30s'` to
+    restore the runner default — `RESET` would fall back to the role / server
+    default (typically 0) and silently strip the guardrail for every later
+    migration in the batch.
+    """
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            with op.get_context().autocommit_block():
+                op.execute("SET statement_timeout = 0")
+                op.execute("CREATE INDEX CONCURRENTLY idx_foo_bar ON foo (bar)")
+                op.execute("SET statement_timeout = '30s'")
+        """,
+    )
+    findings = [
+        f for f in migration_lint.lint_file(path) if f.rule == "no-timeout-overrides"
+    ]
+    assert findings == []
+
+
+def test_set_lock_timeout_inside_autocommit_block_still_flagged(tmp_path: Path) -> None:
+    """The autocommit-block exception is narrow — only statement_timeout is allowed."""
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            with op.get_context().autocommit_block():
+                op.execute("SET lock_timeout = '60s'")
+        """,
+    )
+    findings = [
+        f for f in migration_lint.lint_file(path) if f.rule == "no-timeout-overrides"
+    ]
+    assert len(findings) == 1
+
+
+def test_reset_statement_timeout_inside_autocommit_block_still_flagged(
+    tmp_path: Path,
+) -> None:
+    """RESET reverts to role/server default (typically 0), not the runner's 30s."""
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            with op.get_context().autocommit_block():
+                op.execute("RESET statement_timeout")
+        """,
+    )
+    findings = [
+        f for f in migration_lint.lint_file(path) if f.rule == "no-timeout-overrides"
+    ]
+    assert len(findings) == 1
+
+
+def test_set_statement_timeout_outside_autocommit_block_still_flagged(
+    tmp_path: Path,
+) -> None:
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            op.execute("SET statement_timeout = 0")
+        """,
+    )
+    findings = [
+        f for f in migration_lint.lint_file(path) if f.rule == "no-timeout-overrides"
+    ]
+    assert len(findings) == 1
+
+
+def test_parenthesized_with_autocommit_block_recognized(tmp_path: Path) -> None:
+    """PEP 617 parenthesized `with` form must be treated as an autocommit_block scope."""
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            with (
+                op.get_context().autocommit_block(),
+            ):
+                op.create_index(
+                    "ix_foo_bar", "foo", ["bar"], postgresql_concurrently=True
+                )
+        """,
+    )
+    assert migration_lint.lint_file(path) == []
 
 
 def test_noqa_suppresses_finding(tmp_path: Path) -> None:
