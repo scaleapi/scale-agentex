@@ -45,7 +45,13 @@ class SpanRepository(PostgresCRUDRepository[SpanORM, SpanEntity]):
         # so old rows can have task_id NULL even when they belong to a task. For
         # task-scoped spans, trace_id holds the task id, so we OR the two columns
         # at read time. Both columns are indexed.
-        if filters and "task_id" in filters:
+        #
+        # The OR fallback is skipped when task_id is None — applying it would
+        # expand to (task_id IS NULL OR trace_id IS NULL), which on a large
+        # spans table where virtually all historical rows have task_id NULL
+        # would return an enormous, unintended result set. A None task_id
+        # filter falls through to the parent's normal IS NULL handling.
+        if filters and filters.get("task_id") is not None:
             remaining_filters = {k: v for k, v in filters.items() if k != "task_id"}
             task_id_value = filters["task_id"]
             query = select(self.orm).where(
