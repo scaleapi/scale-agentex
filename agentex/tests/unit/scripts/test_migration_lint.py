@@ -302,6 +302,60 @@ def test_raw_sql_create_index_in_op_execute_flagged(tmp_path: Path) -> None:
     assert any(f.rule == "prefer-robust-stmts" for f in findings)
 
 
+def test_raw_sql_create_index_on_fresh_table_passes(tmp_path: Path) -> None:
+    """Raw-SQL CREATE INDEX on a freshly-created table is safe — no writers to block."""
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        import sqlalchemy as sa
+        def upgrade():
+            op.create_table("foo", sa.Column("id", sa.Integer(), primary_key=True))
+            op.execute("CREATE INDEX idx_foo_id ON foo (id)")
+        """,
+    )
+    assert migration_lint.lint_file(path) == []
+
+
+def test_raw_sql_add_fk_on_fresh_table_passes(tmp_path: Path) -> None:
+    """Raw-SQL ALTER TABLE … ADD CONSTRAINT FOREIGN KEY on a freshly-created table is safe."""
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        import sqlalchemy as sa
+        def upgrade():
+            op.create_table("foo", sa.Column("bar_id", sa.Integer()))
+            op.execute(
+                "ALTER TABLE foo ADD CONSTRAINT fk_foo_bar "
+                "FOREIGN KEY (bar_id) REFERENCES bar (id)"
+            )
+        """,
+    )
+    assert migration_lint.lint_file(path) == []
+
+
+def test_commented_out_op_execute_not_flagged(tmp_path: Path) -> None:
+    """A commented-out `op.execute(...)` line isn't executed — must not produce findings.
+
+    Mirrors the `_is_in_python_comment` guard already used by the timeout
+    rule. Without this guard, removing dead code by commenting it out would
+    require a `# noqa: migration-lint` on the comment, which is absurd.
+    """
+    path = _write(
+        tmp_path,
+        """
+        from alembic import op
+        def upgrade():
+            # op.execute("UPDATE foo SET x = 1")
+            # op.execute("CREATE INDEX idx_foo_bar ON foo (bar)")
+            # op.execute("CREATE INDEX CONCURRENTLY idx_foo_baz ON foo (baz)")
+            op.execute("SELECT 1")
+        """,
+    )
+    assert migration_lint.lint_file(path) == []
+
+
 def test_raw_sql_create_index_concurrently_in_op_execute_passes(tmp_path: Path) -> None:
     path = _write(
         tmp_path,

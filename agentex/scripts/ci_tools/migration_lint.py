@@ -162,6 +162,19 @@ _RAW_CONCURRENT_INDEX = re.compile(
     r"\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\b",
     re.IGNORECASE,
 )
+# Extract the target table from raw-SQL ``CREATE INDEX … ON tbl`` and
+# ``ALTER TABLE tbl ADD CONSTRAINT …`` so the fresh-tables exclusion that
+# already applies to the helper-call paths also covers raw-SQL escape
+# hatches. Strips optional schema-qualification quotes / backticks; bare
+# identifiers only (matches the helper-path behavior).
+_RAW_INDEX_TARGET = re.compile(
+    r"\bON\s+(?:ONLY\s+)?[\"`]?([A-Za-z_][A-Za-z0-9_]*)[\"`]?",
+    re.IGNORECASE,
+)
+_RAW_FK_TARGET = re.compile(
+    r"\bALTER\s+TABLE\s+(?:ONLY\s+)?[\"`]?([A-Za-z_][A-Za-z0-9_]*)[\"`]?",
+    re.IGNORECASE,
+)
 
 
 def _slice_call(source: str, start: int) -> str:
@@ -293,31 +306,41 @@ def _check_prefer_robust_stmts(path: Path, source: str) -> Iterable[Finding]:
         line = _line_of(source, match.start())
         if _has_noqa(source, line):
             continue
+        # Skip ``# op.execute(...)`` shapes — a Python comment isn't executed,
+        # so a finding here would force a `# noqa` on a line that does nothing.
+        if _is_in_python_comment(source, match.start()):
+            continue
         call = _slice_call(source, match.start())
         if _RAW_BLOCKING_INDEX.search(call):
-            yield Finding(
-                path=path,
-                line=line,
-                rule="prefer-robust-stmts",
-                message=(
-                    'op.execute("CREATE INDEX ...") without CONCURRENTLY '
-                    "takes ShareLock for the whole build and blocks writes. "
-                    "Use CREATE INDEX CONCURRENTLY inside an "
-                    "op.get_context().autocommit_block()."
-                ),
-            )
+            target_match = _RAW_INDEX_TARGET.search(call)
+            target = target_match.group(1) if target_match else None
+            if not (target and target in fresh_tables):
+                yield Finding(
+                    path=path,
+                    line=line,
+                    rule="prefer-robust-stmts",
+                    message=(
+                        'op.execute("CREATE INDEX ...") without CONCURRENTLY '
+                        "takes ShareLock for the whole build and blocks writes. "
+                        "Use CREATE INDEX CONCURRENTLY inside an "
+                        "op.get_context().autocommit_block()."
+                    ),
+                )
         if _RAW_VALIDATING_FK.search(call):
-            yield Finding(
-                path=path,
-                line=line,
-                rule="prefer-robust-stmts",
-                message=(
-                    'op.execute("ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ...") '
-                    "without NOT VALID takes ShareRowExclusiveLock and "
-                    "full-scans the child table to validate. Add NOT VALID, "
-                    "then VALIDATE CONSTRAINT in a follow-up migration."
-                ),
-            )
+            target_match = _RAW_FK_TARGET.search(call)
+            target = target_match.group(1) if target_match else None
+            if not (target and target in fresh_tables):
+                yield Finding(
+                    path=path,
+                    line=line,
+                    rule="prefer-robust-stmts",
+                    message=(
+                        'op.execute("ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ...") '
+                        "without NOT VALID takes ShareRowExclusiveLock and "
+                        "full-scans the child table to validate. Add NOT VALID, "
+                        "then VALIDATE CONSTRAINT in a follow-up migration."
+                    ),
+                )
 
 
 def _check_disallowed_unique_constraint(path: Path, source: str) -> Iterable[Finding]:
@@ -458,6 +481,8 @@ def _check_transaction_nesting(path: Path, source: str) -> Iterable[Finding]:
         line = _line_of(source, match.start())
         if _has_noqa(source, line):
             continue
+        if _is_in_python_comment(source, match.start()):
+            continue
         call = _slice_call(source, match.start())
         if not _RAW_CONCURRENT_INDEX.search(call):
             continue
@@ -546,6 +571,8 @@ def _check_in_band_backfill(path: Path, source: str) -> Iterable[Finding]:
     for match in _OP_EXECUTE.finditer(source):
         line = _line_of(source, match.start())
         if _has_noqa(source, line):
+            continue
+        if _is_in_python_comment(source, match.start()):
             continue
         call = _slice_call(source, match.start())
         if _DATA_BACKFILL.search(call):
