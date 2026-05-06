@@ -352,22 +352,27 @@ A migration that genuinely needs to override these guardrails (a pre-approved ma
 
 2. Add the `migration-unsafe-ack` label on the PR.
 
-The directive is what lets a migration include `SET lock_timeout`, `SET statement_timeout`, `SET idle_in_transaction_session_timeout`, or `RESET` of any of those. The PR label is what tells the reviewer the override is intentional.
+Both signals are required. The directive (with a non-empty reason on the same line) suppresses the linter's checks for that file; the PR label puts the linter into `--warn-only` mode in CI so violations still surface in logs but don't block merge. The combination tells the reviewer the override is intentional.
 
 Use the escape hatch for "this needs a maintenance window with traffic shifted away" — not for "I want to ship faster." If you find yourself reaching for it, the answer is almost always to split the migration into the M1 / out-of-band / M2 shape above.
 
 ##### Anti-pattern → linter rule reference
 
-A migration linter is planned (see SGP-5785) and will enforce these rules at PR time. The mapping below is what the linter will catch — and what reviewers should look for in the meantime:
+The migration linter at `agentex/scripts/lint_migrations.py` enforces these rules at PR time via `.github/workflows/migration-lint.yml`. It only checks files changed vs the PR base, so existing migrations are not retro-flagged. The mapping below is what the linter catches:
 
-| Anti-pattern | Linter rule (squawk or equivalent) |
+| Anti-pattern | Linter rule |
 |---|---|
-| `CREATE INDEX` without `CONCURRENTLY` | `prefer-robust-stmts` |
-| `ADD CONSTRAINT FOREIGN KEY` without `NOT VALID` | `prefer-robust-stmts` |
-| `ADD CONSTRAINT ... UNIQUE` (use `CREATE UNIQUE INDEX CONCURRENTLY` + `ADD CONSTRAINT ... USING INDEX` instead) | `disallowed-unique-constraint` |
-| `ADD COLUMN ... NOT NULL` with a volatile default | `adding-required-field` |
-| Mixing `CONCURRENTLY` ops with same-transaction DDL | `transaction-nesting` |
-| `SET lock_timeout` / `SET statement_timeout` / `SET idle_in_transaction_session_timeout` / `RESET` of any | custom rule (forbidden unless `# migration-unsafe-ack: ...` directive present) |
+| `op.create_index` without `postgresql_concurrently=True` (or raw `CREATE INDEX` outside `autocommit_block`) | `no-concurrently` |
+| `op.create_index(postgresql_concurrently=True)` not wrapped in `autocommit_block()` | `concurrently-outside-autocommit` |
+| `op.create_foreign_key` without `postgresql_not_valid=True` (or raw `ADD CONSTRAINT FOREIGN KEY` without `NOT VALID`) | `fk-without-not-valid` |
+| `op.execute("UPDATE ...")` / `DELETE` data backfills | `in-band-backfill` |
+| `SET` / `RESET` of `lock_timeout` / `statement_timeout` / `idle_in_transaction_session_timeout` | `forbidden-set` |
+
+Run the linter locally before pushing:
+
+```bash
+agentex/scripts/lint_migrations.py --base-ref origin/main
+```
 
 ##### Other rules
 
