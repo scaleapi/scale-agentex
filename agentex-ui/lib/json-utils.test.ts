@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { serializeValue } from '@/lib/json-utils';
+import { parseOptionalJsonObject, serializeValue } from '@/lib/json-utils';
 import type { JsonValue } from '@/lib/types';
 
 describe('serializeValue', () => {
@@ -75,5 +75,36 @@ describe('serializeValue', () => {
     const data = 0;
     const result = serializeValue(data);
     expect(result).toBe('0');
+  });
+});
+
+describe('parseOptionalJsonObject', () => {
+  it('returns undefined for empty input', () => {
+    expect(parseOptionalJsonObject('')).toBeUndefined();
+    expect(parseOptionalJsonObject('   ')).toBeUndefined();
+  });
+
+  it('parses a valid JSON object', () => {
+    expect(parseOptionalJsonObject('{ "container_id": "abc123" }')).toEqual({
+      container_id: 'abc123',
+    });
+  });
+
+  it('rejects invalid JSON', () => {
+    expect(() => parseOptionalJsonObject('{ bad json }')).toThrow(
+      'Invalid JSON'
+    );
+  });
+
+  it('rejects arrays', () => {
+    expect(() => parseOptionalJsonObject('[]')).toThrow(
+      'Expected a JSON object'
+    );
+  });
+
+  it('rejects null', () => {
+    expect(() => parseOptionalJsonObject('null')).toThrow(
+      'Expected a JSON object'
+    );
   });
 });
