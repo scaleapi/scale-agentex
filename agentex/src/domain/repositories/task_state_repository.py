@@ -1,3 +1,4 @@
+import asyncio
 from typing import Annotated
 
 import pymongo
@@ -21,12 +22,8 @@ class TaskStateRepository(MongoDBCRUDRepository[StateEntity]):
         {
             "keys": [("task_id", pymongo.ASCENDING), ("agent_id", pymongo.ASCENDING)],
             "name": "task_agent_compound_idx",
-            "description": "Compound index for get_by_task_and_agent queries",
-        },
-        {
-            "keys": [("task_id", pymongo.ASCENDING)],
-            "name": "task_id_idx",
-            "description": "Single index for task_id queries",
+            "unique": True,
+            "description": "Unique compound index for get_by_task_and_agent queries",
         },
         {
             "keys": [("agent_id", pymongo.ASCENDING)],
@@ -43,7 +40,13 @@ class TaskStateRepository(MongoDBCRUDRepository[StateEntity]):
     async def get_by_task_and_agent(
         self, task_id: str, agent_id: str
     ) -> StateEntity | None:
-        doc = self.collection.find_one({"task_id": task_id, "agent_id": agent_id})
+        loop = asyncio.get_running_loop()
+        doc = await loop.run_in_executor(
+            None,
+            lambda: self.collection.find_one(
+                {"task_id": task_id, "agent_id": agent_id}
+            ),
+        )
         return self._deserialize(doc) if doc else None
 
 
