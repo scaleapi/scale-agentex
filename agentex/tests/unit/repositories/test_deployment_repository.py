@@ -71,6 +71,43 @@ async def test_clear_production_nulls_agent_pointer_and_demotes_deployment(
 
 @pytest.mark.asyncio
 @pytest.mark.unit
+async def test_clear_production_updates_acp_url_in_same_transaction(
+    agent_repository, deployment_repository
+):
+    agent, deployment = await _create_agent_with_production_deployment(
+        agent_repository, deployment_repository
+    )
+
+    await deployment_repository.clear_production(
+        agent_id=agent.id, new_acp_url="http://legacy.example.com"
+    )
+
+    refreshed_agent = await agent_repository.get(id=agent.id)
+    refreshed_deployment = await deployment_repository.get(id=deployment.id)
+
+    assert refreshed_agent.production_deployment_id is None
+    assert refreshed_agent.acp_url == "http://legacy.example.com"
+    assert refreshed_deployment.is_production is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_clear_production_leaves_acp_url_untouched_without_new_value(
+    agent_repository, deployment_repository
+):
+    agent, _ = await _create_agent_with_production_deployment(
+        agent_repository, deployment_repository
+    )
+    original_acp_url = agent.acp_url
+
+    await deployment_repository.clear_production(agent_id=agent.id)
+
+    refreshed_agent = await agent_repository.get(id=agent.id)
+    assert refreshed_agent.acp_url == original_acp_url
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_clear_production_is_noop_when_no_production_deployment(
     agent_repository, deployment_repository
 ):

@@ -76,7 +76,9 @@ class AgentsUseCase:
                 agent.registration_metadata = existing_metadata
             agent.registered_at = datetime.now(UTC)
             if agent.production_deployment_id:
-                await self.deployment_repo.clear_production(agent_id=agent.id)
+                await self.deployment_repo.clear_production(
+                    agent_id=agent.id, new_acp_url=acp_url
+                )
                 agent.production_deployment_id = None
             agent = await self.agent_repo.update(item=agent)
         else:

@@ -127,15 +127,26 @@ class DeploymentRepository(PostgresCRUDRepository[DeploymentORM, DeploymentEntit
             await session.refresh(target_deployment)
             return DeploymentEntity.model_validate(target_deployment)
 
-    async def clear_production(self, agent_id: str) -> None:
+    async def clear_production(
+        self, agent_id: str, new_acp_url: str | None = None
+    ) -> None:
         """Atomically clear the current production deployment for an agent.
 
         In a single transaction:
         1. Demote the deployment row currently marked is_production
         2. Null out Agent.production_deployment_id
+        3. If new_acp_url is provided, set Agent.acp_url to that value
 
-        No-op if the agent has no production deployment.
+        Updating acp_url here closes the window where _resolve_acp_url would
+        otherwise fall back to a stale acp_url (set by a prior promotion)
+        between this call and the caller's follow-up Agent update.
+
+        No-op on the deployment side if the agent has no production deployment.
         """
+        agent_values: dict[str, str | None] = {"production_deployment_id": None}
+        if new_acp_url is not None:
+            agent_values["acp_url"] = new_acp_url
+
         async with self.start_async_db_session(allow_writes=True) as session:
             await session.execute(
                 update(DeploymentORM)
@@ -144,9 +155,7 @@ class DeploymentRepository(PostgresCRUDRepository[DeploymentORM, DeploymentEntit
                 .values(is_production=False)
             )
             await session.execute(
-                update(AgentORM)
-                .where(AgentORM.id == agent_id)
-                .values(production_deployment_id=None)
+                update(AgentORM).where(AgentORM.id == agent_id).values(**agent_values)
             )
             await session.commit()
 
