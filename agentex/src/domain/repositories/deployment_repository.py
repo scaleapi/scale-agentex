@@ -127,52 +127,28 @@ class DeploymentRepository(PostgresCRUDRepository[DeploymentORM, DeploymentEntit
             await session.refresh(target_deployment)
             return DeploymentEntity.model_validate(target_deployment)
 
-    async def auto_promote_if_first(
-        self,
-        agent_id: str,
-        deployment_id: str,
-    ) -> bool:
-        """Atomically promote a deployment only if no production deployment exists.
+    async def clear_production(self, agent_id: str) -> None:
+        """Atomically clear the current production deployment for an agent.
 
-        Returns True if promotion happened, False if a production deployment already exists.
+        In a single transaction:
+        1. Demote the deployment row currently marked is_production
+        2. Null out Agent.production_deployment_id
+
+        No-op if the agent has no production deployment.
         """
         async with self.start_async_db_session(allow_writes=True) as session:
-            # Check for existing production deployment within the same transaction
-            existing = await session.execute(
-                select(DeploymentORM)
+            await session.execute(
+                update(DeploymentORM)
                 .where(DeploymentORM.agent_id == agent_id)
                 .where(DeploymentORM.is_production.is_(True))
-                .limit(1)
+                .values(is_production=False)
             )
-            if existing.scalars().first():
-                return False
-
-            # No production deployment — promote this one (if not soft-deleted)
-            target = await session.execute(
-                select(DeploymentORM)
-                .where(DeploymentORM.id == deployment_id)
-                .where(DeploymentORM.agent_id == agent_id)
-                .where(DeploymentORM.expires_at.is_(None))
-            )
-            target_deployment = target.scalars().first()
-            if not target_deployment:
-                return False
-
-            now = datetime.now(UTC)
-            target_deployment.is_production = True
-            target_deployment.promoted_at = now
-
             await session.execute(
                 update(AgentORM)
                 .where(AgentORM.id == agent_id)
-                .values(
-                    production_deployment_id=deployment_id,
-                    acp_url=target_deployment.acp_url,
-                )
+                .values(production_deployment_id=None)
             )
-
             await session.commit()
-            return True
 
 
 DDeploymentRepository = Annotated[DeploymentRepository, Depends(DeploymentRepository)]
