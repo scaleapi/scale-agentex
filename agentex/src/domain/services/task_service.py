@@ -45,6 +45,7 @@ class AgentTaskService:
         agent: AgentEntity,
         task_name: str | None = None,
         task_params: dict[str, Any] | None = None,
+        task_metadata: dict[str, Any] | None = None,
     ) -> TaskEntity:
         """
         Create a new task record in the repository with single agent (maintains existing interface).
@@ -53,6 +54,8 @@ class AgentTaskService:
             agent: The agent to create the task for
             task_name: The name of the task to be created
             task_params: The parameters for the task
+            task_metadata: Caller-provided metadata to persist on the task row.
+                Not forwarded to the agent.
         Returns:
             Task containing the created task info
         """
@@ -65,6 +68,7 @@ class AgentTaskService:
                 status=TaskStatus.RUNNING,
                 status_reason="Task created, forwarding to ACP server",
                 params=task_params,
+                task_metadata=task_metadata,
             ),
         )
         return task_entity
@@ -220,6 +224,8 @@ class AgentTaskService:
         id: str | list[str] | None = None,
         agent_id: str | None = None,
         agent_name: str | None = None,
+        status: TaskStatus | list[TaskStatus] | None = None,
+        task_metadata: dict | None = None,
         order_by: str | None = None,
         order_direction: str = "desc",
         relationships: list[TaskRelationships] | None = None,
@@ -227,11 +233,17 @@ class AgentTaskService:
         """
         List all tasks from the repository.
         """
+        task_filters: dict = {}
+        if id is not None:
+            task_filters["id"] = id
+        if status is not None:
+            task_filters["status"] = status
 
         return await self.task_repository.list_with_join(
-            task_filters={"id": id} if id is not None else None,
+            task_filters=task_filters or None,
             agent_id=agent_id,
             agent_name=agent_name,
+            task_metadata=task_metadata,
             order_by=order_by,
             order_direction=order_direction,
             limit=limit,

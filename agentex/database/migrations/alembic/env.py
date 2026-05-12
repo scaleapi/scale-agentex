@@ -12,6 +12,35 @@ print(f"Added {project_root} to Python path")
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+# Default Postgres timeouts applied to every migration. They keep a stuck
+# migration from queueing behind active writes and holding locks indefinitely.
+#
+# - lock_timeout: how long a statement waits for a lock before aborting. 3s
+#   means a migration that cannot acquire its lock quickly gives up instead of
+#   blocking writers behind it.
+# - statement_timeout: maximum runtime for any single statement. 30s catches
+#   runaway DDL/UPDATEs; long index builds must use CREATE INDEX CONCURRENTLY
+#   in an autocommit_block, which runs outside the transaction-bound timeout.
+# - idle_in_transaction_session_timeout: kills a transaction that has gone
+#   idle while still holding locks (e.g. a stalled AccessExclusiveLock).
+#
+# These are session-level so they persist across each per-migration
+# transaction and across autocommit_block boundaries on the same connection.
+# Migration authors must NOT override them with `SET lock_timeout` or
+# `SET statement_timeout` inside a migration file — the migration linter
+# (scripts/ci_tools/migration_lint.py) flags those, with the
+# `migration-unsafe-ack` PR label as the documented escape hatch for
+# genuinely-long migrations that need a maintenance window.
+DEFAULT_MIGRATION_TIMEOUTS: dict[str, str] = {
+    "lock_timeout": "3s",
+    "statement_timeout": "30s",
+    "idle_in_transaction_session_timeout": "10s",
+}
+
+
+def _format_set_statements(timeouts: dict[str, str]) -> list[str]:
+    return [f"SET {key} = '{value}'" for key, value in timeouts.items()]
+
 # Add explicit error handling to catch import errors
 try:
     print("Starting migration - importing modules")
@@ -83,6 +112,8 @@ def run_migrations_offline() -> None:
         )
 
         with context.begin_transaction():
+            for stmt in _format_set_statements(DEFAULT_MIGRATION_TIMEOUTS):
+                context.execute(stmt)
             context.run_migrations()
     except Exception as e:
         print("ERROR IN OFFLINE MIGRATIONS:", str(e))
@@ -106,7 +137,30 @@ def run_migrations_online() -> None:
         )
 
         with connectable.connect() as connection:
-            context.configure(connection=connection, target_metadata=target_metadata)
+            # Apply default migration timeouts at the session level so they
+            # persist across per-migration transactions and any autocommit_block
+            # boundaries opened by migrations (e.g. for CREATE INDEX CONCURRENTLY).
+            #
+            # exec_driver_sql autobegins a SQLAlchemy transaction. We commit it
+            # before configure() so alembic doesn't latch onto it as an
+            # "external" transaction — that mode disables transaction_per_migration
+            # and breaks autocommit_block (which asserts self._transaction is not
+            # None). Postgres SET is session-level, so the timeouts persist past
+            # the commit.
+            for stmt in _format_set_statements(DEFAULT_MIGRATION_TIMEOUTS):
+                connection.exec_driver_sql(stmt)
+            connection.commit()
+
+            # transaction_per_migration=True wraps each migration in its own
+            # transaction (instead of a single outer transaction for all
+            # migrations). This lets individual migrations opt into
+            # autocommit_block() for operations that cannot run inside a
+            # transaction, such as CREATE INDEX CONCURRENTLY.
+            context.configure(
+                connection=connection,
+                target_metadata=target_metadata,
+                transaction_per_migration=True,
+            )
 
             with context.begin_transaction():
                 context.run_migrations()

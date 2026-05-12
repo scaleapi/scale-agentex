@@ -69,6 +69,13 @@ apply-migrations: ## Apply database migrations
 	cd database/migrations && alembic upgrade head
 
 #
+# OpenAPI Spec
+#
+
+gen-openapi: ## Regenerate openapi.yaml from the FastAPI app
+	@uv run --frozen python scripts/generate_openapi_spec.py --output openapi.yaml
+
+#
 # Documentation
 #
 

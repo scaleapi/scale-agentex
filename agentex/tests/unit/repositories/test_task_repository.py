@@ -1129,3 +1129,83 @@ async def test_list_with_join(postgres_url):
         order_direction="asc",
     )
     assert len(all_tasks_result) == 3  # all 3 tasks should be returned
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_list_with_join_filters_by_task_metadata(postgres_url):
+    """list_with_join should filter rows by JSONB containment on task_metadata."""
+
+    sqlalchemy_asyncpg_url = postgres_url.replace(
+        "postgresql+psycopg2://", "postgresql+asyncpg://"
+    )
+
+    for attempt in range(10):
+        try:
+            engine = create_async_engine(sqlalchemy_asyncpg_url, echo=True)
+            async with engine.begin() as conn:
+                await conn.run_sync(BaseORM.metadata.create_all)
+                await conn.execute(text("SELECT 1"))
+            break
+        except Exception as e:
+            if attempt < 9:
+                print(
+                    f"Database not ready (attempt {attempt + 1}), retrying... Error: {e}"
+                )
+                await asyncio.sleep(2)
+                continue
+            raise
+
+    async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    task_repo = TaskRepository(async_session_maker, async_session_maker)
+    agent_repo = AgentRepository(async_session_maker, async_session_maker)
+
+    unique_suffix = orm_id()[:8]
+    agent = AgentEntity(
+        id=orm_id(),
+        name=f"metadata-filter-agent-{unique_suffix}",
+        description="agent for metadata containment filter test",
+        docker_image="test/agent:latest",
+        status=AgentStatus.READY,
+        acp_url="http://localhost:8000/acp",
+        acp_type=ACPType.ASYNC,
+    )
+    await agent_repo.create(agent)
+
+    user_a_task = await task_repo.create(
+        agent.id,
+        TaskEntity(
+            id=orm_id(),
+            name=f"user-a-task-{unique_suffix}",
+            status=TaskStatus.RUNNING,
+            task_metadata={"created_by_user_id": "user-a", "other": "field"},
+        ),
+    )
+    user_b_task = await task_repo.create(
+        agent.id,
+        TaskEntity(
+            id=orm_id(),
+            name=f"user-b-task-{unique_suffix}",
+            status=TaskStatus.RUNNING,
+            task_metadata={"created_by_user_id": "user-b"},
+        ),
+    )
+    no_meta_task = await task_repo.create(
+        agent.id,
+        TaskEntity(
+            id=orm_id(),
+            name=f"no-meta-task-{unique_suffix}",
+            status=TaskStatus.RUNNING,
+            task_metadata=None,
+        ),
+    )
+
+    results = await task_repo.list_with_join(
+        task_metadata={"created_by_user_id": "user-a"},
+    )
+
+    result_ids = {t.id for t in results}
+    assert user_a_task.id in result_ids
+    assert user_b_task.id not in result_ids
+    assert no_meta_task.id not in result_ids

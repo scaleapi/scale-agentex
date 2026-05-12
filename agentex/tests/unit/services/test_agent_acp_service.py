@@ -688,3 +688,197 @@ class TestAgentACPService:
             agent_acp_service._parse_task_message_update(invalid_result)
 
         assert "Unknown update type" in str(exc_info.value)
+
+
+class _AsyncStreamMock:
+    """Minimal async iterator for mocking HttpxGateway.stream_call."""
+
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.index = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self.index >= len(self.responses):
+            raise StopAsyncIteration
+        response = self.responses[self.index]
+        self.index += 1
+        return response
+
+
+@pytest.fixture
+def task_with_metadata():
+    """Task carrying caller-side metadata that is forwarded as-is to the agent."""
+    return TaskEntity(
+        id=str(uuid4()),
+        name="task-with-meta",
+        status=TaskStatus.RUNNING,
+        status_reason="Test",
+        task_metadata={"created_by_user_id": "user-value"},
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+class TestACPPayloadForwardsTaskMetadata:
+    """task_metadata is forwarded to the agent unchanged.
+
+    Pre-existing agents may rely on reading task_metadata that callers set via
+    PUT /tasks/{id}, so we keep the pass-through behaviour for backward
+    compatibility.
+    """
+
+    async def test_create_task_payload_forwards_metadata(
+        self,
+        agent_acp_service,
+        mock_http_gateway,
+        agent_repository,
+        sample_agent,
+        task_with_metadata,
+    ):
+        await create_or_get_agent(agent_repository, sample_agent)
+        mock_http_gateway.async_call.return_value = {
+            "jsonrpc": "2.0",
+            "result": {"status": "created", "task_id": task_with_metadata.id},
+            "id": f"AgentRPCMethod.TASK_CREATE-{task_with_metadata.id}",
+        }
+
+        await agent_acp_service.create_task(
+            agent=sample_agent,
+            task=task_with_metadata,
+            acp_url="http://test-acp.example.com",
+        )
+
+        payload = mock_http_gateway.async_call.call_args[1]["payload"]
+        assert payload["params"]["task"]["task_metadata"] == {
+            "created_by_user_id": "user-value"
+        }
+
+    async def test_send_message_payload_forwards_metadata(
+        self,
+        agent_acp_service,
+        mock_http_gateway,
+        agent_repository,
+        sample_agent,
+        task_with_metadata,
+        sample_text_content,
+    ):
+        await create_or_get_agent(agent_repository, sample_agent)
+        mock_http_gateway.async_call.return_value = {
+            "jsonrpc": "2.0",
+            "result": {
+                "type": "text",
+                "author": "agent",
+                "style": "static",
+                "format": "plain",
+                "content": "ok",
+                "attachments": None,
+            },
+            "id": f"AgentRPCMethod.MESSAGE_SEND-{task_with_metadata.id}",
+        }
+
+        await agent_acp_service.send_message(
+            agent=sample_agent,
+            task=task_with_metadata,
+            content=sample_text_content,
+            acp_url="http://test-acp.example.com",
+        )
+
+        payload = mock_http_gateway.async_call.call_args[1]["payload"]
+        assert payload["params"]["task"]["task_metadata"] == {
+            "created_by_user_id": "user-value"
+        }
+
+    async def test_send_message_stream_payload_forwards_metadata(
+        self,
+        agent_acp_service,
+        mock_http_gateway,
+        agent_repository,
+        sample_agent,
+        task_with_metadata,
+        sample_text_content,
+    ):
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        captured = {}
+
+        def fake_stream_call(*args, **kwargs):
+            captured["payload"] = kwargs.get("payload")
+            return _AsyncStreamMock([])
+
+        mock_http_gateway.stream_call = fake_stream_call
+
+        async for _ in agent_acp_service.send_message_stream(
+            agent=sample_agent,
+            task=task_with_metadata,
+            content=sample_text_content,
+            acp_url="http://test-acp.example.com",
+        ):
+            pass
+
+        payload = captured["payload"]
+        assert payload["params"]["task"]["task_metadata"] == {
+            "created_by_user_id": "user-value"
+        }
+
+    async def test_cancel_task_payload_forwards_metadata(
+        self,
+        agent_acp_service,
+        mock_http_gateway,
+        agent_repository,
+        sample_agent,
+        task_with_metadata,
+    ):
+        await create_or_get_agent(agent_repository, sample_agent)
+        mock_http_gateway.async_call.return_value = {
+            "jsonrpc": "2.0",
+            "result": {"status": "cancelled", "task_id": task_with_metadata.id},
+            "id": f"AgentRPCMethod.TASK_CANCEL-{task_with_metadata.id}",
+        }
+
+        await agent_acp_service.cancel_task(
+            agent=sample_agent,
+            task=task_with_metadata,
+            acp_url="http://test-acp.example.com",
+        )
+
+        payload = mock_http_gateway.async_call.call_args[1]["payload"]
+        assert payload["params"]["task"]["task_metadata"] == {
+            "created_by_user_id": "user-value"
+        }
+
+    async def test_send_event_payload_forwards_metadata(
+        self,
+        agent_acp_service,
+        mock_http_gateway,
+        agent_repository,
+        sample_agent,
+        task_with_metadata,
+    ):
+        await create_or_get_agent(agent_repository, sample_agent)
+        event = EventEntity(
+            id=str(uuid4()),
+            task_id=task_with_metadata.id,
+            agent_id=sample_agent.id,
+            sequence_id=1,
+            content=TextContent(content="evt", author=MessageAuthor.AGENT),
+        )
+        mock_http_gateway.async_call.return_value = {
+            "jsonrpc": "2.0",
+            "result": {"status": "event_sent", "event_id": event.id},
+            "id": f"AgentRPCMethod.EVENT_SEND-{task_with_metadata.id}",
+        }
+
+        await agent_acp_service.send_event(
+            agent=sample_agent,
+            event=event,
+            task=task_with_metadata,
+            acp_url="http://test-acp.example.com",
+        )
+
+        payload = mock_http_gateway.async_call.call_args[1]["payload"]
+        assert payload["params"]["task"]["task_metadata"] == {
+            "created_by_user_id": "user-value"
+        }

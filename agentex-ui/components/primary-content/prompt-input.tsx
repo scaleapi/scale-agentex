@@ -49,6 +49,9 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
   const { taskID, agentName, updateParams } = useSafeSearchParams();
   const [isClient, setIsClient] = useState(false);
   const [isSendingJSON, setIsSendingJSON] = useState(false);
+  const [isTaskParamsOpen, setIsTaskParamsOpen] = useState(false);
+  const [taskParams, setTaskParams] = useState('');
+  const taskParamsViewRef = useRef<EditorView | null>(null);
 
   const { agentexClient } = useAgentexClient();
 
@@ -119,9 +122,20 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
     setPrompt('');
 
     if (!currentTaskId) {
+      let extraTaskParams: Record<string, unknown> = {};
+      if (taskParams.trim()) {
+        try {
+          extraTaskParams = JSON.parse(taskParams);
+        } catch {
+          toast.error('Invalid Task Parameters JSON');
+          return;
+        }
+      }
+
       const task = await createTaskMutation.mutateAsync({
         agentName: agentName,
         params: {
+          ...extraTaskParams,
           description: prompt,
           content: currentPrompt,
         },
@@ -159,10 +173,32 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
     sendMessageMutation,
     setPrompt,
     isSendingJSON,
+    taskParams,
   ]);
 
   return (
     <div className="flex w-full max-w-3xl flex-col gap-2">
+      {!taskID && !isDisabled && (
+        <div className="flex flex-col gap-1">
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-foreground ml-4 flex items-center gap-1 text-sm transition-colors"
+            onClick={() => setIsTaskParamsOpen(v => !v)}
+          >
+            <span>{isTaskParamsOpen ? '▾' : '▸'}</span>
+            Task Parameters
+          </button>
+          {isTaskParamsOpen && (
+            <DataInput
+              prompt={taskParams}
+              setPrompt={setTaskParams}
+              isDisabled={isDisabled}
+              handleSendPrompt={handleSendPrompt}
+              codeMirrorViewRef={taskParamsViewRef}
+            />
+          )}
+        </div>
+      )}
       <div
         className={`border-input dark:bg-input ${isDisabled ? 'bg-muted scale-90 cursor-not-allowed' : 'scale-100'} flex w-full items-center justify-between rounded-4xl border py-2 pr-2 pl-6 shadow-sm transition-transform duration-300 disabled:cursor-not-allowed`}
       >

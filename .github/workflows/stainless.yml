@@ -1,0 +1,50 @@
+name: Stainless SDK builds
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'agentex/openapi.yaml'
+      - '.github/workflows/stainless.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'agentex/openapi.yaml'
+      - '.github/workflows/stainless.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  STAINLESS_ORG: sgp
+  STAINLESS_PROJECT: agentex-sdk
+  OAS_PATH: agentex/openapi.yaml
+  FAIL_ON: fatal
+
+jobs:
+  build:
+    name: Stainless build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          sparse-checkout: |
+            agentex/openapi.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Run build
+        uses: stainless-api/upload-openapi-spec-action/build@0908d431428c675af1d590f1c6e49146cd5c4c2e
+        with:
+          org: ${{ env.STAINLESS_ORG }}
+          project: ${{ env.STAINLESS_PROJECT }}
+          oas_path: ${{ env.OAS_PATH }}
+          fail_on: ${{ env.FAIL_ON }}
