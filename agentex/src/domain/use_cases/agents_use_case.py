@@ -64,6 +64,7 @@ class AgentsUseCase:
             # Legacy flow: update the agent directly
             agent.name = name
             agent.description = description
+            agent.acp_url = acp_url
             agent.status = AgentStatus.READY
             agent.status_reason = "Agent registered successfully."
             agent.acp_type = acp_type
@@ -74,6 +75,11 @@ class AgentsUseCase:
                 existing_metadata.update(registration_metadata)
                 agent.registration_metadata = existing_metadata
             agent.registered_at = datetime.now(UTC)
+            if agent.production_deployment_id:
+                await self.deployment_repo.clear_production(
+                    agent_id=agent.id, new_acp_url=acp_url
+                )
+                agent.production_deployment_id = None
             agent = await self.agent_repo.update(item=agent)
         else:
             # If an agent_id is not passed, then its probably a new one. We should first validate by checking in the DB
@@ -103,6 +109,12 @@ class AgentsUseCase:
                     agent.registration_metadata = existing_metadata
                 if agent_input_type:
                     agent.agent_input_type = agent_input_type
+
+                if agent.production_deployment_id:
+                    await self.deployment_repo.clear_production(
+                        agent_id=agent.id, new_acp_url=acp_url
+                    )
+                    agent.production_deployment_id = None
 
                 # Check if any fields have changed by comparing model dumps
                 updated_agent_data = agent.model_dump()
@@ -184,17 +196,6 @@ class AgentsUseCase:
                 is_production=False,
             )
             await self.deployment_repo.create(deployment)
-
-        # Auto-promote if this is the first deployment for this agent.
-        # Uses a single transaction to avoid TOCTOU races between concurrent pods.
-        promoted = await self.deployment_repo.auto_promote_if_first(
-            agent_id=agent.id,
-            deployment_id=deployment_id,
-        )
-        if promoted:
-            logger.info(
-                f"Auto-promoted first deployment {deployment_id} for agent {agent.id}"
-            )
 
     async def maybe_update_agent_deployment_history(self, agent: AgentEntity) -> None:
         try:
