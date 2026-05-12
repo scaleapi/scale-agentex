@@ -111,7 +111,9 @@ class AgentsUseCase:
                     agent.agent_input_type = agent_input_type
 
                 if agent.production_deployment_id:
-                    await self.deployment_repo.clear_production(agent_id=agent.id)
+                    await self.deployment_repo.clear_production(
+                        agent_id=agent.id, new_acp_url=acp_url
+                    )
                     agent.production_deployment_id = None
 
                 # Check if any fields have changed by comparing model dumps
