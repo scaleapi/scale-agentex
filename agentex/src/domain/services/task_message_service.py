@@ -146,7 +146,7 @@ class TaskMessageService:
             contents: The message contents to append
             streaming_status: Optional streaming status
             created_at: Optional base timestamp for the batch. Each message in
-                the batch is stamped with base + i microseconds to guarantee
+                the batch is stamped with base + i milliseconds to guarantee
                 unique, monotonic ordering. If omitted, datetime.now(UTC) is
                 used as the base.
 

@@ -185,7 +185,7 @@ class BatchCreateTaskMessagesRequest(BaseModel):
         title="Optional caller-supplied base creation timestamp for the batch",
         description=(
             "Optional base timestamp. Each message in the batch is stamped "
-            "with base + i microseconds to guarantee unique, monotonic "
+            "with base + i milliseconds to guarantee unique, monotonic "
             "ordering. If omitted, the server stamps datetime.now(UTC) at "
             "insert time."
         ),

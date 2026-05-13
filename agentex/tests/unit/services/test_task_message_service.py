@@ -245,15 +245,16 @@ class TestTaskMessageService:
             created_at=caller_time,
         )
 
-        # Then: the persisted value must equal what the caller supplied (modulo
-        # BSON millisecond truncation, which is irrelevant here since the input
-        # is at second precision).
-        assert result.created_at == caller_time
-        assert result.updated_at == caller_time
+        # Then: the persisted value must equal what the caller supplied. The
+        # input is at second precision so BSON ms truncation is a no-op; tzinfo
+        # gets stripped on read by pymongo, so compare naively.
+        expected = caller_time.replace(tzinfo=None)
+        assert result.created_at.replace(tzinfo=None) == expected
+        assert result.updated_at.replace(tzinfo=None) == expected
 
         # And the value survives a fresh fetch from the store.
         fetched = await task_message_service.get_message(result.id)
-        assert fetched.created_at == caller_time
+        assert fetched.created_at.replace(tzinfo=None) == expected
 
     async def test_append_messages_uses_caller_base_time(
         self, task_message_service, sample_task_id
@@ -272,12 +273,12 @@ class TestTaskMessageService:
             task_id=sample_task_id, contents=contents, created_at=base
         )
 
-        # Then
+        # Then (compare naively — pymongo strips tzinfo on read)
         assert len(result) == 3
         for i, message in enumerate(result):
-            expected = base + timedelta(milliseconds=i)
-            assert message.created_at == expected
-            assert message.updated_at == expected
+            expected = (base + timedelta(milliseconds=i)).replace(tzinfo=None)
+            assert message.created_at.replace(tzinfo=None) == expected
+            assert message.updated_at.replace(tzinfo=None) == expected
 
     async def test_concurrent_appends_with_caller_timestamps_preserve_order(
         self, task_message_service, sample_task_id
@@ -302,8 +303,11 @@ class TestTaskMessageService:
             created_at=first_time,
         )
 
-        assert first.created_at == first_time
-        assert second.created_at == second_time
+        # pymongo strips tzinfo on read; normalize for comparison.
+        assert first.created_at.replace(tzinfo=None) == first_time.replace(tzinfo=None)
+        assert second.created_at.replace(tzinfo=None) == second_time.replace(
+            tzinfo=None
+        )
         assert first.created_at < second.created_at
 
     async def test_update_message_success(

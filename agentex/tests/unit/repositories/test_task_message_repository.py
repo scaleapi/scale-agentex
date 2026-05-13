@@ -218,13 +218,17 @@ async def test_create_preserves_caller_supplied_timestamps(
         updated_at=caller_time,
     )
 
+    # pymongo strips tzinfo on read (BSON Date stores UTC but returns naive
+    # datetimes by default), so compare against the naive UTC equivalent.
+    expected_naive = caller_time.replace(tzinfo=None)
+
     created = await repo.create(task_message)
-    assert created.created_at == caller_time
-    assert created.updated_at == caller_time
+    assert created.created_at.replace(tzinfo=None) == expected_naive
+    assert created.updated_at.replace(tzinfo=None) == expected_naive
 
     fetched = await repo.get(id=created.id)
-    assert fetched.created_at == caller_time
-    assert fetched.updated_at == caller_time
+    assert fetched.created_at.replace(tzinfo=None) == expected_naive
+    assert fetched.updated_at.replace(tzinfo=None) == expected_naive
 
     await repo.delete(id=created.id)
 
@@ -262,9 +266,9 @@ async def test_batch_create_preserves_per_item_timestamps(
     created = await repo.batch_create(messages)
     assert len(created) == 3
     for i, c in enumerate(created):
-        expected = base + timedelta(milliseconds=10 - i)
-        assert c.created_at == expected
-        assert c.updated_at == expected
+        expected = (base + timedelta(milliseconds=10 - i)).replace(tzinfo=None)
+        assert c.created_at.replace(tzinfo=None) == expected
+        assert c.updated_at.replace(tzinfo=None) == expected
 
     # Cleanup
     for c in created:
