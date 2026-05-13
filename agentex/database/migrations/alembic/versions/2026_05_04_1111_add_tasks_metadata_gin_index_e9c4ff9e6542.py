@@ -17,11 +17,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_tasks_metadata_gin "
-        "ON tasks USING GIN (task_metadata jsonb_path_ops)"
-    )
+    with op.get_context().autocommit_block():
+        op.execute(
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_tasks_metadata_gin "
+            "ON tasks USING GIN (task_metadata jsonb_path_ops)"
+        )
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS ix_tasks_metadata_gin")
+    with op.get_context().autocommit_block():
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_tasks_metadata_gin")
