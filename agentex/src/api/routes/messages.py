@@ -94,6 +94,7 @@ async def batch_create_messages(
     task_message_entities = await message_use_case.create_batch(
         task_id=request.task_id,
         contents=converted_contents,
+        created_at=request.created_at,
     )
     return [
         TaskMessage.model_validate(task_message_entity)
@@ -137,6 +138,7 @@ async def create_message(
         task_id=request.task_id,
         content=convert_task_message_content_to_entity(request.content.root),
         streaming_status=request.streaming_status,
+        created_at=request.created_at,
     )
     return TaskMessage.model_validate(task_message_entity)
 

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import Depends
@@ -84,6 +85,7 @@ class MessagesUseCase:
         task_id: str,
         content: TaskMessageContentEntity,
         streaming_status: Literal["IN_PROGRESS", "DONE"] | None,
+        created_at: datetime | None = None,
     ) -> TaskMessageEntity:
         """
         Create a new message for a task.
@@ -91,6 +93,8 @@ class MessagesUseCase:
         Args:
             task_id: The task ID
             content: The task message content to create
+            streaming_status: Optional streaming status
+            created_at: Optional caller-supplied timestamp (see service docstring)
 
         Returns:
             The created TaskMessageEntity with ID and metadata
@@ -99,6 +103,7 @@ class MessagesUseCase:
             task_id=task_id,
             content=content,
             streaming_status=streaming_status,
+            created_at=created_at,
         )
 
     async def update(
@@ -125,14 +130,18 @@ class MessagesUseCase:
         )
 
     async def create_batch(
-        self, task_id: str, contents: list[TaskMessageContentEntity]
+        self,
+        task_id: str,
+        contents: list[TaskMessageContentEntity],
+        created_at: datetime | None = None,
     ) -> list[TaskMessageEntity]:
         """
         Create multiple messages for a task.
 
         Args:
             task_id: The task ID
-            messages: The messages to create
+            contents: The messages to create
+            created_at: Optional base timestamp (see service docstring)
 
         Returns:
             The created TaskMessageEntity objects with IDs and metadata
@@ -140,6 +149,7 @@ class MessagesUseCase:
         return await self.task_message_service.append_messages(
             task_id=task_id,
             contents=contents,
+            created_at=created_at,
         )
 
     async def update_batch(
