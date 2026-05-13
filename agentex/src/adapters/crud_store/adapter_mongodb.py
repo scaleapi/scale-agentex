@@ -207,10 +207,14 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
                 if "_id" in data:
                     del data["_id"]
 
-            # Add timestamps
+            # Timestamps: respect caller-supplied values (allowing deterministic
+            # ordering across concurrent requests, e.g. workflow.now() from
+            # Temporal). Only fall back to server time when missing/None.
             now = datetime.now(UTC)
-            data["created_at"] = now
-            data["updated_at"] = now
+            if data.get("created_at") is None:
+                data["created_at"] = now
+            if data.get("updated_at") is None:
+                data["updated_at"] = now
 
             result = self.collection.insert_one(data)
 
@@ -218,13 +222,16 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
             # Set the .id field with the string representation of _id
             if hasattr(item, "id"):
                 item.id = str(result.inserted_id)
-                # Set timestamps on the returned object
-                item.created_at = now
-                item.updated_at = now
+                if getattr(item, "created_at", None) is None:
+                    item.created_at = data["created_at"]
+                if getattr(item, "updated_at", None) is None:
+                    item.updated_at = data["updated_at"]
             elif isinstance(item, dict):
                 item["id"] = str(result.inserted_id)
-                item["created_at"] = now
-                item["updated_at"] = now
+                if item.get("created_at") is None:
+                    item["created_at"] = data["created_at"]
+                if item.get("updated_at") is None:
+                    item["updated_at"] = data["updated_at"]
 
             return item
         except pymongo.errors.DuplicateKeyError as e:
@@ -258,9 +265,12 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
                 if "_id" not in data or data["_id"] is None:
                     data.pop("_id", None)
 
-                # Add timestamps
-                data["created_at"] = now
-                data["updated_at"] = now
+                # Timestamps: respect caller-supplied values per-item, fall back
+                # to server time when missing/None. See create() for rationale.
+                if data.get("created_at") is None:
+                    data["created_at"] = now
+                if data.get("updated_at") is None:
+                    data["updated_at"] = now
 
                 data_list.append(data)
 
@@ -268,15 +278,19 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
 
             # Update items with generated IDs (as strings)
             for idx, inserted_id in enumerate(result.inserted_ids):
-                # Set the .id field with the string representation of _id
+                persisted = data_list[idx]
                 if hasattr(items[idx], "id"):
                     items[idx].id = str(inserted_id)
-                    items[idx].created_at = now
-                    items[idx].updated_at = now
+                    if getattr(items[idx], "created_at", None) is None:
+                        items[idx].created_at = persisted["created_at"]
+                    if getattr(items[idx], "updated_at", None) is None:
+                        items[idx].updated_at = persisted["updated_at"]
                 elif isinstance(items[idx], dict):
                     items[idx]["id"] = str(inserted_id)
-                    items[idx]["created_at"] = now
-                    items[idx]["updated_at"] = now
+                    if items[idx].get("created_at") is None:
+                        items[idx]["created_at"] = persisted["created_at"]
+                    if items[idx].get("updated_at") is None:
+                        items[idx]["updated_at"] = persisted["updated_at"]
 
             return items
         except pymongo.errors.DuplicateKeyError as e:

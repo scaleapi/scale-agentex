@@ -217,17 +217,98 @@ class TestTaskMessageService:
         # Then
         assert len(result) == 3
 
-        # Check that all messages were created correctly
+        # Check that all messages were created correctly. The service stamps
+        # base + i milliseconds, and BSON Date is millisecond-precision, so the
+        # persisted timestamps must be strictly increasing across the batch.
         for i, message in enumerate(result):
             assert message.id is not None
             assert message.task_id == sample_task_id
             assert message.content.content == contents[i].content
             assert message.created_at is not None
 
-            # Check that timestamps are incremented (or at least not decreasing)
             if i > 0:
-                # Later messages should have timestamps >= previous (microsecond precision may be identical)
-                assert message.created_at >= result[i - 1].created_at
+                assert message.created_at > result[i - 1].created_at
+
+    async def test_append_message_preserves_caller_created_at(
+        self, task_message_service, sample_task_id, sample_message_content
+    ):
+        """Caller-supplied created_at must round-trip through the adapter
+        (regression test for the Mongo race where the adapter overwrote
+        caller timestamps with datetime.now(UTC) at insert time)."""
+        # Given: an explicit, well-in-the-past timestamp the caller wants to set.
+        caller_time = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+
+        # When
+        result = await task_message_service.append_message(
+            task_id=sample_task_id,
+            content=sample_message_content,
+            created_at=caller_time,
+        )
+
+        # Then: the persisted value must equal what the caller supplied. The
+        # input is at second precision so BSON ms truncation is a no-op; tzinfo
+        # gets stripped on read by pymongo, so compare naively.
+        expected = caller_time.replace(tzinfo=None)
+        assert result.created_at.replace(tzinfo=None) == expected
+        assert result.updated_at.replace(tzinfo=None) == expected
+
+        # And the value survives a fresh fetch from the store.
+        fetched = await task_message_service.get_message(result.id)
+        assert fetched.created_at.replace(tzinfo=None) == expected
+
+    async def test_append_messages_uses_caller_base_time(
+        self, task_message_service, sample_task_id
+    ):
+        """Batch append must use the caller-supplied base timestamp and stagger
+        each message by 1 ms on top of it."""
+        # Given
+        base = datetime(2025, 6, 15, 9, 0, 0, tzinfo=UTC)
+        contents = [
+            TextContent(content=f"Message {i}", author=MessageAuthor.USER)
+            for i in range(3)
+        ]
+
+        # When
+        result = await task_message_service.append_messages(
+            task_id=sample_task_id, contents=contents, created_at=base
+        )
+
+        # Then (compare naively — pymongo strips tzinfo on read)
+        assert len(result) == 3
+        for i, message in enumerate(result):
+            expected = (base + timedelta(milliseconds=i)).replace(tzinfo=None)
+            assert message.created_at.replace(tzinfo=None) == expected
+            assert message.updated_at.replace(tzinfo=None) == expected
+
+    async def test_concurrent_appends_with_caller_timestamps_preserve_order(
+        self, task_message_service, sample_task_id
+    ):
+        """Simulate the OneEdge race: two messages.create calls fired
+        back-to-back, with the *second one* reaching the adapter first.
+        Because the caller supplies created_at, the persisted ordering must
+        still reflect caller intent rather than insert order."""
+        first_time = datetime(2025, 3, 1, 10, 0, 0, tzinfo=UTC)
+        second_time = first_time + timedelta(milliseconds=1)
+
+        # Insert in the *reverse* of caller-intended order to prove that the
+        # adapter no longer uses now() at insert time.
+        second = await task_message_service.append_message(
+            task_id=sample_task_id,
+            content=TextContent(content="agent", author=MessageAuthor.AGENT),
+            created_at=second_time,
+        )
+        first = await task_message_service.append_message(
+            task_id=sample_task_id,
+            content=TextContent(content="user", author=MessageAuthor.USER),
+            created_at=first_time,
+        )
+
+        # pymongo strips tzinfo on read; normalize for comparison.
+        assert first.created_at.replace(tzinfo=None) == first_time.replace(tzinfo=None)
+        assert second.created_at.replace(tzinfo=None) == second_time.replace(
+            tzinfo=None
+        )
+        assert first.created_at < second.created_at
 
     async def test_update_message_success(
         self, task_message_service, sample_task_id, sample_message_content

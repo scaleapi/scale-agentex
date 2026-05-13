@@ -142,6 +142,18 @@ class CreateTaskMessageRequest(BaseModel):
         None,
         title="The streaming status of the message",
     )
+    created_at: datetime | None = Field(
+        None,
+        title="Optional caller-supplied creation timestamp",
+        description=(
+            "Optional timestamp for the message. Workflow callers should pass "
+            "workflow.now() (Temporal's deterministic monotonic clock) so that "
+            "two awaited messages.create calls from the same workflow are "
+            "guaranteed to have monotonic timestamps regardless of HTTP "
+            "scheduling at the server. If omitted, the server's wall clock at "
+            "insert time is used."
+        ),
+    )
 
 
 class UpdateTaskMessageRequest(BaseModel):
@@ -167,6 +179,16 @@ class BatchCreateTaskMessagesRequest(BaseModel):
     contents: list[TaskMessageContent] = Field(
         ...,
         title="The messages to send to the task. The order of the messages will be the order they are added to the task.",
+    )
+    created_at: datetime | None = Field(
+        None,
+        title="Optional caller-supplied base creation timestamp for the batch",
+        description=(
+            "Optional base timestamp. Each message in the batch is stamped "
+            "with base + i milliseconds to guarantee unique, monotonic "
+            "ordering. If omitted, the server stamps datetime.now(UTC) at "
+            "insert time."
+        ),
     )
 
 

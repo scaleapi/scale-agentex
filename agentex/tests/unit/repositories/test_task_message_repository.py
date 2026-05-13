@@ -1,5 +1,7 @@
 # Import the repository and entities we need to test
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.api.schemas.task_messages import DataContent
@@ -186,3 +188,88 @@ async def test_task_message_repository_list_by_task_id_pagination(
     # Cleanup
     for message_id in created_ids:
         await repo.delete(id=message_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_create_preserves_caller_supplied_timestamps(
+    task_message_repository,
+):
+    """The Mongo adapter must respect caller-supplied created_at/updated_at and
+    not clobber them with datetime.now(UTC) at insert time. This is the
+    server-side fix for the cross-request race that flipped message ordering
+    in the UI when two messages.create calls arrived within milliseconds."""
+    repo = task_message_repository
+    task_id = orm_id()
+
+    caller_time = datetime(2025, 4, 1, 8, 30, 0, tzinfo=UTC)
+    text_content = TextContentEntity(
+        type=TaskMessageContentType.TEXT,
+        content="caller-stamped",
+        author=MessageAuthor.USER,
+        style=MessageStyle.STATIC,
+        format=TextFormat.PLAIN,
+    )
+    task_message = TaskMessageEntity(
+        task_id=task_id,
+        content=text_content,
+        streaming_status="DONE",
+        created_at=caller_time,
+        updated_at=caller_time,
+    )
+
+    # pymongo strips tzinfo on read (BSON Date stores UTC but returns naive
+    # datetimes by default), so compare against the naive UTC equivalent.
+    expected_naive = caller_time.replace(tzinfo=None)
+
+    created = await repo.create(task_message)
+    assert created.created_at.replace(tzinfo=None) == expected_naive
+    assert created.updated_at.replace(tzinfo=None) == expected_naive
+
+    fetched = await repo.get(id=created.id)
+    assert fetched.created_at.replace(tzinfo=None) == expected_naive
+    assert fetched.updated_at.replace(tzinfo=None) == expected_naive
+
+    await repo.delete(id=created.id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_batch_create_preserves_per_item_timestamps(
+    task_message_repository,
+):
+    """batch_create must preserve per-item caller-supplied timestamps so that
+    the service-layer microsecond/millisecond stagger is durable in storage."""
+    repo = task_message_repository
+    task_id = orm_id()
+
+    base = datetime(2025, 4, 2, 12, 0, 0, tzinfo=UTC)
+    messages = [
+        TaskMessageEntity(
+            task_id=task_id,
+            content=TextContentEntity(
+                type=TaskMessageContentType.TEXT,
+                content=f"msg-{i}",
+                author=MessageAuthor.USER,
+                style=MessageStyle.STATIC,
+                format=TextFormat.PLAIN,
+            ),
+            streaming_status="DONE",
+            # Insert with timestamps in *descending* order to prove that the
+            # adapter is not assigning a single now() to all items.
+            created_at=base + timedelta(milliseconds=10 - i),
+            updated_at=base + timedelta(milliseconds=10 - i),
+        )
+        for i in range(3)
+    ]
+
+    created = await repo.batch_create(messages)
+    assert len(created) == 3
+    for i, c in enumerate(created):
+        expected = (base + timedelta(milliseconds=10 - i)).replace(tzinfo=None)
+        assert c.created_at.replace(tzinfo=None) == expected
+        assert c.updated_at.replace(tzinfo=None) == expected
+
+    # Cleanup
+    for c in created:
+        await repo.delete(id=c.id)

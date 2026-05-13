@@ -102,13 +102,21 @@ class TaskMessageService:
         task_id: str,
         content: TaskMessageContentEntity,
         streaming_status: Literal["IN_PROGRESS", "DONE"] | None = None,
+        created_at: datetime | None = None,
     ) -> TaskMessageEntity:
         """
         Append a message to the task's message list.
 
         Args:
             task_id: The task ID
-            message: The message to append
+            content: The message content
+            streaming_status: Optional streaming status
+            created_at: Optional caller-supplied timestamp. Workflow callers
+                should pass workflow.now() (Temporal's deterministic monotonic
+                clock) so two awaited messages.create calls from the same
+                workflow are guaranteed to have monotonic timestamps regardless
+                of HTTP request scheduling at the server. If omitted, the
+                adapter falls back to the server's wall clock at insert time.
 
         Returns:
             The created TaskMessageEntity with ID and metadata
@@ -117,6 +125,8 @@ class TaskMessageService:
             task_id=task_id,
             content=content,
             streaming_status=streaming_status,
+            created_at=created_at,
+            updated_at=created_at,
         )
 
         return await self.repository.create(task_message)
@@ -126,24 +136,30 @@ class TaskMessageService:
         task_id: str,
         contents: list[TaskMessageContentEntity],
         streaming_status: Literal["IN_PROGRESS", "DONE"] | None = None,
+        created_at: datetime | None = None,
     ) -> list[TaskMessageEntity]:
         """
         Append multiple messages to the task's message list.
 
         Args:
             task_id: The task ID
-            messages: The messages to append
+            contents: The message contents to append
+            streaming_status: Optional streaming status
+            created_at: Optional base timestamp for the batch. Each message in
+                the batch is stamped with base + i milliseconds to guarantee
+                unique, monotonic ordering. If omitted, datetime.now(UTC) is
+                used as the base.
 
         Returns:
             The created TaskMessageEntity objects with IDs and metadata
         """
-        # Add a small time increment to each message to ensure unique ordering
-        current_time = datetime.now(UTC)
+        base_time = created_at if created_at is not None else datetime.now(UTC)
 
         task_messages = []
         for i, message in enumerate(contents):
-            # Add i microseconds to ensure unique timestamps within the batch
-            adjusted_time = current_time + timedelta(microseconds=i)
+            # MongoDB BSON Date is millisecond-precision; stagger by ms (not µs)
+            # so the stored ordering is durable across re-fetches.
+            adjusted_time = base_time + timedelta(milliseconds=i)
             task_message = TaskMessageEntity(
                 task_id=task_id,
                 content=message,
