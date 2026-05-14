@@ -93,12 +93,20 @@ USER nonroot
 
 EXPOSE 5003
 ENV PYTHONPATH=/app
-# Run uvicorn with multiple workers so a single pod isn't bottlenecked to one
-# in-flight request at a time. The MongoDB adapter uses `pymongo` (sync) inside
-# `async def` methods, which blocks the event loop for the duration of every
-# Mongo round-trip; the only way to get per-pod concurrency today is via
-# separate worker processes. Default of 4 is a safe match for the typical 1
-# CPU / 2Gi pod limits; bump UVICORN_WORKERS up to ~cpu_count when those
+# Run uvicorn with multiple workers so a single pod isn't bottlenecked on one
+# in-flight request at a time. Default of 4 is a safe match for the typical
+# 1 CPU / 2Gi pod limits; bump UVICORN_WORKERS up to ~cpu_count when those
 # limits are increased.
+#
+# IMPORTANT: each worker is a separate Python process with its OWN DB pools.
+# Per-pod aggregates with the current defaults:
+#   - Postgres: POSTGRES_POOL_SIZE (10) × workers + max_overflow (20) × workers
+#     = 40 base + 80 overflow per pod at workers=4 (vs 10 + 20 at workers=1).
+#   - MongoDB: MONGODB_MAX_POOL_SIZE per worker; 4× the aggregate at workers=4.
+# When changing UVICORN_WORKERS, review POSTGRES_POOL_SIZE /
+# POSTGRES_MIDDLEWARE_POOL_SIZE / MONGODB_MAX_POOL_SIZE against the upstream
+# DB's max_connections so you don't exhaust the pool. A rough rule of thumb is
+# to keep `workers × POSTGRES_POOL_SIZE` below ~half of the upstream cap so
+# overflow has headroom.
 ENV UVICORN_WORKERS=4
 CMD ["sh", "-c", "exec ddtrace-run uvicorn src.api.app:app --host 0.0.0.0 --port 5003 --workers ${UVICORN_WORKERS}"]

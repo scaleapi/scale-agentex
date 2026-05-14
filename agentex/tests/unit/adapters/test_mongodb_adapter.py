@@ -167,7 +167,7 @@ async def test_find_by_field_with_cursor_before_after(mongodb_database):
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_delete_by_field_and_batch_delete(mongodb_database):
+async def test_delete_by_field(mongodb_database):
     repo = _make_repo(mongodb_database)
 
     await repo.batch_create([_Item(name=f"d{i}", group="del") for i in range(6)])
