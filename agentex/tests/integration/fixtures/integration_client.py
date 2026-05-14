@@ -109,7 +109,7 @@ async def isolated_test_schema(integration_test_db_urls):
     )
 
     # Create MongoDB client for database management
-    mongodb_client = pymongo.MongoClient(
+    mongodb_client = pymongo.AsyncMongoClient(
         integration_test_db_urls["mongodb_url"],
         serverSelectionTimeoutMS=15000,  # Longer timeout for container startup
         connectTimeoutMS=10000,
@@ -183,7 +183,7 @@ async def isolated_test_schema(integration_test_db_urls):
 
         try:
             # Drop MongoDB database
-            mongodb_client.drop_database(mongodb_db_name)
+            await mongodb_client.drop_database(mongodb_db_name)
         except Exception as e:
             print(f"Warning: Failed to drop MongoDB database {mongodb_db_name}: {e}")
 
@@ -195,7 +195,7 @@ async def isolated_test_schema(integration_test_db_urls):
 
         try:
             await asyncio.gather(*cleanup_tasks, return_exceptions=True)
-            mongodb_client.close()
+            await mongodb_client.close()
             await redis_client.aclose()
         except Exception as e:
             print(f"Warning: Failed to cleanup connections: {e}")
