@@ -36,6 +36,9 @@ RUN uv sync --frozen --group dev --package agentex-backend
 COPY ${SOURCE_DIR}/src/ ./src/
 EXPOSE 5003
 ENV PYTHONPATH=/app
+# Dev / single-worker stage. `--reload` doesn't work with `--workers >1`.
+# Production multi-worker config is set in the final stage at the bottom of
+# this file.
 CMD ["ddtrace-run", "uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "5003", "--reload"]
 
 # Docs builder stage
@@ -90,4 +93,12 @@ USER nonroot
 
 EXPOSE 5003
 ENV PYTHONPATH=/app
-CMD ["ddtrace-run", "uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "5003"]
+# Run uvicorn with multiple workers so a single pod isn't bottlenecked to one
+# in-flight request at a time. The MongoDB adapter uses `pymongo` (sync) inside
+# `async def` methods, which blocks the event loop for the duration of every
+# Mongo round-trip; the only way to get per-pod concurrency today is via
+# separate worker processes. Default of 4 is a safe match for the typical 1
+# CPU / 2Gi pod limits; bump UVICORN_WORKERS up to ~cpu_count when those
+# limits are increased.
+ENV UVICORN_WORKERS=4
+CMD ["sh", "-c", "exec ddtrace-run uvicorn src.api.app:app --host 0.0.0.0 --port 5003 --workers ${UVICORN_WORKERS}"]
