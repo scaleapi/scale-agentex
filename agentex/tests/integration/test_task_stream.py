@@ -462,85 +462,101 @@ class TestTaskEventStream:
 
         print("✅ Stream connected event includes correct task ID")
 
-    async def test_stream_task_events_uses_snapshotted_cursor_not_dollar(
+    async def test_event_xadded_in_inter_cycle_gap_is_delivered(
         self, test_agent_and_task, streams_use_case
     ):
         """
-        Regression: stream_task_events must snapshot the Redis stream tail
-        on entry via get_stream_tail_id rather than passing "$" to xread.
+        Deterministic symptom-level regression for the SSE drop bug.
 
-        With "$", each BLOCK call re-resolves the cursor to the current
-        stream tail. Any entry XADD'd in the inter-call gap (the ~100ms
-        sleep between empty BLOCKs) lands behind the new "$" and is
-        unreachable from the consumer — silently dropping deltas from
-        fast-emitting agents.
+        With last_id="$" the consumer re-resolves its cursor to the
+        current stream tail on every XREAD call. Any entry XADD'd in
+        the ~100ms gap between an empty BLOCK return and the next
+        BLOCK call lands with an ID equal to the new "$" — XREAD waits
+        for entries strictly greater, so the entry is unreachable from
+        this consumer forever.
 
-        Spy on the repository to verify (a) get_stream_tail_id is called
-        once on entry, and (b) no call to read_messages ever receives "$"
-        as last_id. The behavioral assertion is deterministic — it
-        doesn't depend on race-window timing.
+        Reproduction strategy (no race-window timing):
+        - Patch repo.read_messages so it signals an asyncio.Event the
+          instant the first BLOCK returns empty. asyncio scheduling
+          guarantees the consumer is then about to enter its 100ms
+          inter-cycle asyncio.sleep before yielding control back here.
+        - XADD a uniquely-tagged event synchronously on that signal.
+          asyncio yields control to the consumer's sleep, so the XADD
+          lands inside the gap.
+        - Wait for the second BLOCK cycle to elapse, then assert the
+          reader received the sentinel.
+
+        Under the bug this test fails (the XADD is lost); under the fix
+        it passes (snapshotted cursor advances past our entry).
         """
-        _agent, task = test_agent_and_task
+        from src.utils.stream_topics import get_task_event_stream_topic
 
+        _agent, task = test_agent_and_task
+        stream_topic = get_task_event_stream_topic(task_id=task.id)
         repo = streams_use_case.stream_repository
 
-        tail_topic_calls: list[str] = []
-        original_get_tail = repo.get_stream_tail_id
-
-        async def spy_get_stream_tail_id(topic):
-            tail_topic_calls.append(topic)
-            return await original_get_tail(topic)
-
-        cursor_values: list[str] = []
+        first_empty_block_returned = asyncio.Event()
+        call_count = 0
         original_read_messages = repo.read_messages
 
-        async def spy_read_messages(topic, last_id, timeout_ms=2000, count=10):
-            cursor_values.append(last_id)
+        async def patched_read_messages(topic, last_id, timeout_ms=2000, count=10):
+            nonlocal call_count
+            call_count += 1
+            my_idx = call_count
+            yielded = False
             async for item in original_read_messages(
                 topic, last_id, timeout_ms=timeout_ms, count=count
             ):
+                yielded = True
                 yield item
+            if my_idx == 1 and not yielded:
+                first_empty_block_returned.set()
 
-        repo.get_stream_tail_id = spy_get_stream_tail_id
-        repo.read_messages = spy_read_messages
+        repo.read_messages = patched_read_messages
 
-        try:
+        sentinel = "inter-cycle-gap-sentinel"
+        received_sentinels: list[str] = []
 
-            async def drive():
-                try:
-                    async for _ in streams_use_case.stream_task_events(task_id=task.id):
-                        pass
-                except asyncio.CancelledError:
-                    pass
-
-            drive_task = asyncio.create_task(drive())
-
-            # Wait past the first 2s BLOCK so a second read_messages call
-            # is issued — that's the call that would re-use "$" under the bug.
-            await asyncio.sleep(2.3)
-
-            drive_task.cancel()
+        async def reader():
             try:
-                await drive_task
+                async for event_data in streams_use_case.stream_task_events(
+                    task_id=task.id
+                ):
+                    if event_data.startswith("data: "):
+                        payload_str = event_data[6:].strip()
+                        if sentinel in payload_str:
+                            received_sentinels.append(payload_str)
             except asyncio.CancelledError:
                 pass
 
-            assert len(tail_topic_calls) == 1, (
-                "Expected exactly one get_stream_tail_id call on entry; "
-                f"got {len(tail_topic_calls)}: {tail_topic_calls}"
+        reader_task = asyncio.create_task(reader())
+
+        try:
+            await asyncio.wait_for(first_empty_block_returned.wait(), timeout=5)
+
+            # XADD synchronously inside the gap. Under the bug, the next
+            # xread re-resolves "$" to this entry's ID and waits for
+            # strictly greater entries — losing this one forever.
+            await repo.send_data(
+                stream_topic,
+                {"type": "error", "message": sentinel},
             )
 
-            assert len(cursor_values) >= 2, (
-                "Expected >= 2 read_messages calls (one per BLOCK cycle); "
-                f"got {len(cursor_values)}: {cursor_values}"
-            )
+            # Allow the second BLOCK cycle to complete.
+            await asyncio.sleep(2.5)
 
-            assert "$" not in cursor_values, (
-                "stream_task_events passed '$' to read_messages — race-prone! "
-                f"cursors observed: {cursor_values}"
+            assert received_sentinels, (
+                "Sentinel XADDed during the inter-cycle gap was not "
+                "delivered to the consumer. The stream cursor has "
+                "regressed to literal '$' — fast-emitting agents will "
+                "silently drop deltas."
             )
         finally:
-            repo.get_stream_tail_id = original_get_tail
+            reader_task.cancel()
+            try:
+                await reader_task
+            except asyncio.CancelledError:
+                pass
             repo.read_messages = original_read_messages
 
     async def test_stream_sends_keepalive_pings_during_idle_periods(
