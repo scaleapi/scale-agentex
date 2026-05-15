@@ -7,7 +7,7 @@ from typing import Any, Generic, TypeVar
 
 import pymongo
 from bson import ObjectId
-from pymongo.collection import Collection
+from pymongo.asynchronous.collection import AsyncCollection
 
 from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
 from src.adapters.crud_store.port import CRUDRepository
@@ -98,7 +98,7 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
         model_class: type[T],
     ):
         self.db = db
-        self.collection: Collection = db[collection_name]
+        self.collection: AsyncCollection = db[collection_name]
         self.model_class = model_class
 
         # MongoDB already enforces uniqueness on _id
@@ -216,7 +216,7 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
             if data.get("updated_at") is None:
                 data["updated_at"] = now
 
-            result = self.collection.insert_one(data)
+            result = await self.collection.insert_one(data)
 
             # Update item with generated ID (as string)
             # Set the .id field with the string representation of _id
@@ -274,7 +274,7 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
 
                 data_list.append(data)
 
-            result = self.collection.insert_many(data_list)
+            result = await self.collection.insert_many(data_list)
 
             # Update items with generated IDs (as strings)
             for idx, inserted_id in enumerate(result.inserted_ids):
@@ -320,7 +320,7 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
             else:
                 query = {"name": name}
 
-            document = self.collection.find_one(query)
+            document = await self.collection.find_one(query)
             if document is None:
                 msg = (
                     f"Item with {'id' if id else 'name'} '{id or name}' does not exist."
@@ -362,7 +362,9 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
                 except Exception:
                     pass
 
-            document = self.collection.find_one({mongo_field_name: mongo_field_value})
+            document = await self.collection.find_one(
+                {mongo_field_name: mongo_field_value}
+            )
             if document is None:
                 raise ItemDoesNotExist(
                     f"Item with {field_name} '{field_value}' does not exist."
@@ -392,8 +394,7 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
             elif names:
                 query["name"] = {"$in": names}
 
-            cursor = self.collection.find(query)
-            results = list(cursor)
+            results = await self.collection.find(query).to_list(length=None)
             if not results:
                 key = "ids" if ids else "names"
                 msg = f"No items found with {key} '{ids or names}'."
@@ -429,14 +430,14 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
             # Add updated_at timestamp
             update_data["updated_at"] = datetime.now(UTC)
 
-            result = self.collection.update_one(
+            result = await self.collection.update_one(
                 {"_id": id_value}, {"$set": update_data}
             )
 
             if result.matched_count == 0:
                 raise ItemDoesNotExist(f"Item with id '{id_value}' does not exist.")
 
-            updated_doc = self.collection.find_one({"_id": id_value})
+            updated_doc = await self.collection.find_one({"_id": id_value})
             return self._deserialize(updated_doc)
         except ItemDoesNotExist:
             raise
@@ -476,7 +477,7 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
             else:
                 query = {"name": name}
 
-            result = self.collection.delete_one(query)
+            result = await self.collection.delete_one(query)
             if result.deleted_count == 0:
                 msg = (
                     f"Item with {'id' if id else 'name'} '{id or name}' does not exist."
@@ -507,7 +508,7 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
             elif names:
                 query["name"] = {"$in": names}
 
-            result = self.collection.delete_many(query)
+            result = await self.collection.delete_many(query)
             if result.deleted_count == 0:
                 key = "ids" if ids else "names"
                 msg = f"No items found with {key} '{ids or names}'."
@@ -536,11 +537,6 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
             raise ClientError("Page number must be greater than 0")
         page_number = page_number or 1
         skip = (page_number - 1) * limit
-        if filters:
-            cursor = self.collection.find(filters)
-        else:
-            cursor = self.collection.find()
-        cursor = cursor.skip(skip).limit(limit)
 
         sort_list = []
         if order_by:
@@ -553,10 +549,14 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
 
         # Always use _id as tiebreaker
         sort_list.append(("_id", pymongo.ASCENDING))
-        cursor = cursor.sort(sort_list)
 
         try:
-            return [self._deserialize(doc) for doc in cursor]
+            cursor = (
+                self.collection.find(filters) if filters else self.collection.find()
+            )
+            cursor = cursor.skip(skip).limit(limit).sort(sort_list)
+            docs = await cursor.to_list(length=None)
+            return [self._deserialize(doc) for doc in docs]
         except Exception as e:
             raise ServiceError(
                 message=f"Failed to list items from MongoDB: {e}", detail=str(e)
@@ -600,25 +600,24 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
             if filters:
                 query.update(filters)
 
-            cursor = self.collection.find(query)
-
             # Apply sorting
             sort_by_items = list(sort_by.items()) if sort_by else []
             # Use ID for tiebreaking
             sort_by_items.append(("_id", 1))
-            cursor = cursor.sort(sort_by_items)
 
             # Apply limit if specified
             limit = limit or DEFAULT_PAGE_LIMIT
-            cursor = cursor.limit(limit)
 
             # Apply page number if specified
             if page_number is not None and page_number < 1:
                 raise ClientError("Page number must be greater than 0")
-            if page_number is not None:
-                cursor = cursor.skip((page_number - 1) * limit)
+            skip = (page_number - 1) * limit if page_number is not None else 0
 
-            return [self._deserialize(doc) for doc in cursor]
+            cursor = self.collection.find(query).sort(sort_by_items).limit(limit)
+            if skip:
+                cursor = cursor.skip(skip)
+            docs = await cursor.to_list(length=None)
+            return [self._deserialize(doc) for doc in docs]
         except Exception as e:
             raise ServiceError(
                 message=f"Failed to find items by field in MongoDB: {e}", detail=str(e)
@@ -677,7 +676,7 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
                 except Exception:
                     cursor_object_id = cursor_id
 
-                cursor_doc = self.collection.find_one({"_id": cursor_object_id})
+                cursor_doc = await self.collection.find_one({"_id": cursor_object_id})
                 if cursor_doc and "created_at" in cursor_doc:
                     cursor_timestamp = cursor_doc["created_at"]
                     if before_id:
@@ -705,20 +704,17 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
                             },
                         ]
 
-            # Create a cursor
-            db_cursor = self.collection.find(query)
-
             # Apply sorting
             sort_by_items = list(sort_by.items()) if sort_by else []
             # Use ID for tiebreaking
             sort_by_items.append(("_id", 1))
-            db_cursor = db_cursor.sort(sort_by_items)
 
             # Apply limit if specified
             limit = limit or DEFAULT_PAGE_LIMIT
-            db_cursor = db_cursor.limit(limit)
 
-            return [self._deserialize(doc) for doc in db_cursor]
+            db_cursor = self.collection.find(query).sort(sort_by_items).limit(limit)
+            docs = await db_cursor.to_list(length=None)
+            return [self._deserialize(doc) for doc in docs]
         except Exception as e:
             raise ServiceError(
                 message=f"Failed to find items by field with cursor in MongoDB: {e}",
@@ -745,7 +741,9 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
                 except Exception:
                     pass
 
-            result = self.collection.delete_many({mongo_field_name: mongo_field_value})
+            result = await self.collection.delete_many(
+                {mongo_field_name: mongo_field_value}
+            )
             return result.deleted_count
         except Exception as e:
             raise ServiceError(

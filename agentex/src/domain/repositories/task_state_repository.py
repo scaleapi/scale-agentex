@@ -43,7 +43,7 @@ class TaskStateRepository(MongoDBCRUDRepository[StateEntity]):
     async def get_by_task_and_agent(
         self, task_id: str, agent_id: str
     ) -> StateEntity | None:
-        doc = self.collection.find_one({"task_id": task_id, "agent_id": agent_id})
+        doc = await self.collection.find_one({"task_id": task_id, "agent_id": agent_id})
         return self._deserialize(doc) if doc else None
 
 

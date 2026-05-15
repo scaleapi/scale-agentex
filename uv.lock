@@ -138,7 +138,7 @@ requires-dist = [
     { name = "opentelemetry-exporter-otlp", specifier = ">=1.28.0" },
     { name = "opentelemetry-sdk", specifier = ">=1.28.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.9,<3" },
-    { name = "pymongo", specifier = ">=4.11.2,<5" },
+    { name = "pymongo", specifier = ">=4.13.0,<5" },
     { name = "python-dotenv", specifier = ">=1.2.2,<2" },
     { name = "python-multipart", specifier = ">=0.0.27" },
     { name = "pyyaml", specifier = ">=6.0,<7" },

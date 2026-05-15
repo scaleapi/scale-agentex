@@ -199,9 +199,8 @@ class HealthCheckInterceptor:
             if client is None:
                 return {"healthy": False, "error": "Client not initialized"}
 
-            # MongoDB client is synchronous, run in thread pool
             async with asyncio.timeout(DEPENDENCY_CHECK_TIMEOUT):
-                await asyncio.to_thread(client.admin.command, "ping")
+                await client.admin.command("ping")
 
             return {"healthy": True}
         except TimeoutError:

@@ -106,7 +106,9 @@ class TestHealthCheckInterceptor:
         mock_redis_pool = MagicMock()
 
         mock_mongodb_client = MagicMock()
-        mock_mongodb_client.admin.command = MagicMock(return_value={"ok": 1})
+        # AsyncMongoClient.admin.command(...) is awaitable on the native async
+        # driver, so the mock must return a coroutine — AsyncMock does that.
+        mock_mongodb_client.admin.command = AsyncMock(return_value={"ok": 1})
 
         mock_deps = MagicMock()
         mock_deps.database_async_read_write_engine = mock_engine

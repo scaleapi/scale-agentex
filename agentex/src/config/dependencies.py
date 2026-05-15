@@ -3,12 +3,12 @@ import os
 from typing import Annotated
 
 import httpx
-import pymongo
 import redis.asyncio as redis
 from docker import DockerClient
 from fastapi import Depends
 from kubernetes_asyncio import config as k8s_config
-from pymongo.database import Database as MongoDBDatabase
+from pymongo import AsyncMongoClient
+from pymongo.asynchronous.database import AsyncDatabase
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -43,8 +43,8 @@ class GlobalDependencies(metaclass=Singleton):
         self.database_async_read_write_engine: AsyncEngine | None = None
         self.database_async_middleware_read_write_engine: AsyncEngine | None = None
         self.docker_client = None
-        self.mongodb_client: pymongo.MongoClient | None = None
-        self.mongodb_database: MongoDBDatabase | None = None
+        self.mongodb_client: AsyncMongoClient | None = None
+        self.mongodb_database: AsyncDatabase | None = None
         self.httpx_client: httpx.AsyncClient | None = None
         self.redis_pool: redis.ConnectionPool | None = None
         self.database_async_read_only_engine: AsyncEngine | None = None
@@ -122,7 +122,7 @@ class GlobalDependencies(metaclass=Singleton):
 
             logger.info("Connecting to MongoDB")
 
-            self.mongodb_client = pymongo.MongoClient(
+            self.mongodb_client = AsyncMongoClient(
                 mongodb_uri,
                 serverSelectionTimeoutMS=20000,
                 connectTimeoutMS=20000,
@@ -136,7 +136,7 @@ class GlobalDependencies(metaclass=Singleton):
             self.mongodb_database = self.mongodb_client[mongodb_database_name]
 
             # Ping the database to verify connection
-            self.mongodb_client.admin.command("ping")
+            await self.mongodb_client.admin.command("ping")
             logger.info(
                 f"Successfully connected to MongoDB database '{mongodb_database_name}'"
             )
@@ -146,7 +146,7 @@ class GlobalDependencies(metaclass=Singleton):
             from src.config.mongodb_indexes import ensure_mongodb_indexes
 
             try:
-                ensure_mongodb_indexes(self.mongodb_database)
+                await ensure_mongodb_indexes(self.mongodb_database)
                 logger.info("MongoDB indexes ensured successfully")
             except Exception as index_error:
                 # Don't fail startup if index creation fails
@@ -242,7 +242,7 @@ class GlobalDependencies(metaclass=Singleton):
         if self.database_async_read_only_engine:
             await self.database_async_read_only_engine.dispose()
         if self.mongodb_client:
-            self.mongodb_client.close()
+            await self.mongodb_client.close()
 
         # Reset state
         self._loaded = False
@@ -293,7 +293,7 @@ async def async_shutdown():
 
     # Close MongoDB connection
     if global_dependencies.mongodb_client:
-        global_dependencies.mongodb_client.close()
+        await global_dependencies.mongodb_client.close()
 
     # Close HTTPX client
     if global_dependencies.httpx_client:
@@ -375,7 +375,7 @@ DDockerClient = Annotated[
     DockerClient, Depends(lambda: GlobalDependencies().docker_client)
 ]
 DMongoDBDatabase = Annotated[
-    MongoDBDatabase, Depends(lambda: GlobalDependencies().mongodb_database)
+    AsyncDatabase, Depends(lambda: GlobalDependencies().mongodb_database)
 ]
 DHttpxClient = Annotated[
     httpx.AsyncClient, Depends(lambda: GlobalDependencies().httpx_client)
