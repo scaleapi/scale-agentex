@@ -103,7 +103,12 @@ class StreamsUseCase:
         stream_topic = get_task_event_stream_topic(task_id=task_id)
         # Send initial connection data
         yield f"data: {TaskStreamConnectedEventEntity(type='connected', taskId=task_id).model_dump_json()}\n\n"
-        last_id = "$"  # Start with most recent messages only
+        # Snapshot the tail once on entry rather than passing "$" to every
+        # XREAD. "$" re-resolves to the current tail on each call, so any
+        # entry XADD'd in the gap between BLOCKing reads lands behind the
+        # new "$" and is unreachable — silently dropping deltas from
+        # fast-emitting agents.
+        last_id = await self.stream_repository.get_stream_tail_id(stream_topic)
         last_message_time = asyncio.get_running_loop().time()
         ping_interval = float(
             self.environment_variables.SSE_KEEPALIVE_PING_INTERVAL
