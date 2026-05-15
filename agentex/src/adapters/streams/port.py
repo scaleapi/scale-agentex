@@ -44,6 +44,23 @@ class StreamRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def get_stream_tail_id(self, topic: str) -> str:
+        """
+        Resolve the current tail of a stream into a concrete entry ID
+        suitable for use as a stable cursor in subsequent read_messages calls.
+
+        Unlike the Redis "$" sentinel — which is re-resolved to the tail on
+        every XREAD call and so loses entries XADD'd between calls — this
+        returns a fixed ID at the moment of the call. Callers advance it
+        forward as entries arrive.
+
+        Returns a sentinel meaning "from the beginning" when the stream is
+        empty or does not yet exist, so the next read picks up the first
+        XADD whenever it lands.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     async def cleanup_stream(self, topic: str) -> None:
         """
         Clean up a stream.

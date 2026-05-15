@@ -462,6 +462,87 @@ class TestTaskEventStream:
 
         print("✅ Stream connected event includes correct task ID")
 
+    async def test_stream_task_events_uses_snapshotted_cursor_not_dollar(
+        self, test_agent_and_task, streams_use_case
+    ):
+        """
+        Regression: stream_task_events must snapshot the Redis stream tail
+        on entry via get_stream_tail_id rather than passing "$" to xread.
+
+        With "$", each BLOCK call re-resolves the cursor to the current
+        stream tail. Any entry XADD'd in the inter-call gap (the ~100ms
+        sleep between empty BLOCKs) lands behind the new "$" and is
+        unreachable from the consumer — silently dropping deltas from
+        fast-emitting agents.
+
+        Spy on the repository to verify (a) get_stream_tail_id is called
+        once on entry, and (b) no call to read_messages ever receives "$"
+        as last_id. The behavioral assertion is deterministic — it
+        doesn't depend on race-window timing.
+        """
+        _agent, task = test_agent_and_task
+
+        repo = streams_use_case.stream_repository
+
+        tail_topic_calls: list[str] = []
+        original_get_tail = repo.get_stream_tail_id
+
+        async def spy_get_stream_tail_id(topic):
+            tail_topic_calls.append(topic)
+            return await original_get_tail(topic)
+
+        cursor_values: list[str] = []
+        original_read_messages = repo.read_messages
+
+        async def spy_read_messages(topic, last_id, timeout_ms=2000, count=10):
+            cursor_values.append(last_id)
+            async for item in original_read_messages(
+                topic, last_id, timeout_ms=timeout_ms, count=count
+            ):
+                yield item
+
+        repo.get_stream_tail_id = spy_get_stream_tail_id
+        repo.read_messages = spy_read_messages
+
+        try:
+
+            async def drive():
+                try:
+                    async for _ in streams_use_case.stream_task_events(task_id=task.id):
+                        pass
+                except asyncio.CancelledError:
+                    pass
+
+            drive_task = asyncio.create_task(drive())
+
+            # Wait past the first 2s BLOCK so a second read_messages call
+            # is issued — that's the call that would re-use "$" under the bug.
+            await asyncio.sleep(2.3)
+
+            drive_task.cancel()
+            try:
+                await drive_task
+            except asyncio.CancelledError:
+                pass
+
+            assert len(tail_topic_calls) == 1, (
+                "Expected exactly one get_stream_tail_id call on entry; "
+                f"got {len(tail_topic_calls)}: {tail_topic_calls}"
+            )
+
+            assert len(cursor_values) >= 2, (
+                "Expected >= 2 read_messages calls (one per BLOCK cycle); "
+                f"got {len(cursor_values)}: {cursor_values}"
+            )
+
+            assert "$" not in cursor_values, (
+                "stream_task_events passed '$' to read_messages — race-prone! "
+                f"cursors observed: {cursor_values}"
+            )
+        finally:
+            repo.get_stream_tail_id = original_get_tail
+            repo.read_messages = original_read_messages
+
     async def test_stream_sends_keepalive_pings_during_idle_periods(
         self, test_agent_and_task, streams_use_case
     ):
