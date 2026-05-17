@@ -238,8 +238,14 @@ class DeploymentORM(BaseORM):
     registration_metadata = Column(JSONB, nullable=True)
 
     # Runtime state (updated during lifecycle)
+    # values_callable makes SQLAlchemy emit the enum's .value ("Pending"/"Ready"/"Failed")
+    # instead of its member name ("PENDING"/"READY"/"FAILED"). The Postgres enum created
+    # by migration 2026_03_30_1900_deployments_4a9b7787ccd7 uses the .value form.
     status = Column(
-        SQLAlchemyEnum(DeploymentStatus),
+        SQLAlchemyEnum(
+            DeploymentStatus,
+            values_callable=lambda enum_cls: [e.value for e in enum_cls],
+        ),
         nullable=False,
         default=DeploymentStatus.PENDING,
     )
