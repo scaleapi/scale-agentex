@@ -50,6 +50,10 @@ class TaskEntity(BaseModel):
         None,
         title="The timestamp when the task was last updated",
     )
+    cleaned_at: datetime | None = Field(
+        None,
+        title="The timestamp when the task's content was cleaned for retention compliance; null when active",
+    )
     params: dict[str, Any] | None = Field(
         None,
         title="Task parameters",
@@ -73,6 +77,7 @@ def convert_task_to_entity(task: Task) -> TaskEntity:
         status_reason=task.status_reason,
         created_at=task.created_at,
         updated_at=task.updated_at,
+        cleaned_at=task.cleaned_at,
         params=task.params,
         task_metadata=task.task_metadata,
     )

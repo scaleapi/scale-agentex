@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import Depends
+from sqlalchemy import update
 from sqlalchemy.future import select
 from src.adapters.crud_store.adapter_postgres import (
     PostgresCRUDRepository,
@@ -119,6 +120,25 @@ class AgentTaskTrackerRepository(
             await session.commit()
 
             return result
+
+    async def reset_cursors_for_task(self, task_id: str) -> int:
+        """
+        Reset last_processed_event_id to NULL for every tracker tied to a
+        task. Used during retention cleanup so that any future events arriving
+        after rehydration are processed from scratch. Returns rows updated.
+        """
+        async with (
+            self.start_async_db_session(True) as session,
+            async_sql_exception_handler(),
+        ):
+            stmt = (
+                update(AgentTaskTrackerORM)
+                .where(AgentTaskTrackerORM.task_id == task_id)
+                .values(last_processed_event_id=None)
+            )
+            result = await session.execute(stmt)
+            await session.commit()
+            return result.rowcount or 0
 
 
 DAgentTaskTrackerRepository = Annotated[

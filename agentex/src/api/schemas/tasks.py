@@ -49,6 +49,10 @@ class Task(BaseModel):
         None,
         title="The timestamp when the task was last updated",
     )
+    cleaned_at: datetime | None = Field(
+        None,
+        title="The timestamp when the task's content was cleaned for retention compliance; null when active",
+    )
     params: dict[str, Any] | None = Field(
         None,
         title="Task parameters",

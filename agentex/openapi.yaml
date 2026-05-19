@@ -3533,6 +3533,112 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /tasks/{task_id}/export:
+    get:
+      tags:
+      - task-retention
+      summary: Export Task
+      description: 'Build a self-contained snapshot of a task''s content surfaces.
+
+
+        Returns the exact payload format that POST /rehydrate accepts, so
+
+        export → clean → rehydrate is a round-trip-equivalent operation.'
+      operationId: export_task_tasks__task_id__export_get
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Task Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportTaskResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /tasks/{task_id}/clean:
+    post:
+      tags:
+      - task-retention
+      summary: Clean Task
+      description: 'Delete content-bearing rows for a stale task.
+
+
+        Refuses on active tasks, in-flight workflows, or unprocessed events
+
+        regardless of `force`. The `force=true` flag only bypasses the
+
+        idle-threshold check.'
+      operationId: clean_task_tasks__task_id__clean_post
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Task Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CleanTaskRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CleanTaskResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /tasks/{task_id}/rehydrate:
+    post:
+      tags:
+      - task-retention
+      summary: Rehydrate Task
+      description: 'Restore content-bearing rows from a snapshot.
+
+
+        Refuses if the task isn''t currently in a cleaned state, or if any supplied
+
+        message/state ID already exists in Mongo (catches double-rehydrate).'
+      operationId: rehydrate_task_tasks__task_id__rehydrate_post
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Task Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RehydrateTaskRequest'
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     ACPType:
@@ -3970,6 +4076,48 @@ components:
       - checkpoint
       - metadata
       title: CheckpointTupleResponse
+    CleanTaskRequest:
+      properties:
+        force:
+          type: boolean
+          title: Force
+          description: Skip the idle-threshold check. Active-workflow and unprocessed-events
+            checks still apply. Admin use only.
+          default: false
+        idle_days:
+          type: integer
+          minimum: 1.0
+          title: Idle Days
+          description: Idle threshold in days (ignored when force=true).
+          default: 7
+      type: object
+      title: CleanTaskRequest
+    CleanTaskResponse:
+      properties:
+        task_id:
+          type: string
+          title: Task Id
+        cleaned_at:
+          type: string
+          format: date-time
+          title: Cleaned At
+        messages_deleted:
+          type: integer
+          title: Messages Deleted
+        task_states_deleted:
+          type: integer
+          title: Task States Deleted
+        events_deleted:
+          type: integer
+          title: Events Deleted
+      type: object
+      required:
+      - task_id
+      - cleaned_at
+      - messages_deleted
+      - task_states_deleted
+      - events_deleted
+      title: CleanTaskResponse
     CreateAPIKeyRequest:
       properties:
         agent_id:
@@ -4326,6 +4474,33 @@ components:
       - author
       - data
       title: DataContent
+    DataContentEntity:
+      properties:
+        type:
+          type: string
+          const: data
+          title: Type
+          description: The type of the message, in this case `data`.
+          default: data
+        author:
+          $ref: '#/components/schemas/MessageAuthor'
+          description: The role of the messages author, in this case `system`, `user`,
+            `assistant`, or `tool`.
+        style:
+          $ref: '#/components/schemas/MessageStyle'
+          description: The style of the message. This is used by the client to determine
+            how to display the message.
+          default: static
+        data:
+          additionalProperties: true
+          type: object
+          title: Data
+          description: The contents of the data message.
+      type: object
+      required:
+      - author
+      - data
+      title: DataContentEntity
     DataDelta:
       properties:
         type:
@@ -4531,6 +4706,26 @@ components:
       - task_id
       - agent_id
       title: Event
+    ExportTaskResponse:
+      properties:
+        task_id:
+          type: string
+          title: Task Id
+        messages:
+          items:
+            $ref: '#/components/schemas/TaskMessageEntity'
+          type: array
+          title: Messages
+        task_states:
+          items:
+            $ref: '#/components/schemas/StateEntity'
+          type: array
+          title: Task States
+      type: object
+      required:
+      - task_id
+      title: ExportTaskResponse
+      description: Wire format mirrors the entity directly — schema parity is intentional.
     FileAttachment:
       properties:
         file_id:
@@ -4556,6 +4751,32 @@ components:
       - size
       - type
       title: FileAttachment
+      description: Represents a file attachment in messages.
+    FileAttachmentEntity:
+      properties:
+        file_id:
+          type: string
+          title: File Id
+          description: The unique ID of the attached file
+        name:
+          type: string
+          title: Name
+          description: The name of the file
+        size:
+          type: integer
+          title: Size
+          description: The size of the file in bytes
+        type:
+          type: string
+          title: Type
+          description: The MIME type or content type of the file
+      type: object
+      required:
+      - file_id
+      - name
+      - size
+      - type
+      title: FileAttachmentEntity
       description: Represents a file attachment in messages.
     GetCheckpointTupleRequest:
       properties:
@@ -4799,6 +5020,42 @@ components:
       - content_index
       title: ReasoningContentDelta
       description: Delta for reasoning content updates
+    ReasoningContentEntity:
+      properties:
+        type:
+          type: string
+          const: reasoning
+          title: Type
+          description: The type of the message, in this case `reasoning`.
+          default: reasoning
+        author:
+          $ref: '#/components/schemas/MessageAuthor'
+          description: The role of the messages author, in this case `system`, `user`,
+            `assistant`, or `tool`.
+        style:
+          $ref: '#/components/schemas/MessageStyle'
+          description: The style of the message. This is used by the client to determine
+            how to display the message.
+          default: static
+        summary:
+          items:
+            type: string
+          type: array
+          title: Summary
+          description: A list of short reasoning summaries
+        content:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Content
+          description: The reasoning content or chain-of-thought text
+      type: object
+      required:
+      - author
+      - summary
+      title: ReasoningContentEntity
     ReasoningSummaryDelta:
       properties:
         type:
@@ -4949,6 +5206,26 @@ components:
       - updated_at
       title: RegisterAgentResponse
       description: Response model for registering an agent.
+    RehydrateTaskRequest:
+      properties:
+        task_id:
+          type: string
+          title: Task Id
+        messages:
+          items:
+            $ref: '#/components/schemas/TaskMessageEntity'
+          type: array
+          title: Messages
+        task_states:
+          items:
+            $ref: '#/components/schemas/StateEntity'
+          type: array
+          title: Task States
+      type: object
+      required:
+      - task_id
+      title: RehydrateTaskRequest
+      description: Same shape as the export response — round-trip parity.
     ScheduleActionInfo:
       properties:
         workflow_name:
@@ -5316,6 +5593,60 @@ components:
 
 
         The state is a dictionary of arbitrary data.'
+    StateEntity:
+      properties:
+        id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Id
+          description: The task state's unique id
+        task_id:
+          type: string
+          title: Task Id
+          description: ID of the task this state belongs to. The combination of task_id
+            and agent_id is globally unique.
+        agent_id:
+          type: string
+          title: Agent Id
+          description: ID of the agent this state belongs to. The combination of task_id
+            and agent_id is globally unique.
+        state:
+          additionalProperties: true
+          type: object
+          title: State
+          description: The state object that contains arbitrary data
+        created_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Created At
+          description: The timestamp when the state was created
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+          description: The timestamp when the state was last updated
+      type: object
+      required:
+      - task_id
+      - agent_id
+      - state
+      title: StateEntity
+      description: 'Represents a state in the agent system. A state is associated
+        uniquely with a task and an agent.
+
+
+        This entity is used to store states in MongoDB, with each state
+
+        associated with a specific task and agent. The combination of task_id and
+        agent_id is globally unique.
+
+
+        The state is a dictionary of arbitrary data.'
     StreamTaskMessageDelta:
       properties:
         type:
@@ -5436,6 +5767,13 @@ components:
             format: date-time
           - type: 'null'
           title: The timestamp when the task was last updated
+        cleaned_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: The timestamp when the task's content was cleaned for retention compliance;
+            null when active
         params:
           anyOf:
           - additionalProperties: true
@@ -5536,6 +5874,70 @@ components:
           text: '#/components/schemas/TextDelta'
           tool_request: '#/components/schemas/ToolRequestDelta'
           tool_response: '#/components/schemas/ToolResponseDelta'
+    TaskMessageEntity:
+      properties:
+        id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Id
+          description: The task message's unique id
+        task_id:
+          type: string
+          title: Task Id
+          description: ID of the task this message belongs to
+        content:
+          oneOf:
+          - $ref: '#/components/schemas/TextContentEntity'
+          - $ref: '#/components/schemas/DataContentEntity'
+          - $ref: '#/components/schemas/ToolRequestContentEntity'
+          - $ref: '#/components/schemas/ToolResponseContentEntity'
+          - $ref: '#/components/schemas/ReasoningContentEntity'
+          title: Content
+          description: The content of the message. This content is not OpenAI compatible.
+            These are messages that are meant to be displayed to the user.
+          discriminator:
+            propertyName: type
+            mapping:
+              data: '#/components/schemas/DataContentEntity'
+              reasoning: '#/components/schemas/ReasoningContentEntity'
+              text: '#/components/schemas/TextContentEntity'
+              tool_request: '#/components/schemas/ToolRequestContentEntity'
+              tool_response: '#/components/schemas/ToolResponseContentEntity'
+        streaming_status:
+          anyOf:
+          - type: string
+            enum:
+            - IN_PROGRESS
+            - DONE
+          - type: 'null'
+          title: In case of streaming, this indicates whether the message is still
+            being streamed or has been completed
+        created_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Created At
+          description: The timestamp when the message was created
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+          description: The timestamp when the message was last updated
+      type: object
+      required:
+      - task_id
+      - content
+      title: TaskMessageEntity
+      description: 'Represents a message in the agent system.
+
+
+        This entity is used to store messages in MongoDB, with each message
+
+        associated with a specific task.'
     TaskMessageUpdate:
       oneOf:
       - $ref: '#/components/schemas/StreamTaskMessageStart'
@@ -5588,6 +5990,13 @@ components:
             format: date-time
           - type: 'null'
           title: The timestamp when the task was last updated
+        cleaned_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: The timestamp when the task's content was cleaned for retention compliance;
+            null when active
         params:
           anyOf:
           - additionalProperties: true
@@ -5672,6 +6081,45 @@ components:
       - author
       - content
       title: TextContent
+    TextContentEntity:
+      properties:
+        type:
+          type: string
+          const: text
+          title: Type
+          description: The type of the message, in this case `text`.
+          default: text
+        author:
+          $ref: '#/components/schemas/MessageAuthor'
+          description: The role of the messages author, in this case `system`, `user`,
+            `assistant`, or `tool`.
+        style:
+          $ref: '#/components/schemas/MessageStyle'
+          description: The style of the message. This is used by the client to determine
+            how to display the message.
+          default: static
+        format:
+          $ref: '#/components/schemas/TextFormat'
+          description: The format of the message. This is used by the client to determine
+            how to display the message.
+          default: plain
+        content:
+          type: string
+          title: Content
+          description: The contents of the text message.
+        attachments:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/FileAttachmentEntity'
+            type: array
+          - type: 'null'
+          title: Attachments
+          description: Optional list of file attachments with structured metadata.
+      type: object
+      required:
+      - author
+      - content
+      title: TextContentEntity
     TextDelta:
       properties:
         type:
@@ -5732,6 +6180,43 @@ components:
       - name
       - arguments
       title: ToolRequestContent
+    ToolRequestContentEntity:
+      properties:
+        type:
+          type: string
+          const: tool_request
+          title: Type
+          description: The type of the message, in this case `tool_request`.
+          default: tool_request
+        author:
+          $ref: '#/components/schemas/MessageAuthor'
+          description: The role of the messages author, in this case `system`, `user`,
+            `assistant`, or `tool`.
+        style:
+          $ref: '#/components/schemas/MessageStyle'
+          description: The style of the message. This is used by the client to determine
+            how to display the message.
+          default: static
+        tool_call_id:
+          type: string
+          title: Tool Call Id
+          description: The ID of the tool call that is being requested.
+        name:
+          type: string
+          title: Name
+          description: The name of the tool that is being requested.
+        arguments:
+          additionalProperties: true
+          type: object
+          title: Arguments
+          description: The arguments to the tool.
+      type: object
+      required:
+      - author
+      - tool_call_id
+      - name
+      - arguments
+      title: ToolRequestContentEntity
     ToolRequestDelta:
       properties:
         type:
@@ -5792,6 +6277,41 @@ components:
       - name
       - content
       title: ToolResponseContent
+    ToolResponseContentEntity:
+      properties:
+        type:
+          type: string
+          const: tool_response
+          title: Type
+          description: The type of the message, in this case `tool_response`.
+          default: tool_response
+        author:
+          $ref: '#/components/schemas/MessageAuthor'
+          description: The role of the messages author, in this case `system`, `user`,
+            `assistant`, or `tool`.
+        style:
+          $ref: '#/components/schemas/MessageStyle'
+          description: The style of the message. This is used by the client to determine
+            how to display the message.
+          default: static
+        tool_call_id:
+          type: string
+          title: Tool Call Id
+          description: The ID of the tool call that is being responded to.
+        name:
+          type: string
+          title: Name
+          description: The name of the tool that is being responded to.
+        content:
+          title: Content
+          description: The result of the tool.
+      type: object
+      required:
+      - author
+      - tool_call_id
+      - name
+      - content
+      title: ToolResponseContentEntity
     ToolResponseDelta:
       properties:
         type:

@@ -72,6 +72,7 @@ class TaskORM(BaseORM):
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    cleaned_at = Column(DateTime(timezone=True), nullable=True)
     params = Column(JSONB, nullable=True)
     task_metadata = Column(JSONB, nullable=True)
     # Many-to-Many relationship with agents
