@@ -6,18 +6,18 @@ admin / external-caller integration surface. The scheduled Temporal cleanup
 workflow calls the same use case (TaskRetentionUseCase.clean_task), not
 these endpoints.
 
-OPEN DESIGN DECISION: auth.
-The clean endpoint is destructive. It should require elevated privilege
-(admin role, internal service account header, or similar). The export endpoint
-is read-only but exposes content — gate similarly. Rehydrate is the contract
-external callers integrate against — needs a stable auth model.
-
-For the first cut, gate behind task ownership (same as today's /tasks routes)
-plus a feature flag on the backend. Revisit before external integration.
+Authorization mirrors the existing /tasks routes via DAuthorizedId:
+- export → read (returns content)
+- rehydrate → update (writes content for a task the caller owns)
+- clean → delete (destructive)
 """
 
 from fastapi import APIRouter
 
+from src.api.schemas.authorization_types import (
+    AgentexResourceType,
+    AuthorizedOperationType,
+)
 from src.api.schemas.task_retention import (
     CleanTaskRequest,
     CleanTaskResponse,
@@ -25,6 +25,7 @@ from src.api.schemas.task_retention import (
     RehydrateTaskRequest,
 )
 from src.domain.use_cases.task_retention_use_case import DTaskRetentionUseCase
+from src.utils.authorization_shortcuts import DAuthorizedId
 
 router = APIRouter(prefix="/tasks", tags=["task-retention"])
 
@@ -34,9 +35,8 @@ router = APIRouter(prefix="/tasks", tags=["task-retention"])
     response_model=ExportTaskResponse,
 )
 async def export_task(
-    task_id: str,
+    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.read),
     use_case: DTaskRetentionUseCase,
-    # TODO: auth dep — task ownership + admin/elevated role
 ) -> ExportTaskResponse:
     """
     Build a self-contained snapshot of a task's content surfaces.
@@ -53,10 +53,9 @@ async def export_task(
     response_model=CleanTaskResponse,
 )
 async def clean_task(
-    task_id: str,
+    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.delete),
     request: CleanTaskRequest,
     use_case: DTaskRetentionUseCase,
-    # TODO: auth dep — admin only
 ) -> CleanTaskResponse:
     """
     Delete content-bearing rows for a stale task.
@@ -78,10 +77,9 @@ async def clean_task(
     status_code=204,
 )
 async def rehydrate_task(
-    task_id: str,
+    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.update),
     request: RehydrateTaskRequest,
     use_case: DTaskRetentionUseCase,
-    # TODO: auth dep — task ownership; this is the caller-facing endpoint
 ) -> None:
     """
     Restore content-bearing rows from a snapshot.

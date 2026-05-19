@@ -300,6 +300,65 @@ class TestTaskRetentionAPIIntegration:
         assert response.status_code == 400
         assert "does not match" in response.json()["message"]
 
+    async def test_rehydrate_rejects_mismatched_message_task_id(
+        self, isolated_client, isolated_repositories, stale_task
+    ):
+        """
+        Defense in depth: even when snapshot.task_id matches the path, each
+        embedded message's task_id must also match — otherwise a caller could
+        smuggle messages into a different task's collection through rehydrate.
+        """
+        await isolated_client.post(
+            f"/tasks/{stale_task.id}/clean", json={"force": True}
+        )
+
+        foreign_task_id = "00000000-0000-0000-0000-000000000000"
+        payload = {
+            "task_id": stale_task.id,
+            "messages": [
+                {
+                    "id": orm_id(),
+                    "task_id": foreign_task_id,
+                    "content": {"type": "text", "author": "user", "content": "x"},
+                    "streaming_status": "DONE",
+                }
+            ],
+            "task_states": [],
+        }
+        response = await isolated_client.post(
+            f"/tasks/{stale_task.id}/rehydrate", json=payload
+        )
+
+        assert response.status_code == 400
+        assert "message[0]" in response.json()["message"]
+
+    async def test_rehydrate_rejects_mismatched_task_state_task_id(
+        self, isolated_client, isolated_repositories, stale_task, test_agent
+    ):
+        await isolated_client.post(
+            f"/tasks/{stale_task.id}/clean", json={"force": True}
+        )
+
+        foreign_task_id = "00000000-0000-0000-0000-000000000000"
+        payload = {
+            "task_id": stale_task.id,
+            "messages": [],
+            "task_states": [
+                {
+                    "id": orm_id(),
+                    "task_id": foreign_task_id,
+                    "agent_id": test_agent.id,
+                    "state": {"k": "v"},
+                }
+            ],
+        }
+        response = await isolated_client.post(
+            f"/tasks/{stale_task.id}/rehydrate", json=payload
+        )
+
+        assert response.status_code == 400
+        assert "task_states[0]" in response.json()["message"]
+
     async def test_rehydrate_id_collision_returns_400(
         self, isolated_client, isolated_repositories, stale_task
     ):

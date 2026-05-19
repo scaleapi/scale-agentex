@@ -269,6 +269,22 @@ class TaskRetentionService:
                 f"path task_id ({task_id})"
             )
 
+        # Reject any embedded entity whose task_id disagrees with the path.
+        # Mongo has no foreign key to tasks, so an unchecked batch_create here
+        # would write rows that get tagged to a task the caller may not own.
+        for i, message in enumerate(snapshot.messages):
+            if message.task_id != task_id:
+                raise ClientError(
+                    f"Snapshot message[{i}] task_id ({message.task_id}) does not "
+                    f"match path task_id ({task_id})"
+                )
+        for i, state in enumerate(snapshot.task_states):
+            if state.task_id != task_id:
+                raise ClientError(
+                    f"Snapshot task_states[{i}] task_id ({state.task_id}) does "
+                    f"not match path task_id ({task_id})"
+                )
+
         # 1. Reload task; refuse if not in cleaned state.
         task = await self.task_repository.get(id=task_id)
         if task.cleaned_at is None:
