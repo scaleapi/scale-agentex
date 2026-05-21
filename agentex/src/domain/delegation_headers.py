@@ -1,4 +1,4 @@
-"""Build outbound delegation headers for ACP calls to agent pods."""
+"""Outbound runtime-delegation headers for ACP calls to agent pods."""
 
 from typing import Any
 
@@ -22,7 +22,7 @@ def build_delegation_headers(
     agent_identity: str | None = None,
 ) -> dict[str, str]:
     """
-    Headers that let an agent pod call SGP as the invoking user.
+    Outbound ACP headers so the agent can act on behalf of the authenticated user.
 
     Requires a validated user principal from auth; reads x-api-key from the
     inbound request (already checked during auth). Skips delegation when the

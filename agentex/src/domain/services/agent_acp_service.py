@@ -274,9 +274,8 @@ class AgentACPService(TaskMessageMixin):
             )
         )
         auth_headers = await self.get_agent_auth_headers(agent) or {}
-        headers.update(auth_headers)
-        headers["x-request-id"] = ctx_var_request_id.get(uuid4().hex)
-        return headers
+        request_id = ctx_var_request_id.get(uuid4().hex)
+        return {**headers, **auth_headers, "x-request-id": request_id}
 
     async def get_agent_auth_headers(
         self,
