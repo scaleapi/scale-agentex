@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -19,7 +19,10 @@ from src.domain.entities.task_messages import (
 from src.domain.entities.tasks import TaskEntity, TaskStatus
 from src.domain.repositories.agent_api_key_repository import AgentAPIKeyRepository
 from src.domain.repositories.agent_repository import AgentRepository
-from src.domain.services.agent_acp_service import AgentACPService
+from src.domain.services.agent_acp_service import (
+    AgentACPService,
+    filter_request_headers,
+)
 
 # UTC timezone constant
 UTC = ZoneInfo("UTC")
@@ -45,12 +48,25 @@ def agent_api_key_repository(postgres_session_maker):
 
 
 @pytest.fixture
-def agent_acp_service(mock_http_gateway, agent_repository, agent_api_key_repository):
+def mock_request():
+    request = MagicMock()
+    request.state = MagicMock()
+    request.state.principal_context = None
+    request.state.agent_identity = None
+    request.headers = {}
+    return request
+
+
+@pytest.fixture
+def agent_acp_service(
+    mock_http_gateway, agent_repository, agent_api_key_repository, mock_request
+):
     """Create AgentACPService instance with mocked HTTP gateway and real repository"""
     return AgentACPService(
         http_gateway=mock_http_gateway,
         agent_repository=agent_repository,
         agent_api_key_repository=agent_api_key_repository,
+        request=mock_request,
     )
 
 
@@ -222,6 +238,129 @@ class TestAgentACPService:
         payload = call_args[1]["payload"]
         assert payload["method"] == "message/send"
         assert payload["params"]["stream"] is False
+
+    async def test_send_message_includes_delegation_headers(
+        self,
+        agent_acp_service,
+        mock_http_gateway,
+        mock_request,
+        agent_repository,
+        sample_agent,
+        sample_task,
+        sample_text_content,
+    ):
+        """User principals get delegation headers on outbound ACP calls."""
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        mock_request.state.principal_context = type(
+            "Principal",
+            (),
+            {"user_id": "user-1", "account_id": "acct-1"},
+        )()
+        mock_request.state.agent_identity = None
+        mock_request.headers = {
+            "x-api-key": "user-delegation-key",
+            "x-selected-account-id": "acct-1",
+        }
+
+        from src.domain.entities.agents_rpc import AgentRPCMethod
+
+        expected_request_id = f"{AgentRPCMethod.MESSAGE_SEND}-{sample_task.id}"
+        mock_http_gateway.async_call.return_value = {
+            "jsonrpc": "2.0",
+            "result": {
+                "type": "text",
+                "author": "agent",
+                "style": "static",
+                "format": "plain",
+                "content": "ok",
+                "attachments": None,
+            },
+            "id": expected_request_id,
+        }
+
+        await agent_acp_service.send_message(
+            agent=sample_agent,
+            task=sample_task,
+            content=sample_text_content,
+            acp_url="http://test-acp.example.com",
+        )
+
+        http_headers = mock_http_gateway.async_call.call_args[1]["default_headers"]
+        assert http_headers["x-acting-user-api-key"] == "user-delegation-key"
+        assert http_headers["x-selected-account-id"] == "acct-1"
+        assert "x-acting-as-agent" not in http_headers
+        assert "x-api-key" not in http_headers
+
+    async def test_send_event_delegation_not_raw_api_key_passthrough(
+        self,
+        agent_acp_service,
+        mock_http_gateway,
+        mock_request,
+        agent_repository,
+        sample_agent,
+        sample_task,
+        sample_event,
+    ):
+        """EVENT_SEND must not passthrough x-api-key; only x-acting-user-api-key."""
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        mock_request.state.principal_context = type(
+            "Principal",
+            (),
+            {"user_id": "user-1", "account_id": "acct-1"},
+        )()
+        mock_request.state.agent_identity = None
+        mock_request.headers = {"x-api-key": "user-delegation-key"}
+
+        from src.domain.entities.agents_rpc import AgentRPCMethod
+
+        expected_request_id = f"{AgentRPCMethod.EVENT_SEND}-{sample_task.id}"
+        mock_http_gateway.async_call.return_value = {
+            "jsonrpc": "2.0",
+            "result": {"status": "event_sent", "event_id": sample_event.id},
+            "id": expected_request_id,
+        }
+
+        await agent_acp_service.send_event(
+            agent=sample_agent,
+            event=sample_event,
+            task=sample_task,
+            acp_url="http://test-acp.example.com",
+            request_headers={
+                "x-api-key": "user-delegation-key",
+                "x-trace-id": "trace-456",
+            },
+        )
+
+        http_headers = mock_http_gateway.async_call.call_args[1]["default_headers"]
+        assert http_headers["x-acting-user-api-key"] == "user-delegation-key"
+        assert http_headers["x-trace-id"] == "trace-456"
+        assert "x-api-key" not in http_headers
+
+    async def test_get_headers_server_request_id_wins_over_passthrough(
+        self,
+        agent_acp_service,
+        mock_request,
+        sample_agent,
+    ):
+        """Server-generated x-request-id must override client passthrough."""
+        mock_request.state.principal_context = None
+        mock_request.state.agent_identity = None
+        mock_request.headers = {}
+
+        with patch.object(
+            agent_acp_service,
+            "get_agent_auth_headers",
+            new=AsyncMock(return_value={}),
+        ):
+            headers = await agent_acp_service.get_headers(
+                sample_agent,
+                request_headers={"x-request-id": "client-request-id"},
+            )
+
+        assert headers["x-request-id"] != "client-request-id"
+        assert len(headers["x-request-id"]) > 0
 
     async def test_send_message_success_data(
         self,
@@ -487,37 +626,31 @@ class TestAgentACPService:
         sample_task,
         sample_event,
     ):
-        """Test event sending with request headers forwarding"""
-        # Given - Create agent first
+        """Test event sending with safe request header passthrough (not raw x-api-key)."""
         await create_or_get_agent(agent_repository, sample_agent)
-
-        # Mock get_headers to return auth headers
-        from unittest.mock import AsyncMock, patch
 
         from src.domain.entities.agents_rpc import AgentRPCMethod
 
+        expected_request_id = f"{AgentRPCMethod.EVENT_SEND}-{sample_task.id}"
+        mock_http_gateway.async_call.return_value = {
+            "jsonrpc": "2.0",
+            "result": {"status": "event_sent", "event_id": sample_event.id},
+            "id": expected_request_id,
+        }
+
+        request_headers = {
+            "x-api-key": "must-not-forward",
+            "x-user-id": "user-123",
+            "x-trace-id": "trace-456",
+            "user-agent": "test-client",
+            "authorization": "Bearer test-token",
+        }
+
         with patch.object(
             agent_acp_service,
-            "get_headers",
+            "get_agent_auth_headers",
             new=AsyncMock(return_value={"x-agent-api-key": "test-api-key"}),
         ):
-            expected_request_id = f"{AgentRPCMethod.EVENT_SEND}-{sample_task.id}"
-            mock_response = {
-                "jsonrpc": "2.0",
-                "result": {"status": "event_sent", "event_id": sample_event.id},
-                "id": expected_request_id,
-            }
-            mock_http_gateway.async_call.return_value = mock_response
-
-            # Request headers to forward - mix of allowed and blocked headers
-            request_headers = {
-                "x-user-id": "user-123",  # Allowed: x-* prefix
-                "x-trace-id": "trace-456",  # Allowed: x-* prefix
-                "user-agent": "test-client",  # Blocked: no x-* prefix
-                "authorization": "Bearer test-token",  # Blocked: sensitive header
-            }
-
-            # When
             result = await agent_acp_service.send_event(
                 agent=sample_agent,
                 event=sample_event,
@@ -526,31 +659,20 @@ class TestAgentACPService:
                 request_headers=request_headers,
             )
 
-            # Then
-            assert result["status"] == "event_sent"
-            assert result["event_id"] == sample_event.id
+        assert result["status"] == "event_sent"
+        assert result["event_id"] == sample_event.id
 
-            # Verify call was made - headers sent via HTTP headers, not in params body
-            mock_http_gateway.async_call.assert_called_once()
-            call_args = mock_http_gateway.async_call.call_args
-            payload = call_args[1]["payload"]
+        call_args = mock_http_gateway.async_call.call_args
+        payload = call_args[1]["payload"]
+        assert payload["params"]["request"] is None
 
-            # Headers should NOT be in params body (sent via HTTP headers instead)
-            assert "params" in payload
-            assert payload["params"]["request"] is None
-
-            # Verify filtered headers were sent via HTTP headers (parameter name is default_headers)
-            http_headers = call_args[1]["default_headers"]
-            assert "x-user-id" in http_headers
-            assert http_headers["x-user-id"] == "user-123"
-            assert "x-trace-id" in http_headers
-            assert http_headers["x-trace-id"] == "trace-456"
-            # Verify auth header is present (overlayed after filtered headers)
-            assert "x-agent-api-key" in http_headers
-            assert http_headers["x-agent-api-key"] == "test-api-key"
-            # Verify blocked headers are NOT in HTTP headers
-            assert "user-agent" not in http_headers  # Blocked: no x-* prefix
-            assert "authorization" not in http_headers  # Blocked: sensitive
+        http_headers = call_args[1]["default_headers"]
+        assert http_headers["x-user-id"] == "user-123"
+        assert http_headers["x-trace-id"] == "trace-456"
+        assert http_headers["x-agent-api-key"] == "test-api-key"
+        assert "x-api-key" not in http_headers
+        assert "user-agent" not in http_headers
+        assert "authorization" not in http_headers
 
     async def test_send_event_without_request_headers(
         self,
@@ -882,3 +1004,17 @@ class TestACPPayloadForwardsTaskMetadata:
         assert payload["params"]["task"]["task_metadata"] == {
             "created_by_user_id": "user-value"
         }
+
+
+class TestFilterRequestHeaders:
+    def test_blocks_user_api_key_and_acting_headers(self):
+        result = filter_request_headers(
+            {
+                "x-api-key": "user-key",
+                "x-acting-user-api-key": "spoof",
+                "x-acting-as-agent": "spoof-agent",
+                "x-trace-id": "trace-1",
+                "authorization": "Bearer x",
+            }
+        )
+        assert result == {"x-trace-id": "trace-1"}

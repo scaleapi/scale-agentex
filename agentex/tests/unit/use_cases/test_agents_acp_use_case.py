@@ -105,10 +105,18 @@ def task_state_repository(mongodb_database):
 @pytest.fixture
 def agent_acp_service(mock_http_gateway, agent_repository, agent_api_key_repository):
     """Real AgentACPService instance with mocked HTTP gateway"""
+    from unittest.mock import MagicMock
+
+    request = MagicMock()
+    request.state = MagicMock()
+    request.state.principal_context = None
+    request.state.agent_identity = None
+    request.headers = {}
     return AgentACPService(
         http_gateway=mock_http_gateway,
         agent_repository=agent_repository,
         agent_api_key_repository=agent_api_key_repository,
+        request=request,
     )
 
 
