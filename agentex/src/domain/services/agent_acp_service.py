@@ -259,41 +259,41 @@ class AgentACPService(TaskMessageMixin):
             logger.error(f"Error calling ACP server at {url}: {e}")
             raise e
 
+    def get_delegation_headers(self, agent: AgentEntity) -> dict[str, str]:
+        state = self._request.state
+        return build_delegation_headers(
+            getattr(state, "principal_context", None),
+            agent.id,
+            dict(self._request.headers),
+            agent_identity=getattr(state, "agent_identity", None),
+        )
+
     async def get_headers(
         self,
         agent: AgentEntity,
         request_headers: dict[str, str] | None = None,
     ) -> dict[str, str]:
-        passthrough_headers = filter_request_headers(request_headers)
-        passthrough_headers.update(
-            build_delegation_headers(
-                getattr(self._request.state, "principal_context", None),
-                agent.id,
-                dict(self._request.headers),
-                agent_identity=getattr(self._request.state, "agent_identity", None),
-            )
-        )
-
-        auth_headers = await self.get_agent_auth_headers(agent) or {}
-
+        filtered_request_headers = filter_request_headers(request_headers)
+        delegation_headers = self.get_delegation_headers(agent)
+        auth_headers = await self.get_agent_auth_headers(agent)
         request_id = ctx_var_request_id.get(uuid4().hex)
-        headers = {**auth_headers, "x-request-id": request_id}
-        headers.update(passthrough_headers)
-        return headers
 
-    async def get_agent_auth_headers(
-        self,
-        agent: AgentEntity,
-    ) -> dict[str, str] | None:
-        """
-        Get the authentication headers for an agent by its ID.
-        """
+        # Later keys win. Client passthrough and delegation first; agent auth last.
+        return {
+            **filtered_request_headers,
+            **delegation_headers,
+            **auth_headers,
+            "x-request-id": request_id,
+        }
+
+    async def get_agent_auth_headers(self, agent: AgentEntity) -> dict[str, str]:
+        """Authentication headers the agent pod uses to call back into agentex."""
         api_key = await self._agent_api_key_repository.get_internal_api_key_by_agent_id(
             agent_id=agent.id
         )
         if api_key:
             return {"x-agent-api-key": api_key.api_key}
-        return None
+        return {}
 
     async def create_task(
         self,
