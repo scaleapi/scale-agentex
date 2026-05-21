@@ -626,37 +626,31 @@ class TestAgentACPService:
         sample_task,
         sample_event,
     ):
-        """Test event sending with request headers forwarding"""
-        # Given - Create agent first
+        """Test event sending with safe request header passthrough (not raw x-api-key)."""
         await create_or_get_agent(agent_repository, sample_agent)
-
-        # Mock get_headers to return auth headers
-        from unittest.mock import AsyncMock, patch
 
         from src.domain.entities.agents_rpc import AgentRPCMethod
 
+        expected_request_id = f"{AgentRPCMethod.EVENT_SEND}-{sample_task.id}"
+        mock_http_gateway.async_call.return_value = {
+            "jsonrpc": "2.0",
+            "result": {"status": "event_sent", "event_id": sample_event.id},
+            "id": expected_request_id,
+        }
+
+        request_headers = {
+            "x-api-key": "must-not-forward",
+            "x-user-id": "user-123",
+            "x-trace-id": "trace-456",
+            "user-agent": "test-client",
+            "authorization": "Bearer test-token",
+        }
+
         with patch.object(
             agent_acp_service,
-            "get_headers",
+            "get_agent_auth_headers",
             new=AsyncMock(return_value={"x-agent-api-key": "test-api-key"}),
         ):
-            expected_request_id = f"{AgentRPCMethod.EVENT_SEND}-{sample_task.id}"
-            mock_response = {
-                "jsonrpc": "2.0",
-                "result": {"status": "event_sent", "event_id": sample_event.id},
-                "id": expected_request_id,
-            }
-            mock_http_gateway.async_call.return_value = mock_response
-
-            # Request headers to forward - mix of allowed and blocked headers
-            request_headers = {
-                "x-user-id": "user-123",  # Allowed: x-* prefix
-                "x-trace-id": "trace-456",  # Allowed: x-* prefix
-                "user-agent": "test-client",  # Blocked: no x-* prefix
-                "authorization": "Bearer test-token",  # Blocked: sensitive header
-            }
-
-            # When
             result = await agent_acp_service.send_event(
                 agent=sample_agent,
                 event=sample_event,
@@ -665,31 +659,20 @@ class TestAgentACPService:
                 request_headers=request_headers,
             )
 
-            # Then
-            assert result["status"] == "event_sent"
-            assert result["event_id"] == sample_event.id
+        assert result["status"] == "event_sent"
+        assert result["event_id"] == sample_event.id
 
-            # Verify call was made - headers sent via HTTP headers, not in params body
-            mock_http_gateway.async_call.assert_called_once()
-            call_args = mock_http_gateway.async_call.call_args
-            payload = call_args[1]["payload"]
+        call_args = mock_http_gateway.async_call.call_args
+        payload = call_args[1]["payload"]
+        assert payload["params"]["request"] is None
 
-            # Headers should NOT be in params body (sent via HTTP headers instead)
-            assert "params" in payload
-            assert payload["params"]["request"] is None
-
-            # Verify filtered headers were sent via HTTP headers (parameter name is default_headers)
-            http_headers = call_args[1]["default_headers"]
-            assert "x-user-id" in http_headers
-            assert http_headers["x-user-id"] == "user-123"
-            assert "x-trace-id" in http_headers
-            assert http_headers["x-trace-id"] == "trace-456"
-            # Verify auth header is present (overlayed after filtered headers)
-            assert "x-agent-api-key" in http_headers
-            assert http_headers["x-agent-api-key"] == "test-api-key"
-            # Verify blocked headers are NOT in HTTP headers
-            assert "user-agent" not in http_headers  # Blocked: no x-* prefix
-            assert "authorization" not in http_headers  # Blocked: sensitive
+        http_headers = call_args[1]["default_headers"]
+        assert http_headers["x-user-id"] == "user-123"
+        assert http_headers["x-trace-id"] == "trace-456"
+        assert http_headers["x-agent-api-key"] == "test-api-key"
+        assert "x-api-key" not in http_headers
+        assert "user-agent" not in http_headers
+        assert "authorization" not in http_headers
 
     async def test_send_event_without_request_headers(
         self,
