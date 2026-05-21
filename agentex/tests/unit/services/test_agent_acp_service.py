@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -19,7 +19,10 @@ from src.domain.entities.task_messages import (
 from src.domain.entities.tasks import TaskEntity, TaskStatus
 from src.domain.repositories.agent_api_key_repository import AgentAPIKeyRepository
 from src.domain.repositories.agent_repository import AgentRepository
-from src.domain.services.agent_acp_service import AgentACPService
+from src.domain.services.agent_acp_service import (
+    AgentACPService,
+    filter_request_headers,
+)
 
 # UTC timezone constant
 UTC = ZoneInfo("UTC")
@@ -287,6 +290,77 @@ class TestAgentACPService:
         assert http_headers["x-acting-user-api-key"] == "user-delegation-key"
         assert http_headers["x-acting-as-agent"] == sample_agent.id
         assert http_headers["x-selected-account-id"] == "acct-1"
+        assert "x-api-key" not in http_headers
+
+    async def test_send_event_delegation_not_raw_api_key_passthrough(
+        self,
+        agent_acp_service,
+        mock_http_gateway,
+        mock_request,
+        agent_repository,
+        sample_agent,
+        sample_task,
+        sample_event,
+    ):
+        """EVENT_SEND must not passthrough x-api-key; only x-acting-user-api-key."""
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        mock_request.state.principal_context = type(
+            "Principal",
+            (),
+            {"user_id": "user-1", "account_id": "acct-1"},
+        )()
+        mock_request.state.agent_identity = None
+        mock_request.headers = {"x-api-key": "user-delegation-key"}
+
+        from src.domain.entities.agents_rpc import AgentRPCMethod
+
+        expected_request_id = f"{AgentRPCMethod.EVENT_SEND}-{sample_task.id}"
+        mock_http_gateway.async_call.return_value = {
+            "jsonrpc": "2.0",
+            "result": {"status": "event_sent", "event_id": sample_event.id},
+            "id": expected_request_id,
+        }
+
+        await agent_acp_service.send_event(
+            agent=sample_agent,
+            event=sample_event,
+            task=sample_task,
+            acp_url="http://test-acp.example.com",
+            request_headers={
+                "x-api-key": "user-delegation-key",
+                "x-trace-id": "trace-456",
+            },
+        )
+
+        http_headers = mock_http_gateway.async_call.call_args[1]["default_headers"]
+        assert http_headers["x-acting-user-api-key"] == "user-delegation-key"
+        assert http_headers["x-trace-id"] == "trace-456"
+        assert "x-api-key" not in http_headers
+
+    async def test_get_headers_server_request_id_wins_over_passthrough(
+        self,
+        agent_acp_service,
+        mock_request,
+        sample_agent,
+    ):
+        """Server-generated x-request-id must override client passthrough."""
+        mock_request.state.principal_context = None
+        mock_request.state.agent_identity = None
+        mock_request.headers = {}
+
+        with patch.object(
+            agent_acp_service,
+            "get_agent_auth_headers",
+            new=AsyncMock(return_value={}),
+        ):
+            headers = await agent_acp_service.get_headers(
+                sample_agent,
+                request_headers={"x-request-id": "client-request-id"},
+            )
+
+        assert headers["x-request-id"] != "client-request-id"
+        assert len(headers["x-request-id"]) > 0
 
     async def test_send_message_success_data(
         self,
@@ -753,3 +827,17 @@ class TestAgentACPService:
             agent_acp_service._parse_task_message_update(invalid_result)
 
         assert "Unknown update type" in str(exc_info.value)
+
+
+class TestFilterRequestHeaders:
+    def test_blocks_user_api_key_and_acting_headers(self):
+        result = filter_request_headers(
+            {
+                "x-api-key": "user-key",
+                "x-acting-user-api-key": "spoof",
+                "x-acting-as-agent": "spoof-agent",
+                "x-trace-id": "trace-1",
+                "authorization": "Bearer x",
+            }
+        )
+        assert result == {"x-trace-id": "trace-1"}

@@ -73,6 +73,7 @@ BLOCKED_HEADERS = frozenset(
     {
         "authorization",
         "cookie",
+        "x-api-key",
         "x-agent-api-key",
         "x-acting-user-api-key",
         "x-acting-as-agent",
@@ -87,7 +88,7 @@ def filter_request_headers(headers: dict[str, str] | None) -> dict[str, str]:
     Security filtering rules:
     1. Allow only x-* prefixed headers (allowlist approach)
     2. Block hop-by-hop headers (connection, keep-alive, etc.)
-    3. Block sensitive headers (authorization, cookie, x-agent-api-key)
+    3. Block sensitive headers (credentials, acting delegation, x-agent-api-key)
 
     Args:
         headers: Raw request headers from client
