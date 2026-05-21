@@ -264,8 +264,8 @@ class AgentACPService(TaskMessageMixin):
         agent: AgentEntity,
         request_headers: dict[str, str] | None = None,
     ) -> dict[str, str]:
-        headers = filter_request_headers(request_headers)
-        headers.update(
+        passthrough_headers = filter_request_headers(request_headers)
+        passthrough_headers.update(
             build_delegation_headers(
                 getattr(self._request.state, "principal_context", None),
                 agent.id,
@@ -273,9 +273,13 @@ class AgentACPService(TaskMessageMixin):
                 agent_identity=getattr(self._request.state, "agent_identity", None),
             )
         )
+
         auth_headers = await self.get_agent_auth_headers(agent) or {}
+
         request_id = ctx_var_request_id.get(uuid4().hex)
-        return {**headers, **auth_headers, "x-request-id": request_id}
+        headers = {**auth_headers, "x-request-id": request_id}
+        headers.update(passthrough_headers)
+        return headers
 
     async def get_agent_auth_headers(
         self,
