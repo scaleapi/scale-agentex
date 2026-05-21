@@ -53,9 +53,9 @@ async def test_event_repository_crud_operations(postgres_url):
     async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
     # Create repositories
-    event_repo = EventRepository(async_session_maker)
-    agent_repo = AgentRepository(async_session_maker)
-    task_repo = TaskRepository(async_session_maker)
+    event_repo = EventRepository(async_session_maker, async_session_maker)
+    agent_repo = AgentRepository(async_session_maker, async_session_maker)
+    task_repo = TaskRepository(async_session_maker, async_session_maker)
 
     # First, create prerequisites: Agent and Task
     agent_id = orm_id()

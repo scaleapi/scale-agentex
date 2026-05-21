@@ -10,10 +10,12 @@ from src.adapters.temporal.exceptions import (
 )
 from src.config.environment_variables import EnvironmentVariables
 from src.domain.entities.agents import ACPType, AgentEntity, AgentInputType, AgentStatus
+from src.domain.entities.deployments import DeploymentEntity, DeploymentStatus
 from src.domain.repositories.agent_repository import DAgentRepository
 from src.domain.repositories.deployment_history_repository import (
     DDeploymentHistoryRepository,
 )
+from src.domain.repositories.deployment_repository import DDeploymentRepository
 from src.temporal.workflows.healthcheck_workflow import HealthCheckWorkflow
 from src.utils.ids import orm_id
 from src.utils.logging import make_logger
@@ -26,10 +28,12 @@ class AgentsUseCase:
         self,
         agent_repository: DAgentRepository,
         deployment_history_repository: DDeploymentHistoryRepository,
+        deployment_repository: DDeploymentRepository,
         temporal_adapter: DTemporalAdapter,
     ):
         self.agent_repo = agent_repository
         self.deployment_history_repo = deployment_history_repository
+        self.deployment_repo = deployment_repository
         self.temporal_adapter = temporal_adapter
 
     async def register_agent(
@@ -42,12 +46,25 @@ class AgentsUseCase:
         registration_metadata: dict[str, Any] | None = None,
         agent_input_type: AgentInputType | None = None,
     ) -> AgentEntity:
+        deployment_id = (registration_metadata or {}).get("deployment_id")
+
         # If an agent_id is passed, then the agent expects that it is already in the db
         if agent_id:
             agent = await self.agent_repo.get(id=agent_id)
-            # Update the agent with potentially new name/description (acp_url should never change)
+
+            if deployment_id:
+                # Deployment-scoped registration: only update the deployment record,
+                # don't touch the agent row (acp_url changes only via promotion)
+                await self.complete_deployment_registration(
+                    agent, acp_url, registration_metadata
+                )
+                await self.ensure_healthcheck_workflow(agent)
+                return agent
+
+            # Legacy flow: update the agent directly
             agent.name = name
             agent.description = description
+            agent.acp_url = acp_url
             agent.status = AgentStatus.READY
             agent.status_reason = "Agent registered successfully."
             agent.acp_type = acp_type
@@ -58,14 +75,29 @@ class AgentsUseCase:
                 existing_metadata.update(registration_metadata)
                 agent.registration_metadata = existing_metadata
             agent.registered_at = datetime.now(UTC)
+            if agent.production_deployment_id:
+                await self.deployment_repo.clear_production(
+                    agent_id=agent.id, new_acp_url=acp_url
+                )
+                agent.production_deployment_id = None
             agent = await self.agent_repo.update(item=agent)
         else:
             # If an agent_id is not passed, then its probably a new one. We should first validate by checking in the DB
             try:
                 agent = await self.agent_repo.get(name=name)
+
+                if deployment_id:
+                    # Deployment-scoped registration: only update the deployment record,
+                    # don't touch the agent row (acp_url changes only via promotion)
+                    await self.complete_deployment_registration(
+                        agent, acp_url, registration_metadata
+                    )
+                    await self.ensure_healthcheck_workflow(agent)
+                    return agent
+
+                # Legacy flow: update the agent directly
                 existing_agent_data = agent.model_dump()
 
-                # Update agent fields
                 agent.description = description
                 agent.acp_url = acp_url
                 agent.status = AgentStatus.READY
@@ -77,6 +109,12 @@ class AgentsUseCase:
                     agent.registration_metadata = existing_metadata
                 if agent_input_type:
                     agent.agent_input_type = agent_input_type
+
+                if agent.production_deployment_id:
+                    await self.deployment_repo.clear_production(
+                        agent_id=agent.id, new_acp_url=acp_url
+                    )
+                    agent.production_deployment_id = None
 
                 # Check if any fields have changed by comparing model dumps
                 updated_agent_data = agent.model_dump()
@@ -118,10 +156,46 @@ class AgentsUseCase:
                 logger.info(
                     f"Agent {name} was likely created in parallel, skipping creation"
                 )
+                # Re-fetch the actual persisted agent so downstream code
+                # (complete_deployment_registration) uses the correct agent_id
+                agent = await self.agent_repo.get(name=name)
+        await self.complete_deployment_registration(
+            agent, acp_url, registration_metadata
+        )
         await self.maybe_update_agent_deployment_history(agent)
 
         await self.ensure_healthcheck_workflow(agent)
         return agent
+
+    async def complete_deployment_registration(
+        self,
+        agent: AgentEntity,
+        acp_url: str,
+        registration_metadata: dict[str, Any] | None,
+    ) -> None:
+        """Handle deployment-aware registration when deployment_id is present."""
+        deployment_id = (registration_metadata or {}).get("deployment_id")
+        if not deployment_id:
+            return
+
+        deployment = await self.deployment_repo.get_or_none(id=deployment_id)
+        if deployment:
+            deployment.acp_url = acp_url
+            deployment.status = DeploymentStatus.READY
+            await self.deployment_repo.update(deployment)
+        else:
+            deployment = DeploymentEntity(
+                id=deployment_id,
+                agent_id=agent.id,
+                docker_image=registration_metadata.get(
+                    "docker_image", agent.docker_image or "unknown"
+                ),
+                registration_metadata=registration_metadata,
+                status=DeploymentStatus.READY,
+                acp_url=acp_url,
+                is_production=False,
+            )
+            await self.deployment_repo.create(deployment)
 
     async def maybe_update_agent_deployment_history(self, agent: AgentEntity) -> None:
         try:
@@ -192,13 +266,19 @@ class AgentsUseCase:
         limit: int,
         page_number: int,
         task_id: str | None = None,
+        order_by: str | None = None,
+        order_direction: str = "desc",
         **filters,
     ) -> list[AgentEntity]:
         if task_id is not None:
             filters["task_id"] = task_id
 
         return await self.agent_repo.list(
-            filters=filters, limit=limit, page_number=page_number
+            filters=filters,
+            limit=limit,
+            page_number=page_number,
+            order_by=order_by,
+            order_direction=order_direction,
         )
 
 

@@ -3,7 +3,7 @@ import time
 
 import pytest
 import redis.asyncio as redis
-from pymongo import MongoClient
+from pymongo import AsyncMongoClient
 from sqlalchemy.ext.asyncio import create_async_engine
 
 
@@ -39,22 +39,24 @@ async def base_postgres_session(postgres_session_maker):
 
 
 @pytest.fixture
-def base_mongodb_database(mongodb_connection_string):
+async def base_mongodb_database(mongodb_connection_string):
     """
     Base MongoDB database with cleanup.
     Creates a unique database per test and cleans up afterward.
     This is the shared foundation for both unit and integration tests.
+    Returns an AsyncDatabase (pymongo native async API) so repositories
+    consuming it can `await` collection operations.
     """
     # Create unique database name with process ID for extra uniqueness
     db_name = f"test_agentex_{int(time.time() * 1000)}_{os.getpid()}"
-    client = MongoClient(mongodb_connection_string)
+    client = AsyncMongoClient(mongodb_connection_string)
     db = client[db_name]
 
     yield db
 
     # Cleanup: Drop the database after the test
-    client.drop_database(db_name)
-    client.close()
+    await client.drop_database(db_name)
+    await client.close()
 
 
 @pytest.fixture
@@ -88,7 +90,7 @@ async def unit_db_session(base_postgres_session):
 
 
 @pytest.fixture
-def unit_mongodb_database(base_mongodb_database):
+async def unit_mongodb_database(base_mongodb_database):
     """
     MongoDB database for unit tests.
     This is an alias for base_mongodb_database for consistency.

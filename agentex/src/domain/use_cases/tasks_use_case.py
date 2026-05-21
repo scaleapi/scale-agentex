@@ -69,6 +69,10 @@ class TasksUseCase:
         id: str | list[str] | None = None,
         agent_id: str | None = None,
         agent_name: str | None = None,
+        status: TaskStatus | list[TaskStatus] | None = None,
+        task_metadata: dict | None = None,
+        order_by: str | None = None,
+        order_direction: str = "desc",
         relationships: list[TaskRelationships] | None = None,
     ) -> list[TaskEntity]:
         """List all tasks from repository"""
@@ -76,8 +80,12 @@ class TasksUseCase:
             id=id,
             agent_id=agent_id,
             agent_name=agent_name,
+            status=status,
+            task_metadata=task_metadata,
             limit=limit,
             page_number=page_number,
+            order_by=order_by,
+            order_direction=order_direction,
             relationships=relationships,
         )
 
@@ -109,6 +117,80 @@ class TasksUseCase:
 
         updated_task_entity = await self.task_service.update_task(task=task_entity)
         return updated_task_entity
+
+    async def _transition_to_terminal(
+        self,
+        target_status: TaskStatus,
+        id: str | None = None,
+        name: str | None = None,
+        reason: str | None = None,
+    ) -> TaskEntity:
+        """Atomically transition a running task to a terminal status."""
+        if not id and not name:
+            raise ClientError("Either id or name must be provided")
+
+        task_entity = await self.task_service.get_task(id=id, name=name)
+        if task_entity.status == TaskStatus.DELETED:
+            raise ItemDoesNotExist(f"Task {id or name} not found")
+        if task_entity.status != TaskStatus.RUNNING:
+            raise ClientError(
+                f"Task {task_entity.id} is not running (current status: {task_entity.status}). "
+                f"Only running tasks can have their status updated."
+            )
+
+        status_reason = reason or f"Task {target_status.value.lower()}"
+        updated = await self.task_service.transition_task_status(
+            task_id=task_entity.id,
+            expected_status=TaskStatus.RUNNING,
+            new_status=target_status,
+            status_reason=status_reason,
+        )
+        if updated is None:
+            raise ClientError(
+                f"Task {task_entity.id} status was concurrently modified. "
+                f"Please retry the request."
+            )
+        return updated
+
+    async def complete_task(
+        self, id: str | None = None, name: str | None = None, reason: str | None = None
+    ) -> TaskEntity:
+        """Mark a running task as completed."""
+        return await self._transition_to_terminal(
+            TaskStatus.COMPLETED, id=id, name=name, reason=reason
+        )
+
+    async def fail_task(
+        self, id: str | None = None, name: str | None = None, reason: str | None = None
+    ) -> TaskEntity:
+        """Mark a running task as failed."""
+        return await self._transition_to_terminal(
+            TaskStatus.FAILED, id=id, name=name, reason=reason
+        )
+
+    async def cancel_task(
+        self, id: str | None = None, name: str | None = None, reason: str | None = None
+    ) -> TaskEntity:
+        """Mark a running task as canceled."""
+        return await self._transition_to_terminal(
+            TaskStatus.CANCELED, id=id, name=name, reason=reason
+        )
+
+    async def terminate_task(
+        self, id: str | None = None, name: str | None = None, reason: str | None = None
+    ) -> TaskEntity:
+        """Mark a running task as terminated."""
+        return await self._transition_to_terminal(
+            TaskStatus.TERMINATED, id=id, name=name, reason=reason
+        )
+
+    async def timeout_task(
+        self, id: str | None = None, name: str | None = None, reason: str | None = None
+    ) -> TaskEntity:
+        """Mark a running task as timed out."""
+        return await self._transition_to_terminal(
+            TaskStatus.TIMED_OUT, id=id, name=name, reason=reason
+        )
 
 
 DTaskUseCase = Annotated[TasksUseCase, Depends(TasksUseCase)]

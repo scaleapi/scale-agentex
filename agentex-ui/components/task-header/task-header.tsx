@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
+import { useSpans } from '@/hooks/use-spans';
 
 import type { Agent } from 'agentex/resources';
 
@@ -36,6 +37,8 @@ export function TaskHeader({
 }: TaskHeaderProps) {
   const displayTaskId = taskId ? taskId.split('-')[0] : '';
   const { agentName: selectedAgentName } = useSafeSearchParams();
+  const { spans } = useSpans(taskId);
+  const traceId = spans[0]?.trace_id ?? taskId;
 
   const copyTaskId = async () => {
     if (taskId) {
@@ -80,7 +83,11 @@ export function TaskHeader({
               </SelectTrigger>
               <SelectContent>
                 {agents.map(agent => (
-                  <SelectItem key={agent.name} value={agent.name}>
+                  <SelectItem
+                    key={agent.name}
+                    value={agent.name}
+                    disabled={agent.status !== 'Ready'}
+                  >
                     {agent.name}
                   </SelectItem>
                 ))}
@@ -105,7 +112,7 @@ export function TaskHeader({
               icon={Activity}
             />
           )}
-          {taskId && <InvestigateTracesButton taskId={taskId} />}
+          {taskId && traceId && <InvestigateTracesButton traceId={traceId} />}
         </div>
       </div>
     </motion.div>

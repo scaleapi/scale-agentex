@@ -18,3 +18,16 @@ repos:
         files: ^agentex-ui/.*\.(ts|tsx|js|jsx)$
         pass_filenames: true
 
+      - id: agentex-openapi-spec
+        name: Regenerate AgentEx OpenAPI spec
+        entry: bash -c 'cd agentex && make gen-openapi && git add openapi.yaml'
+        language: system
+        files: ^agentex/(src/.*|scripts/generate_openapi_spec\.py)$
+        pass_filenames: false
+
+      - id: migration-safety-lint
+        name: 'lint Alembic migrations for dangerous Postgres patterns'
+        language: system
+        entry: agentex/scripts/git_hooks/migration_safety_lint.sh
+        files: ^agentex/database/migrations/alembic/versions/.*\.py$
+

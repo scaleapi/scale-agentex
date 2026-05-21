@@ -14,13 +14,13 @@ from src.domain.use_cases.deployment_history_use_case import DeploymentHistoryUs
 @pytest.fixture
 def agent_repository(postgres_session_maker):
     """Real AgentRepository using test PostgreSQL database"""
-    return AgentRepository(postgres_session_maker)
+    return AgentRepository(postgres_session_maker, postgres_session_maker)
 
 
 @pytest.fixture
 def deployment_history_repository(postgres_session_maker):
     """Real DeploymentHistoryRepository using test PostgreSQL database"""
-    return DeploymentHistoryRepository(postgres_session_maker)
+    return DeploymentHistoryRepository(postgres_session_maker, postgres_session_maker)
 
 
 @pytest.fixture

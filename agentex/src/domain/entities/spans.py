@@ -15,6 +15,10 @@ class SpanEntity(BaseModel):
         ...,
         title="The trace ID for this span",
     )
+    task_id: str | None = Field(
+        None,
+        title="The task ID this span is associated with",
+    )
     parent_id: str | None = Field(
         None,
         title="The parent span ID if this is a child span",

@@ -4,6 +4,8 @@ from typing import Any
 
 from temporalio.client import (
     Client,
+    ScheduleDescription,
+    ScheduleHandle,
     WorkflowExecution,
     WorkflowHandle,
 )
@@ -221,5 +223,153 @@ class TemporalGateway(ABC):
 
         Returns:
             True if connected, False otherwise
+        """
+        pass
+
+    # ==================== Schedule Operations ====================
+
+    @abstractmethod
+    async def create_schedule(
+        self,
+        schedule_id: str,
+        workflow: str | type,
+        workflow_id: str,
+        args: list[Any] | None = None,
+        task_queue: str | None = None,
+        cron_expressions: list[str] | None = None,
+        interval_seconds: int | None = None,
+        execution_timeout: timedelta | None = None,
+        start_at: Any | None = None,
+        end_at: Any | None = None,
+        paused: bool = False,
+    ) -> ScheduleHandle:
+        """
+        Create a new schedule for recurring workflow execution.
+
+        Args:
+            schedule_id: Unique identifier for the schedule
+            workflow: The workflow class or name to execute
+            workflow_id: ID prefix for workflow executions (will have timestamp appended)
+            args: Arguments to pass to the workflow
+            task_queue: Task queue for the workflow
+            cron_expressions: List of cron expressions (e.g., ["0 0 * * 0"] for weekly)
+            interval_seconds: Alternative to cron - run every N seconds
+            execution_timeout: Maximum time for each workflow execution
+            start_at: When the schedule should start being active
+            end_at: When the schedule should stop being active
+            paused: Whether to create the schedule in a paused state
+
+        Returns:
+            Handle to the created schedule
+
+        Raises:
+            TemporalScheduleAlreadyExistsError: If schedule with ID already exists
+            TemporalScheduleError: If schedule creation fails
+        """
+        pass
+
+    @abstractmethod
+    async def get_schedule(self, schedule_id: str) -> ScheduleHandle:
+        """
+        Get a handle to an existing schedule.
+
+        Args:
+            schedule_id: The schedule ID
+
+        Returns:
+            Handle to the schedule
+
+        Raises:
+            TemporalScheduleNotFoundError: If schedule doesn't exist
+        """
+        pass
+
+    @abstractmethod
+    async def describe_schedule(self, schedule_id: str) -> ScheduleDescription:
+        """
+        Get detailed information about a schedule.
+
+        Args:
+            schedule_id: The schedule ID
+
+        Returns:
+            Schedule description with info, state, and configuration
+
+        Raises:
+            TemporalScheduleNotFoundError: If schedule doesn't exist
+        """
+        pass
+
+    @abstractmethod
+    async def list_schedules(
+        self,
+        page_size: int = 100,
+    ) -> list[Any]:
+        """
+        List all schedules.
+
+        Args:
+            page_size: Number of results per page
+
+        Returns:
+            List of schedule descriptions
+        """
+        pass
+
+    @abstractmethod
+    async def pause_schedule(self, schedule_id: str, note: str | None = None) -> None:
+        """
+        Pause a schedule.
+
+        Args:
+            schedule_id: The schedule ID
+            note: Optional note explaining why the schedule was paused
+
+        Raises:
+            TemporalScheduleNotFoundError: If schedule doesn't exist
+            TemporalScheduleError: If pause fails
+        """
+        pass
+
+    @abstractmethod
+    async def unpause_schedule(self, schedule_id: str, note: str | None = None) -> None:
+        """
+        Unpause/resume a schedule.
+
+        Args:
+            schedule_id: The schedule ID
+            note: Optional note explaining why the schedule was unpaused
+
+        Raises:
+            TemporalScheduleNotFoundError: If schedule doesn't exist
+            TemporalScheduleError: If unpause fails
+        """
+        pass
+
+    @abstractmethod
+    async def trigger_schedule(self, schedule_id: str) -> None:
+        """
+        Trigger a schedule to run immediately.
+
+        Args:
+            schedule_id: The schedule ID
+
+        Raises:
+            TemporalScheduleNotFoundError: If schedule doesn't exist
+            TemporalScheduleError: If trigger fails
+        """
+        pass
+
+    @abstractmethod
+    async def delete_schedule(self, schedule_id: str) -> None:
+        """
+        Delete a schedule.
+
+        Args:
+            schedule_id: The schedule ID
+
+        Raises:
+            TemporalScheduleNotFoundError: If schedule doesn't exist
+            TemporalScheduleError: If deletion fails
         """
         pass

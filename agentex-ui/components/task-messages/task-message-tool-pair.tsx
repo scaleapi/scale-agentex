@@ -45,11 +45,13 @@ type TaskMessageToolPairProps = {
   toolResponseMessage?:
     | (TaskMessage & { content: ToolResponseContent })
     | undefined;
+  isInProgress?: boolean;
 };
 
 function TaskMessageToolPairImpl({
   toolRequestMessage,
   toolResponseMessage,
+  isInProgress = false,
 }: TaskMessageToolPairProps) {
   const [isCollapsed, setIsCollapsed] = useState(true);
 
@@ -92,9 +94,9 @@ function TaskMessageToolPairImpl({
       >
         <Wrench className="size-4" />
         <ShimmeringText
-          enabled={!toolResponseMessage}
+          enabled={isInProgress}
           text={
-            !toolResponseMessage
+            isInProgress
               ? 'Using tool:  ' + toolRequestMessage.content.name
               : 'Used tool:  ' + toolRequestMessage.content.name
           }

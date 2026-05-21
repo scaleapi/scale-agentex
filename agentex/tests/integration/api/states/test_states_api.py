@@ -292,3 +292,138 @@ class TestStatesAPIIntegration:
         assert {(d["id"], d["state"]["key"]) for d in paginated_states} == {
             (d.id, d.state["key"]) for d in test_pagination_states
         }
+
+    async def test_list_states_with_order_by(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test that list states endpoint supports order_by parameter"""
+        # Given - Create an agent and task
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="order-by-state-agent",
+            description="Agent for order_by state testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="order-by-state-task",
+            status=TaskStatus.RUNNING,
+            status_reason="Task for order_by state testing",
+        )
+        await task_repo.create(agent_id=agent.id, task=task)
+
+        # Create multiple states
+        state_repo = isolated_repositories["task_state_repository"]
+        states = []
+        for i in range(3):
+            state = StateEntity(
+                id=orm_id(),
+                task_id=task.id,
+                agent_id=agent.id,
+                state={"order": i, "key": f"value-{i}"},
+            )
+            states.append(await state_repo.create(state))
+
+        # When - Request states with order_by=created_at and order_direction=asc
+        response_asc = await isolated_client.get(
+            "/states",
+            params={
+                "task_id": task.id,
+                "agent_id": agent.id,
+                "order_by": "created_at",
+                "order_direction": "asc",
+            },
+        )
+
+        # Then - Should return states in ascending order
+        assert response_asc.status_code == 200
+        states_asc = response_asc.json()
+        assert len(states_asc) == 3
+
+        # Verify ascending order
+        for i in range(len(states_asc) - 1):
+            assert states_asc[i]["created_at"] <= states_asc[i + 1]["created_at"]
+
+        # When - Request states with order_by=created_at and order_direction=desc
+        response_desc = await isolated_client.get(
+            "/states",
+            params={
+                "task_id": task.id,
+                "agent_id": agent.id,
+                "order_by": "created_at",
+                "order_direction": "desc",
+            },
+        )
+
+        # Then - Should return states in descending order
+        assert response_desc.status_code == 200
+        states_desc = response_desc.json()
+        assert len(states_desc) == 3
+
+        # Verify descending order
+        for i in range(len(states_desc) - 1):
+            assert states_desc[i]["created_at"] >= states_desc[i + 1]["created_at"]
+
+        # Verify asc and desc return different orderings (first element of asc should be in last position of desc)
+        # Note: We only check the first element reversal since items with identical timestamps
+        # may have unpredictable relative ordering
+        assert states_asc[0]["id"] == states_desc[-1]["id"]
+
+    async def test_list_states_order_by_defaults_to_desc(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test that order_direction defaults to desc for states"""
+        # Given - Create an agent and task
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="order-default-state-agent",
+            description="Agent for order default state testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="order-default-state-task",
+            status=TaskStatus.RUNNING,
+            status_reason="Task for order default state testing",
+        )
+        await task_repo.create(agent_id=agent.id, task=task)
+
+        # Create multiple states
+        state_repo = isolated_repositories["task_state_repository"]
+        for i in range(3):
+            state = StateEntity(
+                id=orm_id(),
+                task_id=task.id,
+                agent_id=agent.id,
+                state={"order": i},
+            )
+            await state_repo.create(state)
+
+        # When - Request states with order_by but without order_direction
+        response = await isolated_client.get(
+            "/states",
+            params={
+                "task_id": task.id,
+                "agent_id": agent.id,
+                "order_by": "created_at",
+            },
+        )
+
+        # Then - Should return states in descending order (default)
+        assert response.status_code == 200
+        states = response.json()
+        assert len(states) == 3
+
+        # Verify descending order
+        for i in range(len(states) - 1):
+            assert states[i]["created_at"] >= states[i + 1]["created_at"]

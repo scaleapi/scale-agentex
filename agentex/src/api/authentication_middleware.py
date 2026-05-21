@@ -52,6 +52,10 @@ class AgentexAuthMiddleware(BaseHTTPMiddleware):
         request.state.principal_context = None
         request.state.agent_identity = None
 
+        # Skip authentication for OPTIONS requests (CORS preflight)
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         # Skip authentication for whitelisted routes
         if is_whitelisted_route(request.url.path):
             logger.info(

@@ -179,6 +179,61 @@ class TestAgentTaskTrackerAPIIntegration:
             assert tracker["task_id"] == test_task.id
             assert tracker["agent_id"] == test_agent.id
 
+    async def test_list_trackers_with_order_by(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test that list trackers endpoint supports order_by parameter"""
+        # Given - Create an agent and multiple tasks
+        # Note: task_repo.create() auto-creates an associated tracker for each task
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="order-by-tracker-agent",
+            description="Agent for order_by tracker testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+
+        for i in range(3):
+            task = TaskEntity(
+                id=orm_id(),
+                name=f"order-tracker-task-{i}",
+                status=TaskStatus.RUNNING,
+                status_reason=f"Task {i}",
+            )
+            await task_repo.create(agent_id=agent.id, task=task)
+
+        # When - Request trackers with order_by=created_at and order_direction=asc
+        response_asc = await isolated_client.get(
+            f"/tracker?agent_id={agent.id}&order_by=created_at&order_direction=asc"
+        )
+
+        # Then - Should return trackers in ascending order
+        assert response_asc.status_code == 200
+        trackers_asc = response_asc.json()
+        assert len(trackers_asc) == 3
+
+        # Verify ascending order
+        for i in range(len(trackers_asc) - 1):
+            assert trackers_asc[i]["created_at"] <= trackers_asc[i + 1]["created_at"]
+
+        # When - Request trackers with order_by=created_at and order_direction=desc
+        response_desc = await isolated_client.get(
+            f"/tracker?agent_id={agent.id}&order_by=created_at&order_direction=desc"
+        )
+
+        # Then - Should return trackers in descending order
+        assert response_desc.status_code == 200
+        trackers_desc = response_desc.json()
+        assert len(trackers_desc) == 3
+
+        # Verify descending order
+        for i in range(len(trackers_desc) - 1):
+            assert trackers_desc[i]["created_at"] >= trackers_desc[i + 1]["created_at"]
+
     async def test_update_tracker_success_and_retrieve(
         self, isolated_client, test_tracker
     ):

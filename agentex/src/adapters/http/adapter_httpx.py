@@ -12,14 +12,6 @@ from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
 
-# Global connection pool limits for better connection management
-# Increased limits to handle streaming requests that hold connections longer
-DEFAULT_LIMITS = Limits(
-    max_keepalive_connections=1000,  # Max connections to keep alive (increased)
-    max_connections=1000,  # Max total connections allowed (increased for streaming)
-    keepalive_expiry=30,  # Seconds to keep connections alive
-)
-
 
 class HttpxGateway(HttpPort):
     # Class-level cached clients shared across all instances
@@ -37,6 +29,11 @@ class HttpxGateway(HttpPort):
         """Get or create the shared regular HTTP client."""
         if cls._regular_client is None:
             env = cls._environment_variables
+            limits = Limits(
+                max_connections=env.HTTPX_MAX_CONNECTIONS,
+                max_keepalive_connections=env.HTTPX_MAX_KEEPALIVE_CONNECTIONS,
+                keepalive_expiry=30,
+            )
             timeout = Timeout(
                 connect=env.HTTPX_CONNECT_TIMEOUT,
                 read=env.HTTPX_READ_TIMEOUT,
@@ -44,13 +41,15 @@ class HttpxGateway(HttpPort):
                 pool=env.HTTPX_POOL_TIMEOUT,
             )
             cls._regular_client = httpx.AsyncClient(
-                limits=DEFAULT_LIMITS,
+                limits=limits,
                 timeout=timeout,
                 http2=True,  # Enable HTTP/2 for better connection reuse
                 follow_redirects=True,
             )
             logger.info(
-                f"Created shared regular httpx client (id: {id(cls._regular_client)})"
+                f"Created shared regular httpx client (id: {id(cls._regular_client)}, "
+                f"max_connections={env.HTTPX_MAX_CONNECTIONS}, "
+                f"max_keepalive={env.HTTPX_MAX_KEEPALIVE_CONNECTIONS})"
             )
         return cls._regular_client
 
@@ -59,6 +58,11 @@ class HttpxGateway(HttpPort):
         """Get or create the shared streaming HTTP client."""
         if cls._streaming_client is None:
             env = cls._environment_variables
+            limits = Limits(
+                max_connections=env.HTTPX_MAX_CONNECTIONS,
+                max_keepalive_connections=env.HTTPX_MAX_KEEPALIVE_CONNECTIONS,
+                keepalive_expiry=30,
+            )
             # Use longer timeout for streaming
             streaming_timeout = Timeout(
                 connect=env.HTTPX_CONNECT_TIMEOUT,
@@ -67,20 +71,21 @@ class HttpxGateway(HttpPort):
                 pool=env.HTTPX_POOL_TIMEOUT,
             )
             cls._streaming_client = httpx.AsyncClient(
-                limits=DEFAULT_LIMITS,
+                limits=limits,
                 timeout=streaming_timeout,
                 http2=True,  # Enable HTTP/2 for better streaming
                 follow_redirects=True,
             )
             logger.info(
-                f"Created shared streaming httpx client (id: {id(cls._streaming_client)})"
+                f"Created shared streaming httpx client (id: {id(cls._streaming_client)}, "
+                f"max_connections={env.HTTPX_MAX_CONNECTIONS}, "
+                f"max_keepalive={env.HTTPX_MAX_KEEPALIVE_CONNECTIONS})"
             )
         return cls._streaming_client
 
     @classmethod
     async def close_clients(cls) -> None:
-        # TODO: Call this method
-        """Close and cleanup the shared clients. Call this during app shutdown for proper cleanup."""
+        """Close and cleanup the shared clients. Called during app shutdown for proper cleanup."""
         if cls._regular_client:
             await cls._regular_client.aclose()
             cls._regular_client = None
@@ -253,9 +258,14 @@ class HttpxGateway(HttpPort):
             )
 
         try:
+            limits = Limits(
+                max_connections=env.HTTPX_MAX_CONNECTIONS,
+                max_keepalive_connections=env.HTTPX_MAX_KEEPALIVE_CONNECTIONS,
+                keepalive_expiry=30,
+            )
             # Use a client with connection pool limits for sync calls
             with httpx.Client(
-                limits=DEFAULT_LIMITS,
+                limits=limits,
                 timeout=httpx_timeout,
                 http2=True,  # Enable HTTP/2
                 follow_redirects=True,

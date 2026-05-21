@@ -52,6 +52,9 @@ class AgentAPIKeysUseCase:
             ),
             environment=resolve_environment_variable_dependency(EnvVarKeys.ENVIRONMENT),
         )
+        self.webhook_request_timeout = resolve_environment_variable_dependency(
+            EnvVarKeys.WEBHOOK_REQUEST_TIMEOUT
+        )
 
     async def get_agent(
         self, agent_id: str | None = None, agent_name: str | None = None
@@ -198,6 +201,7 @@ class AgentAPIKeysUseCase:
             agent_url,
             headers=get_request_headers_to_forward(request),
             content=content,
+            timeout=self.webhook_request_timeout,
         )
         r = await self.client.send(req, stream=False)
         return Response(

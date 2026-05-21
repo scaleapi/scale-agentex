@@ -62,9 +62,16 @@ async def filter_states(
     agent_id: str | None = Query(None, description="Agent ID"),
     limit: int = Query(50, description="Limit", ge=1),
     page_number: int = Query(1, description="Page number", ge=1),
+    order_by: str | None = Query(None, description="Field to order by"),
+    order_direction: str = Query("desc", description="Order direction (asc or desc)"),
 ) -> list[State]:
     state_entities = await states_use_case.list(
-        task_id=task_id, agent_id=agent_id, limit=limit, page_number=page_number
+        task_id=task_id,
+        agent_id=agent_id,
+        limit=limit,
+        page_number=page_number,
+        order_by=order_by,
+        order_direction=order_direction,
     )
     logger.info(f"Listing states: {state_entities}")
     return [State.model_validate(state_entity) for state_entity in state_entities]

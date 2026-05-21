@@ -57,7 +57,7 @@ module.exports = [
         'error',
         {
           argsIgnorePattern: '_',
-          varsIgnorePattern: '_',
+          varsIgnorePattern: '^_',
           args: 'all',
         },
       ],

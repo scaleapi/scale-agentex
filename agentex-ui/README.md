@@ -60,15 +60,26 @@ A modern web interface for building, testing, and monitoring intelligent agents.
 - npm
 - Running Agentex backend (see `../agentex/README.md`)
 
+> **Windows Users**: Use PowerShell scripts (`build.ps1`) instead of Make commands throughout this guide.
+
 ## Getting Started from Scratch
 
 ### 1. Start the Backend
 
 Before running the frontend, ensure the Agentex backend is running:
 
+#### macOS/Linux
+
 ```bash
 cd ../agentex
 make dev
+```
+
+#### Windows (PowerShell)
+
+```powershell
+cd ../agentex
+.\build.ps1 dev
 ```
 
 This starts all required services (PostgreSQL, Redis, MongoDB, Temporal) and the FastAPI backend on port 5003.
@@ -99,10 +110,20 @@ This installs all required packages including Next.js, React, Tailwind CSS, and 
 
 ### 4. Run the Development Server
 
+#### macOS/Linux
+
 ```bash
 npm run dev
 # or using make
 make dev
+```
+
+#### Windows (PowerShell)
+
+```powershell
+npm run dev
+# or using PowerShell script
+.\build.ps1 dev
 ```
 
 The application will start on [http://localhost:3000](http://localhost:3000).
@@ -111,15 +132,15 @@ The application will start on [http://localhost:3000](http://localhost:3000).
 
 **Development:**
 
-- `make dev` or `npm run dev` — Start dev server with Turbopack
+- `npm run dev` — Start dev server with Turbopack
 - `npm run build` — Create production build
 - `npm start` — Start production server
 
 **Code Quality:**
 
-- `make lint` or `npm run lint` — Run ESLint with zero warnings policy
+- `npm run lint` — Run ESLint with zero warnings policy
 - `npm run lint:fix` — Auto-fix linting issues
-- `make typecheck` or `npm run typecheck` — TypeScript type checking
+- `npm run typecheck` — TypeScript type checking
 - `npm run format` — Format code with Prettier
 - `npm run format:check` — Check formatting without writing
 
@@ -129,6 +150,19 @@ The application will start on [http://localhost:3000](http://localhost:3000).
 - `npm run test:run` — Run tests once (CI mode)
 - `npm run test:ui` — Open Vitest UI for interactive testing
 - `npm run test:coverage` — Generate coverage report
+
+**Using PowerShell Scripts (Windows):**
+
+For Windows users, the following PowerShell commands are available via `build.ps1`:
+
+- `.\build.ps1 dev` — Start dev server (runs install and npm run dev)
+- `.\build.ps1 install` — Install dependencies
+- `.\build.ps1 typecheck` — TypeScript type checking
+- `.\build.ps1 lint` — Run linting
+- `.\build.ps1 build` — Build Docker image (includes typecheck and lint)
+- `.\build.ps1 help` — Show all available commands
+
+For Docker-related commands, see the Docker section in `build.ps1 help`.
 
 ## Architecture
 

@@ -3,12 +3,12 @@ import os
 from typing import Annotated
 
 import httpx
-import pymongo
 import redis.asyncio as redis
 from docker import DockerClient
 from fastapi import Depends
 from kubernetes_asyncio import config as k8s_config
-from pymongo.database import Database as MongoDBDatabase
+from pymongo import AsyncMongoClient
+from pymongo.asynchronous.database import AsyncDatabase
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -19,6 +19,7 @@ from temporalio.client import Client as TemporalClient
 
 from src.config.environment_variables import Environment, EnvironmentVariables
 from src.utils.database import async_db_engine_creator
+from src.utils.db_metrics import PostgresMetricsCollector
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
@@ -42,11 +43,12 @@ class GlobalDependencies(metaclass=Singleton):
         self.database_async_read_write_engine: AsyncEngine | None = None
         self.database_async_middleware_read_write_engine: AsyncEngine | None = None
         self.docker_client = None
-        self.mongodb_client: pymongo.MongoClient | None = None
-        self.mongodb_database: MongoDBDatabase | None = None
+        self.mongodb_client: AsyncMongoClient | None = None
+        self.mongodb_database: AsyncDatabase | None = None
         self.httpx_client: httpx.AsyncClient | None = None
         self.redis_pool: redis.ConnectionPool | None = None
-        # self.database_async_read_only_engine: Optional[AsyncEngine] = None
+        self.database_async_read_only_engine: AsyncEngine | None = None
+        self.postgres_metrics_collector: PostgresMetricsCollector | None = None
         self._loaded = False
 
     async def create_temporal_client(self):
@@ -120,7 +122,7 @@ class GlobalDependencies(metaclass=Singleton):
 
             logger.info("Connecting to MongoDB")
 
-            self.mongodb_client = pymongo.MongoClient(
+            self.mongodb_client = AsyncMongoClient(
                 mongodb_uri,
                 serverSelectionTimeoutMS=20000,
                 connectTimeoutMS=20000,
@@ -134,7 +136,7 @@ class GlobalDependencies(metaclass=Singleton):
             self.mongodb_database = self.mongodb_client[mongodb_database_name]
 
             # Ping the database to verify connection
-            self.mongodb_client.admin.command("ping")
+            await self.mongodb_client.admin.command("ping")
             logger.info(
                 f"Successfully connected to MongoDB database '{mongodb_database_name}'"
             )
@@ -144,7 +146,7 @@ class GlobalDependencies(metaclass=Singleton):
             from src.config.mongodb_indexes import ensure_mongodb_indexes
 
             try:
-                ensure_mongodb_indexes(self.mongodb_database)
+                await ensure_mongodb_indexes(self.mongodb_database)
                 logger.info("MongoDB indexes ensured successfully")
             except Exception as index_error:
                 # Don't fail startup if index creation fails
@@ -176,36 +178,82 @@ class GlobalDependencies(metaclass=Singleton):
                 f"Redis connection pool initialized with max_connections={self.environment_variables.REDIS_MAX_CONNECTIONS}"
             )
 
-        self._loaded = True
+        # Create readonly engine - falls back to primary database if no replica URL is set
+        read_only_db_url = (
+            self.environment_variables.READ_ONLY_DATABASE_URL
+            or self.environment_variables.DATABASE_URL
+        )
+        if read_only_db_url:
+            self.database_async_read_only_engine = create_async_engine(
+                "postgresql+asyncpg://",
+                async_creator=async_db_engine_creator(read_only_db_url),
+                echo=echo_db_engine,
+                pool_size=async_db_pool_size,
+                max_overflow=20,
+                pool_pre_ping=True,
+                pool_recycle=3600,
+            )
 
-        # self.database_async_read_only_engine = create_async_engine(
-        #     "postgresql+asyncpg://",
-        #     async_creator=async_db_engine_creator(
-        #         self.environment_variables.READ_ONLY_DATABASE_URL,
-        #     ),
-        #     echo=echo_db_engine,
-        #     pool_size=async_db_pool_size,
-        #     pool_pre_ping=True,
-        # )
+        # Initialize PostgreSQL metrics collector
+        self.postgres_metrics_collector = PostgresMetricsCollector()
+        environment = self.environment_variables.ENVIRONMENT
+        service_name = os.environ.get("OTEL_SERVICE_NAME", "agentex")
+
+        if self.database_async_read_write_engine:
+            self.postgres_metrics_collector.register_engine(
+                engine=self.database_async_read_write_engine,
+                pool_name="main",
+                db_url=self.environment_variables.DATABASE_URL,
+                environment=environment,
+                service_name=service_name,
+            )
+
+        if self.database_async_middleware_read_write_engine:
+            self.postgres_metrics_collector.register_engine(
+                engine=self.database_async_middleware_read_write_engine,
+                pool_name="middleware",
+                db_url=self.environment_variables.DATABASE_URL,
+                environment=environment,
+                service_name=service_name,
+            )
+
+        if self.database_async_read_only_engine:
+            self.postgres_metrics_collector.register_engine(
+                engine=self.database_async_read_only_engine,
+                pool_name="readonly",
+                db_url=read_only_db_url,
+                environment=environment,
+                service_name=service_name,
+            )
+
+        self._loaded = True
 
     async def force_reload(self):
         """Force reload all dependencies with fresh environment variables"""
+        # Stop metrics collection
+        if self.postgres_metrics_collector:
+            await self.postgres_metrics_collector.stop_collection()
+
         # Clear existing connections
         if self.database_async_read_write_engine:
             await self.database_async_read_write_engine.dispose()
         if self.database_async_middleware_read_write_engine:
             await self.database_async_middleware_read_write_engine.dispose()
+        if self.database_async_read_only_engine:
+            await self.database_async_read_only_engine.dispose()
         if self.mongodb_client:
-            self.mongodb_client.close()
+            await self.mongodb_client.close()
 
         # Reset state
         self._loaded = False
         self.temporal_client = None
         self.database_async_read_write_engine = None
         self.database_async_middleware_read_write_engine = None
+        self.database_async_read_only_engine = None
         self.docker_client = None
         self.mongodb_client = None
         self.mongodb_database = None
+        self.postgres_metrics_collector = None
 
         # Reload with fresh environment variables
         EnvironmentVariables.clear_cache()
@@ -223,9 +271,16 @@ def shutdown():
 
 async def async_shutdown():
     global_dependencies = GlobalDependencies()
+
+    # Stop PostgreSQL metrics collection
+    if global_dependencies.postgres_metrics_collector:
+        await global_dependencies.postgres_metrics_collector.stop_collection()
+
     run_concurrently = []
-    # if global_dependencies.database_async_read_only_engine:
-    #     run_concurrently.append(global_dependencies.database_async_read_only_engine.dispose())
+    if global_dependencies.database_async_read_only_engine:
+        run_concurrently.append(
+            global_dependencies.database_async_read_only_engine.dispose()
+        )
     if global_dependencies.database_async_read_write_engine:
         run_concurrently.append(
             global_dependencies.database_async_read_write_engine.dispose()
@@ -238,7 +293,7 @@ async def async_shutdown():
 
     # Close MongoDB connection
     if global_dependencies.mongodb_client:
-        global_dependencies.mongodb_client.close()
+        await global_dependencies.mongodb_client.close()
 
     # Close HTTPX client
     if global_dependencies.httpx_client:
@@ -264,8 +319,8 @@ def database_async_read_write_engine() -> AsyncEngine:
     return GlobalDependencies().database_async_read_write_engine
 
 
-# def database_async_read_only_engine() -> AsyncEngine:
-#     return GlobalDependencies().database_async_read_only_engine
+def database_async_read_only_engine() -> AsyncEngine:
+    return GlobalDependencies().database_async_read_only_engine
 
 
 def middleware_async_read_only_engine() -> AsyncEngine:
@@ -276,8 +331,9 @@ DDatabaseAsyncReadWriteEngine = Annotated[
     AsyncEngine, Depends(database_async_read_write_engine)
 ]
 
-
-# DDatabaseAsyncReadOnlyEngine = Annotated[AsyncEngine, Depends(database_async_read_only_engine)]
+DDatabaseAsyncReadOnlyEngine = Annotated[
+    AsyncEngine, Depends(database_async_read_only_engine)
+]
 
 
 def database_async_read_write_session_maker(
@@ -288,12 +344,12 @@ def database_async_read_write_session_maker(
     )
 
 
-# def database_async_read_only_session_maker(
-#     db_async_read_only_engine: DDatabaseAsyncReadOnlyEngine,
-# ) -> async_sessionmaker[AsyncSession]:
-#     return async_sessionmaker(
-#         autoflush=False, bind=db_async_read_only_engine, expire_on_commit=False
-#     )
+def database_async_read_only_session_maker(
+    db_async_read_only_engine: DDatabaseAsyncReadOnlyEngine,
+) -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(
+        autoflush=False, bind=db_async_read_only_engine, expire_on_commit=False
+    )
 
 
 def middleware_async_read_only_session_maker() -> async_sessionmaker[AsyncSession]:
@@ -305,10 +361,9 @@ DDatabaseAsyncReadWriteSessionMaker = Annotated[
     async_sessionmaker[AsyncSession], Depends(database_async_read_write_session_maker)
 ]
 
-
-# DDatabaseAsyncReadOnlySessionMaker = Annotated[
-#     async_sessionmaker[AsyncSession], Depends(database_async_read_only_session_maker)
-# ]
+DDatabaseAsyncReadOnlySessionMaker = Annotated[
+    async_sessionmaker[AsyncSession], Depends(database_async_read_only_session_maker)
+]
 
 DEnvironmentVariables = Annotated[
     EnvironmentVariables, Depends(lambda: GlobalDependencies().environment_variables)
@@ -320,7 +375,7 @@ DDockerClient = Annotated[
     DockerClient, Depends(lambda: GlobalDependencies().docker_client)
 ]
 DMongoDBDatabase = Annotated[
-    MongoDBDatabase, Depends(lambda: GlobalDependencies().mongodb_database)
+    AsyncDatabase, Depends(lambda: GlobalDependencies().mongodb_database)
 ]
 DHttpxClient = Annotated[
     httpx.AsyncClient, Depends(lambda: GlobalDependencies().httpx_client)

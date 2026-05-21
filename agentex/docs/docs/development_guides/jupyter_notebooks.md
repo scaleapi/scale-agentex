@@ -13,7 +13,8 @@ Before starting, ensure you have:
 
 1. **AgentEx server running locally** (see [Getting Started](https://github.com/scaleapi/scale-agentex#getting-started){target="_blank"})
 2. **AgentEx Python SDK installed**: `uv tool install agentex-sdk`
-3. **Your agent running**: `agentex agents run --manifest manifest.yaml`
+3. **Jupyter Notebook installed**: `uv tool install notebook`
+4. **Your agent running**: `agentex agents run --manifest manifest.yaml`
 
 ## The `dev.ipynb` Notebook
 
@@ -24,7 +25,9 @@ When you run `agentex init`, a `dev.ipynb` notebook is automatically created in 
 - **Working examples** tailored to your agent type (Sync or Async)
 - **Code snippets** demonstrating both streaming and non-streaming patterns
 
-Simply open the notebook and run the cells to start testing your agent immediately. The examples below explain what's in the notebook and how to customize it for your needs.
+Simply open the notebook and run the cells to start testing your agent immediately - you can launch it with `uv run jupyter notebook dev.ipynb`.
+
+The examples below explain what's in the notebook and how to customize it for your needs.
 
 ## Sync ACP Agents
 

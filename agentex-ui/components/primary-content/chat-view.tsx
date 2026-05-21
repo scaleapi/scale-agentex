@@ -49,7 +49,7 @@ export function ChatView({
       key="chat-view"
       layout
       ref={scrollContainerRef}
-      className="relative flex-1 flex-col overflow-y-auto"
+      className="relative flex-1 flex-col overflow-x-hidden overflow-y-auto"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.25, ease: 'easeInOut' }}
@@ -63,10 +63,14 @@ export function ChatView({
         ref={headerRef}
       />
 
-      <div className="flex min-h-full w-full flex-col items-center px-4 sm:px-6 md:px-8">
+      <div className="flex w-full flex-col items-center px-4 sm:px-6 md:px-8">
         <div className="w-full max-w-3xl">
           <TaskProvider taskId={taskID}>
-            <TaskMessages taskId={taskID} headerRef={headerRef} />
+            <TaskMessages
+              taskId={taskID}
+              headerRef={headerRef}
+              scrollContainerRef={scrollContainerRef}
+            />
           </TaskProvider>
         </div>
       </div>

@@ -1,61 +1,75 @@
-# Use the official Node.js 20 Debian image
-FROM node:20
+# Build stage — install build deps, build the Next.js app
+FROM node:20-trixie-slim AS builder
+ARG SOURCE_DIR=agentex-ui
 
-# Update package lists and install Sharp dependencies
-RUN apt-get update && apt-get install -y \
-    libvips-dev \
+# Install system dependencies for native modules (node-gyp)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
     g++ \
-    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Set Sharp to use system libvips
-ENV SHARP_IGNORE_GLOBAL_LIBVIPS=0
-
-# Set production environment
-ENV NODE_ENV=production
+# Disable telemetry during build
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Copy package files
-COPY package.json package-lock.json ./
+COPY ${SOURCE_DIR}/package.json ${SOURCE_DIR}/package-lock.json ./
 
 ENV npm_config_cache=/tmp/.npm
 RUN npm config set maxsockets 3
 
-# Install dependencies with better reliability settings
+# Install all dependencies (including dev for build tooling)
 RUN npm config set registry https://registry.npmjs.org/ && \
-    npm ci --omit=dev --verbose
+    npm ci --verbose
 
-# Copy source code (node_modules and .next excluded by .dockerignore)
-COPY . .
+# Copy source code
+COPY ${SOURCE_DIR} .
 COPY LICENSE /app/LICENSE
 
-# Build the application (creates fresh .next directory)
+# Set production environment for the build step
+ENV NODE_ENV=production
+
+# Build the application
 RUN npm run build
 
-# Verify build output exists and show final structure
-RUN echo "=== Build verification ===" && \
-    ls -la .next/ && \
-    echo "=== Final container structure ===" && \
-    ls -la /app/
+# Remove dev dependencies after build
+RUN npm prune --production
 
-# Create non-root user (Debian syntax)
-RUN groupadd --system --gid 1001 nodejs && \
-    useradd --system --uid 1001 --gid nodejs nextjs
+# Production stage — clean image without build tools
+FROM node:20-trixie-slim AS production
+ENTRYPOINT []
 
-# Change ownership of the entire app directory to nextjs user
-RUN chown -R nextjs:nodejs /app
+WORKDIR /app
 
-# Switch to non-root user
-USER nextjs
-
-EXPOSE 3000
-
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# Start the application
-CMD ["npm", "start"] 
+# Remove npm and its bundled vulnerable deps (tar, glob, minimatch, cross-spawn)
+# npm is not needed at runtime — we run next start directly via node
+RUN npm cache clean --force && \
+    rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+
+# Copy built application from builder (no build tools, no dev deps)
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/next.config.ts ./
+COPY --from=builder /app/LICENSE ./LICENSE
+
+# Create nonroot user and set ownership
+RUN groupadd --system --gid 65532 nonroot && \
+    useradd --system --uid 65532 --gid nonroot nonroot && \
+    chown -R nonroot:nonroot /app
+
+# Switch to non-root user
+USER 65532
+
+EXPOSE 3000
+
+# Start the application directly via node (no npm needed)
+CMD ["node", "node_modules/.bin/next", "start"]

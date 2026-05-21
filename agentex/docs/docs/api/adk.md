@@ -1,6 +1,11 @@
 # Agent Development Kit (ADK) Reference
 
-This is the API reference for the Agentex Python ADK. Use this ADK to leverage nice abstractions for interacting with the clients through Agentex's Agentic Infrastructure. This ADK makes things like streaming, tracing, tool calling, and communicating with clients in an async manner easy.
+!!! info "ADK vs SDK"
+    **ADK (Agent Development Kit)** - Use within agent code to interact with Agentex infrastructure (streaming, tracing, state management, etc.)
+
+    **SDK (Software Development Kit)** - Use to make requests to the Agentex server via its REST API. [View SDK Docs →](https://agentex-sdk.stldocs.app/api/python)
+
+This is the API reference for the Agentex Python ADK. Use this ADK to leverage convenient abstractions for interacting with clients through Agentex's Agentic Infrastructure. This ADK makes things like streaming, tracing, tool calling, and communicating with clients in an async manner easy.
 
 ## Agent Development Kit (ADK)
 

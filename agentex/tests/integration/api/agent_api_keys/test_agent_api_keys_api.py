@@ -542,10 +542,14 @@ class TestAgentAPIKeysIntegration:
         )
 
         # When - Forward a request to the agent
+        payload_body = b'{"key": "value"}'
         forward_response = await isolated_client.post(
             "/agents/forward/name/test-agent/some/path",
-            json={"key": "value"},
-            headers={"x-agent-api-key": "test-api-key-value"},
+            content=payload_body,
+            headers={
+                "content-type": "application/json",
+                "x-agent-api-key": "test-api-key-value",
+            },
         )
         assert forward_response.status_code == 200
         assert forward_response.json() == mock_response
@@ -557,7 +561,7 @@ class TestAgentAPIKeysIntegration:
         assert (
             call_args[0][1] == "http://test-acp:8000/some/path"
         )  # URL should match agent's ACP URL
-        assert call_args[1]["content"] == b'{"key": "value"}'  # Body should match
+        assert call_args[1]["content"] == payload_body  # Body should match
 
         isolated_api_key_http_client.send.assert_called_once()
         call_args = isolated_api_key_http_client.send.call_args
@@ -814,8 +818,9 @@ class TestAgentAPIKeysIntegration:
         )
         forward_response = await isolated_client.post(
             "/agents/forward/name/test-agent/some/path",
-            json={"api_app_id": test_agent_api_key_slack.name},
+            content=payload_body,
             headers={
+                "content-type": "application/json",
                 "x-slack-signature": "v0=" + hash_object.hexdigest(),
                 "x-slack-request-timestamp": str(request_timestamp),
             },

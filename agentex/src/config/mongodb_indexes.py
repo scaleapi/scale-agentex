@@ -8,7 +8,7 @@ not on every request.
 
 from typing import Any
 
-from pymongo.database import Database as MongoDBDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import OperationFailure
 
 from src.utils.logging import make_logger
@@ -16,7 +16,7 @@ from src.utils.logging import make_logger
 logger = make_logger(__name__)
 
 
-def ensure_mongodb_indexes(mongodb_database: MongoDBDatabase) -> None:
+async def ensure_mongodb_indexes(mongodb_database: AsyncDatabase) -> None:
     """
     Create all MongoDB indexes defined in repository classes.
 
@@ -76,7 +76,7 @@ def ensure_mongodb_indexes(mongodb_database: MongoDBDatabase) -> None:
                         index_kwargs[key] = index_spec[key]
 
                 # Create the index
-                result = collection.create_index(keys, **index_kwargs)
+                result = await collection.create_index(keys, **index_kwargs)
 
                 if description:
                     logger.info(f"  ✓ Created index '{name or result}': {description}")
@@ -100,7 +100,7 @@ def ensure_mongodb_indexes(mongodb_database: MongoDBDatabase) -> None:
     logger.info("MongoDB index creation completed.")
 
 
-def drop_all_indexes(mongodb_database: MongoDBDatabase) -> None:
+async def drop_all_indexes(mongodb_database: AsyncDatabase) -> None:
     """
     Drop all non-_id indexes from MongoDB collections.
 
@@ -129,7 +129,7 @@ def drop_all_indexes(mongodb_database: MongoDBDatabase) -> None:
 
         try:
             # Drop all indexes except _id
-            collection.drop_indexes()
+            await collection.drop_indexes()
             logger.info(f"  ✓ Dropped all indexes from collection '{collection_name}'")
         except Exception as e:
             logger.error(f"  ✗ Failed to drop indexes from '{collection_name}': {e}")
@@ -137,7 +137,7 @@ def drop_all_indexes(mongodb_database: MongoDBDatabase) -> None:
     logger.warning("Index dropping completed.")
 
 
-def get_index_stats(mongodb_database: MongoDBDatabase) -> dict[str, Any]:
+async def get_index_stats(mongodb_database: AsyncDatabase) -> dict[str, Any]:
     """
     Get statistics about indexes for all collections.
 
@@ -165,7 +165,7 @@ def get_index_stats(mongodb_database: MongoDBDatabase) -> dict[str, Any]:
         collection = mongodb_database[collection_name]
 
         try:
-            indexes = list(collection.list_indexes())
+            indexes = [idx async for idx in collection.list_indexes()]
             stats[collection_name] = {
                 "count": len(indexes),
                 "indexes": [

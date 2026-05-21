@@ -251,7 +251,15 @@ class AuthenticationCache:
                 context_dict = {"value": str(principal_context)}
 
             # Extract key fields that identify the principal
-            for key in ["user_id", "account_id", "agent_id", "id", "sub", "email"]:
+            for key in [
+                "user_id",
+                "service_account_id",
+                "account_id",
+                "agent_id",
+                "id",
+                "sub",
+                "email",
+            ]:
                 if key in context_dict:
                     principal_key_data[key] = context_dict[key]
 

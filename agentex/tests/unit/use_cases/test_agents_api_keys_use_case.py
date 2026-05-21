@@ -21,13 +21,13 @@ def mock_http_client():
 @pytest.fixture
 def agent_repository(postgres_session_maker):
     """Real AgentRepository using test PostgreSQL database"""
-    return AgentRepository(postgres_session_maker)
+    return AgentRepository(postgres_session_maker, postgres_session_maker)
 
 
 @pytest.fixture
 def agent_api_key_repository(postgres_session_maker):
     """Real AgentAPIKeyRepository using test PostgreSQL database"""
-    return AgentAPIKeyRepository(postgres_session_maker)
+    return AgentAPIKeyRepository(postgres_session_maker, postgres_session_maker)
 
 
 @pytest.fixture

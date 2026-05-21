@@ -66,26 +66,26 @@ def mongodb_connection_string(mongodb_container):
     return mongodb_container.get_connection_url()
 
 
-@pytest.fixture
-def mongodb_database(mongodb_connection_string):
+@pytest_asyncio.fixture
+async def mongodb_database(mongodb_connection_string):
     """
     Function-scoped MongoDB database instance.
     Creates a fresh database for each test to ensure isolation.
+    Returns an AsyncDatabase (pymongo native async API) so repositories
+    consuming it can `await` collection operations.
     """
     import time
 
-    from pymongo import MongoClient
+    from pymongo import AsyncMongoClient
 
-    # Create a unique database name for this test
     db_name = f"test_agentex_{int(time.time() * 1000)}"
-    client = MongoClient(mongodb_connection_string)
+    client = AsyncMongoClient(mongodb_connection_string)
     db = client[db_name]
 
     yield db
 
-    # Cleanup: Drop the database after the test
-    client.drop_database(db_name)
-    client.close()
+    await client.drop_database(db_name)
+    await client.close()
 
 
 @pytest.fixture(scope="session")

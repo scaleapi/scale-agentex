@@ -1,5 +1,5 @@
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends
 
@@ -43,26 +43,58 @@ class TaskMessageService:
         return await self.repository.get(id=message_id)
 
     async def get_messages(
-        self, task_id: str, limit: int, page_number: int
+        self,
+        task_id: str,
+        limit: int,
+        page_number: int,
+        order_by: str | None = None,
+        order_direction: str = "desc",
+        before_id: str | None = None,
+        after_id: str | None = None,
+        filters: dict[str, Any] | None = None,
     ) -> list[TaskMessageEntity]:
         """
-        Get all messages for a specific task.
+        Get all messages for a specific task with optional cursor-based pagination.
 
         Args:
             task_id: The task ID
-            limit: Optional limit on the number of messages to return
+            limit: Maximum number of messages to return
+            page_number: Page number for offset-based pagination
+            order_by: Field name to order by (defaults to created_at)
+            order_direction: Direction to order by ("asc" or "desc", defaults to "desc")
+            before_id: Get messages created before this message ID (cursor pagination)
+            after_id: Get messages created after this message ID (cursor pagination)
 
         Returns:
             List of TaskMessageEntity objects for the task
+
+        Note:
+            When using before_id or after_id, page_number is ignored.
         """
-        # Sort by created_at in ascending order (oldest first)
-        # This is typically what we want for conversation history
+        # Default to created_at descending (newest first)
+        sort_field = order_by or "created_at"
+        sort_direction = 1 if order_direction.lower() == "asc" else -1
+
+        # If cursor pagination is requested, use cursor-based query
+        if before_id or after_id:
+            return await self.repository.find_by_field_with_cursor(
+                field_name="task_id",
+                field_value=task_id,
+                limit=limit,
+                sort_by={sort_field: sort_direction},
+                before_id=before_id,
+                after_id=after_id,
+                filters=filters,
+            )
+
+        # Otherwise use standard offset-based pagination
         return await self.repository.find_by_field(
             "task_id",
             task_id,
             limit=limit,
             page_number=page_number,
-            sort_by={"created_at": 1},
+            sort_by={sort_field: sort_direction},
+            filters=filters,
         )
 
     async def append_message(
@@ -70,13 +102,21 @@ class TaskMessageService:
         task_id: str,
         content: TaskMessageContentEntity,
         streaming_status: Literal["IN_PROGRESS", "DONE"] | None = None,
+        created_at: datetime | None = None,
     ) -> TaskMessageEntity:
         """
         Append a message to the task's message list.
 
         Args:
             task_id: The task ID
-            message: The message to append
+            content: The message content
+            streaming_status: Optional streaming status
+            created_at: Optional caller-supplied timestamp. Workflow callers
+                should pass workflow.now() (Temporal's deterministic monotonic
+                clock) so two awaited messages.create calls from the same
+                workflow are guaranteed to have monotonic timestamps regardless
+                of HTTP request scheduling at the server. If omitted, the
+                adapter falls back to the server's wall clock at insert time.
 
         Returns:
             The created TaskMessageEntity with ID and metadata
@@ -85,6 +125,8 @@ class TaskMessageService:
             task_id=task_id,
             content=content,
             streaming_status=streaming_status,
+            created_at=created_at,
+            updated_at=created_at,
         )
 
         return await self.repository.create(task_message)
@@ -94,24 +136,30 @@ class TaskMessageService:
         task_id: str,
         contents: list[TaskMessageContentEntity],
         streaming_status: Literal["IN_PROGRESS", "DONE"] | None = None,
+        created_at: datetime | None = None,
     ) -> list[TaskMessageEntity]:
         """
         Append multiple messages to the task's message list.
 
         Args:
             task_id: The task ID
-            messages: The messages to append
+            contents: The message contents to append
+            streaming_status: Optional streaming status
+            created_at: Optional base timestamp for the batch. Each message in
+                the batch is stamped with base + i milliseconds to guarantee
+                unique, monotonic ordering. If omitted, datetime.now(UTC) is
+                used as the base.
 
         Returns:
             The created TaskMessageEntity objects with IDs and metadata
         """
-        # Add a small time increment to each message to ensure unique ordering
-        current_time = datetime.now(UTC)
+        base_time = created_at if created_at is not None else datetime.now(UTC)
 
         task_messages = []
         for i, message in enumerate(contents):
-            # Add i microseconds to ensure unique timestamps within the batch
-            adjusted_time = current_time + timedelta(microseconds=i)
+            # MongoDB BSON Date is millisecond-precision; stagger by ms (not µs)
+            # so the stored ordering is durable across re-fetches.
+            adjusted_time = base_time + timedelta(milliseconds=i)
             task_message = TaskMessageEntity(
                 task_id=task_id,
                 content=message,

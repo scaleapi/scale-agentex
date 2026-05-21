@@ -340,6 +340,109 @@ class TestTasksAPIIntegration:
         assert len(tasks) == 1
         assert tasks[0]["id"] == target_task.id
 
+    async def test_list_tasks_with_task_metadata_filter(
+        self, isolated_client, isolated_repositories
+    ):
+        """list_tasks?task_metadata={...} should return only matching tasks."""
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="metadata-filter-agent",
+            description="agent for metadata filter test",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        matching = TaskEntity(
+            id=orm_id(),
+            name="matching-task",
+            status=TaskStatus.RUNNING,
+            task_metadata={"created_by_user_id": "user-a"},
+        )
+        other = TaskEntity(
+            id=orm_id(),
+            name="other-task",
+            status=TaskStatus.RUNNING,
+            task_metadata={"created_by_user_id": "user-b"},
+        )
+        await task_repo.create(agent_id=agent.id, task=matching)
+        await task_repo.create(agent_id=agent.id, task=other)
+
+        response = await isolated_client.get(
+            "/tasks",
+            params={"task_metadata": '{"created_by_user_id": "user-a"}'},
+        )
+        assert response.status_code == 200
+        ids = {t["id"] for t in response.json()}
+        assert matching.id in ids
+        assert other.id not in ids
+
+    async def test_list_tasks_rejects_malformed_task_metadata(self, isolated_client):
+        """Malformed JSON in task_metadata should yield a 400."""
+        response = await isolated_client.get(
+            "/tasks", params={"task_metadata": "not-json"}
+        )
+        assert response.status_code == 400
+
+    async def test_list_tasks_rejects_empty_task_metadata(self, isolated_client):
+        """Empty JSON object in task_metadata should yield a 400."""
+        response = await isolated_client.get("/tasks", params={"task_metadata": "{}"})
+        assert response.status_code == 400
+
+    async def test_list_tasks_rejects_non_object_task_metadata(self, isolated_client):
+        """Non-object JSON in task_metadata should yield a 400."""
+        response = await isolated_client.get(
+            "/tasks", params={"task_metadata": '"some-string"'}
+        )
+        assert response.status_code == 400
+
+    async def test_list_tasks_with_status_filter(
+        self, isolated_client, isolated_repositories
+    ):
+        """list_tasks?status=RUNNING should return only RUNNING tasks."""
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="status-filter-agent",
+            description="agent for status filter test",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        running = TaskEntity(
+            id=orm_id(),
+            name="status-filter-running",
+            status=TaskStatus.RUNNING,
+        )
+        completed = TaskEntity(
+            id=orm_id(),
+            name="status-filter-completed",
+            status=TaskStatus.COMPLETED,
+        )
+        await task_repo.create(agent_id=agent.id, task=running)
+        await task_repo.create(agent_id=agent.id, task=completed)
+
+        response = await isolated_client.get("/tasks", params={"status": "RUNNING"})
+        assert response.status_code == 200
+        ids = {t["id"] for t in response.json()}
+        assert running.id in ids
+        assert completed.id not in ids
+
+    async def test_list_tasks_rejects_invalid_status(self, isolated_client):
+        """Invalid status enum value should yield a 422."""
+        response = await isolated_client.get("/tasks", params={"status": "BOGUS"})
+        assert response.status_code == 422
+
+    async def test_list_tasks_rejects_deleted_status(self, isolated_client):
+        """status=DELETED is contradictory with the always-on DELETED exclusion;
+        rejecting at the route avoids silently returning an empty list."""
+        response = await isolated_client.get("/tasks", params={"status": "DELETED"})
+        assert response.status_code == 400
+
     #
     async def test_get_task_by_id_returns_correct_task(
         self, isolated_client, test_task
@@ -1228,6 +1331,103 @@ class TestTasksAPIIntegration:
         # agents field should be None or not present
         assert found_task.get("agents") is None
 
+    async def test_list_tasks_with_order_by(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test that list tasks endpoint supports order_by parameter"""
+        # Given - Create multiple tasks with different names (which affects created_at order)
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="order-by-test-agent",
+            description="Agent for order_by testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        tasks = []
+        for i in range(3):
+            task = TaskEntity(
+                id=orm_id(),
+                name=f"order-test-task-{i}",
+                status=TaskStatus.RUNNING,
+                status_reason=f"Task {i} for order_by testing",
+            )
+            tasks.append(await task_repo.create(agent_id=agent.id, task=task))
+
+        # When - Request tasks with order_by=created_at and order_direction=asc
+        response_asc = await isolated_client.get(
+            f"/tasks?agent_id={agent.id}&order_by=created_at&order_direction=asc"
+        )
+
+        # Then - Should return tasks in ascending order
+        assert response_asc.status_code == 200
+        tasks_asc = response_asc.json()
+        assert len(tasks_asc) == 3
+
+        # Verify ascending order (first created should be first)
+        for i in range(len(tasks_asc) - 1):
+            assert tasks_asc[i]["created_at"] <= tasks_asc[i + 1]["created_at"]
+
+        # When - Request tasks with order_by=created_at and order_direction=desc
+        response_desc = await isolated_client.get(
+            f"/tasks?agent_id={agent.id}&order_by=created_at&order_direction=desc"
+        )
+
+        # Then - Should return tasks in descending order
+        assert response_desc.status_code == 200
+        tasks_desc = response_desc.json()
+        assert len(tasks_desc) == 3
+
+        # Verify descending order (last created should be first)
+        for i in range(len(tasks_desc) - 1):
+            assert tasks_desc[i]["created_at"] >= tasks_desc[i + 1]["created_at"]
+
+        # Verify the order is actually reversed
+        assert tasks_asc[0]["id"] == tasks_desc[-1]["id"]
+        assert tasks_asc[-1]["id"] == tasks_desc[0]["id"]
+
+    async def test_list_tasks_order_by_defaults_to_desc(
+        self, isolated_client, isolated_repositories
+    ):
+        """Test that order_direction defaults to desc when not specified"""
+        # Given - Create tasks
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="order-default-test-agent",
+            description="Agent for order default testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        for i in range(3):
+            task = TaskEntity(
+                id=orm_id(),
+                name=f"order-default-task-{i}",
+                status=TaskStatus.RUNNING,
+                status_reason=f"Task {i}",
+            )
+            await task_repo.create(agent_id=agent.id, task=task)
+
+        # When - Request tasks with order_by but no order_direction
+        response = await isolated_client.get(
+            f"/tasks?agent_id={agent.id}&order_by=created_at"
+        )
+
+        # Then - Should return tasks in descending order (default)
+        assert response.status_code == 200
+        tasks = response.json()
+        assert len(tasks) == 3
+
+        # Verify descending order
+        for i in range(len(tasks) - 1):
+            assert tasks[i]["created_at"] >= tasks[i + 1]["created_at"]
+
     async def test_list_tasks_filters_work_with_views(
         self, isolated_client, isolated_repositories
     ):
@@ -1284,3 +1484,101 @@ class TestTasksAPIIntegration:
         assert "agents" in task_data
         assert len(task_data["agents"]) == 1
         assert task_data["agents"][0]["name"] == "target-filter-agent"
+
+    async def test_complete_task_endpoint(self, isolated_client, test_task):
+        """Test POST /tasks/{task_id}/complete transitions RUNNING to COMPLETED"""
+        # When
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/complete",
+            json={"reason": "Agent finished"},
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "COMPLETED"
+        assert task_data["status_reason"] == "Agent finished"
+
+    async def test_fail_task_endpoint(self, isolated_client, test_task):
+        """Test POST /tasks/{task_id}/fail transitions RUNNING to FAILED"""
+        # When
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/fail",
+            json={"reason": "Something went wrong"},
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "FAILED"
+        assert task_data["status_reason"] == "Something went wrong"
+
+    async def test_cancel_task_endpoint(self, isolated_client, test_task):
+        """Test POST /tasks/{task_id}/cancel transitions RUNNING to CANCELED"""
+        # When
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/cancel",
+            json={"reason": "User requested cancellation"},
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "CANCELED"
+        assert task_data["status_reason"] == "User requested cancellation"
+
+    async def test_terminate_task_endpoint(self, isolated_client, test_task):
+        """Test POST /tasks/{task_id}/terminate transitions RUNNING to TERMINATED"""
+        # When
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/terminate",
+            json={"reason": "Workflow killed"},
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "TERMINATED"
+        assert task_data["status_reason"] == "Workflow killed"
+
+    async def test_timeout_task_endpoint(self, isolated_client, test_task):
+        """Test POST /tasks/{task_id}/timeout transitions RUNNING to TIMED_OUT"""
+        # When
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/timeout",
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "TIMED_OUT"
+        assert task_data["status_reason"] == "Task timed_out"
+
+    async def test_complete_task_with_default_reason(self, isolated_client, test_task):
+        """Test POST /tasks/{task_id}/complete without a reason uses default"""
+        # When
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/complete",
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "COMPLETED"
+        assert task_data["status_reason"] == "Task completed"
+
+    async def test_cannot_transition_non_running_task(self, isolated_client, test_task):
+        """Test that a completed task cannot be transitioned again"""
+        # Given - Complete the task first
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/complete",
+        )
+        assert response.status_code == 200
+
+        # When - Try to terminate the already-completed task
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/terminate",
+        )
+
+        # Then - Should fail
+        assert response.status_code == 400

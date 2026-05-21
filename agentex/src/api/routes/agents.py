@@ -95,12 +95,16 @@ async def list_agents(
     task_id: str | None = Query(None, description="Task ID"),
     limit: int = Query(50, description="Limit", ge=1),
     page_number: int = Query(1, description="Page number", ge=1),
+    order_by: str | None = Query(None, description="Field to order by"),
+    order_direction: str = Query("desc", description="Order direction (asc or desc)"),
 ):
     """List all registered agents."""
     agent_entities = await agents_use_case.list(
         task_id=task_id,
         limit=limit,
         page_number=page_number,
+        order_by=order_by,
+        order_direction=order_direction,
         **{"id": _authorized_ids} if _authorized_ids is not None else {},
     )
     return [Agent.model_validate(agent_entity) for agent_entity in agent_entities]
@@ -212,13 +216,30 @@ async def register_agent(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.api_route(
+@router.get(
     "/forward/name/{agent_name}/{path:path}",
-    methods=["GET", "POST"],
-    summary="Forward request to agent by ID",
-    description="Forward a request to an agent by its unique ID.",
+    summary="Forward GET request to agent by name",
+    description="Forward a GET request to an agent by its name.",
 )
-async def forward_request_to_agent(
+async def forward_get_request_to_agent(
+    agent_name: str,
+    path: str,
+    request: Request,
+    agent_api_keys_use_case: DAgentAPIKeysUseCase,
+):
+    return await agent_api_keys_use_case.forward_agent_request(
+        agent_name=agent_name,
+        path=path,
+        request=request,
+    )
+
+
+@router.post(
+    "/forward/name/{agent_name}/{path:path}",
+    summary="Forward POST request to agent by name",
+    description="Forward a POST request to an agent by its name.",
+)
+async def forward_post_request_to_agent(
     agent_name: str,
     path: str,
     request: Request,

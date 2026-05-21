@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from typing import Annotated, Literal
 
 from fastapi import Depends
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 from src.adapters.crud_store.adapter_postgres import (
     ColumnPrimitiveValue,
@@ -10,7 +10,10 @@ from src.adapters.crud_store.adapter_postgres import (
     async_sql_exception_handler,
 )
 from src.adapters.orm import AgentORM, AgentTaskTrackerORM, TaskAgentORM, TaskORM
-from src.config.dependencies import DDatabaseAsyncReadWriteSessionMaker
+from src.config.dependencies import (
+    DDatabaseAsyncReadOnlySessionMaker,
+    DDatabaseAsyncReadWriteSessionMaker,
+)
 from src.domain.entities.tasks import TaskEntity, TaskRelationships, TaskStatus
 from src.utils.logging import make_logger
 
@@ -28,9 +31,16 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
     }
 
     def __init__(
-        self, async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker
+        self,
+        async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker,
+        async_read_only_session_maker: DDatabaseAsyncReadOnlySessionMaker,
     ):
-        super().__init__(async_read_write_session_maker, TaskORM, TaskEntity)
+        super().__init__(
+            async_read_write_session_maker,
+            async_read_only_session_maker,
+            TaskORM,
+            TaskEntity,
+        )
 
     async def list_with_join(
         self,
@@ -39,6 +49,7 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
         | None = None,
         agent_id: str | None = None,
         agent_name: str | None = None,
+        task_metadata: dict | None = None,
         order_by: str | None = None,
         order_direction: Literal["asc", "desc"] = "desc",
         limit: int | None = None,
@@ -52,6 +63,8 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
             - task_filters: Filters on the task table itself
             - agent_id: Filter tasks by agent ID using the join table
             - agent_name: Filter tasks by agent name
+            - task_metadata: JSONB containment filter on `task_metadata`. Returns
+              tasks whose metadata is a JSON superset of the provided dict.
             - order_by: Column to order by
             - order_direction: Direction to order by
             - limit: Maximum number of results to return
@@ -68,6 +81,8 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
                 ).where(AgentORM.name == agent_name)
             if agent_id:
                 query = query.where(TaskAgentORM.agent_id == agent_id)
+        if task_metadata is not None:
+            query = query.where(TaskORM.task_metadata.contains(task_metadata))
         query = query.where(TaskORM.status != TaskStatus.DELETED)
         return await self.list(
             filters=task_filters,
@@ -128,6 +143,40 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
 
             # Return with agents populated
             return TaskEntity.model_validate(modified_orm)
+
+    async def transition_status(
+        self,
+        task_id: str,
+        expected_status: TaskStatus,
+        new_status: TaskStatus,
+        status_reason: str,
+        task_metadata: dict | None = None,
+    ) -> TaskEntity | None:
+        """Atomically transition task status. Returns None if the expected status didn't match (i.e. lost the race)."""
+
+        async with (
+            self.start_async_db_session(True) as session,
+            async_sql_exception_handler(),
+        ):
+            values: dict = {"status": new_status, "status_reason": status_reason}
+            if task_metadata is not None:
+                values["task_metadata"] = task_metadata
+
+            stmt = (
+                update(TaskORM)
+                .where(TaskORM.id == task_id, TaskORM.status == expected_status)
+                .values(**values)
+            )
+            result = await session.execute(stmt)
+            await session.commit()
+
+            if result.rowcount == 0:
+                return None
+
+            refreshed = await session.get(TaskORM, task_id)
+            if refreshed is None:
+                return None
+            return TaskEntity.model_validate(refreshed)
 
 
 DTaskRepository = Annotated[TaskRepository, Depends(TaskRepository)]

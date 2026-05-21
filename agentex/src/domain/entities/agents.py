@@ -65,3 +65,6 @@ class AgentEntity(BaseModel):
     agent_input_type: AgentInputType | None = Field(
         None, description="The type of input the agent expects."
     )
+    production_deployment_id: str | None = Field(
+        None, description="ID of the current production deployment."
+    )

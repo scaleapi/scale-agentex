@@ -108,24 +108,24 @@ You will not be able to retrieve the API key value after you've created the API 
 
 To store a GitHub secret that will be used to verify incoming webhook requests, grab the full name of the repository you will be configuring the webhook for and run the following command:
 ```bash
-# Replace with your repository name instead of scaleapi/agentex!
+# Replace with your repository name instead of scaleapi/scale-agentex!
 curl -X POST $HOST/agent_api_keys \
   -H "Content-Type: application/json" \
   -d '{
     "agent_name": "<AGENT_NAME>",
-    "name": "scaleapi/agentex",
+    "name": "scaleapi/scale-agentex",
     "api_key_type": "github"
   }'
 ```
 The backend will generate an API key value for you, store this in the database, and return the value for you in the response so that you can set it in GitHub as the webhook secret.
 If you already have a webhook configured with a secret and you don't want to rotate it, you can also pass it as follows:
 ```bash
-# Replace with your repository name instead of scaleapi/agentex
+# Replace with your repository name instead of scaleapi/scale-agentex
 curl -X POST $HOST/agent_api_keys \
   -H "Content-Type: application/json" \
   -d '{
     "agent_name": "<AGENT_NAME>",
-    "name": "scaleapi/agentex",
+    "name": "scaleapi/scale-agentex",
     "api_key_type": "github",
     "api_key": "existingsecret"
   }'

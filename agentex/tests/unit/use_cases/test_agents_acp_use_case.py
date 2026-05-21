@@ -69,25 +69,25 @@ def mock_http_gateway():
 @pytest.fixture
 def agent_repository(postgres_session_maker):
     """Real AgentRepository using test PostgreSQL database"""
-    return AgentRepository(postgres_session_maker)
+    return AgentRepository(postgres_session_maker, postgres_session_maker)
 
 
 @pytest.fixture
 def agent_api_key_repository(postgres_session_maker):
     """Real AgentAPIKeyRepository using test PostgreSQL database"""
-    return AgentAPIKeyRepository(postgres_session_maker)
+    return AgentAPIKeyRepository(postgres_session_maker, postgres_session_maker)
 
 
 @pytest.fixture
 def task_repository(postgres_session_maker):
     """Real TaskRepository using test PostgreSQL database"""
-    return TaskRepository(postgres_session_maker)
+    return TaskRepository(postgres_session_maker, postgres_session_maker)
 
 
 @pytest.fixture
 def event_repository(postgres_session_maker):
     """Real EventRepository using test PostgreSQL database"""
-    return EventRepository(postgres_session_maker)
+    return EventRepository(postgres_session_maker, postgres_session_maker)
 
 
 @pytest.fixture
@@ -155,8 +155,15 @@ def authorization_service():
 
 
 @pytest.fixture
+def deployment_repository():
+    """Mock deployment repository"""
+    return AsyncMock()
+
+
+@pytest.fixture
 def agents_acp_use_case(
     agent_repository,
+    deployment_repository,
     agent_acp_service,
     task_service,
     task_message_service,
@@ -165,6 +172,7 @@ def agents_acp_use_case(
     """Real AgentsACPUseCase instance with required services and mocked authorization"""
     return AgentsACPUseCase(
         agent_repository=agent_repository,
+        deployment_repository=deployment_repository,
         acp_client=agent_acp_service,
         task_service=task_service,
         task_message_service=task_message_service,
@@ -290,6 +298,7 @@ class TestAgentsACPUseCase:
         await agents_acp_use_case._handle_message_send_sync(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         )
 
     async def test_handle_message_send_sync_success(
@@ -345,6 +354,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_message_send_sync(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         )
 
         assert isinstance(result, list)
@@ -411,6 +421,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_message_send_sync(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         )
 
         assert isinstance(result, list)
@@ -510,6 +521,7 @@ class TestAgentsACPUseCase:
         async for update in agents_acp_use_case._handle_message_send_stream(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         ):
             updates.append(update)
 
@@ -635,6 +647,7 @@ class TestAgentsACPUseCase:
         async for update in agents_acp_use_case._handle_message_send_stream(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         ):
             updates.append(update)
 
@@ -790,6 +803,7 @@ class TestAgentsACPUseCase:
         async for update in agents_acp_use_case._handle_message_send_stream(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         ):
             updates.append(update)
 
@@ -874,6 +888,7 @@ class TestAgentsACPUseCase:
             await agents_acp_use_case._handle_task_create(
                 agent=sample_agent,
                 params=create_request,
+                acp_url=sample_agent.acp_url,
             )
 
         assert "ACP server connection failed" in str(exc_info.value)
@@ -912,6 +927,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_task_create(
             agent=sample_agent,
             params=create_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then
@@ -924,6 +940,100 @@ class TestAgentsACPUseCase:
 
         # Verify HTTP call was made
         mock_http_gateway.async_call.assert_called_once()
+
+    async def test_handle_task_create_persists_task_metadata(
+        self, agents_acp_use_case, mock_http_gateway, agent_repository, sample_agent
+    ):
+        """task_metadata on CreateTaskRequest is persisted on the row and forwarded to ACP."""
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        from src.api.schemas.agents_rpc import CreateTaskRequest
+
+        async def mock_async_call(*args, **kwargs):
+            payload = kwargs.get("payload", {})
+            return {
+                "jsonrpc": "2.0",
+                "result": {"status": "created", "task_id": "new-task-id"},
+                "id": payload.get("id", ""),
+            }
+
+        mock_http_gateway.async_call.side_effect = mock_async_call
+
+        import uuid
+
+        unique_task_name = f"test-task-meta-{uuid.uuid4().hex[:8]}"
+        create_request = CreateTaskRequest(
+            name=unique_task_name,
+            params={"param1": "value1"},
+            task_metadata={"created_by_user_id": "user-a"},
+        )
+
+        result = await agents_acp_use_case._handle_task_create(
+            agent=sample_agent,
+            params=create_request,
+            acp_url=sample_agent.acp_url,
+        )
+
+        assert result.task_metadata == {"created_by_user_id": "user-a"}
+
+        # task_metadata is forwarded to the agent (kept for backward compat with
+        # agents that already read metadata set via PUT /tasks/{id}).
+        mock_http_gateway.async_call.assert_called_once()
+        sent_payload = mock_http_gateway.async_call.call_args.kwargs["payload"]
+        assert sent_payload["params"]["task"]["task_metadata"] == {
+            "created_by_user_id": "user-a"
+        }
+
+    async def test_handle_task_create_ignores_task_metadata_for_existing_task(
+        self, agents_acp_use_case, mock_http_gateway, agent_repository, sample_agent
+    ):
+        """task_metadata is only stamped at creation; a re-issued task/create with the
+        same name must not overwrite the existing row's metadata. Update-via-PUT is the
+        supported way to mutate metadata after creation."""
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        from src.api.schemas.agents_rpc import CreateTaskRequest
+
+        async def mock_async_call(*args, **kwargs):
+            payload = kwargs.get("payload", {})
+            return {
+                "jsonrpc": "2.0",
+                "result": {"status": "created", "task_id": "x"},
+                "id": payload.get("id", ""),
+            }
+
+        mock_http_gateway.async_call.side_effect = mock_async_call
+
+        import uuid
+
+        unique_task_name = f"test-task-existing-{uuid.uuid4().hex[:8]}"
+
+        # First create — metadata is stamped.
+        first_request = CreateTaskRequest(
+            name=unique_task_name,
+            params={"param1": "v1"},
+            task_metadata={"created_by_user_id": "user-a"},
+        )
+        first = await agents_acp_use_case._handle_task_create(
+            agent=sample_agent,
+            params=first_request,
+            acp_url=sample_agent.acp_url,
+        )
+        assert first.task_metadata == {"created_by_user_id": "user-a"}
+
+        # Second create with same name — metadata in the request must be ignored.
+        second_request = CreateTaskRequest(
+            name=unique_task_name,
+            params={"param1": "v1"},
+            task_metadata={"created_by_user_id": "user-b-attacker"},
+        )
+        second = await agents_acp_use_case._handle_task_create(
+            agent=sample_agent,
+            params=second_request,
+            acp_url=sample_agent.acp_url,
+        )
+        assert second.id == first.id
+        assert second.task_metadata == {"created_by_user_id": "user-a"}
 
     #
     async def test_handle_message_send_sync_error_handling(
@@ -956,6 +1066,7 @@ class TestAgentsACPUseCase:
             await agents_acp_use_case._handle_message_send_sync(
                 agent=sample_agent,
                 params=send_request,
+                acp_url=sample_agent.acp_url,
             )
 
         assert "ACP server connection failed" in str(exc_info.value)
@@ -1025,6 +1136,7 @@ class TestAgentsACPUseCase:
         async for update in agents_acp_use_case._handle_message_send_stream(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         ):
             updates.append(update)
 
@@ -1309,6 +1421,7 @@ class TestAgentsACPUseCase:
         async for update in agents_acp_use_case._handle_message_send_stream(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         ):
             updates.append(update)
 
@@ -1422,6 +1535,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_task_cancel(
             agent=sample_agent,
             params=cancel_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then
@@ -1467,6 +1581,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_task_cancel(
             agent=sample_agent,
             params=cancel_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then
@@ -1515,6 +1630,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_event_send(
             agent=sample_agent,
             params=event_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then
@@ -1589,6 +1705,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_event_send(
             agent=sample_agent,
             params=event_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then
@@ -1686,6 +1803,7 @@ class TestAgentsACPUseCase:
             agent=sample_agent,
             params=event_request,
             request_headers=request_headers,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then
@@ -1745,6 +1863,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_event_send(
             agent=sample_agent,
             params=event_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then
@@ -1835,6 +1954,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_message_send_sync(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then
@@ -1922,6 +2042,7 @@ class TestAgentsACPUseCase:
         async for update in agents_acp_use_case._handle_message_send_stream(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         ):
             updates.append(update)
 
@@ -2024,6 +2145,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_message_send_sync(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then
@@ -2120,6 +2242,7 @@ class TestAgentsACPUseCase:
         async for update in agents_acp_use_case._handle_message_send_stream(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         ):
             updates.append(update)
 
@@ -2229,6 +2352,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_message_send_sync(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then - params should be updated
@@ -2296,6 +2420,7 @@ class TestAgentsACPUseCase:
         result = await agents_acp_use_case._handle_message_send_sync(
             agent=sample_agent,
             params=send_request,
+            acp_url=sample_agent.acp_url,
         )
 
         # Then - task should not be updated

@@ -14,6 +14,7 @@ from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from src.adapters.temporal.client_factory import TemporalClientFactory
 from src.config.dependencies import (
+    database_async_read_only_session_maker,
     database_async_read_write_engine,
     database_async_read_write_session_maker,
     httpx_client,
@@ -166,7 +167,8 @@ async def main() -> None:
         # Create session maker
         engine = database_async_read_write_engine()
         session_maker = database_async_read_write_session_maker(engine)
-        agent_repo = AgentRepository(session_maker)
+        read_only_session_maker = database_async_read_only_session_maker(engine)
+        agent_repo = AgentRepository(session_maker, read_only_session_maker)
         health_check_worker_task = create_health_check_worker(
             agent_repo=agent_repo,
             http_client=httpx_client(),

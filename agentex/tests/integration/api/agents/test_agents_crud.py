@@ -137,6 +137,50 @@ class TestAgentsCRUD:
         assert agents[0]["name"] == agent_data["name"]
 
     @pytest.mark.asyncio
+    async def test_list_agents_with_order_by(self, isolated_client, test_data_factory):
+        """Test that list agents endpoint supports order_by parameter"""
+        # Given - Register multiple agents
+        agents_data = [
+            test_data_factory["create_agent_data"](f"order-agent-{i}") for i in range(3)
+        ]
+
+        for agent_data in agents_data:
+            response = await isolated_client.post("/agents/register", json=agent_data)
+            assert response.status_code == 200
+
+        # When - Request agents with order_by=created_at and order_direction=asc
+        response_asc = await isolated_client.get(
+            "/agents?order_by=created_at&order_direction=asc"
+        )
+
+        # Then - Should return agents in ascending order
+        assert response_asc.status_code == 200
+        agents_asc = response_asc.json()
+        assert len(agents_asc) == 3
+
+        # Verify ascending order
+        for i in range(len(agents_asc) - 1):
+            assert agents_asc[i]["created_at"] <= agents_asc[i + 1]["created_at"]
+
+        # When - Request agents with order_by=created_at and order_direction=desc
+        response_desc = await isolated_client.get(
+            "/agents?order_by=created_at&order_direction=desc"
+        )
+
+        # Then - Should return agents in descending order
+        assert response_desc.status_code == 200
+        agents_desc = response_desc.json()
+        assert len(agents_desc) == 3
+
+        # Verify descending order
+        for i in range(len(agents_desc) - 1):
+            assert agents_desc[i]["created_at"] >= agents_desc[i + 1]["created_at"]
+
+        # Verify the order is actually reversed
+        assert agents_asc[0]["id"] == agents_desc[-1]["id"]
+        assert agents_asc[-1]["id"] == agents_desc[0]["id"]
+
+    @pytest.mark.asyncio
     # #
     async def test_agents_list_consistency(self, isolated_client, test_data_factory):
         """

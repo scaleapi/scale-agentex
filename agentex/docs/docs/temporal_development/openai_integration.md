@@ -3,7 +3,7 @@
 Learn how to integrate the OpenAI Agents SDK with Temporal workflows in Agentex to build durable, production-grade agents.
 
 !!! note "Temporal Required"
-    The OpenAI Agents SDK integration is **only available with Temporal ACP**. This integration uses Temporal's durability features to make OpenAI SDK calls reliable.
+    This guide is **only** for using the OpenAI Agents SDK integration with **Temporal ACP**. This integration uses Temporal's durability features to make OpenAI SDK calls reliable. The OpenAI Agents SDK __is__ compatible with all other ACP types as well, but without durable execution.
 
 ## Why OpenAI SDK + Temporal?
 

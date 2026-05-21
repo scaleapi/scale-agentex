@@ -35,25 +35,22 @@ class StatesUseCase:
         page_number: int,
         task_id: str | None = None,
         agent_id: str | None = None,
+        order_by: str | None = None,
+        order_direction: str = "desc",
     ) -> list[StateEntity]:
-        if task_id and agent_id:
-            return await self.task_state_repository.list(
-                filters={"task_id": task_id, "agent_id": agent_id},
-                limit=limit,
-                page_number=page_number,
-            )
-        elif task_id:
-            return await self.task_state_repository.list(
-                filters={"task_id": task_id}, limit=limit, page_number=page_number
-            )
-        elif agent_id:
-            return await self.task_state_repository.list(
-                filters={"agent_id": agent_id}, limit=limit, page_number=page_number
-            )
-        else:
-            return await self.task_state_repository.list(
-                limit=limit, page_number=page_number
-            )
+        filters = {}
+        if task_id:
+            filters["task_id"] = task_id
+        if agent_id:
+            filters["agent_id"] = agent_id
+
+        return await self.task_state_repository.list(
+            filters=filters if filters else None,
+            limit=limit,
+            page_number=page_number,
+            order_by=order_by,
+            order_direction=order_direction,
+        )
 
     async def update(self, id: str, task_id: str, state: dict[str, Any]) -> StateEntity:
         task_state = await self.task_state_repository.get(id=id)

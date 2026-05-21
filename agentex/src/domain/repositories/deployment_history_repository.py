@@ -5,7 +5,10 @@ from fastapi import Depends
 from sqlalchemy import desc, select
 from src.adapters.crud_store.adapter_postgres import PostgresCRUDRepository
 from src.adapters.orm import AgentORM, DeploymentHistoryORM
-from src.config.dependencies import DDatabaseAsyncReadWriteSessionMaker
+from src.config.dependencies import (
+    DDatabaseAsyncReadOnlySessionMaker,
+    DDatabaseAsyncReadWriteSessionMaker,
+)
 from src.domain.entities.agents import AgentEntity
 from src.domain.entities.deployment_history import DeploymentHistoryEntity
 from src.utils.ids import orm_id
@@ -22,9 +25,11 @@ class DeploymentHistoryRepository(
     def __init__(
         self,
         async_read_write_session_maker: DDatabaseAsyncReadWriteSessionMaker,
+        async_read_only_session_maker: DDatabaseAsyncReadOnlySessionMaker,
     ):
         super().__init__(
             async_read_write_session_maker,
+            async_read_only_session_maker,
             DeploymentHistoryORM,
             DeploymentHistoryEntity,
         )
@@ -34,6 +39,8 @@ class DeploymentHistoryRepository(
         filters: dict | None = None,
         limit: int | None = None,
         page_number: int | None = None,
+        order_by: str | None = None,
+        order_direction: str | None = None,
     ) -> list[DeploymentHistoryEntity]:
         """
         List deployment history with optional filtering.
@@ -41,6 +48,8 @@ class DeploymentHistoryRepository(
         Args:
             filters: Dictionary of filters to apply. Currently supports:
                     - agent_id: Filter agents by agent ID using the join table
+            order_by: Field to order by
+            order_direction: Order direction (asc or desc)
         """
         query = select(DeploymentHistoryORM)
         if filters and "agent_id" in filters:
@@ -48,7 +57,12 @@ class DeploymentHistoryRepository(
                 AgentORM, AgentORM.id == DeploymentHistoryORM.agent_id
             ).where(AgentORM.id == filters["agent_id"])
         return await super().list(
-            filters=filters, query=query, limit=limit, page_number=page_number
+            filters=filters,
+            query=query,
+            limit=limit,
+            page_number=page_number,
+            order_by=order_by,
+            order_direction=order_direction,
         )
 
     async def get_last_deployment_for_agent(
@@ -71,7 +85,7 @@ class DeploymentHistoryRepository(
             .order_by(desc(DeploymentHistoryORM.deployment_timestamp))
             .limit(1)
         )
-        async with self.start_async_db_session(allow_writes=True) as session:
+        async with self.start_async_db_session(allow_writes=False) as session:
             result = await session.execute(query)
             orm_results = result.scalars().all()
             return (

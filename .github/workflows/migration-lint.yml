@@ -1,0 +1,50 @@
+name: Migration Safety Lint
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'agentex/database/migrations/alembic/versions/**.py'
+      - 'agentex/scripts/ci_tools/migration_lint.py'
+      - '.github/workflows/migration-lint.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  lint-migrations:
+    name: 'Lint changed migrations'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Need history back to the merge base so --base works.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Detect migration-unsafe-ack label
+        id: ack_label
+        env:
+          LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          if echo "$LABELS" | grep -q '"migration-unsafe-ack"'; then
+            echo "ack=1" >> "$GITHUB_OUTPUT"
+            echo "::notice title=migration-unsafe-ack label present::Linter will not fail the build, findings will surface as warnings only."
+          else
+            echo "ack=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Lint migrations
+        env:
+          MIGRATION_UNSAFE_ACK: ${{ steps.ack_label.outputs.ack }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          # Make the merge base reachable so --base diff works.
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          python3 agentex/scripts/ci_tools/migration_lint.py --base "origin/$BASE_REF"

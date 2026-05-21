@@ -12,7 +12,7 @@
     "ruff.fixAll": true,
     "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
     "python.terminal.activateEnvironment": true,
-    "python.languageServer": "Pylance",
+    "python.languageServer": "None",
     "editor.defaultFormatter": "esbenp.prettier-vscode",
     "editor.formatOnSave": true,
     "editor.codeActionsOnSave": {

@@ -35,6 +35,9 @@ dump.rdb
 # Temp dirs
 tmp
 
+# Dev script logs
+.dev-logs/
+
 ### PYTHON
 
 # Byte-compiled / optimized / DLL files
