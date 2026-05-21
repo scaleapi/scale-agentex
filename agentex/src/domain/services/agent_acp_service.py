@@ -264,7 +264,6 @@ class AgentACPService(TaskMessageMixin):
         state = self._request.state
         return build_delegation_headers(
             getattr(state, "principal_context", None),
-            agent.id,
             dict(self._request.headers),
             agent_identity=getattr(state, "agent_identity", None),
         )

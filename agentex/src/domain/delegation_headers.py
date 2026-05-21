@@ -1,8 +1,13 @@
-"""Outbound runtime-delegation headers for ACP calls to agent pods."""
+"""
+Outbound runtime-delegation headers for ACP calls to agent pods (v1).
+
+Forwards the validated user API key on a dedicated header so agents can call
+downstream APIs as the user. Agent identity for SGP will eventually be a claim
+on a pod-minted delegation token (OBO), not a separate header from agentex.
+"""
 
 from typing import Any
 
-HEADER_ACTING_AS_AGENT = "x-acting-as-agent"
 HEADER_ACTING_USER_API_KEY = "x-acting-user-api-key"
 HEADER_SELECTED_ACCOUNT_ID = "x-selected-account-id"
 HEADER_USER_API_KEY = "x-api-key"
@@ -16,7 +21,6 @@ def _normalize_headers(headers: dict[str, str] | None) -> dict[str, str]:
 
 def build_delegation_headers(
     principal: Any,
-    agent_id: str,
     inbound_headers: dict[str, str] | None,
     *,
     agent_identity: str | None = None,
@@ -38,7 +42,6 @@ def build_delegation_headers(
 
     result = {
         HEADER_ACTING_USER_API_KEY: api_key,
-        HEADER_ACTING_AS_AGENT: agent_id,
     }
 
     account_id = normalized.get(HEADER_SELECTED_ACCOUNT_ID)

@@ -288,8 +288,8 @@ class TestAgentACPService:
 
         http_headers = mock_http_gateway.async_call.call_args[1]["default_headers"]
         assert http_headers["x-acting-user-api-key"] == "user-delegation-key"
-        assert http_headers["x-acting-as-agent"] == sample_agent.id
         assert http_headers["x-selected-account-id"] == "acct-1"
+        assert "x-acting-as-agent" not in http_headers
         assert "x-api-key" not in http_headers
 
     async def test_send_event_delegation_not_raw_api_key_passthrough(
