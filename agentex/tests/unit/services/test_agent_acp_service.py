@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -45,12 +45,25 @@ def agent_api_key_repository(postgres_session_maker):
 
 
 @pytest.fixture
-def agent_acp_service(mock_http_gateway, agent_repository, agent_api_key_repository):
+def mock_request():
+    request = MagicMock()
+    request.state = MagicMock()
+    request.state.principal_context = None
+    request.state.agent_identity = None
+    request.headers = {}
+    return request
+
+
+@pytest.fixture
+def agent_acp_service(
+    mock_http_gateway, agent_repository, agent_api_key_repository, mock_request
+):
     """Create AgentACPService instance with mocked HTTP gateway and real repository"""
     return AgentACPService(
         http_gateway=mock_http_gateway,
         agent_repository=agent_repository,
         agent_api_key_repository=agent_api_key_repository,
+        request=mock_request,
     )
 
 
@@ -222,6 +235,58 @@ class TestAgentACPService:
         payload = call_args[1]["payload"]
         assert payload["method"] == "message/send"
         assert payload["params"]["stream"] is False
+
+    async def test_send_message_includes_delegation_headers(
+        self,
+        agent_acp_service,
+        mock_http_gateway,
+        mock_request,
+        agent_repository,
+        sample_agent,
+        sample_task,
+        sample_text_content,
+    ):
+        """User principals get delegation headers on outbound ACP calls."""
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        mock_request.state.principal_context = type(
+            "Principal",
+            (),
+            {"user_id": "user-1", "account_id": "acct-1"},
+        )()
+        mock_request.state.agent_identity = None
+        mock_request.headers = {
+            "x-api-key": "user-delegation-key",
+            "x-selected-account-id": "acct-1",
+        }
+
+        from src.domain.entities.agents_rpc import AgentRPCMethod
+
+        expected_request_id = f"{AgentRPCMethod.MESSAGE_SEND}-{sample_task.id}"
+        mock_http_gateway.async_call.return_value = {
+            "jsonrpc": "2.0",
+            "result": {
+                "type": "text",
+                "author": "agent",
+                "style": "static",
+                "format": "plain",
+                "content": "ok",
+                "attachments": None,
+            },
+            "id": expected_request_id,
+        }
+
+        await agent_acp_service.send_message(
+            agent=sample_agent,
+            task=sample_task,
+            content=sample_text_content,
+            acp_url="http://test-acp.example.com",
+        )
+
+        http_headers = mock_http_gateway.async_call.call_args[1]["default_headers"]
+        assert http_headers["x-acting-user-api-key"] == "user-delegation-key"
+        assert http_headers["x-acting-as-agent"] == sample_agent.id
+        assert http_headers["x-selected-account-id"] == "acct-1"
 
     async def test_send_message_success_data(
         self,
