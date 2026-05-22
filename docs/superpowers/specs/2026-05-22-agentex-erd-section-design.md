@@ -63,10 +63,21 @@ These are the bullets that drop into the "All-up SGP Service Catalog" section of
 >
 > **`agentex-auth`.** Existing AgentEx-owned authentication and authorization service; exposes `/v1/authn` and `/v1/authz/{grant,revoke,check,search}`. All AgentEx services authenticate and authorize requests against `agentex-auth` directly. Outbound: `sgp-identity` (delegated identity verification). Future direction may fold `agentex-auth` into `sgp-identity` as part of OneAuth — see Open Questions.
 
+## Boundaries with adjacent services
+
+### `agentex-control-plane` ↔ `sgp-agent-deploy`
+
+The two services own complementary halves of the agent deployment lifecycle, with no direct API call between them.
+
+- **`sgp-agent-deploy`** owns the build and deployment pipeline: building container images (`agentex_cloud_builds`), creating and updating the Flux CRDs / Kubernetes manifests that schedule agent pods (`agentex_cloud_deploys`), and the permissions governing who can deploy what (`agentex_permissions`). Its scope ends when the agent pod is running.
+- **`agentex-control-plane`** owns the runtime side: agent self-registration on pod startup, the in-cluster registry of what version is currently registered and serving (`deployments`, `deployment_history`), and runtime credentials (`agent_api_keys`). Its scope begins when the agent pod registers itself.
+
+The handoff is implicit: once `sgp-agent-deploy` reaches a "pod running" state via Flux, the agent process inside the pod calls `agentex-control-plane` to register itself. The two services never call each other directly. Permissions are similarly scope-divided: `agentex_permissions` in `sgp-agent-deploy` is a deploy-time concern (who can deploy what), distinct from `agent_api_keys` in `agentex-control-plane`, which is the runtime credential an agent uses to call back into the platform once it is running.
+
+## Forward-looking notes
+
+- **Checkpoint lift-out.** `agentex-state` bundles LangGraph checkpoints with general K/V state. If non-LangGraph graph runtimes are adopted, or if checkpoint write rate comes to dominate the service, consider lifting checkpoints into a separate `agentex-checkpoints` service. Revisit periodically as LangGraph usage grows.
+
 ## Open Questions
 
 1. **`agentex-auth` ↔ `sgp-identity` fold-in via OneAuth.** Today `agentex-auth` is a standalone AgentEx service that AgentEx services call directly and which delegates identity verification to `sgp-identity` underneath. The OneAuth direction may consolidate `agentex-auth` into `sgp-identity`, but the decision is not committed. Affects whether AgentEx services continue calling `agentex-auth` long-term or eventually call `sgp-identity` directly, and whether `agentex-auth`'s authz-policy responsibilities move with it.
-
-2. **Checkpoint lift-out trigger.** `agentex-state` bundles LangGraph checkpoints with general K/V state. Lift `checkpoints` into a separate `agentex-checkpoints` service if (a) non-LangGraph graph runtimes are adopted, or (b) checkpoint write rate dominates the service. Specific criteria to be sharpened in a follow-up.
-
-3. **`agentex-control-plane` ↔ `sgp-agent-deploy` boundary.** `sgp-agent-deploy` (per parent ERD) owns `agentex_cloud_builds`, `agentex_cloud_deploys`, `agentex_permissions` — the build/push pipeline. `agentex-control-plane` owns `deployments` + `deployment_history` — the in-cluster runtime registry of "what version is currently registered and serving." Pin the handoff between "build artifact ready" and "live agent registered and serving" so the contract is unambiguous.
