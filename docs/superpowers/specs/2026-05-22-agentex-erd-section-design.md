@@ -61,7 +61,7 @@ These are the bullets that drop into the "All-up SGP Service Catalog" section of
 >
 > **`agentex-control-plane`.** The residual AgentEx backend after the three extractions above. Owns `agents`, `deployments`, `deployment_history`, `schedules`, `agent_api_keys`; agent registration and lifecycle, deployment registration (the in-cluster registry of what version is currently registered and serving — distinct from `sgp-agent-deploy`'s build/push pipeline), cron schedules, and agent-scoped API key management. Hosts the AgentEx Temporal worker on a single task queue. Other AgentEx services do not use Temporal post-decomposition; if a future service needs it, it gets its own service-specific queue. Python service. Outbound: `agentex-auth` (authn / authz).
 >
-> **`agentex-auth`.** Existing AgentEx-owned authentication and authorization service; exposes `/v1/authn` and `/v1/authz/{grant,revoke,check,search}`. All AgentEx services authenticate and authorize requests against `agentex-auth` directly. Outbound: `sgp-identity` (delegated identity verification). Future direction may fold `agentex-auth` into `sgp-identity` as part of OneAuth — see Open Questions.
+> **`agentex-auth`.** Existing AgentEx-owned authentication and authorization service; exposes `/v1/authn` and `/v1/authz/{grant,revoke,check,search}`. All AgentEx services authenticate and authorize requests against `agentex-auth` directly. Outbound: `sgp-identity` (delegated identity verification).
 
 ## Boundaries with adjacent services
 
@@ -77,7 +77,4 @@ The handoff is implicit: once `sgp-agent-deploy` reaches a "pod running" state v
 ## Forward-looking notes
 
 - **Checkpoint lift-out.** `agentex-state` bundles LangGraph checkpoints with general K/V state. If non-LangGraph graph runtimes are adopted, or if checkpoint write rate comes to dominate the service, consider lifting checkpoints into a separate `agentex-checkpoints` service. Revisit periodically as LangGraph usage grows.
-
-## Open Questions
-
-1. **`agentex-auth` ↔ `sgp-identity` fold-in via OneAuth.** Today `agentex-auth` is a standalone AgentEx service that AgentEx services call directly and which delegates identity verification to `sgp-identity` underneath. The OneAuth direction may consolidate `agentex-auth` into `sgp-identity`, but the decision is not committed. Affects whether AgentEx services continue calling `agentex-auth` long-term or eventually call `sgp-identity` directly, and whether `agentex-auth`'s authz-policy responsibilities move with it.
+- **`agentex-auth` ↔ `sgp-identity` via OneAuth.** `agentex-auth` remains a standalone AgentEx service in the near term; the OneAuth direction may eventually consolidate it into `sgp-identity`. If that happens, AgentEx services would call `sgp-identity` directly, and `agentex-auth`'s authz-policy responsibilities would need to move with it. Revisit when OneAuth direction firms up.
