@@ -13,6 +13,7 @@ from src.domain.repositories.event_repository import DEventRepository
 from src.domain.repositories.task_repository import DTaskRepository
 from src.domain.repositories.task_state_repository import DTaskStateRepository
 from src.domain.services.authorization_service import DAuthorizationService
+from src.utils.agent_api_key_authorization import _check_api_key_or_collapse_to_404
 
 
 async def _get_parent_task_id(
@@ -54,6 +55,12 @@ def DAuthorizedId(
             await authorization.check(
                 resource=AgentexResource.task(task_id),
                 operation=operation,
+            )
+        elif resource_type == AgentexResourceType.api_key:
+            # Collapse api_key denials to 404 so name/id probes can't
+            # distinguish "present in another tenant" from "absent".
+            await _check_api_key_or_collapse_to_404(
+                authorization, resource_id, operation
             )
         else:
             # For direct resources, check directly
