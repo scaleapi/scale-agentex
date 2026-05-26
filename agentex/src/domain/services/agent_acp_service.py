@@ -3,10 +3,11 @@ from collections.abc import AsyncIterator
 from typing import Annotated, Any
 from uuid import uuid4
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from pydantic import BaseModel
 
 from src.adapters.http.adapter_httpx import DHttpxGateway
+from src.domain.delegation_headers import build_delegation_headers
 from src.domain.entities.agents import AgentEntity
 from src.domain.entities.agents_rpc import (
     AgentRPCMethod,
@@ -72,7 +73,10 @@ BLOCKED_HEADERS = frozenset(
     {
         "authorization",
         "cookie",
+        "x-api-key",
         "x-agent-api-key",
+        "x-acting-user-api-key",
+        "x-acting-as-agent",
     }
 )
 
@@ -84,7 +88,7 @@ def filter_request_headers(headers: dict[str, str] | None) -> dict[str, str]:
     Security filtering rules:
     1. Allow only x-* prefixed headers (allowlist approach)
     2. Block hop-by-hop headers (connection, keep-alive, etc.)
-    3. Block sensitive headers (authorization, cookie, x-agent-api-key)
+    3. Block sensitive headers (credentials, acting delegation, x-agent-api-key)
 
     Args:
         headers: Raw request headers from client
@@ -118,10 +122,12 @@ class AgentACPService(TaskMessageMixin):
         agent_repository: DAgentRepository,
         agent_api_key_repository: DAgentAPIKeyRepository,
         http_gateway: DHttpxGateway,
+        request: Request,
     ):
         self._http_gateway = http_gateway
         self._agent_repository = agent_repository
         self._agent_api_key_repository = agent_api_key_repository
+        self._request = request
 
     def _parse_task_message(self, result: dict[str, Any]) -> TaskMessageContentEntity:
         """Parse a result dict into a TaskMessage"""
@@ -254,26 +260,40 @@ class AgentACPService(TaskMessageMixin):
             logger.error(f"Error calling ACP server at {url}: {e}")
             raise e
 
-    async def get_headers(self, agent: AgentEntity) -> dict[str, str]:
-        auth_headers = await self.get_agent_auth_headers(agent) or {}
+    def get_delegation_headers(self, agent: AgentEntity) -> dict[str, str]:
+        state = self._request.state
+        return build_delegation_headers(
+            getattr(state, "principal_context", None),
+            dict(self._request.headers),
+            agent_identity=getattr(state, "agent_identity", None),
+        )
 
-        request_id = ctx_var_request_id.get(uuid4().hex)
-        headers = {**auth_headers, "x-request-id": request_id}
-        return headers
-
-    async def get_agent_auth_headers(
+    async def get_headers(
         self,
         agent: AgentEntity,
-    ) -> dict[str, str] | None:
-        """
-        Get the authentication headers for an agent by its ID.
-        """
+        request_headers: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        filtered_request_headers = filter_request_headers(request_headers)
+        delegation_headers = self.get_delegation_headers(agent)
+        auth_headers = await self.get_agent_auth_headers(agent)
+        request_id = ctx_var_request_id.get(uuid4().hex)
+
+        # Later keys win. Client passthrough and delegation first; agent auth last.
+        return {
+            **filtered_request_headers,
+            **delegation_headers,
+            **auth_headers,
+            "x-request-id": request_id,
+        }
+
+    async def get_agent_auth_headers(self, agent: AgentEntity) -> dict[str, str]:
+        """Authentication headers the agent pod uses to call back into agentex."""
         api_key = await self._agent_api_key_repository.get_internal_api_key_by_agent_id(
             agent_id=agent.id
         )
         if api_key:
             return {"x-agent-api-key": api_key.api_key}
-        return None
+        return {}
 
     async def create_task(
         self,
@@ -398,11 +418,6 @@ class AgentACPService(TaskMessageMixin):
     ) -> dict[str, Any]:
         """Send an event to a running task"""
 
-        # Filter request headers for security (only safe x-* headers)
-        filtered_headers = filter_request_headers(request_headers)
-
-        # Don't include headers in params body - let SDK extract from HTTP headers
-        # This ensures single source of truth and avoids duplication
         params = SendEventParams(
             agent=agent,
             task=task,
@@ -410,12 +425,7 @@ class AgentACPService(TaskMessageMixin):
             request=None,
         )
 
-        # Build HTTP headers: start with filtered request headers, then overlay auth headers
-        # Auth headers are added last to ensure they cannot be overwritten
-        # SDK will extract these headers and populate params.request at agent side
-        headers = filtered_headers.copy()
-        auth_headers = await self.get_headers(agent)
-        headers.update(auth_headers)
+        headers = await self.get_headers(agent, request_headers)
 
         return await self._call_jsonrpc(
             url=acp_url,

@@ -151,6 +151,29 @@ class RedisStreamRepository(StreamRepository):
         except Exception as e:
             logger.error(f"Failed to send metrics: {e}", exc_info=e)
 
+    async def get_stream_tail_id(self, topic: str) -> str:
+        """
+        Snapshot the current tail of a Redis stream as a concrete entry ID.
+
+        The Redis "$" sentinel re-resolves to the stream tail on every XREAD
+        call, so any entry XADD'd in the gap between BLOCKing calls is
+        unreachable. Callers should resolve a stable cursor once on entry
+        via this helper and advance it forward from yielded entry IDs.
+
+        Returns the entry ID of the most recent stream entry, or "0-0" if
+        the stream is empty or does not exist — in which case the next
+        XREAD will return the first XADD whenever it lands.
+        """
+        try:
+            entries = await self.redis.xrevrange(name=topic, count=1)
+        except Exception as e:
+            logger.error(f"Error snapshotting tail of Redis stream {topic}: {e}")
+            raise
+        if not entries:
+            return "0-0"
+        tail_id, _fields = entries[0]
+        return tail_id.decode("utf-8") if isinstance(tail_id, bytes) else tail_id
+
     async def read_messages(
         self, topic: str, last_id: str, timeout_ms: int = 2000, count: int = 10
     ) -> AsyncIterator[tuple[str, dict[str, Any]]]:

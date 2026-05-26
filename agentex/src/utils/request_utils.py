@@ -7,10 +7,12 @@ from starlette.datastructures import FormData, Headers, UploadFile
 
 REQUEST_KEY_REGEXP_BLACKLIST = [
     r"api_key",
+    r"api-key",
     r"password",
     r"secret",
     r"token",
     r"authorization",
+    r"acting-user",
 ]
 
 

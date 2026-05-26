@@ -142,10 +142,12 @@ async def verify_auth_gateway(
         method = request.method
 
         logger.info(
-            "[authentication_middleware] Request authenticated successfully for %s %s with principal %s",
+            "[authentication_middleware] Request authenticated successfully for %s %s "
+            "(user_id=%s, account_id=%s)",
             method,
             route_path,
-            principal_context,
+            getattr(principal_context, "user_id", None),
+            getattr(principal_context, "account_id", None),
         )
         return None  # Authentication successful
     except Exception as exc:

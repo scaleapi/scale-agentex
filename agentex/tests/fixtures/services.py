@@ -3,7 +3,7 @@ Shared service fixtures for both unit and integration tests.
 Provides factory functions and specific fixtures for creating services with test repositories.
 """
 
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 import pytest
 
@@ -19,7 +19,22 @@ def create_task_message_service(task_message_repository):
     return TaskMessageService(task_message_repository=task_message_repository)
 
 
-def create_agent_acp_service(http_gateway, agent_repository, agent_api_key_repository):
+def create_mock_request():
+    """Minimal FastAPI Request stand-in for AgentACPService tests."""
+    request = MagicMock()
+    request.state = MagicMock()
+    request.state.principal_context = None
+    request.state.agent_identity = None
+    request.headers = {}
+    return request
+
+
+def create_agent_acp_service(
+    http_gateway,
+    agent_repository,
+    agent_api_key_repository,
+    request=None,
+):
     """Factory function to create AgentACPService with given HTTP gateway"""
     from src.domain.services.agent_acp_service import AgentACPService
 
@@ -27,6 +42,7 @@ def create_agent_acp_service(http_gateway, agent_repository, agent_api_key_repos
         http_gateway=http_gateway,
         agent_repository=agent_repository,
         agent_api_key_repository=agent_api_key_repository,
+        request=request or create_mock_request(),
     )
 
 

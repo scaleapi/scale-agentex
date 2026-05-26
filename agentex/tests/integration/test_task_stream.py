@@ -462,6 +462,103 @@ class TestTaskEventStream:
 
         print("✅ Stream connected event includes correct task ID")
 
+    async def test_event_xadded_in_inter_cycle_gap_is_delivered(
+        self, test_agent_and_task, streams_use_case
+    ):
+        """
+        Deterministic symptom-level regression for the SSE drop bug.
+
+        With last_id="$" the consumer re-resolves its cursor to the
+        current stream tail on every XREAD call. Any entry XADD'd in
+        the ~100ms gap between an empty BLOCK return and the next
+        BLOCK call lands with an ID equal to the new "$" — XREAD waits
+        for entries strictly greater, so the entry is unreachable from
+        this consumer forever.
+
+        Reproduction strategy (no race-window timing):
+        - Patch repo.read_messages so it signals an asyncio.Event the
+          instant the first BLOCK returns empty. asyncio scheduling
+          guarantees the consumer is then about to enter its 100ms
+          inter-cycle asyncio.sleep before yielding control back here.
+        - XADD a uniquely-tagged event synchronously on that signal.
+          asyncio yields control to the consumer's sleep, so the XADD
+          lands inside the gap.
+        - Wait for the second BLOCK cycle to elapse, then assert the
+          reader received the sentinel.
+
+        Under the bug this test fails (the XADD is lost); under the fix
+        it passes (snapshotted cursor advances past our entry).
+        """
+        from src.utils.stream_topics import get_task_event_stream_topic
+
+        _agent, task = test_agent_and_task
+        stream_topic = get_task_event_stream_topic(task_id=task.id)
+        repo = streams_use_case.stream_repository
+
+        first_empty_block_returned = asyncio.Event()
+        call_count = 0
+        original_read_messages = repo.read_messages
+
+        async def patched_read_messages(topic, last_id, timeout_ms=2000, count=10):
+            nonlocal call_count
+            call_count += 1
+            my_idx = call_count
+            yielded = False
+            async for item in original_read_messages(
+                topic, last_id, timeout_ms=timeout_ms, count=count
+            ):
+                yielded = True
+                yield item
+            if my_idx == 1 and not yielded:
+                first_empty_block_returned.set()
+
+        repo.read_messages = patched_read_messages
+
+        sentinel = "inter-cycle-gap-sentinel"
+        received_sentinels: list[str] = []
+
+        async def reader():
+            try:
+                async for event_data in streams_use_case.stream_task_events(
+                    task_id=task.id
+                ):
+                    if event_data.startswith("data: "):
+                        payload_str = event_data[6:].strip()
+                        if sentinel in payload_str:
+                            received_sentinels.append(payload_str)
+            except asyncio.CancelledError:
+                pass
+
+        reader_task = asyncio.create_task(reader())
+
+        try:
+            await asyncio.wait_for(first_empty_block_returned.wait(), timeout=5)
+
+            # XADD synchronously inside the gap. Under the bug, the next
+            # xread re-resolves "$" to this entry's ID and waits for
+            # strictly greater entries — losing this one forever.
+            await repo.send_data(
+                stream_topic,
+                {"type": "error", "message": sentinel},
+            )
+
+            # Allow the second BLOCK cycle to complete.
+            await asyncio.sleep(2.5)
+
+            assert received_sentinels, (
+                "Sentinel XADDed during the inter-cycle gap was not "
+                "delivered to the consumer. The stream cursor has "
+                "regressed to literal '$' — fast-emitting agents will "
+                "silently drop deltas."
+            )
+        finally:
+            reader_task.cancel()
+            try:
+                await reader_task
+            except asyncio.CancelledError:
+                pass
+            repo.read_messages = original_read_messages
+
     async def test_stream_sends_keepalive_pings_during_idle_periods(
         self, test_agent_and_task, streams_use_case
     ):
