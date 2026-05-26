@@ -42,3 +42,17 @@ class TaskCleanupResultEntity(BaseModel):
     messages_deleted: int
     task_states_deleted: int
     events_deleted: int
+
+
+class TaskExportToUrlResultEntity(BaseModel):
+    """
+    Per-invocation result of an export-to-URL operation. Returned to callers
+    of POST /tasks/{id}/export so they can verify what was uploaded without
+    having to re-download and parse.
+    """
+
+    task_id: str
+    upload_url: str
+    uploaded_bytes: int
+    messages_count: int
+    task_states_count: int

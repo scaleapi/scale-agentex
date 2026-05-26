@@ -3565,6 +3565,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - task-retention
+      summary: Export Task To Url
+      description: 'Build the task snapshot and PUT it to a caller-supplied presigned
+        URL.
+
+
+        Use this when the snapshot is too large for a JSON response body (long
+
+        conversations, deep reasoning content, many attachments). The upload URL
+
+        must be https and resolve to a public address — see SSRF guard.'
+      operationId: export_task_to_url_tasks__task_id__export_post
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Task Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExportTaskToUrlRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportTaskToUrlResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /tasks/{task_id}/clean:
     post:
       tags:
@@ -3611,6 +3651,13 @@ paths:
       - task-retention
       summary: Rehydrate Task
       description: 'Restore content-bearing rows from a snapshot.
+
+
+        Two modes:
+
+        - Inline: caller provides messages and task_states in the request body.
+
+        - URL: caller provides snapshot_url; Agentex downloads and parses it.
 
 
         Refuses if the task isn''t currently in a cleaned state, or if any supplied
@@ -4726,6 +4773,45 @@ components:
       - task_id
       title: ExportTaskResponse
       description: Wire format mirrors the entity directly — schema parity is intentional.
+    ExportTaskToUrlRequest:
+      properties:
+        upload_url:
+          type: string
+          maxLength: 2083
+          minLength: 1
+          format: uri
+          title: Upload Url
+          description: Presigned PUT URL where Agentex will upload the task snapshot
+            as JSON. Must be https; must resolve to a public address.
+      type: object
+      required:
+      - upload_url
+      title: ExportTaskToUrlRequest
+    ExportTaskToUrlResponse:
+      properties:
+        task_id:
+          type: string
+          title: Task Id
+        upload_url:
+          type: string
+          title: Upload Url
+        uploaded_bytes:
+          type: integer
+          title: Uploaded Bytes
+        messages_count:
+          type: integer
+          title: Messages Count
+        task_states_count:
+          type: integer
+          title: Task States Count
+      type: object
+      required:
+      - task_id
+      - upload_url
+      - uploaded_bytes
+      - messages_count
+      - task_states_count
+      title: ExportTaskToUrlResponse
     FileAttachment:
       properties:
         file_id:
@@ -5221,11 +5307,31 @@ components:
             $ref: '#/components/schemas/StateEntity'
           type: array
           title: Task States
+        snapshot_url:
+          anyOf:
+          - type: string
+            maxLength: 2083
+            minLength: 1
+            format: uri
+          - type: 'null'
+          title: Snapshot Url
+          description: Presigned GET URL whose body is a JSON-encoded TaskSnapshotEntity.
+            Must be https; must resolve to a public address. When set, messages/task_states
+            must be empty.
       type: object
       required:
       - task_id
       title: RehydrateTaskRequest
-      description: Same shape as the export response — round-trip parity.
+      description: 'Either provide inline content (messages + task_states) or a snapshot_url
+
+        pointing at a presigned JSON download. Mixing both is rejected.
+
+
+        The inline form is the canonical shape used by export''s GET response, so
+
+        snapshot → clean → rehydrate round-trips cleanly without serialization
+
+        changes.'
     ScheduleActionInfo:
       properties:
         workflow_name:

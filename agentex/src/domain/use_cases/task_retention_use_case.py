@@ -4,6 +4,7 @@ from fastapi import Depends
 
 from src.domain.entities.task_retention import (
     TaskCleanupResultEntity,
+    TaskExportToUrlResultEntity,
     TaskSnapshotEntity,
 )
 from src.domain.services.task_retention_service import DTaskRetentionService
@@ -21,6 +22,16 @@ class TaskRetentionUseCase:
 
     async def export_task(self, task_id: str) -> TaskSnapshotEntity:
         return await self.retention_service.export_task(task_id)
+
+    async def export_task_to_url(
+        self,
+        task_id: str,
+        upload_url: str,
+    ) -> TaskExportToUrlResultEntity:
+        return await self.retention_service.export_task_to_url(
+            task_id=task_id,
+            upload_url=upload_url,
+        )
 
     async def clean_task(
         self,
@@ -42,11 +53,13 @@ class TaskRetentionUseCase:
     async def rehydrate_task(
         self,
         task_id: str,
-        snapshot: TaskSnapshotEntity,
+        snapshot: TaskSnapshotEntity | None = None,
+        snapshot_url: str | None = None,
     ) -> None:
         await self.retention_service.rehydrate_task(
             task_id=task_id,
             snapshot=snapshot,
+            snapshot_url=snapshot_url,
         )
 
 

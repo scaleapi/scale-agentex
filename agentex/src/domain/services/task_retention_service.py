@@ -18,12 +18,14 @@ from typing import Annotated
 from fastapi import Depends
 
 from src.adapters.temporal.adapter_temporal import DTemporalAdapter
+from src.config.dependencies import DHttpxClient
 from src.domain.entities.task_retention import (
     TaskCleanupResultEntity,
+    TaskExportToUrlResultEntity,
     TaskSnapshotEntity,
 )
 from src.domain.entities.tasks import TaskStatus
-from src.domain.exceptions import ClientError
+from src.domain.exceptions import ClientError, ServiceError
 from src.domain.repositories.agent_task_tracker_repository import (
     DAgentTaskTrackerRepository,
 )
@@ -33,6 +35,7 @@ from src.domain.repositories.task_repository import DTaskRepository
 from src.domain.repositories.task_state_repository import DTaskStateRepository
 from src.domain.services.task_message_service import DTaskMessageService
 from src.utils.logging import make_logger
+from src.utils.url_validation import validate_external_url
 
 logger = make_logger(__name__)
 
@@ -52,6 +55,7 @@ class TaskRetentionService:
         event_repository: DEventRepository,
         agent_task_tracker_repository: DAgentTaskTrackerRepository,
         temporal_adapter: DTemporalAdapter,
+        httpx_client: DHttpxClient,
     ):
         self.task_repository = task_repository
         self.task_message_service = task_message_service
@@ -60,6 +64,7 @@ class TaskRetentionService:
         self.event_repository = event_repository
         self.agent_task_tracker_repository = agent_task_tracker_repository
         self.temporal_adapter = temporal_adapter
+        self.httpx_client = httpx_client
 
     async def export_task(self, task_id: str) -> TaskSnapshotEntity:
         """
@@ -113,6 +118,58 @@ class TaskRetentionService:
             messages=messages,
             task_states=task_states,
         )
+
+    async def export_task_to_url(
+        self,
+        task_id: str,
+        upload_url: str,
+    ) -> TaskExportToUrlResultEntity:
+        """
+        Build the snapshot the same way export_task does, then PUT the JSON
+        body to a caller-supplied presigned URL. Useful when the snapshot is
+        too large to fit comfortably in a JSON response body.
+
+        The upload URL is validated against the SSRF guard before any request
+        is issued (see utils.url_validation).
+        """
+        await validate_external_url(upload_url)
+
+        snapshot = await self.export_task(task_id)
+        body = snapshot.model_dump_json().encode("utf-8")
+
+        try:
+            response = await self.httpx_client.put(
+                upload_url,
+                content=body,
+                headers={"Content-Type": "application/json"},
+            )
+            response.raise_for_status()
+        except Exception as e:
+            raise ServiceError(
+                message=f"Failed to upload snapshot for task {task_id}",
+                detail=str(e),
+            ) from e
+
+        result = TaskExportToUrlResultEntity(
+            task_id=task_id,
+            upload_url=upload_url,
+            uploaded_bytes=len(body),
+            messages_count=len(snapshot.messages),
+            task_states_count=len(snapshot.task_states),
+        )
+
+        logger.info(
+            "task_export_to_url_completed",
+            extra={
+                "task_id": result.task_id,
+                "upload_url": result.upload_url,
+                "uploaded_bytes": result.uploaded_bytes,
+                "messages_count": result.messages_count,
+                "task_states_count": result.task_states_count,
+            },
+        )
+
+        return result
 
     async def clean_task(
         self,
@@ -233,18 +290,27 @@ class TaskRetentionService:
     async def rehydrate_task(
         self,
         task_id: str,
-        snapshot: TaskSnapshotEntity,
+        snapshot: TaskSnapshotEntity | None = None,
+        snapshot_url: str | None = None,
     ) -> None:
         """
         Restore content-bearing rows from a snapshot. Inverse of clean_task.
 
+        Source of the snapshot is mutually exclusive: caller supplies either an
+        inline `snapshot` or a `snapshot_url` (presigned GET URL whose body is
+        the JSON-encoded snapshot). URL form is for cases where the snapshot is
+        larger than is comfortable as a JSON request body.
+
         Refuses (raises) if:
+        - both/neither of snapshot and snapshot_url are provided.
         - snapshot.task_id != task_id (catch payload misuse).
         - cleaned_at IS NULL on the task (would clobber live data).
         - any supplied message.id or task_state.id already exists in Mongo
           (collision → DuplicateItemError surfaced from the adapter).
 
         Order of operations (mirror of clean_task):
+        0. If snapshot_url is set, validate (SSRF) and download → parse to
+           TaskSnapshotEntity.
         1. Reload task; verify cleaned_at IS NOT NULL.
         2. Mongo: batch insert messages with caller-supplied IDs.
         3. Mongo: batch insert task_states with caller-supplied IDs.
@@ -262,6 +328,26 @@ class TaskRetentionService:
         at write time and store them alongside content in their external system.
         This is a contract on the caller's integration, not enforced by Agentex.
         """
+        if (snapshot is None) == (snapshot_url is None):
+            raise ClientError("Provide exactly one of snapshot or snapshot_url.")
+
+        if snapshot_url is not None:
+            await validate_external_url(snapshot_url)
+            try:
+                response = await self.httpx_client.get(snapshot_url)
+                response.raise_for_status()
+            except Exception as e:
+                raise ServiceError(
+                    message=f"Failed to download snapshot from URL for task {task_id}",
+                    detail=str(e),
+                ) from e
+            try:
+                snapshot = TaskSnapshotEntity.model_validate_json(response.content)
+            except Exception as e:
+                raise ClientError(
+                    f"Downloaded snapshot is not a valid TaskSnapshotEntity: {e}"
+                ) from e
+
         # Validate payload before touching anything.
         if snapshot.task_id != task_id:
             raise ClientError(

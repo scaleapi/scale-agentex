@@ -486,6 +486,7 @@ async def isolated_integration_app(
                 "agent_task_tracker_repository"
             ],
             temporal_adapter=isolated_temporal_adapter,
+            httpx_client=isolated_api_key_http_client,
         )
         return TaskRetentionUseCase(retention_service=retention_service)
 

@@ -7,6 +7,8 @@ surfaces (Mongo messages, Mongo task_states, Postgres events, Postgres
 agent_task_tracker cursor, Postgres tasks.cleaned_at).
 """
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 import pytest_asyncio
 from src.domain.entities.agents import ACPType, AgentEntity
@@ -390,3 +392,149 @@ class TestTaskRetentionAPIIntegration:
 
         assert response.status_code == 400
         assert "duplicate id" in response.json()["message"].lower()
+
+    # ---- export-to-url ----
+
+    async def test_export_to_url_uploads_snapshot_via_put(
+        self,
+        isolated_client,
+        isolated_repositories,
+        isolated_api_key_http_client,
+        stale_task,
+        test_agent,
+    ):
+        """
+        Verify the snapshot we'd return inline is what gets PUT to the upload URL.
+        The mock httpx client captures the request body so we can diff.
+        """
+        await self._seed_messages(isolated_repositories, stale_task.id, 2)
+        await self._seed_state(isolated_repositories, stale_task.id, test_agent.id)
+        expected = (await isolated_client.get(f"/tasks/{stale_task.id}/export")).json()
+
+        put_response = MagicMock()
+        put_response.raise_for_status = MagicMock()
+        isolated_api_key_http_client.put = AsyncMock(return_value=put_response)
+
+        response = await isolated_client.post(
+            f"/tasks/{stale_task.id}/export",
+            json={"upload_url": "https://example.com/upload"},
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["task_id"] == stale_task.id
+        assert result["messages_count"] == 2
+        assert result["task_states_count"] == 1
+        assert result["uploaded_bytes"] > 0
+
+        # Verify the PUT body matches the inline export byte-for-byte.
+        put_kwargs = isolated_api_key_http_client.put.call_args.kwargs
+        import json as _json
+
+        uploaded = _json.loads(put_kwargs["content"].decode("utf-8"))
+        assert uploaded == expected
+
+    async def test_export_to_url_rejects_non_https_scheme(
+        self, isolated_client, stale_task
+    ):
+        response = await isolated_client.post(
+            f"/tasks/{stale_task.id}/export",
+            json={"upload_url": "http://example.com/upload"},
+        )
+        # Pydantic-level URL validation may reject before reaching the SSRF guard.
+        assert response.status_code in (400, 422)
+
+    async def test_export_to_url_rejects_private_address(
+        self, isolated_client, stale_task
+    ):
+        # 127.0.0.1 resolves to itself; the SSRF guard's is_loopback check fires.
+        response = await isolated_client.post(
+            f"/tasks/{stale_task.id}/export",
+            json={"upload_url": "https://127.0.0.1/upload"},
+        )
+        assert response.status_code == 400
+        assert "non-public" in response.json()["message"]
+
+    # ---- rehydrate-from-url ----
+
+    async def test_rehydrate_from_url_downloads_and_restores(
+        self,
+        isolated_client,
+        isolated_repositories,
+        isolated_api_key_http_client,
+        stale_task,
+        test_agent,
+    ):
+        # Seed, snapshot, clean — then rehydrate via URL whose body is the snapshot.
+        await self._seed_messages(isolated_repositories, stale_task.id, 2)
+        await self._seed_state(isolated_repositories, stale_task.id, test_agent.id)
+        snapshot = (await isolated_client.get(f"/tasks/{stale_task.id}/export")).json()
+        await isolated_client.post(
+            f"/tasks/{stale_task.id}/clean", json={"force": True}
+        )
+
+        import json as _json
+
+        get_response = MagicMock()
+        get_response.raise_for_status = MagicMock()
+        get_response.content = _json.dumps(snapshot).encode("utf-8")
+        isolated_api_key_http_client.get = AsyncMock(return_value=get_response)
+
+        response = await isolated_client.post(
+            f"/tasks/{stale_task.id}/rehydrate",
+            json={
+                "task_id": stale_task.id,
+                "snapshot_url": "https://example.com/snapshot.json",
+            },
+        )
+        assert response.status_code == 204
+
+        # Round-trip identity holds: re-exported snapshot matches the original.
+        restored = (await isolated_client.get(f"/tasks/{stale_task.id}/export")).json()
+        assert restored == snapshot
+
+    async def test_rehydrate_rejects_both_inline_and_url(
+        self, isolated_client, stale_task
+    ):
+        await isolated_client.post(
+            f"/tasks/{stale_task.id}/clean", json={"force": True}
+        )
+
+        response = await isolated_client.post(
+            f"/tasks/{stale_task.id}/rehydrate",
+            json={
+                "task_id": stale_task.id,
+                "messages": [
+                    {
+                        "id": orm_id(),
+                        "task_id": stale_task.id,
+                        "content": {
+                            "type": "text",
+                            "author": "user",
+                            "content": "x",
+                        },
+                        "streaming_status": "DONE",
+                    }
+                ],
+                "snapshot_url": "https://example.com/snapshot.json",
+            },
+        )
+        # Pydantic validator rejects with 422 before reaching the handler.
+        assert response.status_code == 422
+
+    async def test_rehydrate_url_rejects_private_address(
+        self, isolated_client, stale_task
+    ):
+        await isolated_client.post(
+            f"/tasks/{stale_task.id}/clean", json={"force": True}
+        )
+
+        response = await isolated_client.post(
+            f"/tasks/{stale_task.id}/rehydrate",
+            json={
+                "task_id": stale_task.id,
+                "snapshot_url": "https://127.0.0.1/snapshot.json",
+            },
+        )
+        assert response.status_code == 400
+        assert "non-public" in response.json()["message"]
