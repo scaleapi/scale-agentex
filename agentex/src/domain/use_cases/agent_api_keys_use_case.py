@@ -13,6 +13,7 @@ from src.adapters.authentication.adapter_agentex_authn_proxy import (
 )
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.api.middleware_utils import get_request_headers_to_forward, verify_auth_gateway
+from src.api.schemas.authorization_types import AgentexResource
 from src.config.dependencies import (
     DHttpxClient,
     resolve_environment_variable_dependency,
@@ -27,6 +28,8 @@ from src.domain.repositories.agent_api_key_repository import (
     DAgentAPIKeyRepository,
 )
 from src.domain.repositories.agent_repository import DAgentRepository
+from src.domain.services.authorization_service import DAuthorizationService
+from src.utils.feature_flags import DFeatureFlagProvider, FeatureFlagName
 from src.utils.ids import orm_id
 from src.utils.logging import make_logger
 
@@ -39,10 +42,14 @@ class AgentAPIKeysUseCase:
         agent_api_key_repository: DAgentAPIKeyRepository,
         agent_repository: DAgentRepository,
         client: DHttpxClient,
+        authorization_service: DAuthorizationService,
+        feature_flags: DFeatureFlagProvider,
     ):
         self.agent_api_key_repo = agent_api_key_repository
         self.agent_repo = agent_repository
         self.client = client
+        self.authorization_service = authorization_service
+        self.feature_flags = feature_flags
         self.auth_gateway_enabled = bool(
             resolve_environment_variable_dependency(EnvVarKeys.AGENTEX_AUTH_URL)
         )
@@ -76,6 +83,7 @@ class AgentAPIKeysUseCase:
         agent_id: str,
         api_key_type: AgentAPIKeyType,
         api_key: str,
+        account_id: str | None = None,
     ) -> AgentAPIKeyEntity:
         agent = await self.get_agent(agent_id=agent_id)
         if not agent:
@@ -83,16 +91,106 @@ class AgentAPIKeysUseCase:
                 status_code=404,
                 detail=f"Agent ID {agent_id} not found.",
             )
+
+        principal_context = self.authorization_service.principal_context
+        creator_user_id = getattr(principal_context, "user_id", None)
+        creator_service_account_id = getattr(
+            principal_context, "service_account_id", None
+        )
+
+        api_key_id = orm_id()
+        zedtoken: str | None = None
+
+        if self.feature_flags.is_enabled(
+            FeatureFlagName.FGAC_AGENT_API_KEYS_DUAL_WRITE, account_id
+        ):
+            zedtoken = await self._register_api_key_in_spark_authz(
+                api_key_id=api_key_id,
+                agent_id=agent.id,
+                account_id=account_id,
+                creator_user_id=creator_user_id,
+                creator_service_account_id=creator_service_account_id,
+            )
+
         # TODO: encrypt API key before storing it
         # Initialize a new agent api_key
         agent_api_key = AgentAPIKeyEntity(
-            id=orm_id(),
+            id=api_key_id,
             name=name,
             agent_id=agent.id,
             api_key_type=api_key_type,
             api_key=api_key,
+            creator_user_id=creator_user_id,
+            creator_service_account_id=creator_service_account_id,
+            spark_authz_zedtoken=zedtoken,
         )
         return await self.agent_api_key_repo.create(item=agent_api_key)
+
+    async def _register_api_key_in_spark_authz(
+        self,
+        *,
+        api_key_id: str,
+        agent_id: str,
+        account_id: str | None,
+        creator_user_id: str | None,
+        creator_service_account_id: str | None,
+    ) -> str | None:
+        """Register a new agent_api_key in Spark AuthZ with creator as owner.
+
+        Called BEFORE the Postgres write — a failure raises and prevents the
+        row from being persisted, so there is no compensating action to take.
+        Mirrors the dual-write pattern used for tasks (AGX1-274).
+
+        The current ``Provider.spark`` adapter returns ``{}`` from ``grant``;
+        no ZedToken is surfaced today, so we always return ``None`` for the
+        new-write-isolation column. A follow-up will plumb the token through
+        once the adapter exposes it.
+
+        Note: the ``agent_api_key`` SpiceDB schema has a ``parent_agent``
+        relation that read/delete permissions cascade through. The current
+        ``AuthorizationGateway.grant`` signature does not accept a parent
+        relation — the agentex-auth adapter is expected to set
+        ``parent_agent`` based on the resource shape. This is the same
+        gap Asher's task PR has and is tracked as a follow-up.
+        """
+        if creator_user_id is None and creator_service_account_id is None:
+            logger.warning(
+                "Skipping Spark AuthZ api_key registration: no creator resolvable",
+                extra={
+                    "api_key_id": api_key_id,
+                    "agent_id": agent_id,
+                    "account_id": account_id,
+                },
+            )
+            return None
+        await self.authorization_service.grant(
+            resource=AgentexResource.api_key(api_key_id),
+        )
+        return None
+
+    async def _deregister_api_key_from_spark_authz(
+        self, *, api_key_id: str, account_id: str | None
+    ) -> None:
+        """Best-effort revocation of an api_key's Spark AuthZ tuples on delete.
+
+        Only invoked when the FGAC_AGENT_API_KEYS_DUAL_WRITE flag is enabled
+        for the caller's account. Failures are logged but do not block the
+        delete.
+        """
+        if not self.feature_flags.is_enabled(
+            FeatureFlagName.FGAC_AGENT_API_KEYS_DUAL_WRITE, account_id
+        ):
+            return
+        try:
+            await self.authorization_service.revoke(
+                resource=AgentexResource.api_key(api_key_id),
+            )
+        except Exception:
+            logger.warning(
+                "Spark AuthZ revoke failed for agent_api_key",
+                extra={"api_key_id": api_key_id, "account_id": account_id},
+                exc_info=True,
+            )
 
     async def get(self, id: str) -> AgentAPIKeyEntity:
         return await self.agent_api_key_repo.get(id=id)
@@ -123,22 +221,47 @@ class AgentAPIKeysUseCase:
             agent_id=agent_id, api_key=api_key
         )
 
-    async def delete(self, id: str) -> None:
-        return await self.agent_api_key_repo.delete(id=id)
+    async def delete(self, id: str, account_id: str | None = None) -> None:
+        await self.agent_api_key_repo.delete(id=id)
+        await self._deregister_api_key_from_spark_authz(
+            api_key_id=id, account_id=account_id
+        )
 
     async def delete_by_agent_id_and_key_name(
-        self, agent_id: str, key_name: str, api_key_type: AgentAPIKeyType
+        self,
+        agent_id: str,
+        key_name: str,
+        api_key_type: AgentAPIKeyType,
+        account_id: str | None = None,
     ) -> None:
-        return await self.agent_api_key_repo.delete_by_agent_id_and_key_name(
+        existing = await self.agent_api_key_repo.get_by_agent_id_and_name(
+            agent_id=agent_id, name=key_name, api_key_type=api_key_type
+        )
+        await self.agent_api_key_repo.delete_by_agent_id_and_key_name(
             agent_id=agent_id, key_name=key_name, api_key_type=api_key_type
         )
+        if existing is not None:
+            await self._deregister_api_key_from_spark_authz(
+                api_key_id=existing.id, account_id=account_id
+            )
 
     async def delete_by_agent_name_and_key_name(
-        self, agent_name: str, key_name: str, api_key_type: AgentAPIKeyType
+        self,
+        agent_name: str,
+        key_name: str,
+        api_key_type: AgentAPIKeyType,
+        account_id: str | None = None,
     ) -> None:
-        return await self.agent_api_key_repo.delete_by_agent_name_and_key_name(
+        existing = await self.agent_api_key_repo.get_by_agent_name_and_key_name(
+            agent_name, key_name, api_key_type
+        )
+        await self.agent_api_key_repo.delete_by_agent_name_and_key_name(
             agent_name=agent_name, key_name=key_name, api_key_type=api_key_type
         )
+        if existing is not None:
+            await self._deregister_api_key_from_spark_authz(
+                api_key_id=existing.id, account_id=account_id
+            )
 
     async def list(
         self, agent_id: str, limit: int, page_number: int
