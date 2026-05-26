@@ -9,6 +9,7 @@ class AuthorizedOperationType(StrEnum):
     update = "update"
     delete = "delete"
     execute = "execute"
+    cancel = "cancel"
 
 
 class AgentexResourceType(StrEnum):
