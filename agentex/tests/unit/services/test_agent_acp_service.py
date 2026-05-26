@@ -359,7 +359,7 @@ class TestAgentACPService:
         )()
         mock_request.state.agent_identity = None
         mock_request.headers = {
-            "cookie": session_cookie,
+            "cookie": f"{session_cookie}; csrf=must-not-forward",
             "x-selected-account-id": "acct-1",
         }
 
@@ -388,6 +388,7 @@ class TestAgentACPService:
 
         http_headers = mock_http_gateway.async_call.call_args[1]["default_headers"]
         assert http_headers["x-acting-user-cookie"] == session_cookie
+        assert "csrf" not in http_headers["x-acting-user-cookie"]
         assert http_headers["x-selected-account-id"] == "acct-1"
         assert "cookie" not in http_headers
         assert "x-acting-user-api-key" not in http_headers
