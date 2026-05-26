@@ -298,6 +298,20 @@ class MongoDBCRUDRepository(CRUDRepository[T], Generic[T]):
                 message="One or more items have duplicate id values. IDs must be unique.",
                 detail=str(e),
             ) from e
+        except pymongo.errors.BulkWriteError as e:
+            # insert_many raises BulkWriteError wrapping individual write errors.
+            # Translate to DuplicateItemError only when all underlying errors are
+            # duplicate-key (11000); otherwise surface as a generic ServiceError
+            # so callers can distinguish "fix your IDs" from "transient failure".
+            write_errors = e.details.get("writeErrors", []) if e.details else []
+            if write_errors and all(we.get("code") == 11000 for we in write_errors):
+                raise DuplicateItemError(
+                    message="One or more items have duplicate id values. IDs must be unique.",
+                    detail=str(e),
+                ) from e
+            raise ServiceError(
+                message=f"Failed to batch create items in MongoDB: {e}", detail=str(e)
+            ) from e
         except ClientError:
             raise
         except Exception as e:

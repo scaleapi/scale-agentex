@@ -27,6 +27,7 @@ from src.api.routes import (
     schedules,
     spans,
     states,
+    task_retention,
     tasks,
 )
 from src.config import dependencies
@@ -187,6 +188,7 @@ fastapi_app.include_router(deployment_history.router)
 fastapi_app.include_router(deployments.router)
 fastapi_app.include_router(schedules.router)
 fastapi_app.include_router(checkpoints.router)
+fastapi_app.include_router(task_retention.router)
 
 # Wrap FastAPI app with health check interceptor for sub-millisecond K8s probe responses.
 # This must be the outermost layer to bypass all middleware.
