@@ -2,17 +2,19 @@
 
 These cover the AGX1-272 dual-write path:
 
-- Flag OFF: ``authorization_service.grant`` is NOT called and the api_key is
-  written to the repository with creator metadata populated from the
-  principal context.
-- Flag ON: ``grant`` is called with ``AgentexResource.api_key(<id>)`` and the
-  row is written.
-- Delete deregisters: ``revoke`` is called when ``delete`` runs under the flag.
-- Spark failure prevents row: when ``grant`` raises, the api_key is NOT
-  persisted.
-- Revoke failure does not block delete: when ``revoke`` raises, the DB
-  delete still completes and the failure is logged.
-- No creator → no grant: if neither user_id nor service_account_id is
+- Flag OFF: ``authorization_service.register_resource`` is NOT called and
+  the api_key is written to the repository with creator metadata populated
+  from the principal context.
+- Flag ON: ``register_resource`` is called with ``AgentexResource.api_key(<id>)``
+  and ``parent=AgentexResource.agent(<agent_id>)`` (the parent edge is
+  load-bearing for cascade), and the row is written.
+- Delete deregisters: ``deregister_resource`` is called when ``delete`` runs
+  under the flag.
+- Spark failure prevents row: when ``register_resource`` raises, the api_key
+  is NOT persisted.
+- Deregister failure does not block delete: when ``deregister_resource``
+  raises, the DB delete still completes and the failure is logged.
+- No creator → no register: if neither user_id nor service_account_id is
   resolvable, the dual-write is a no-op (logged) and the row still lands.
 
 The tests intentionally mock the repository, authorization service, agent
@@ -62,8 +64,8 @@ def _build_use_case(
     *,
     flag_accounts: str,
     principal: SimpleNamespace | None,
-    grant: AsyncMock | None = None,
-    revoke: AsyncMock | None = None,
+    register_resource: AsyncMock | None = None,
+    deregister_resource: AsyncMock | None = None,
     agent: AgentEntity | None = None,
     create_raises: Exception | None = None,
     monkeypatch: pytest.MonkeyPatch,
@@ -94,8 +96,12 @@ def _build_use_case(
 
     authorization_service = Mock()
     authorization_service.principal_context = principal
-    authorization_service.grant = grant or AsyncMock(return_value={})
-    authorization_service.revoke = revoke or AsyncMock(return_value=None)
+    authorization_service.register_resource = register_resource or AsyncMock(
+        return_value=None
+    )
+    authorization_service.deregister_resource = deregister_resource or AsyncMock(
+        return_value=None
+    )
 
     feature_flags = FeatureFlagProvider()
 
@@ -115,8 +121,8 @@ def _build_use_case(
     return (
         use_case,
         agent_api_key_repository,
-        authorization_service.grant,
-        authorization_service.revoke,
+        authorization_service.register_resource,
+        authorization_service.deregister_resource,
     )
 
 
@@ -126,7 +132,7 @@ async def test_create_api_key_skips_grant_when_flag_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     agent = _agent()
-    use_case, repo, grant, _ = _build_use_case(
+    use_case, repo, register, _ = _build_use_case(
         flag_accounts="",
         principal=_principal(user_id="user-A", account_id="acct-1"),
         agent=agent,
@@ -141,7 +147,7 @@ async def test_create_api_key_skips_grant_when_flag_off(
         account_id="acct-1",
     )
 
-    grant.assert_not_called()
+    register.assert_not_called()
     repo.create.assert_awaited_once()
     assert api_key.creator_user_id == "user-A"
     assert api_key.creator_service_account_id is None
@@ -154,7 +160,7 @@ async def test_create_api_key_calls_grant_when_flag_on(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     agent = _agent()
-    use_case, repo, grant, _ = _build_use_case(
+    use_case, repo, register, _ = _build_use_case(
         flag_accounts="acct-1",
         principal=_principal(user_id="user-A", account_id="acct-1"),
         agent=agent,
@@ -169,13 +175,19 @@ async def test_create_api_key_calls_grant_when_flag_on(
         account_id="acct-1",
     )
 
-    grant.assert_awaited_once()
-    granted_resource: AgentexResource = grant.await_args.kwargs["resource"]
-    assert granted_resource.type == AgentexResourceType.api_key
-    assert granted_resource.selector == api_key.id
+    register.assert_awaited_once()
+    registered_resource: AgentexResource = register.await_args.kwargs["resource"]
+    assert registered_resource.type == AgentexResourceType.api_key
+    assert registered_resource.selector == api_key.id
+    # parent_agent edge is load-bearing — without it the SpiceDB cascade
+    # `read = ... & parent_agent->read & ...` fails closed for every reader.
+    registered_parent: AgentexResource = register.await_args.kwargs["parent"]
+    assert registered_parent is not None
+    assert registered_parent.type == AgentexResourceType.agent
+    assert registered_parent.selector == agent.id
     repo.create.assert_awaited_once()
     assert api_key.creator_user_id == "user-A"
-    # Provider.spark.grant returns {} today — no zedtoken yet.
+    # Provider.spark.register_resource returns None today — no zedtoken yet.
     assert api_key.spark_authz_zedtoken is None
 
 
@@ -184,7 +196,7 @@ async def test_create_api_key_calls_grant_when_flag_on(
 async def test_delete_api_key_calls_revoke_when_flag_on(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    use_case, repo, _, revoke = _build_use_case(
+    use_case, repo, _, deregister = _build_use_case(
         flag_accounts="acct-1",
         principal=_principal(user_id="user-A", account_id="acct-1"),
         monkeypatch=monkeypatch,
@@ -194,10 +206,10 @@ async def test_delete_api_key_calls_revoke_when_flag_on(
     await use_case.delete(id=api_key_id, account_id="acct-1")
 
     repo.delete.assert_awaited_once_with(id=api_key_id)
-    revoke.assert_awaited_once()
-    revoked_resource: AgentexResource = revoke.await_args.kwargs["resource"]
-    assert revoked_resource.type == AgentexResourceType.api_key
-    assert revoked_resource.selector == api_key_id
+    deregister.assert_awaited_once()
+    deregistered_resource: AgentexResource = deregister.await_args.kwargs["resource"]
+    assert deregistered_resource.type == AgentexResourceType.api_key
+    assert deregistered_resource.selector == api_key_id
 
 
 @pytest.mark.asyncio
@@ -205,7 +217,7 @@ async def test_delete_api_key_calls_revoke_when_flag_on(
 async def test_delete_api_key_skips_revoke_when_flag_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    use_case, repo, _, revoke = _build_use_case(
+    use_case, repo, _, deregister = _build_use_case(
         flag_accounts="",
         principal=_principal(user_id="user-A", account_id="acct-1"),
         monkeypatch=monkeypatch,
@@ -214,7 +226,7 @@ async def test_delete_api_key_skips_revoke_when_flag_off(
     await use_case.delete(id=orm_id(), account_id="acct-1")
 
     repo.delete.assert_awaited_once()
-    revoke.assert_not_called()
+    deregister.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -222,12 +234,12 @@ async def test_delete_api_key_skips_revoke_when_flag_off(
 async def test_create_api_key_grant_failure_prevents_db_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    grant = AsyncMock(side_effect=RuntimeError("spark unavailable"))
+    register_resource = AsyncMock(side_effect=RuntimeError("spark unavailable"))
     agent = _agent()
     use_case, repo, _, _ = _build_use_case(
         flag_accounts="acct-1",
         principal=_principal(user_id="user-A", account_id="acct-1"),
-        grant=grant,
+        register_resource=register_resource,
         agent=agent,
         monkeypatch=monkeypatch,
     )
@@ -249,11 +261,11 @@ async def test_create_api_key_grant_failure_prevents_db_row(
 async def test_delete_api_key_revoke_failure_does_not_block_delete(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    revoke = AsyncMock(side_effect=RuntimeError("spark unavailable"))
-    use_case, repo, _, revoke_ref = _build_use_case(
+    deregister = AsyncMock(side_effect=RuntimeError("spark unavailable"))
+    use_case, repo, _, deregister_ref = _build_use_case(
         flag_accounts="acct-1",
         principal=_principal(user_id="user-A", account_id="acct-1"),
-        revoke=revoke,
+        deregister_resource=deregister,
         monkeypatch=monkeypatch,
     )
 
@@ -261,7 +273,7 @@ async def test_delete_api_key_revoke_failure_does_not_block_delete(
     await use_case.delete(id=orm_id(), account_id="acct-1")
 
     repo.delete.assert_awaited_once()
-    revoke_ref.assert_awaited_once()
+    deregister_ref.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -272,7 +284,7 @@ async def test_create_api_key_skips_grant_when_no_creator_resolvable(
     """If neither user_id nor service_account_id is available on the principal,
     the dual-write is a no-op (logged) and the row still lands without a tuple."""
     agent = _agent()
-    use_case, repo, grant, _ = _build_use_case(
+    use_case, repo, register, _ = _build_use_case(
         flag_accounts="acct-1",
         principal=_principal(user_id=None, account_id="acct-1"),
         agent=agent,
@@ -287,7 +299,7 @@ async def test_create_api_key_skips_grant_when_no_creator_resolvable(
         account_id="acct-1",
     )
 
-    grant.assert_not_called()
+    register.assert_not_called()
     repo.create.assert_awaited_once()
     assert api_key.creator_user_id is None
     assert api_key.creator_service_account_id is None
@@ -300,7 +312,7 @@ async def test_delete_by_agent_id_and_key_name_revokes_existing(
 ) -> None:
     agent = _agent()
     existing_id = orm_id()
-    use_case, repo, _, revoke = _build_use_case(
+    use_case, repo, _, deregister = _build_use_case(
         flag_accounts="acct-1",
         principal=_principal(user_id="user-A", account_id="acct-1"),
         agent=agent,
@@ -324,6 +336,6 @@ async def test_delete_by_agent_id_and_key_name_revokes_existing(
     )
 
     repo.delete_by_agent_id_and_key_name.assert_awaited_once()
-    revoke.assert_awaited_once()
-    revoked_resource: AgentexResource = revoke.await_args.kwargs["resource"]
-    assert revoked_resource.selector == existing_id
+    deregister.assert_awaited_once()
+    deregistered_resource: AgentexResource = deregister.await_args.kwargs["resource"]
+    assert deregistered_resource.selector == existing_id
