@@ -135,23 +135,24 @@ class AgentAPIKeysUseCase:
         creator_user_id: str | None,
         creator_service_account_id: str | None,
     ) -> str | None:
-        """Register a new agent_api_key in Spark AuthZ with creator as owner.
+        """Register a new agent_api_key in Spark AuthZ with creator as owner
+        AND the parent_agent edge to the owning agent.
 
         Called BEFORE the Postgres write — a failure raises and prevents the
-        row from being persisted, so there is no compensating action to take.
-        Mirrors the dual-write pattern used for tasks (AGX1-274).
+        row from being persisted, so there is no compensating action.
 
-        The current ``Provider.spark`` adapter returns ``{}`` from ``grant``;
-        no ZedToken is surfaced today, so we always return ``None`` for the
-        new-write-isolation column. A follow-up will plumb the token through
+        The ``agent_api_key`` SpiceDB schema has a ``parent_agent`` relation
+        that read/update/delete permissions cascade through:
+        ``permission read = internal_effective_viewer & parent_agent->read &
+        internal_tenant_gate``. We MUST write the parent edge here or every
+        downstream permission check fails closed. ``register_resource``
+        (added in agentex-auth and sgp-authz 0.7.0) writes both the owner
+        edge and the parent edge atomically in one round-trip.
+
+        The current ``register_resource`` returns ``None``; no ZedToken is
+        surfaced today, so we always return ``None`` for the
+        spark_authz_zedtoken column. A follow-up will plumb the token through
         once the adapter exposes it.
-
-        Note: the ``agent_api_key`` SpiceDB schema has a ``parent_agent``
-        relation that read/delete permissions cascade through. The current
-        ``AuthorizationGateway.grant`` signature does not accept a parent
-        relation — the agentex-auth adapter is expected to set
-        ``parent_agent`` based on the resource shape. This is the same
-        gap Asher's task PR has and is tracked as a follow-up.
         """
         if creator_user_id is None and creator_service_account_id is None:
             logger.warning(
@@ -163,16 +164,36 @@ class AgentAPIKeysUseCase:
                 },
             )
             return None
-        await self.authorization_service.grant(
-            resource=AgentexResource.api_key(api_key_id),
-        )
+        try:
+            await self.authorization_service.register_resource(
+                resource=AgentexResource.api_key(api_key_id),
+                parent=AgentexResource.agent(agent_id),
+            )
+        except Exception as exc:
+            # Fail closed: log + re-raise so the Postgres row is never written.
+            # The dual-write contract requires the SpiceDB tuple (and parent
+            # edge) to exist before the row does.
+            logger.exception(
+                "Spark AuthZ register_resource failed for agent_api_key; aborting create",
+                extra={
+                    "api_key_id": api_key_id,
+                    "agent_id": agent_id,
+                    "account_id": account_id,
+                    "creator_user_id": creator_user_id,
+                    "creator_service_account_id": creator_service_account_id,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise
         return None
 
     async def _deregister_api_key_from_spark_authz(
         self, *, api_key_id: str, account_id: str | None
     ) -> None:
-        """Best-effort revocation of an api_key's Spark AuthZ tuples on delete.
+        """Best-effort deregistration of an api_key's Spark AuthZ tuples on delete.
 
+        ``deregister_resource`` removes the resource and all of its
+        relationships (owner, parent_agent, any grantees) atomically.
         Only invoked when the FGAC_AGENT_API_KEYS_DUAL_WRITE flag is enabled
         for the caller's account. Failures are logged but do not block the
         delete.
@@ -182,13 +203,18 @@ class AgentAPIKeysUseCase:
         ):
             return
         try:
-            await self.authorization_service.revoke(
+            await self.authorization_service.deregister_resource(
                 resource=AgentexResource.api_key(api_key_id),
             )
-        except Exception:
+        except Exception as exc:
+            # Best-effort: log and continue. Postgres row already deleted.
             logger.warning(
-                "Spark AuthZ revoke failed for agent_api_key",
-                extra={"api_key_id": api_key_id, "account_id": account_id},
+                "Spark AuthZ deregister failed for agent_api_key; tuple may be orphaned",
+                extra={
+                    "api_key_id": api_key_id,
+                    "account_id": account_id,
+                    "error_type": type(exc).__name__,
+                },
                 exc_info=True,
             )
 
