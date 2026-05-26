@@ -338,6 +338,60 @@ class TestAgentACPService:
         assert http_headers["x-trace-id"] == "trace-456"
         assert "x-api-key" not in http_headers
 
+    async def test_send_message_includes_cookie_delegation_headers(
+        self,
+        agent_acp_service,
+        mock_http_gateway,
+        mock_request,
+        agent_repository,
+        sample_agent,
+        sample_task,
+        sample_text_content,
+    ):
+        """JWT/session users get x-acting-user-cookie on outbound ACP calls."""
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        session_cookie = "_identityJwt=eyJhbGciOiJIUzI1NiJ9.test"
+        mock_request.state.principal_context = type(
+            "Principal",
+            (),
+            {"user_id": "user-1", "account_id": "acct-1"},
+        )()
+        mock_request.state.agent_identity = None
+        mock_request.headers = {
+            "cookie": session_cookie,
+            "x-selected-account-id": "acct-1",
+        }
+
+        from src.domain.entities.agents_rpc import AgentRPCMethod
+
+        expected_request_id = f"{AgentRPCMethod.MESSAGE_SEND}-{sample_task.id}"
+        mock_http_gateway.async_call.return_value = {
+            "jsonrpc": "2.0",
+            "result": {
+                "type": "text",
+                "author": "agent",
+                "style": "static",
+                "format": "plain",
+                "content": "ok",
+                "attachments": None,
+            },
+            "id": expected_request_id,
+        }
+
+        await agent_acp_service.send_message(
+            agent=sample_agent,
+            task=sample_task,
+            content=sample_text_content,
+            acp_url="http://test-acp.example.com",
+        )
+
+        http_headers = mock_http_gateway.async_call.call_args[1]["default_headers"]
+        assert http_headers["x-acting-user-cookie"] == session_cookie
+        assert http_headers["x-selected-account-id"] == "acct-1"
+        assert "cookie" not in http_headers
+        assert "x-acting-user-api-key" not in http_headers
+
     async def test_get_headers_server_request_id_wins_over_passthrough(
         self,
         agent_acp_service,
@@ -1012,7 +1066,9 @@ class TestFilterRequestHeaders:
             {
                 "x-api-key": "user-key",
                 "x-acting-user-api-key": "spoof",
+                "x-acting-user-cookie": "spoof-cookie",
                 "x-acting-as-agent": "spoof-agent",
+                "x-selected-account-id": "spoof-acct",
                 "x-trace-id": "trace-1",
                 "authorization": "Bearer x",
             }
