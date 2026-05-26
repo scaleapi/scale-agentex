@@ -274,13 +274,41 @@ class TestTaskRetentionAPIIntegration:
 
     async def test_rehydrate_active_task_returns_400(self, isolated_client, stale_task):
         # Task was never cleaned; rehydrate must refuse.
-        payload = {"task_id": stale_task.id, "messages": [], "task_states": []}
+        # Payload needs a real message to pass the "exactly one source" validator.
+        payload = {
+            "task_id": stale_task.id,
+            "messages": [
+                {
+                    "id": orm_id(),
+                    "task_id": stale_task.id,
+                    "content": {"type": "text", "author": "user", "content": "x"},
+                    "streaming_status": "DONE",
+                }
+            ],
+            "task_states": [],
+        }
         response = await isolated_client.post(
             f"/tasks/{stale_task.id}/rehydrate", json=payload
         )
 
         assert response.status_code == 400
         assert "not in cleaned state" in response.json()["message"]
+
+    async def test_rehydrate_rejects_empty_payload(self, isolated_client, stale_task):
+        """
+        An empty rehydrate (no inline content, no snapshot_url) would silently
+        clear cleaned_at without restoring anything — caught by the validator.
+        """
+        await isolated_client.post(
+            f"/tasks/{stale_task.id}/clean", json={"force": True}
+        )
+
+        payload = {"task_id": stale_task.id, "messages": [], "task_states": []}
+        response = await isolated_client.post(
+            f"/tasks/{stale_task.id}/rehydrate", json=payload
+        )
+
+        assert response.status_code == 422
 
     async def test_rehydrate_task_id_mismatch_returns_400(
         self, isolated_client, stale_task
@@ -292,7 +320,14 @@ class TestTaskRetentionAPIIntegration:
 
         payload = {
             "task_id": "00000000-0000-0000-0000-000000000000",
-            "messages": [],
+            "messages": [
+                {
+                    "id": orm_id(),
+                    "task_id": "00000000-0000-0000-0000-000000000000",
+                    "content": {"type": "text", "author": "user", "content": "x"},
+                    "streaming_status": "DONE",
+                }
+            ],
             "task_states": [],
         }
         response = await isolated_client.post(

@@ -79,4 +79,12 @@ class RehydrateTaskRequest(BaseModel):
                 "Provide inline content (messages/task_states) OR snapshot_url, "
                 "not both."
             )
+        if not has_inline and not has_url:
+            # Empty payloads would silently clear cleaned_at without restoring
+            # anything — the task ends up active with no content, an
+            # inconsistent state. Force the caller to be explicit about source.
+            raise ValueError(
+                "Provide exactly one of: inline content (messages/task_states) "
+                "or snapshot_url."
+            )
         return self
