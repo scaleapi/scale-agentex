@@ -39,7 +39,7 @@ sequenceDiagram
 ```python
 from agentex.lib.sdk.fastacp.fastacp import FastACP
 from agentex.lib.types.fastacp import AsyncACPConfig
-from agentex.lib.types.acp import CreateTaskParams, SendEventParams, CancelTaskParams
+from agentex.protocol.acp import CreateTaskParams, SendEventParams, CancelTaskParams
 from agentex.lib import adk
 
 # Create Base Async ACP server
@@ -78,7 +78,7 @@ async def handle_task_cancel(params: CancelTaskParams) -> None:
 
 Used in `@acp.on_task_create` for task initialization:
 
-::: agentex.lib.types.acp.CreateTaskParams
+::: agentex.protocol.acp.CreateTaskParams
     options:
       heading_level: 4
       show_root_heading: false
@@ -88,7 +88,7 @@ Used in `@acp.on_task_create` for task initialization:
 
 Used in `@acp.on_task_event_send` for processing events:
 
-::: agentex.lib.types.acp.SendEventParams
+::: agentex.protocol.acp.SendEventParams
     options:
       heading_level: 4
       show_root_heading: false
@@ -98,7 +98,7 @@ Used in `@acp.on_task_event_send` for processing events:
 
 Used in `@acp.on_task_cancel` for cleanup:
 
-::: agentex.lib.types.acp.CancelTaskParams
+::: agentex.protocol.acp.CancelTaskParams
     options:
       heading_level: 4
       show_root_heading: false

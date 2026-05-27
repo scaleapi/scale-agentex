@@ -31,7 +31,7 @@ sequenceDiagram
 
 ```python
 from agentex.lib.sdk.fastacp.fastacp import FastACP
-from agentex.lib.types.acp import SendMessageParams
+from agentex.protocol.acp import SendMessageParams
 from agentex.types.text_content import TextContent
 from agentex.types.message_author import MessageAuthor
 
@@ -61,7 +61,7 @@ async def handle_message(params: SendMessageParams):
 
 The `@acp.on_message_send` handler receives:
 
-::: agentex.lib.types.acp.SendMessageParams
+::: agentex.protocol.acp.SendMessageParams
     options:
       heading_level: 4
       show_root_heading: false

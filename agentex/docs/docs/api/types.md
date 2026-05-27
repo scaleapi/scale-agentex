@@ -6,19 +6,19 @@ Comprehensive API reference for all core object types in Agentex. These types ar
 
 ### CreateTaskParams
 
-::: agentex.lib.types.acp.CreateTaskParams
+::: agentex.protocol.acp.CreateTaskParams
 
 ### SendMessageParams
 
-::: agentex.lib.types.acp.SendMessageParams
+::: agentex.protocol.acp.SendMessageParams
 
 ### SendEventParams
 
-::: agentex.lib.types.acp.SendEventParams
+::: agentex.protocol.acp.SendEventParams
 
 ### CancelTaskParams
 
-::: agentex.lib.types.acp.CancelTaskParams
+::: agentex.protocol.acp.CancelTaskParams
 
 ## Agent
 
