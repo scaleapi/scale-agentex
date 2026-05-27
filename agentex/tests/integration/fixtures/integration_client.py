@@ -383,6 +383,7 @@ async def isolated_integration_app(
     from src.domain.use_cases.messages_use_case import MessagesUseCase
     from src.domain.use_cases.spans_use_case import SpanUseCase
     from src.domain.use_cases.states_use_case import StatesUseCase
+    from src.domain.use_cases.task_retention_use_case import TaskRetentionUseCase
     from src.domain.use_cases.tasks_use_case import TasksUseCase
 
     # Create use case factory functions with isolated repositories
@@ -466,6 +467,29 @@ async def isolated_integration_app(
 
         return MessagesUseCase(task_message_service=task_message_service)
 
+    def create_task_retention_use_case():
+        """Create TaskRetentionUseCase wired to isolated repos for retention tests."""
+        from src.domain.services.task_message_service import TaskMessageService
+        from src.domain.services.task_retention_service import TaskRetentionService
+        from src.domain.use_cases.task_retention_use_case import TaskRetentionUseCase
+
+        task_message_service = TaskMessageService(
+            message_repository=isolated_repositories["task_message_repository"]
+        )
+        retention_service = TaskRetentionService(
+            task_repository=isolated_repositories["task_repository"],
+            task_message_service=task_message_service,
+            task_message_repository=isolated_repositories["task_message_repository"],
+            task_state_repository=isolated_repositories["task_state_repository"],
+            event_repository=isolated_repositories["event_repository"],
+            agent_task_tracker_repository=isolated_repositories[
+                "agent_task_tracker_repository"
+            ],
+            temporal_adapter=isolated_temporal_adapter,
+            httpx_client=isolated_api_key_http_client,
+        )
+        return TaskRetentionUseCase(retention_service=retention_service)
+
     # Import dependency types and repository classes that need to be overridden
     from src.adapters.streams.adapter_redis import RedisStreamRepository
     from src.config.dependencies import (
@@ -510,6 +534,7 @@ async def isolated_integration_app(
             AgentTaskTrackerUseCase: create_agent_task_tracker_use_case,
             TasksUseCase: create_tasks_use_case,
             MessagesUseCase: create_messages_use_case,
+            TaskRetentionUseCase: create_task_retention_use_case,
             AgentAPIKeysUseCase: create_agent_api_keys_use_case,
             DeploymentHistoryUseCase: create_deployment_history_use_case,
             # Repositories - these ensure consistent isolated instances

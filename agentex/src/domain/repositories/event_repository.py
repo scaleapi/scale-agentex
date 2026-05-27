@@ -1,7 +1,7 @@
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy import and_
+from sqlalchemy import and_, delete
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.future import select
 from src.adapters.crud_store.adapter_postgres import (
@@ -114,6 +114,17 @@ class EventRepository(PostgresCRUDRepository[EventORM, EventEntity]):
             event_orms = result.scalars().all()
 
             return [EventEntity.model_validate(orm) for orm in event_orms]
+
+    async def delete_by_task_id(self, task_id: str) -> int:
+        """Delete all events for a task. Idempotent. Returns rows deleted."""
+        async with (
+            self.start_async_db_session(True) as session,
+            async_sql_exception_handler(),
+        ):
+            stmt = delete(EventORM).where(EventORM.task_id == task_id)
+            result = await session.execute(stmt)
+            await session.commit()
+            return result.rowcount or 0
 
 
 DEventRepository = Annotated[EventRepository, Depends(EventRepository)]
