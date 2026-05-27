@@ -3,7 +3,9 @@ from typing import Annotated, Any
 
 from fastapi import Depends
 
+from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.adapters.streams.adapter_redis import DRedisStreamRepository
+from src.api.schemas.authorization_types import AgentexResource
 from src.domain.entities.agents import ACPType, AgentEntity
 from src.domain.entities.events import EventEntity
 from src.domain.entities.task_message_updates import TaskMessageUpdateEntity
@@ -14,6 +16,7 @@ from src.domain.repositories.event_repository import DEventRepository
 from src.domain.repositories.task_repository import DTaskRepository
 from src.domain.repositories.task_state_repository import DTaskStateRepository
 from src.domain.services.agent_acp_service import DAgentACPService
+from src.domain.services.authorization_service import DAuthorizationService
 from src.utils.ids import orm_id
 from src.utils.logging import make_logger
 from src.utils.stream_topics import get_task_event_stream_topic
@@ -33,12 +36,14 @@ class AgentTaskService:
         task_repository: DTaskRepository,
         event_repository: DEventRepository,
         stream_repository: DRedisStreamRepository,
+        authorization_service: DAuthorizationService,
     ):
         self.acp_client = acp_client
         self.task_state_repository = task_state_repository
         self.task_repository = task_repository
         self.event_repository = event_repository
         self.stream_repository = stream_repository
+        self.authorization_service = authorization_service
 
     async def create_task(
         self,
@@ -59,19 +64,33 @@ class AgentTaskService:
         Returns:
             Task containing the created task info
         """
-
-        task_entity = await self.task_repository.create(
-            agent_id=agent.id,
-            task=TaskEntity(
-                id=orm_id(),
-                name=task_name,
-                status=TaskStatus.RUNNING,
-                status_reason="Task created, forwarding to ACP server",
-                params=task_params,
-                task_metadata=task_metadata,
-            ),
+        # Register in the authorization service before persisting: a registration
+        # failure aborts the request with no orphaned row. If the persist fails
+        # after a successful registration, the compensating deregister_resource
+        # below prevents a dangling authorization entry. Both calls are no-ops
+        # when the authorization service is disabled for this account.
+        task_entity = TaskEntity(
+            id=orm_id(),
+            name=task_name,
+            status=TaskStatus.RUNNING,
+            status_reason="Task created, forwarding to ACP server",
+            params=task_params,
+            task_metadata=task_metadata,
         )
-        return task_entity
+        await self.authorization_service.register_resource(
+            AgentexResource.task(task_entity.id),
+            parent=AgentexResource.agent(agent.id),
+        )
+        try:
+            return await self.task_repository.create(
+                agent_id=agent.id,
+                task=task_entity,
+            )
+        except Exception:
+            await self.authorization_service.deregister_resource(
+                AgentexResource.task(task_entity.id),
+            )
+            raise
 
     async def create_task_and_forward_to_acp(
         self,
@@ -91,7 +110,9 @@ class AgentTaskService:
             Task containing the created task info
         """
         task_entity = await self.create_task(
-            agent=agent, task_name=task_name, task_params=task_params
+            agent=agent,
+            task_name=task_name,
+            task_params=task_params,
         )
 
         if agent.acp_type == ACPType.SYNC:
@@ -214,7 +235,34 @@ class AgentTaskService:
         """
         Delete a task from the repository.
         """
+        # Delete first (Postgres is the source of truth for existence), then
+        # deregister best-effort: a deregister failure is logged and swallowed
+        # rather than failing a delete that already succeeded.
+        # Resolve the id before the delete so we can pass it to deregister_resource;
+        # looking it up by name afterwards would race. If the name doesn't resolve,
+        # swallow ItemDoesNotExist and let delete() surface its own native error
+        # so the missing-task error contract is unchanged.
+        task_id_for_deregister: str | None = id
+        if task_id_for_deregister is None and name is not None:
+            try:
+                task = await self.task_repository.get(name=name)
+                task_id_for_deregister = task.id
+            except ItemDoesNotExist:
+                task_id_for_deregister = None
+
         await self.task_repository.delete(id=id, name=name)
+
+        if task_id_for_deregister is not None:
+            try:
+                await self.authorization_service.deregister_resource(
+                    AgentexResource.task(task_id_for_deregister),
+                )
+            except Exception:
+                logger.exception(
+                    "task authorization deregister failed for task %s after successful delete; "
+                    "the deregistration failure has been swallowed",
+                    task_id_for_deregister,
+                )
 
     async def list_tasks(
         self,
