@@ -23,13 +23,13 @@ async def _get_parent_task_id(
     resource_id: str,
     event_repository: DEventRepository,
     state_repository: DTaskStateRepository,
-    task_message_repository: DTaskMessageRepository,
+    message_repository: DTaskMessageRepository,
 ) -> str:
     """Get the parent task ID for a child resource."""
     registry = {
         TaskChildResourceType.state: state_repository,
         TaskChildResourceType.event: event_repository,
-        TaskChildResourceType.message: task_message_repository,
+        TaskChildResourceType.message: message_repository,
     }
 
     repository = registry[resource_type]
@@ -49,7 +49,7 @@ def DAuthorizedId(
         authorization: DAuthorizationService,
         event_repository: DEventRepository,
         state_repository: DTaskStateRepository,
-        task_message_repository: DTaskMessageRepository,
+        message_repository: DTaskMessageRepository,
         resource_id: str = Path(..., alias=param_name),
     ) -> str:
         # For child resources, check the parent task. Collapse a denied check
@@ -61,7 +61,7 @@ def DAuthorizedId(
                 resource_id,
                 event_repository,
                 state_repository,
-                task_message_repository,
+                message_repository,
             )
             try:
                 await authorization.check(
@@ -98,7 +98,7 @@ def DAuthorizedQuery(
         authorization: DAuthorizationService,
         event_repository: DEventRepository,
         state_repository: DTaskStateRepository,
-        task_message_repository: DTaskMessageRepository,
+        message_repository: DTaskMessageRepository,
         resource_id: str = Query(..., alias=param_name, description=description),
     ) -> str:
         # For child resources, check the parent task. Collapse a denied check
@@ -110,7 +110,7 @@ def DAuthorizedQuery(
                 resource_id,
                 event_repository,
                 state_repository,
-                task_message_repository,
+                message_repository,
             )
             try:
                 await authorization.check(
