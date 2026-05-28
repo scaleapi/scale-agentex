@@ -44,6 +44,7 @@ class EnvVarKeys(str, Enum):
     REDIS_STREAM_TTL_SECONDS = "REDIS_STREAM_TTL_SECONDS"
     IMAGE_PULL_SECRET_NAME = "IMAGE_PULL_SECRET_NAME"
     AGENTEX_AUTH_URL = "AGENTEX_AUTH_URL"
+    EGP_API_BACKEND_URL = "EGP_API_BACKEND_URL"
     ALLOWED_ORIGINS = "ALLOWED_ORIGINS"
     DD_AGENT_HOST = "DD_AGENT_HOST"
     DD_STATSD_PORT = "DD_STATSD_PORT"
@@ -100,6 +101,7 @@ class EnvironmentVariables(BaseModel):
     )
     IMAGE_PULL_SECRET_NAME: str | None = None
     AGENTEX_AUTH_URL: str | None = None
+    EGP_API_BACKEND_URL: str | None = None
     ALLOWED_ORIGINS: str | None = None
     HTTPX_MAX_CONNECTIONS: int = 200  # Max total connections allowed
     HTTPX_MAX_KEEPALIVE_CONNECTIONS: int = 100  # Max connections to keep alive
@@ -166,6 +168,7 @@ class EnvironmentVariables(BaseModel):
             ),
             IMAGE_PULL_SECRET_NAME=os.environ.get(EnvVarKeys.IMAGE_PULL_SECRET_NAME),
             AGENTEX_AUTH_URL=os.environ.get(EnvVarKeys.AGENTEX_AUTH_URL),
+            EGP_API_BACKEND_URL=os.environ.get(EnvVarKeys.EGP_API_BACKEND_URL),
             ALLOWED_ORIGINS=os.environ.get(EnvVarKeys.ALLOWED_ORIGINS, "*"),
             DD_AGENT_HOST=os.environ.get(EnvVarKeys.DD_AGENT_HOST),
             DD_STATSD_PORT=os.environ.get(EnvVarKeys.DD_STATSD_PORT),

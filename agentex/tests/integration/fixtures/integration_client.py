@@ -409,7 +409,7 @@ async def isolated_integration_app(
             agent_repository=isolated_repositories["agent_repository"],
             client=isolated_api_key_http_client,  # Use mock client for forwarding requests
             authorization_service=noop_authorization_service,
-            feature_flags=FeatureFlagProvider(),
+            feature_flags=FeatureFlagProvider(egp_api_backend_url=None),
         )
 
     def create_deployment_history_use_case():

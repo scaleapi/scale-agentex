@@ -45,7 +45,7 @@ def agent_api_keys_use_case(
         agent_repository=agent_repository,
         client=mock_http_client,
         authorization_service=authorization_service,
-        feature_flags=FeatureFlagProvider(),
+        feature_flags=FeatureFlagProvider(egp_api_backend_url=None),
     )
 
 

@@ -101,8 +101,10 @@ class AgentAPIKeysUseCase:
         api_key_id = orm_id()
         zedtoken: str | None = None
 
-        if self.feature_flags.is_enabled(
-            FeatureFlagName.FGAC_AGENT_API_KEYS_DUAL_WRITE, account_id
+        if await self.feature_flags.is_enabled(
+            FeatureFlagName.FGAC_AGENT_API_KEYS_DUAL_WRITE,
+            principal_context=principal_context,
+            account_id=account_id,
         ):
             zedtoken = await self._register_api_key_in_spark_authz(
                 api_key_id=api_key_id,
@@ -198,8 +200,10 @@ class AgentAPIKeysUseCase:
         for the caller's account. Failures are logged but do not block the
         delete.
         """
-        if not self.feature_flags.is_enabled(
-            FeatureFlagName.FGAC_AGENT_API_KEYS_DUAL_WRITE, account_id
+        if not await self.feature_flags.is_enabled(
+            FeatureFlagName.FGAC_AGENT_API_KEYS_DUAL_WRITE,
+            principal_context=self.authorization_service.principal_context,
+            account_id=account_id,
         ):
             return
         try:

@@ -37,7 +37,6 @@ from src.api.schemas.authorization_types import AgentexResource, AgentexResource
 from src.domain.entities.agent_api_keys import AgentAPIKeyEntity, AgentAPIKeyType
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
 from src.domain.use_cases.agent_api_keys_use_case import AgentAPIKeysUseCase
-from src.utils.feature_flags import FeatureFlagProvider
 from src.utils.ids import orm_id
 
 
@@ -62,7 +61,7 @@ def _agent() -> AgentEntity:
 
 def _build_use_case(
     *,
-    flag_accounts: str,
+    flag_on: bool,
     principal: SimpleNamespace | None,
     register_resource: AsyncMock | None = None,
     deregister_resource: AsyncMock | None = None,
@@ -70,8 +69,6 @@ def _build_use_case(
     create_raises: Exception | None = None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[AgentAPIKeysUseCase, Mock, AsyncMock, AsyncMock]:
-    monkeypatch.setenv("FGAC_AGENT_API_KEYS_DUAL_WRITE_ACCOUNTS", flag_accounts)
-
     sample_agent = agent or _agent()
 
     agent_repository = Mock()
@@ -103,7 +100,11 @@ def _build_use_case(
         return_value=None
     )
 
-    feature_flags = FeatureFlagProvider()
+    # FeatureFlagProvider normally calls egp-api-backend over HTTP. Mock it
+    # so tests are hermetic; behaviour under test is the use case's response
+    # to the flag value, not the provider's transport.
+    feature_flags = Mock()
+    feature_flags.is_enabled = AsyncMock(return_value=flag_on)
 
     # Patch env var lookup inside UseCase __init__ so we don't depend on real
     # env configuration to instantiate.
@@ -133,7 +134,7 @@ async def test_create_api_key_skips_grant_when_flag_off(
 ) -> None:
     agent = _agent()
     use_case, repo, register, _ = _build_use_case(
-        flag_accounts="",
+        flag_on=False,
         principal=_principal(user_id="user-A", account_id="acct-1"),
         agent=agent,
         monkeypatch=monkeypatch,
@@ -161,7 +162,7 @@ async def test_create_api_key_calls_grant_when_flag_on(
 ) -> None:
     agent = _agent()
     use_case, repo, register, _ = _build_use_case(
-        flag_accounts="acct-1",
+        flag_on=True,
         principal=_principal(user_id="user-A", account_id="acct-1"),
         agent=agent,
         monkeypatch=monkeypatch,
@@ -197,7 +198,7 @@ async def test_delete_api_key_calls_revoke_when_flag_on(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     use_case, repo, _, deregister = _build_use_case(
-        flag_accounts="acct-1",
+        flag_on=True,
         principal=_principal(user_id="user-A", account_id="acct-1"),
         monkeypatch=monkeypatch,
     )
@@ -218,7 +219,7 @@ async def test_delete_api_key_skips_revoke_when_flag_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     use_case, repo, _, deregister = _build_use_case(
-        flag_accounts="",
+        flag_on=False,
         principal=_principal(user_id="user-A", account_id="acct-1"),
         monkeypatch=monkeypatch,
     )
@@ -237,7 +238,7 @@ async def test_create_api_key_grant_failure_prevents_db_row(
     register_resource = AsyncMock(side_effect=RuntimeError("spark unavailable"))
     agent = _agent()
     use_case, repo, _, _ = _build_use_case(
-        flag_accounts="acct-1",
+        flag_on=True,
         principal=_principal(user_id="user-A", account_id="acct-1"),
         register_resource=register_resource,
         agent=agent,
@@ -263,7 +264,7 @@ async def test_delete_api_key_revoke_failure_does_not_block_delete(
 ) -> None:
     deregister = AsyncMock(side_effect=RuntimeError("spark unavailable"))
     use_case, repo, _, deregister_ref = _build_use_case(
-        flag_accounts="acct-1",
+        flag_on=True,
         principal=_principal(user_id="user-A", account_id="acct-1"),
         deregister_resource=deregister,
         monkeypatch=monkeypatch,
@@ -285,7 +286,7 @@ async def test_create_api_key_skips_grant_when_no_creator_resolvable(
     the dual-write is a no-op (logged) and the row still lands without a tuple."""
     agent = _agent()
     use_case, repo, register, _ = _build_use_case(
-        flag_accounts="acct-1",
+        flag_on=True,
         principal=_principal(user_id=None, account_id="acct-1"),
         agent=agent,
         monkeypatch=monkeypatch,
@@ -313,7 +314,7 @@ async def test_delete_by_agent_id_and_key_name_revokes_existing(
     agent = _agent()
     existing_id = orm_id()
     use_case, repo, _, deregister = _build_use_case(
-        flag_accounts="acct-1",
+        flag_on=True,
         principal=_principal(user_id="user-A", account_id="acct-1"),
         agent=agent,
         monkeypatch=monkeypatch,
