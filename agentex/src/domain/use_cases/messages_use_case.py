@@ -162,7 +162,7 @@ class MessagesUseCase:
             task_id=task_id, updates=updates
         )
 
-    async def get_message(self, message_id: str) -> TaskMessageEntity | None:
+    async def get_message(self, message_id: str) -> TaskMessageEntity:
         """
         Get a message by its ID.
 
@@ -170,7 +170,10 @@ class MessagesUseCase:
             message_id: The message ID
 
         Returns:
-            The TaskMessageEntity if found, None otherwise
+            The TaskMessageEntity
+
+        Raises:
+            ItemDoesNotExist: If the message with the given ID does not exist
         """
         return await self.task_message_service.get_message(message_id=message_id)
 
