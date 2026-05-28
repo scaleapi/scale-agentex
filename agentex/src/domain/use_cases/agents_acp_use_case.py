@@ -370,17 +370,35 @@ class AgentsACPUseCase(TaskMessageMixin):
             - TaskEntity for TASK_CREATE or TASK_CANCEL
             - EventEntity for EVENT_SEND
         """
-        # Get the agent
-        agent = await self.agent_repository.get(id=agent_id, name=agent_name)
+        import time as _time
+        _rpc_t0 = _time.perf_counter()
+
+        # Get the agent — use in-process cache to avoid PG read on every request.
+        _agent_cache_key = agent_id or agent_name
+        _cached_agent = getattr(self, '_agent_cache', {}).get(_agent_cache_key)
+        if _cached_agent and _time.perf_counter() - _cached_agent[0] < 300:
+            agent = _cached_agent[1]
+        else:
+            agent = await self.agent_repository.get(id=agent_id, name=agent_name)
+            if not hasattr(self, '_agent_cache'):
+                self._agent_cache = {}
+            self._agent_cache[_agent_cache_key] = (_time.perf_counter(), agent)
+        _rpc_t1 = _time.perf_counter()
+
         if method not in AgentRPCMethod:
             raise ClientError(f"Unsupported method: {method}")
         if agent.status == AgentStatus.DELETED:
             raise ClientError(f"Agent {agent_id} is deleted")
 
         acp_url = await self._resolve_acp_url(agent, acp_url_override)
+        _rpc_t2 = _time.perf_counter()
 
         logger.info(
             f"[handle_rpc_request] Validating RPC method for ACP type: {agent.acp_type} - {method}"
+        )
+        logger.info(
+            f"[PERF_BACKEND] agent_lookup={(_rpc_t1-_rpc_t0)*1000:.0f}ms "
+            f"resolve_acp_url={(_rpc_t2-_rpc_t1)*1000:.0f}ms"
         )
         self._validate_rpc_method_for_acp_type(agent.acp_type, method)
 
@@ -636,6 +654,9 @@ class AgentsACPUseCase(TaskMessageMixin):
             return parent_task_message
 
         try:
+            import time as _time
+            _t0 = _time.perf_counter()
+
             # Setup task and initial message
             task = await self._get_or_create_task(
                 agent=agent,
@@ -643,6 +664,7 @@ class AgentsACPUseCase(TaskMessageMixin):
                 task_name=params.task_name,
                 task_params=params.task_params,
             )
+            _t1 = _time.perf_counter()
 
             # Append the input client message
             await self.task_message_service.append_message(
@@ -650,6 +672,15 @@ class AgentsACPUseCase(TaskMessageMixin):
                 content=params.content,
                 streaming_status="DONE",
             )
+            _t2 = _time.perf_counter()
+
+            logger.info(
+                f"[PERF_BACKEND] task_id={task.id} "
+                f"get_or_create_task={(_t1-_t0)*1000:.0f}ms "
+                f"append_message={(_t2-_t1)*1000:.0f}ms "
+                f"total_pre_stream={(_t2-_t0)*1000:.0f}ms"
+            )
+
             # Stream the response - yield raw TaskMessage objects
             async for task_message_update in self.task_service.send_message_stream(
                 agent=agent,

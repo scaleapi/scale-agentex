@@ -236,17 +236,21 @@ class AgentACPService(TaskMessageMixin):
         )
 
         try:
-            logger.info(
-                "Calling model dump on payload:", request.model_dump(mode="json")
-            )
+            import time as _time
             payload = request.model_dump(mode="json")
-            logger.info(f"Streaming payload: {payload}")
+            _stream_t0 = _time.perf_counter()
+            _first_chunk = True
             async for chunk in self._http_gateway.stream_call(
                 method="POST",
                 url=f"{url}/api",
                 payload=payload,
                 default_headers=default_headers,
             ):
+                if _first_chunk:
+                    logger.info(
+                        f"[PERF_BACKEND] stream_first_chunk={(_time.perf_counter()-_stream_t0)*1000:.0f}ms"
+                    )
+                    _first_chunk = False
                 rpc_response = JSONRPCResponse.model_validate(chunk)
 
                 # Verify the response ID matches our request ID
@@ -289,14 +293,24 @@ class AgentACPService(TaskMessageMixin):
             "x-request-id": request_id,
         }
 
+    # In-process cache for agent API keys — avoids a PG read on every request.
+    # Keys rarely change; 300s TTL matches the auth middleware cache.
+    _agent_api_key_cache: dict[str, tuple[float, dict[str, str]]] = {}
+    _AGENT_KEY_CACHE_TTL_S = 300.0
+
     async def get_agent_auth_headers(self, agent: AgentEntity) -> dict[str, str]:
         """Authentication headers the agent pod uses to call back into agentex."""
+        import time as _time
+        cached = self._agent_api_key_cache.get(agent.id)
+        if cached and _time.time() - cached[0] < self._AGENT_KEY_CACHE_TTL_S:
+            return cached[1]
+
         api_key = await self._agent_api_key_repository.get_internal_api_key_by_agent_id(
             agent_id=agent.id
         )
-        if api_key:
-            return {"x-agent-api-key": api_key.api_key}
-        return {}
+        headers = {"x-agent-api-key": api_key.api_key} if api_key else {}
+        self._agent_api_key_cache[agent.id] = (_time.time(), headers)
+        return headers
 
     async def create_task(
         self,
@@ -359,6 +373,9 @@ class AgentACPService(TaskMessageMixin):
         acp_url: str,
     ) -> AsyncIterator[TaskMessageUpdateEntity]:
         """Send a message to a running task and stream the response"""
+        import time as _time
+        _sms_t0 = _time.perf_counter()
+
         params = SendMessageParams(
             agent=agent,
             task=task,
@@ -366,6 +383,10 @@ class AgentACPService(TaskMessageMixin):
             stream=True,
         )
         headers = await self.get_headers(agent)
+        _sms_t1 = _time.perf_counter()
+        logger.info(
+            f"[PERF_BACKEND] send_message_stream get_headers={(_sms_t1-_sms_t0)*1000:.0f}ms"
+        )
         lock_key = hash((agent.id, task.id))
 
         if USE_STREAMING_ADVISORY_LOCK:

@@ -84,8 +84,8 @@ class GlobalDependencies(metaclass=Singleton):
         # Increased pool sizes to handle higher concurrency
         # Each concurrent request needs ~1-2 connections
         async_db_pool_size = int(
-            os.environ.get("POSTGRES_POOL_SIZE", "10")
-        )  # Support 25-50 concurrent requests
+            os.environ.get("POSTGRES_POOL_SIZE", "30")
+        )  # Support 50-100 concurrent requests
         middleware_db_pool_size = int(
             os.environ.get("POSTGRES_MIDDLEWARE_POOL_SIZE", "5")
         )  # Support middleware operations
