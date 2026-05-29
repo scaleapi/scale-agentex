@@ -5,14 +5,12 @@ from fastapi import Depends, Path, Query, Request
 from src.adapters.authorization.exceptions import AuthorizationError
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.api.schemas.authorization_types import (
-    AgentChildResourceType,
     AgentexResource,
     AgentexResourceType,
     AuthorizedOperationType,
     TaskChildResourceType,
 )
 from src.domain.repositories.agent_repository import DAgentRepository
-from src.domain.repositories.event_repository import DEventRepository
 from src.domain.repositories.task_repository import DTaskRepository
 from src.domain.repositories.task_state_repository import DTaskStateRepository
 from src.domain.services.authorization_service import DAuthorizationService
@@ -33,23 +31,8 @@ async def _get_parent_task_id(
     return resource.task_id
 
 
-async def _get_parent_agent_id(
-    resource_type: AgentChildResourceType,
-    resource_id: str,
-    event_repository: DEventRepository,
-) -> str:
-    """Get the parent agent ID for an agent-child resource."""
-    registry = {
-        AgentChildResourceType.event: event_repository,
-    }
-
-    repository = registry[resource_type]
-    resource = await repository.get(id=resource_id)
-    return resource.agent_id
-
-
 def DAuthorizedId(
-    resource_type: AgentexResourceType | TaskChildResourceType | AgentChildResourceType,
+    resource_type: AgentexResourceType | TaskChildResourceType,
     operation: AuthorizedOperationType = AuthorizedOperationType.read,
     param_name: str = None,
 ):
@@ -58,7 +41,6 @@ def DAuthorizedId(
 
     async def _ensure_authorized_id(
         authorization: DAuthorizationService,
-        event_repository: DEventRepository,
         state_repository: DTaskStateRepository,
         resource_id: str = Path(..., alias=param_name),
     ) -> str:
@@ -78,19 +60,6 @@ def DAuthorizedId(
                 raise ItemDoesNotExist(
                     f"Item with id '{resource_id}' does not exist."
                 ) from None
-        elif isinstance(resource_type, AgentChildResourceType):
-            agent_id = await _get_parent_agent_id(
-                resource_type, resource_id, event_repository
-            )
-            try:
-                await authorization.check(
-                    resource=AgentexResource.agent(agent_id),
-                    operation=operation,
-                )
-            except AuthorizationError:
-                raise ItemDoesNotExist(
-                    f"Item with id '{resource_id}' does not exist."
-                ) from None
         else:
             await authorization.check(
                 resource=AgentexResource(type=resource_type, selector=resource_id),
@@ -102,7 +71,7 @@ def DAuthorizedId(
 
 
 def DAuthorizedQuery(
-    resource_type: AgentexResourceType | TaskChildResourceType | AgentChildResourceType,
+    resource_type: AgentexResourceType | TaskChildResourceType,
     operation: AuthorizedOperationType = AuthorizedOperationType.read,
     param_name: str = None,
     description: str = None,
@@ -114,7 +83,6 @@ def DAuthorizedQuery(
 
     async def _ensure_authorized_query(
         authorization: DAuthorizationService,
-        event_repository: DEventRepository,
         state_repository: DTaskStateRepository,
         resource_id: str = Query(..., alias=param_name, description=description),
     ) -> str:
@@ -128,19 +96,6 @@ def DAuthorizedQuery(
             try:
                 await authorization.check(
                     resource=AgentexResource.task(task_id),
-                    operation=operation,
-                )
-            except AuthorizationError:
-                raise ItemDoesNotExist(
-                    f"Item with id '{resource_id}' does not exist."
-                ) from None
-        elif isinstance(resource_type, AgentChildResourceType):
-            agent_id = await _get_parent_agent_id(
-                resource_type, resource_id, event_repository
-            )
-            try:
-                await authorization.check(
-                    resource=AgentexResource.agent(agent_id),
                     operation=operation,
                 )
             except AuthorizationError:
