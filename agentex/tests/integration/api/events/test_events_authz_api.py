@@ -1,11 +1,4 @@
-"""
-Integration tests for event-route authorization.
-
-Covers the AGX1-244 deliverable: list/get events enforce ``agent.read`` on
-the parent agent (events delegate to the parent agent, not the task), with
-denied checks collapsing to 404 (not 403) so callers cannot probe
-cross-tenant existence by comparing response codes.
-"""
+"""AGX1-244: event routes delegate authz to the parent agent."""
 
 from typing import Any
 from unittest.mock import patch
@@ -131,8 +124,7 @@ class TestEventsAuthzAPIIntegration:
         assert response.status_code == 200
         assert response.json()["id"] == test_event.id
 
-        # Exactly one /v1/authz/check, on the parent agent with the read
-        # operation. Events delegate to the parent agent, not the parent task.
+        # One check, on the parent agent (not the task).
         check_calls = [
             call
             for call in post_with_error_handling_mock.call_args_list
@@ -167,7 +159,7 @@ class TestEventsAuthzAPIIntegration:
             side_effect=_mock_post_factory(deny_agent_ids={test_agent.id}),
         ):
             response = await isolated_client.get(f"/events/{test_event.id}")
-        # Denial on the parent agent must collapse to 404, not surface as 403.
+        # Parent-agent denial collapses to 404.
         assert response.status_code == 404
 
     @pytest.mark.asyncio
@@ -192,8 +184,7 @@ class TestEventsAuthzAPIIntegration:
     ):
         response = await isolated_client.get(f"/events/{orm_id()}")
         assert response.status_code == 404
-        # The parent-agent lookup raises ItemDoesNotExist before any authz
-        # check fires, so /v1/authz/check should never be called.
+        # Event lookup 404s before any authz call fires.
         assert not any(
             call[0][1] == "/v1/authz/check"
             for call in post_with_error_handling_mock.call_args_list
@@ -229,9 +220,7 @@ class TestEventsAuthzAPIIntegration:
         body = response.json()
         assert any(e["id"] == test_event.id for e in body)
 
-        # The list endpoint takes both task_id and agent_id as query params and
-        # each has its own DAuthorizedQuery — so we expect two authz checks:
-        # one for the task (direct) and one for the agent (direct).
+        # Two checks: one on the task, one on the agent.
         check_calls = [
             call
             for call in post_with_error_handling_mock.call_args_list
@@ -268,10 +257,7 @@ class TestEventsAuthzAPIIntegration:
         test_agent,
         test_task,
     ):
-        """Caller without view on the queried agent_id gets 403. Matches the
-        direct-resource convention used in #249/#255 — only task-children and
-        agent-children collapse to 404 (via the parent-resolution path); direct
-        agent/task denials surface as 403."""
+        """Direct-resource denials surface as 403 (convention from #249/#255)."""
         with patch(
             "src.utils.http_request_handler.HttpRequestHandler.post_with_error_handling",
             side_effect=_mock_post_factory(deny_agent_ids={test_agent.id}),

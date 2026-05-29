@@ -25,9 +25,7 @@ async def get_event(
     event_use_case: DEventUseCase,
     authorization: DAuthorizationService,
 ) -> Event:
-    # Events delegate to their parent agent. Load the event first (404 if it
-    # doesn't exist), then check `read` on the parent agent and collapse a
-    # denial to 404 — see check_agent_or_collapse_to_404 for the rationale.
+    # Events delegate authz to the parent agent.
     event_entity = await event_use_case.get(event_id)
     await check_agent_or_collapse_to_404(
         authorization, event_entity.agent_id, AuthorizedOperationType.read
