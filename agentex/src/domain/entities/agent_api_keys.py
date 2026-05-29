@@ -25,15 +25,3 @@ class AgentAPIKeyEntity(BaseModel):
         description="The type of the API key (either internal or external)",
     )
     api_key: str = Field(..., description="The API key")
-    creator_user_id: str | None = Field(
-        None,
-        description="Identity ID of the user who created this API key (granted as FGAC owner)",
-    )
-    creator_service_account_id: str | None = Field(
-        None,
-        description="Service identity ID of the service account that created this API key",
-    )
-    spark_authz_zedtoken: str | None = Field(
-        None,
-        description="ZedToken from the Spark AuthZ grant for new-write isolation",
-    )

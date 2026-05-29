@@ -1,18 +1,16 @@
 """Integration tests for AgentAPIKeysUseCase dual-write to Spark AuthZ.
 
-These cover the AGX1-272 dual-write path:
+These cover the AGX1-272 dual-write path. scale-agentex calls
+``register_resource`` / ``deregister_resource`` unconditionally; per-account
+routing (Spark vs legacy SGP) is owned by agentex-auth (scaleapi/agentex#353)
+so scale-agentex does NOT couple to egp-api-backend's feature-flag service.
 
-- Flag OFF: ``authorization_service.register_resource`` is NOT called and
-  the api_key is written to the repository with creator metadata populated
-  from the principal context.
-- Flag ON: ``register_resource`` is called with ``AgentexResource.api_key(<id>)``
-  and ``parent=AgentexResource.agent(<agent_id>)`` (the parent edge is
-  load-bearing for cascade), and the row is written.
-- Delete deregisters: ``deregister_resource`` is called when ``delete`` runs
-  under the flag.
-- Spark failure prevents row: when ``register_resource`` raises, the api_key
+- Create calls register_resource with parent=agent (the parent_agent edge
+  is load-bearing for the SpiceDB cascade).
+- Delete calls deregister_resource after the Postgres row is gone.
+- Spark failure prevents row: when register_resource raises, the api_key
   is NOT persisted.
-- Deregister failure does not block delete: when ``deregister_resource``
+- Deregister failure does not block delete: when deregister_resource
   raises, the DB delete still completes and the failure is logged.
 - No creator → no register: if neither user_id nor service_account_id is
   resolvable, the dual-write is a no-op (logged) and the row still lands.
@@ -23,8 +21,7 @@ inside ``AgentAPIKeysUseCase`` — not Postgres or Spark itself.
 
 Note on structural divergence from the task PR (AGX1-274): tasks live behind
 ``AgentTaskService``; agent_api_keys have no service layer, so the dual-write
-logic is colocated in ``AgentAPIKeysUseCase``. Mirrors the spirit of Asher's
-PR rather than the exact layering.
+logic is colocated in ``AgentAPIKeysUseCase``.
 """
 
 from __future__ import annotations
@@ -61,7 +58,6 @@ def _agent() -> AgentEntity:
 
 def _build_use_case(
     *,
-    flag_on: bool,
     principal: SimpleNamespace | None,
     register_resource: AsyncMock | None = None,
     deregister_resource: AsyncMock | None = None,
@@ -100,12 +96,6 @@ def _build_use_case(
         return_value=None
     )
 
-    # FeatureFlagProvider normally calls egp-api-backend over HTTP. Mock it
-    # so tests are hermetic; behaviour under test is the use case's response
-    # to the flag value, not the provider's transport.
-    feature_flags = Mock()
-    feature_flags.is_enabled = AsyncMock(return_value=flag_on)
-
     # Patch env var lookup inside UseCase __init__ so we don't depend on real
     # env configuration to instantiate.
     monkeypatch.setenv("AGENTEX_AUTH_URL", "")
@@ -117,7 +107,6 @@ def _build_use_case(
         agent_repository=agent_repository,
         client=Mock(),
         authorization_service=authorization_service,
-        feature_flags=feature_flags,
     )
     return (
         use_case,
@@ -129,40 +118,11 @@ def _build_use_case(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_create_api_key_skips_grant_when_flag_off(
+async def test_create_api_key_calls_register_resource_with_parent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     agent = _agent()
     use_case, repo, register, _ = _build_use_case(
-        flag_on=False,
-        principal=_principal(user_id="user-A", account_id="acct-1"),
-        agent=agent,
-        monkeypatch=monkeypatch,
-    )
-
-    api_key = await use_case.create(
-        name="k1",
-        agent_id=agent.id,
-        api_key_type=AgentAPIKeyType.EXTERNAL,
-        api_key="secret",
-        account_id="acct-1",
-    )
-
-    register.assert_not_called()
-    repo.create.assert_awaited_once()
-    assert api_key.creator_user_id == "user-A"
-    assert api_key.creator_service_account_id is None
-    assert api_key.spark_authz_zedtoken is None
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_create_api_key_calls_grant_when_flag_on(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    agent = _agent()
-    use_case, repo, register, _ = _build_use_case(
-        flag_on=True,
         principal=_principal(user_id="user-A", account_id="acct-1"),
         agent=agent,
         monkeypatch=monkeypatch,
@@ -187,18 +147,17 @@ async def test_create_api_key_calls_grant_when_flag_on(
     assert registered_parent.type == AgentexResourceType.agent
     assert registered_parent.selector == agent.id
     repo.create.assert_awaited_once()
-    assert api_key.creator_user_id == "user-A"
-    # Provider.spark.register_resource returns None today — no zedtoken yet.
-    assert api_key.spark_authz_zedtoken is None
+    # Sanity: the persisted entity itself; we don't persist creator audit
+    # columns in OSS scale-agentex (Harvey's review feedback on #248).
+    assert api_key.id is not None
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_delete_api_key_calls_revoke_when_flag_on(
+async def test_delete_api_key_calls_deregister_resource(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     use_case, repo, _, deregister = _build_use_case(
-        flag_on=True,
         principal=_principal(user_id="user-A", account_id="acct-1"),
         monkeypatch=monkeypatch,
     )
@@ -215,30 +174,12 @@ async def test_delete_api_key_calls_revoke_when_flag_on(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_delete_api_key_skips_revoke_when_flag_off(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    use_case, repo, _, deregister = _build_use_case(
-        flag_on=False,
-        principal=_principal(user_id="user-A", account_id="acct-1"),
-        monkeypatch=monkeypatch,
-    )
-
-    await use_case.delete(id=orm_id(), account_id="acct-1")
-
-    repo.delete.assert_awaited_once()
-    deregister.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_create_api_key_grant_failure_prevents_db_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     register_resource = AsyncMock(side_effect=RuntimeError("spark unavailable"))
     agent = _agent()
     use_case, repo, _, _ = _build_use_case(
-        flag_on=True,
         principal=_principal(user_id="user-A", account_id="acct-1"),
         register_resource=register_resource,
         agent=agent,
@@ -264,7 +205,6 @@ async def test_delete_api_key_revoke_failure_does_not_block_delete(
 ) -> None:
     deregister = AsyncMock(side_effect=RuntimeError("spark unavailable"))
     use_case, repo, _, deregister_ref = _build_use_case(
-        flag_on=True,
         principal=_principal(user_id="user-A", account_id="acct-1"),
         deregister_resource=deregister,
         monkeypatch=monkeypatch,
@@ -286,7 +226,6 @@ async def test_create_api_key_skips_grant_when_no_creator_resolvable(
     the dual-write is a no-op (logged) and the row still lands without a tuple."""
     agent = _agent()
     use_case, repo, register, _ = _build_use_case(
-        flag_on=True,
         principal=_principal(user_id=None, account_id="acct-1"),
         agent=agent,
         monkeypatch=monkeypatch,
@@ -302,8 +241,8 @@ async def test_create_api_key_skips_grant_when_no_creator_resolvable(
 
     register.assert_not_called()
     repo.create.assert_awaited_once()
-    assert api_key.creator_user_id is None
-    assert api_key.creator_service_account_id is None
+    # Sanity: the row landed even though we skipped the auth-side registration.
+    assert api_key.id is not None
 
 
 @pytest.mark.asyncio
@@ -314,7 +253,6 @@ async def test_delete_by_agent_id_and_key_name_revokes_existing(
     agent = _agent()
     existing_id = orm_id()
     use_case, repo, _, deregister = _build_use_case(
-        flag_on=True,
         principal=_principal(user_id="user-A", account_id="acct-1"),
         agent=agent,
         monkeypatch=monkeypatch,

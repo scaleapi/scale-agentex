@@ -29,7 +29,6 @@ from src.domain.repositories.agent_api_key_repository import (
 )
 from src.domain.repositories.agent_repository import DAgentRepository
 from src.domain.services.authorization_service import DAuthorizationService
-from src.utils.feature_flags import DFeatureFlagProvider, FeatureFlagName
 from src.utils.ids import orm_id
 from src.utils.logging import make_logger
 
@@ -43,13 +42,11 @@ class AgentAPIKeysUseCase:
         agent_repository: DAgentRepository,
         client: DHttpxClient,
         authorization_service: DAuthorizationService,
-        feature_flags: DFeatureFlagProvider,
     ):
         self.agent_api_key_repo = agent_api_key_repository
         self.agent_repo = agent_repository
         self.client = client
         self.authorization_service = authorization_service
-        self.feature_flags = feature_flags
         self.auth_gateway_enabled = bool(
             resolve_environment_variable_dependency(EnvVarKeys.AGENTEX_AUTH_URL)
         )
@@ -92,27 +89,18 @@ class AgentAPIKeysUseCase:
                 detail=f"Agent ID {agent_id} not found.",
             )
 
-        principal_context = self.authorization_service.principal_context
-        creator_user_id = getattr(principal_context, "user_id", None)
-        creator_service_account_id = getattr(
-            principal_context, "service_account_id", None
-        )
-
         api_key_id = orm_id()
-        zedtoken: str | None = None
 
-        if await self.feature_flags.is_enabled(
-            FeatureFlagName.FGAC_AGENT_API_KEYS_DUAL_WRITE,
-            principal_context=principal_context,
+        # Always call register_resource. agentex-auth's per-account routing
+        # (FGAC_AGENTEX_AUTH_SPARK, scaleapi/agentex#353) decides whether
+        # the call lands on Spark AuthZ or falls back to the legacy SGP
+        # backend for this caller's account. scale-agentex is intentionally
+        # decoupled from egp-api-backend's feature-flag service.
+        await self._register_api_key_in_auth(
+            api_key_id=api_key_id,
+            agent_id=agent.id,
             account_id=account_id,
-        ):
-            zedtoken = await self._register_api_key_in_spark_authz(
-                api_key_id=api_key_id,
-                agent_id=agent.id,
-                account_id=account_id,
-                creator_user_id=creator_user_id,
-                creator_service_account_id=creator_service_account_id,
-            )
+        )
 
         # TODO: encrypt API key before storing it
         # Initialize a new agent api_key
@@ -122,50 +110,38 @@ class AgentAPIKeysUseCase:
             agent_id=agent.id,
             api_key_type=api_key_type,
             api_key=api_key,
-            creator_user_id=creator_user_id,
-            creator_service_account_id=creator_service_account_id,
-            spark_authz_zedtoken=zedtoken,
         )
         return await self.agent_api_key_repo.create(item=agent_api_key)
 
-    async def _register_api_key_in_spark_authz(
+    async def _register_api_key_in_auth(
         self,
         *,
         api_key_id: str,
         agent_id: str,
         account_id: str | None,
-        creator_user_id: str | None,
-        creator_service_account_id: str | None,
-    ) -> str | None:
-        """Register a new agent_api_key in Spark AuthZ with creator as owner
-        AND the parent_agent edge to the owning agent.
+    ) -> None:
+        """Register a new agent_api_key with the auth service, including the
+        parent_agent edge so permissions cascade from the owning agent.
 
         Called BEFORE the Postgres write — a failure raises and prevents the
-        row from being persisted, so there is no compensating action.
-
-        The ``agent_api_key`` SpiceDB schema has a ``parent_agent`` relation
-        that read/update/delete permissions cascade through:
-        ``permission read = internal_effective_viewer & parent_agent->read &
-        internal_tenant_gate``. We MUST write the parent edge here or every
-        downstream permission check fails closed. ``register_resource``
-        (added in agentex-auth and sgp-authz 0.7.0) writes both the owner
-        edge and the parent edge atomically in one round-trip.
-
-        The current ``register_resource`` returns ``None``; no ZedToken is
-        surfaced today, so we always return ``None`` for the
-        spark_authz_zedtoken column. A follow-up will plumb the token through
-        once the adapter exposes it.
+        row from being persisted, so there is no compensating action. Skipped
+        with a warning when no usable creator identity is available on the
+        principal context (e.g. internal-key creation paths without an
+        authenticated user).
         """
-        if creator_user_id is None and creator_service_account_id is None:
+        principal_context = self.authorization_service.principal_context
+        user_id = getattr(principal_context, "user_id", None)
+        service_account_id = getattr(principal_context, "service_account_id", None)
+        if user_id is None and service_account_id is None:
             logger.warning(
-                "Skipping Spark AuthZ api_key registration: no creator resolvable",
+                "Skipping auth registration for api_key: no creator resolvable",
                 extra={
                     "api_key_id": api_key_id,
                     "agent_id": agent_id,
                     "account_id": account_id,
                 },
             )
-            return None
+            return
         try:
             await self.authorization_service.register_resource(
                 resource=AgentexResource.api_key(api_key_id),
@@ -173,39 +149,28 @@ class AgentAPIKeysUseCase:
             )
         except Exception as exc:
             # Fail closed: log + re-raise so the Postgres row is never written.
-            # The dual-write contract requires the SpiceDB tuple (and parent
-            # edge) to exist before the row does.
             logger.exception(
-                "Spark AuthZ register_resource failed for agent_api_key; aborting create",
+                "Auth register_resource failed for agent_api_key; aborting create",
                 extra={
                     "api_key_id": api_key_id,
                     "agent_id": agent_id,
                     "account_id": account_id,
-                    "creator_user_id": creator_user_id,
-                    "creator_service_account_id": creator_service_account_id,
                     "error_type": type(exc).__name__,
                 },
             )
             raise
-        return None
 
-    async def _deregister_api_key_from_spark_authz(
+    async def _deregister_api_key_from_auth(
         self, *, api_key_id: str, account_id: str | None
     ) -> None:
-        """Best-effort deregistration of an api_key's Spark AuthZ tuples on delete.
+        """Best-effort deregistration of an api_key's auth tuples on delete.
 
         ``deregister_resource`` removes the resource and all of its
-        relationships (owner, parent_agent, any grantees) atomically.
-        Only invoked when the FGAC_AGENT_API_KEYS_DUAL_WRITE flag is enabled
-        for the caller's account. Failures are logged but do not block the
-        delete.
+        relationships (owner, parent, grantees) atomically. Always invoked;
+        agentex-auth's per-account routing (#353) decides whether the call
+        targets Spark or the legacy backend. Failures are logged but do not
+        block the delete.
         """
-        if not await self.feature_flags.is_enabled(
-            FeatureFlagName.FGAC_AGENT_API_KEYS_DUAL_WRITE,
-            principal_context=self.authorization_service.principal_context,
-            account_id=account_id,
-        ):
-            return
         try:
             await self.authorization_service.deregister_resource(
                 resource=AgentexResource.api_key(api_key_id),
@@ -213,7 +178,7 @@ class AgentAPIKeysUseCase:
         except Exception as exc:
             # Best-effort: log and continue. Postgres row already deleted.
             logger.warning(
-                "Spark AuthZ deregister failed for agent_api_key; tuple may be orphaned",
+                "Auth deregister failed for agent_api_key; tuple may be orphaned",
                 extra={
                     "api_key_id": api_key_id,
                     "account_id": account_id,
@@ -253,9 +218,7 @@ class AgentAPIKeysUseCase:
 
     async def delete(self, id: str, account_id: str | None = None) -> None:
         await self.agent_api_key_repo.delete(id=id)
-        await self._deregister_api_key_from_spark_authz(
-            api_key_id=id, account_id=account_id
-        )
+        await self._deregister_api_key_from_auth(api_key_id=id, account_id=account_id)
 
     async def delete_by_agent_id_and_key_name(
         self,
@@ -271,7 +234,7 @@ class AgentAPIKeysUseCase:
             agent_id=agent_id, key_name=key_name, api_key_type=api_key_type
         )
         if existing is not None:
-            await self._deregister_api_key_from_spark_authz(
+            await self._deregister_api_key_from_auth(
                 api_key_id=existing.id, account_id=account_id
             )
 
@@ -289,7 +252,7 @@ class AgentAPIKeysUseCase:
             agent_name=agent_name, key_name=key_name, api_key_type=api_key_type
         )
         if existing is not None:
-            await self._deregister_api_key_from_spark_authz(
+            await self._deregister_api_key_from_auth(
                 api_key_id=existing.id, account_id=account_id
             )
 

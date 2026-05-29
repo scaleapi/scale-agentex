@@ -9,7 +9,6 @@ from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
 from src.domain.repositories.agent_api_key_repository import AgentAPIKeyRepository
 from src.domain.repositories.agent_repository import AgentRepository
 from src.domain.use_cases.agent_api_keys_use_case import AgentAPIKeysUseCase
-from src.utils.feature_flags import FeatureFlagProvider
 
 
 @pytest.fixture
@@ -45,7 +44,6 @@ def agent_api_keys_use_case(
         agent_repository=agent_repository,
         client=mock_http_client,
         authorization_service=authorization_service,
-        feature_flags=FeatureFlagProvider(egp_api_backend_url=None),
     )
 
 

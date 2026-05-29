@@ -181,9 +181,6 @@ class AgentAPIKeyORM(BaseORM):
     name = Column(String(256), nullable=False, index=True)
     api_key_type = Column(SQLAlchemyEnum(AgentAPIKeyType), nullable=False)
     api_key = Column(String, nullable=False)
-    creator_user_id = Column(String, nullable=True, index=True)
-    creator_service_account_id = Column(String, nullable=True, index=True)
-    spark_authz_zedtoken = Column(Text, nullable=True)
 
     # Indexes for efficient querying
     __table_args__ = (

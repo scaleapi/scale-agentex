@@ -398,18 +398,17 @@ async def isolated_integration_app(
         )
 
     def create_agent_api_keys_use_case():
-        from src.utils.feature_flags import FeatureFlagProvider
-
         noop_authorization_service = Mock()
         noop_authorization_service.principal_context = None
         noop_authorization_service.grant = AsyncMock(return_value={})
         noop_authorization_service.revoke = AsyncMock(return_value=None)
+        noop_authorization_service.register_resource = AsyncMock(return_value=None)
+        noop_authorization_service.deregister_resource = AsyncMock(return_value=None)
         return AgentAPIKeysUseCase(
             agent_api_key_repository=isolated_repositories["agent_api_key_repository"],
             agent_repository=isolated_repositories["agent_repository"],
             client=isolated_api_key_http_client,  # Use mock client for forwarding requests
             authorization_service=noop_authorization_service,
-            feature_flags=FeatureFlagProvider(egp_api_backend_url=None),
         )
 
     def create_deployment_history_use_case():
