@@ -259,7 +259,7 @@ class TestEventsAuthzAPIIntegration:
         "src.domain.services.authorization_service.AuthorizationService.is_enabled",
         return_value=True,
     )
-    async def test_list_events_unauthorized_agent_returns_404(
+    async def test_list_events_unauthorized_agent_returns_403(
         self,
         is_enabled_authorization_mock,
         is_enabled_mock,
@@ -268,9 +268,10 @@ class TestEventsAuthzAPIIntegration:
         test_agent,
         test_task,
     ):
-        """Caller without view on the queried agent_id gets 404, not 403 — the
-        DAuthorizedQuery on agent_id catches the denial and collapses it. No
-        leak of agent existence across tenants."""
+        """Caller without view on the queried agent_id gets 403. Matches the
+        direct-resource convention used in #249/#255 — only task-children and
+        agent-children collapse to 404 (via the parent-resolution path); direct
+        agent/task denials surface as 403."""
         with patch(
             "src.utils.http_request_handler.HttpRequestHandler.post_with_error_handling",
             side_effect=_mock_post_factory(deny_agent_ids={test_agent.id}),
@@ -278,4 +279,4 @@ class TestEventsAuthzAPIIntegration:
             response = await isolated_client.get(
                 f"/events?task_id={test_task.id}&agent_id={test_agent.id}"
             )
-        assert response.status_code == 404
+        assert response.status_code == 403

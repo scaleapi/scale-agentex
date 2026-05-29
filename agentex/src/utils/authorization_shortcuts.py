@@ -92,17 +92,10 @@ def DAuthorizedId(
                     f"Item with id '{resource_id}' does not exist."
                 ) from None
         else:
-            # Direct resources — same 404 collapse so get/list behave
-            # consistently and we don't leak existence via 403 vs 404.
-            try:
-                await authorization.check(
-                    resource=AgentexResource(type=resource_type, selector=resource_id),
-                    operation=operation,
-                )
-            except AuthorizationError:
-                raise ItemDoesNotExist(
-                    f"Item with id '{resource_id}' does not exist."
-                ) from None
+            await authorization.check(
+                resource=AgentexResource(type=resource_type, selector=resource_id),
+                operation=operation,
+            )
         return resource_id
 
     return Annotated[str, Depends(_ensure_authorized_id)]
@@ -155,17 +148,10 @@ def DAuthorizedQuery(
                     f"Item with id '{resource_id}' does not exist."
                 ) from None
         else:
-            # Direct resources — same 404 collapse so get/list behave
-            # consistently and we don't leak existence via 403 vs 404.
-            try:
-                await authorization.check(
-                    resource=AgentexResource(type=resource_type, selector=resource_id),
-                    operation=operation,
-                )
-            except AuthorizationError:
-                raise ItemDoesNotExist(
-                    f"Item with id '{resource_id}' does not exist."
-                ) from None
+            await authorization.check(
+                resource=AgentexResource(type=resource_type, selector=resource_id),
+                operation=operation,
+            )
         return resource_id
 
     return Annotated[str, Depends(_ensure_authorized_query)]
