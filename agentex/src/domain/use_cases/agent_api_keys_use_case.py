@@ -91,11 +91,8 @@ class AgentAPIKeysUseCase:
 
         api_key_id = orm_id()
 
-        # Always call register_resource. agentex-auth's per-account routing
-        # (FGAC_AGENTEX_AUTH_SPARK, scaleapi/agentex#353) decides whether
-        # the call lands on Spark AuthZ or falls back to the legacy SGP
-        # backend for this caller's account. scale-agentex is intentionally
-        # decoupled from egp-api-backend's feature-flag service.
+        # Unconditional — agentex-auth decides per-account whether the call
+        # routes to Spark or the legacy backend.
         await self._register_api_key_in_auth(
             api_key_id=api_key_id,
             agent_id=agent.id,
@@ -217,8 +214,17 @@ class AgentAPIKeysUseCase:
         )
 
     async def delete(self, id: str, account_id: str | None = None) -> None:
+        # Pre-fetch so we skip deregister when the row never existed, matching
+        # the delete_by_* methods.
+        try:
+            existing = await self.agent_api_key_repo.get(id=id)
+        except ItemDoesNotExist:
+            existing = None
         await self.agent_api_key_repo.delete(id=id)
-        await self._deregister_api_key_from_auth(api_key_id=id, account_id=account_id)
+        if existing is not None:
+            await self._deregister_api_key_from_auth(
+                api_key_id=id, account_id=account_id
+            )
 
     async def delete_by_agent_id_and_key_name(
         self,

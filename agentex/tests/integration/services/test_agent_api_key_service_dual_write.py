@@ -30,6 +30,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.api.schemas.authorization_types import AgentexResource, AgentexResourceType
 from src.domain.entities.agent_api_keys import AgentAPIKeyEntity, AgentAPIKeyType
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
@@ -56,6 +57,17 @@ def _agent() -> AgentEntity:
     )
 
 
+def _stub_api_key(id: str) -> AgentAPIKeyEntity:
+    """Minimal entity stand-in for the repo.get default in _build_use_case."""
+    return AgentAPIKeyEntity(
+        id=id,
+        name="stub",
+        agent_id=orm_id(),
+        api_key_type=AgentAPIKeyType.EXTERNAL,
+        api_key="stub",
+    )
+
+
 def _build_use_case(
     *,
     principal: SimpleNamespace | None,
@@ -76,6 +88,9 @@ def _build_use_case(
     else:
         agent_api_key_repository.create = AsyncMock(side_effect=create_raises)
     agent_api_key_repository.delete = AsyncMock(return_value=None)
+    # Default get() returns a sentinel "exists" so delete() flows through the
+    # deregister path; tests covering "row doesn't exist" override this.
+    agent_api_key_repository.get = AsyncMock(side_effect=lambda id: _stub_api_key(id))
     agent_api_key_repository.get_by_agent_id_and_name = AsyncMock(return_value=None)
     agent_api_key_repository.get_by_agent_name_and_key_name = AsyncMock(
         return_value=None
@@ -278,3 +293,24 @@ async def test_delete_by_agent_id_and_key_name_revokes_existing(
     deregister.assert_awaited_once()
     deregistered_resource: AgentexResource = deregister.await_args.kwargs["resource"]
     assert deregistered_resource.selector == existing_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_delete_api_key_skips_deregister_when_row_does_not_exist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the api_key id doesn't exist, the pre-fetch raises and the
+    deregister call is skipped — matches the delete_by_* pattern and avoids
+    a wasted auth round-trip on a no-op delete."""
+    use_case, repo, _, deregister = _build_use_case(
+        principal=_principal(user_id="user-A", account_id="acct-1"),
+        monkeypatch=monkeypatch,
+    )
+    # Override the default "row exists" sentinel.
+    repo.get = AsyncMock(side_effect=ItemDoesNotExist("not found"))
+
+    await use_case.delete(id=orm_id(), account_id="acct-1")
+
+    repo.delete.assert_awaited_once()
+    deregister.assert_not_called()
