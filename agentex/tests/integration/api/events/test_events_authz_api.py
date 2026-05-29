@@ -249,3 +249,33 @@ class TestEventsAuthzAPIIntegration:
         assert (AgentexResourceType.agent.value, test_agent.id) in checked
         for call in check_calls:
             assert call[1]["json"]["operation"] == "read"
+
+    @pytest.mark.asyncio
+    @patch(
+        "src.api.authentication_middleware.AgentexAuthMiddleware.is_enabled",
+        return_value=True,
+    )
+    @patch(
+        "src.domain.services.authorization_service.AuthorizationService.is_enabled",
+        return_value=True,
+    )
+    async def test_list_events_unauthorized_agent_returns_404(
+        self,
+        is_enabled_authorization_mock,
+        is_enabled_mock,
+        isolated_client,
+        test_event,
+        test_agent,
+        test_task,
+    ):
+        """Caller without view on the queried agent_id gets 404, not 403 — the
+        DAuthorizedQuery on agent_id catches the denial and collapses it. No
+        leak of agent existence across tenants."""
+        with patch(
+            "src.utils.http_request_handler.HttpRequestHandler.post_with_error_handling",
+            side_effect=_mock_post_factory(deny_agent_ids={test_agent.id}),
+        ):
+            response = await isolated_client.get(
+                f"/events?task_id={test_task.id}&agent_id={test_agent.id}"
+            )
+        assert response.status_code == 404
