@@ -6,7 +6,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
-from src.api.schemas.agents import Agent, RegisterAgentRequest, RegisterAgentResponse
+from src.api.schemas.agents import (
+    Agent,
+    RegisterAgentRequest,
+    RegisterAgentResponse,
+    RegisterBuildRequest,
+)
 from src.api.schemas.agents_rpc import (
     AgentRPCRequest,
     AgentRPCResponse,
@@ -214,6 +219,45 @@ async def register_agent(
         return RegisterAgentResponse.model_validate(response_fields)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post(
+    "/register-build",
+    response_model=Agent,
+    summary="Register Build",
+    description=(
+        "Register an agent at build time, before it is deployed. Creates the "
+        "agent row in BUILD_ONLY status without an acp_url (there is no running "
+        "pod yet) so it can be permissioned and shared prior to deploy. Unlike "
+        "/register, this does not mint an API key. Idempotent by name."
+    ),
+)
+async def register_build(
+    request: RegisterBuildRequest,
+    agents_use_case: DAgentsUseCase,
+    authorization_service: DAuthorizationService,
+) -> Agent:
+    """Create a build-only agent row and grant the caller access to it."""
+    await authorization_service.check(
+        AgentexResource.agent("*"),
+        AuthorizedOperationType.create,
+        principal_context=request.principal_context,
+    )
+    logger.info(f"Registering build for agent: {request.name}")
+    try:
+        agent_entity = await agents_use_case.register_build(
+            name=request.name,
+            description=request.description,
+            registration_metadata=request.registration_metadata,
+            agent_input_type=request.agent_input_type,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    await authorization_service.grant(
+        AgentexResource.agent(agent_entity.id),
+        principal_context=request.principal_context,
+    )
+    return Agent.model_validate(agent_entity)
 
 
 @router.get(
