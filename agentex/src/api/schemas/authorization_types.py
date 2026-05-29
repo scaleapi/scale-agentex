@@ -20,8 +20,14 @@ class AgentexResourceType(StrEnum):
 class TaskChildResourceType(StrEnum):
     """Resources that inherit permissions from their parent task."""
 
-    event = "event"
     state = "state"
+
+
+# Resources that inherit permissions from their parent agent
+class AgentChildResourceType(StrEnum):
+    """Resources that inherit permissions from their parent agent."""
+
+    event = "event"
 
 
 class AgentexResource(BaseModel):

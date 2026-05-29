@@ -2,7 +2,10 @@ from typing import Annotated
 
 from fastapi import Depends, Path, Query, Request
 
+from src.adapters.authorization.exceptions import AuthorizationError
+from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.api.schemas.authorization_types import (
+    AgentChildResourceType,
     AgentexResource,
     AgentexResourceType,
     AuthorizedOperationType,
@@ -18,13 +21,11 @@ from src.domain.services.authorization_service import DAuthorizationService
 async def _get_parent_task_id(
     resource_type: TaskChildResourceType,
     resource_id: str,
-    event_repository: DEventRepository,
     state_repository: DTaskStateRepository,
 ) -> str:
-    """Get the parent task ID for a child resource."""
+    """Get the parent task ID for a task-child resource."""
     registry = {
         TaskChildResourceType.state: state_repository,
-        TaskChildResourceType.event: event_repository,
     }
 
     repository = registry[resource_type]
@@ -32,8 +33,23 @@ async def _get_parent_task_id(
     return resource.task_id
 
 
+async def _get_parent_agent_id(
+    resource_type: AgentChildResourceType,
+    resource_id: str,
+    event_repository: DEventRepository,
+) -> str:
+    """Get the parent agent ID for an agent-child resource."""
+    registry = {
+        AgentChildResourceType.event: event_repository,
+    }
+
+    repository = registry[resource_type]
+    resource = await repository.get(id=resource_id)
+    return resource.agent_id
+
+
 def DAuthorizedId(
-    resource_type: AgentexResourceType | TaskChildResourceType,
+    resource_type: AgentexResourceType | TaskChildResourceType | AgentChildResourceType,
     operation: AuthorizedOperationType = AuthorizedOperationType.read,
     param_name: str = None,
 ):
@@ -46,15 +62,35 @@ def DAuthorizedId(
         state_repository: DTaskStateRepository,
         resource_id: str = Path(..., alias=param_name),
     ) -> str:
-        # For child resources, check the parent task
+        # For child resources, check the parent. Collapse a denied check
+        # into 404 so callers cannot use 403 vs 404 to probe whether a resource
+        # exists in another tenant.
         if isinstance(resource_type, TaskChildResourceType):
             task_id = await _get_parent_task_id(
-                resource_type, resource_id, event_repository, state_repository
+                resource_type, resource_id, state_repository
             )
-            await authorization.check(
-                resource=AgentexResource.task(task_id),
-                operation=operation,
+            try:
+                await authorization.check(
+                    resource=AgentexResource.task(task_id),
+                    operation=operation,
+                )
+            except AuthorizationError:
+                raise ItemDoesNotExist(
+                    f"Item with id '{resource_id}' does not exist."
+                ) from None
+        elif isinstance(resource_type, AgentChildResourceType):
+            agent_id = await _get_parent_agent_id(
+                resource_type, resource_id, event_repository
             )
+            try:
+                await authorization.check(
+                    resource=AgentexResource.agent(agent_id),
+                    operation=operation,
+                )
+            except AuthorizationError:
+                raise ItemDoesNotExist(
+                    f"Item with id '{resource_id}' does not exist."
+                ) from None
         else:
             # For direct resources, check directly
             await authorization.check(
@@ -67,7 +103,7 @@ def DAuthorizedId(
 
 
 def DAuthorizedQuery(
-    resource_type: AgentexResourceType | TaskChildResourceType,
+    resource_type: AgentexResourceType | TaskChildResourceType | AgentChildResourceType,
     operation: AuthorizedOperationType = AuthorizedOperationType.read,
     param_name: str = None,
     description: str = None,
@@ -83,15 +119,35 @@ def DAuthorizedQuery(
         state_repository: DTaskStateRepository,
         resource_id: str = Query(..., alias=param_name, description=description),
     ) -> str:
-        # For child resources, check the parent task
+        # For child resources, check the parent. Collapse a denied check
+        # into 404 so callers cannot use 403 vs 404 to probe whether a resource
+        # exists in another tenant.
         if isinstance(resource_type, TaskChildResourceType):
             task_id = await _get_parent_task_id(
-                resource_type, resource_id, event_repository, state_repository
+                resource_type, resource_id, state_repository
             )
-            await authorization.check(
-                resource=AgentexResource.task(task_id),
-                operation=operation,
+            try:
+                await authorization.check(
+                    resource=AgentexResource.task(task_id),
+                    operation=operation,
+                )
+            except AuthorizationError:
+                raise ItemDoesNotExist(
+                    f"Item with id '{resource_id}' does not exist."
+                ) from None
+        elif isinstance(resource_type, AgentChildResourceType):
+            agent_id = await _get_parent_agent_id(
+                resource_type, resource_id, event_repository
             )
+            try:
+                await authorization.check(
+                    resource=AgentexResource.agent(agent_id),
+                    operation=operation,
+                )
+            except AuthorizationError:
+                raise ItemDoesNotExist(
+                    f"Item with id '{resource_id}' does not exist."
+                ) from None
         else:
             # For direct resources, check directly
             await authorization.check(

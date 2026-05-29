@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Query
 
 from src.api.schemas.authorization_types import (
+    AgentChildResourceType,
     AgentexResourceType,
     AuthorizedOperationType,
-    TaskChildResourceType,
 )
 from src.api.schemas.events import Event
 from src.domain.use_cases.events_use_case import DEventUseCase
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/events", tags=["Events"])
     response_model=Event,
 )
 async def get_event(
-    event_id: DAuthorizedId(TaskChildResourceType.event, AuthorizedOperationType.read),
+    event_id: DAuthorizedId(AgentChildResourceType.event, AuthorizedOperationType.read),
     event_use_case: DEventUseCase,
 ) -> Event:
     event_entity = await event_use_case.get(event_id)
