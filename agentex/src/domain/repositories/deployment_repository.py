@@ -10,6 +10,7 @@ from src.config.dependencies import (
     DDatabaseAsyncReadOnlySessionMaker,
     DDatabaseAsyncReadWriteSessionMaker,
 )
+from src.domain.entities.agents import AgentStatus
 from src.domain.entities.deployments import DeploymentEntity, DeploymentStatus
 from src.utils.logging import make_logger
 
@@ -79,6 +80,9 @@ class DeploymentRepository(PostgresCRUDRepository[DeploymentORM, DeploymentEntit
         1. Unset is_production on the current production deployment
         2. Set is_production=True and promoted_at on the target deployment
         3. Update Agent.production_deployment_id and Agent.acp_url
+        4. Promote a BUILD_ONLY agent to READY (the deployment-scoped flow's
+           equivalent of the legacy /register status flip; for that flow the
+           agent row is only mutated here, not at register time)
         """
         async with self.start_async_db_session(allow_writes=True) as session:
             # Validate the target deployment exists, belongs to this agent, and is not soft-deleted
@@ -99,6 +103,10 @@ class DeploymentRepository(PostgresCRUDRepository[DeploymentORM, DeploymentEntit
                     f"Deployment must be in {DeploymentStatus.READY} status."
                 )
 
+            agent = await session.get(AgentORM, agent_id)
+            if not agent:
+                raise ItemDoesNotExist(f"Agent {agent_id} not found")
+
             now = datetime.now(UTC)
 
             # Demote current production deployment
@@ -114,13 +122,19 @@ class DeploymentRepository(PostgresCRUDRepository[DeploymentORM, DeploymentEntit
             target_deployment.promoted_at = now
 
             # Update agent's denormalized fields
+            agent_values: dict[str, object] = {
+                "production_deployment_id": deployment_id,
+                "acp_url": target_deployment.acp_url,
+            }
+            # A build-only agent has never been deployed; its first promotion is
+            # what makes it live, so flip it to READY here. Leave any other
+            # status (e.g. UNHEALTHY) untouched.
+            if agent.status == AgentStatus.BUILD_ONLY:
+                agent_values["status"] = AgentStatus.READY
+                agent_values["status_reason"] = "Agent registered successfully."
+                agent_values["registered_at"] = now
             await session.execute(
-                update(AgentORM)
-                .where(AgentORM.id == agent_id)
-                .values(
-                    production_deployment_id=deployment_id,
-                    acp_url=target_deployment.acp_url,
-                )
+                update(AgentORM).where(AgentORM.id == agent_id).values(**agent_values)
             )
 
             await session.commit()
