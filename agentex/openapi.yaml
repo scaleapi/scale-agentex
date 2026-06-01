@@ -208,6 +208,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /agents/register-build:
+    post:
+      tags:
+      - Agents
+      summary: Register Build
+      description: Register an agent at build time, before it is deployed, so it can
+        be permissioned and shared prior to deploy. Idempotent by name.
+      operationId: register_build_agents_register_build_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterBuildRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /agents/forward/name/{agent_name}/{path}:
     get:
       tags:
@@ -3894,6 +3921,7 @@ components:
       - Unknown
       - Deleted
       - Unhealthy
+      - BuildOnly
       title: AgentStatus
     AgentTaskTracker:
       properties:
@@ -5292,6 +5320,48 @@ components:
       - updated_at
       title: RegisterAgentResponse
       description: Response model for registering an agent.
+    RegisterBuildRequest:
+      properties:
+        name:
+          type: string
+          pattern: ^[a-z0-9-]+$
+          title: Name
+          description: The unique name of the agent.
+        description:
+          type: string
+          title: Description
+          description: The description of the agent.
+        principal_context:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Principal Context
+          description: Principal used for authorization
+        registration_metadata:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Registration Metadata
+          description: The metadata for the agent's build registration.
+        agent_input_type:
+          anyOf:
+          - $ref: '#/components/schemas/AgentInputType'
+          - type: 'null'
+          description: The type of input the agent expects.
+      type: object
+      required:
+      - name
+      - description
+      title: RegisterBuildRequest
+      description: 'Request model for registering an agent at build time (pre-deploy).
+
+
+        Unlike RegisterAgentRequest, there is no acp_url (the agent is not running
+
+        yet) and no acp_type is required. The created agent is left in BUILD_ONLY
+
+        status so it can be permissioned/shared before it is deployed.'
     RehydrateTaskRequest:
       properties:
         task_id:

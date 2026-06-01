@@ -167,6 +167,55 @@ class AgentsUseCase:
         await self.ensure_healthcheck_workflow(agent)
         return agent
 
+    async def register_build(
+        self,
+        name: str,
+        description: str,
+        registration_metadata: dict[str, Any] | None = None,
+        agent_input_type: AgentInputType | None = None,
+    ) -> AgentEntity:
+        """
+        Create an agent row for a build, before any deployment exists.
+
+        Unlike register_agent, this does NOT populate acp_url (there is no
+        running pod yet) and leaves the agent in BUILD_ONLY status so it can be
+        permissioned/shared prior to deploy. Deploy-time registration later
+        flips the agent to READY and sets the acp_url.
+
+        Idempotent: if an agent with the same name already exists, it is
+        returned unchanged so that re-building an existing agent never clobbers
+        a live deployment's status or acp_url.
+        """
+        try:
+            existing = await self.agent_repo.get(name=name)
+            logger.info(
+                f"Agent {name} already exists, returning existing agent for build"
+            )
+            return existing
+        except ItemDoesNotExist:
+            logger.info(f"Agent {name} not found, creating build-only agent")
+
+        agent = AgentEntity(
+            id=orm_id(),
+            name=name,
+            description=description,
+            status=AgentStatus.BUILD_ONLY,
+            status_reason="Agent build registered; not yet deployed.",
+            acp_url=None,
+            registration_metadata=registration_metadata,
+            agent_input_type=agent_input_type,
+        )
+        # If multiple builds for the same new agent race, the first wins and the
+        # rest re-fetch the persisted row instead of erroring.
+        try:
+            agent = await self.agent_repo.create(item=agent)
+        except DuplicateItemError:
+            logger.info(
+                f"Agent {name} was likely created in parallel, returning existing"
+            )
+            agent = await self.agent_repo.get(name=name)
+        return agent
+
     async def complete_deployment_registration(
         self,
         agent: AgentEntity,
