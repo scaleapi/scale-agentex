@@ -148,7 +148,6 @@ async def test_create_api_key_calls_register_resource_with_parent(
         agent_id=agent.id,
         api_key_type=AgentAPIKeyType.EXTERNAL,
         api_key="secret",
-        account_id="acct-1",
     )
 
     register.assert_awaited_once()
@@ -178,7 +177,7 @@ async def test_delete_api_key_calls_deregister_resource(
     )
 
     api_key_id = orm_id()
-    await use_case.delete(id=api_key_id, account_id="acct-1")
+    await use_case.delete(id=api_key_id)
 
     repo.delete.assert_awaited_once_with(id=api_key_id)
     deregister.assert_awaited_once()
@@ -207,7 +206,6 @@ async def test_create_api_key_grant_failure_prevents_db_row(
             agent_id=agent.id,
             api_key_type=AgentAPIKeyType.EXTERNAL,
             api_key="secret",
-            account_id="acct-1",
         )
 
     repo.create.assert_not_awaited()
@@ -226,7 +224,7 @@ async def test_delete_api_key_revoke_failure_does_not_block_delete(
     )
 
     # Should NOT raise.
-    await use_case.delete(id=orm_id(), account_id="acct-1")
+    await use_case.delete(id=orm_id())
 
     repo.delete.assert_awaited_once()
     deregister_ref.assert_awaited_once()
@@ -251,7 +249,6 @@ async def test_create_api_key_skips_grant_when_no_creator_resolvable(
         agent_id=agent.id,
         api_key_type=AgentAPIKeyType.EXTERNAL,
         api_key="secret",
-        account_id="acct-1",
     )
 
     register.assert_not_called()
@@ -286,7 +283,6 @@ async def test_delete_by_agent_id_and_key_name_revokes_existing(
         agent_id=agent.id,
         key_name="k1",
         api_key_type=AgentAPIKeyType.EXTERNAL,
-        account_id="acct-1",
     )
 
     repo.delete_by_agent_id_and_key_name.assert_awaited_once()
@@ -310,7 +306,7 @@ async def test_delete_api_key_skips_deregister_when_row_does_not_exist(
     # Override the default "row exists" sentinel.
     repo.get = AsyncMock(side_effect=ItemDoesNotExist("not found"))
 
-    await use_case.delete(id=orm_id(), account_id="acct-1")
+    await use_case.delete(id=orm_id())
 
     repo.delete.assert_awaited_once()
     deregister.assert_not_called()

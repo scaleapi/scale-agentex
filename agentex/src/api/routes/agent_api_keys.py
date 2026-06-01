@@ -8,7 +8,6 @@ from src.api.schemas.agent_api_keys import (
     CreateAPIKeyResponse,
 )
 from src.domain.entities.agent_api_keys import AgentAPIKeyType
-from src.domain.services.authorization_service import DAuthorizationService
 from src.domain.use_cases.agent_api_keys_use_case import DAgentAPIKeysUseCase
 from src.domain.use_cases.agents_use_case import DAgentsUseCase
 from src.utils.logging import make_logger
@@ -29,7 +28,6 @@ async def create_api_key(
     request: CreateAPIKeyRequest,
     agent_api_key_use_case: DAgentAPIKeysUseCase,
     agent_use_case: DAgentsUseCase,
-    authorization_service: DAuthorizationService,
 ) -> CreateAPIKeyResponse:
     if not request.agent_id and not request.agent_name:
         raise HTTPException(
@@ -54,13 +52,11 @@ async def create_api_key(
         raise HTTPException(status_code=409, detail=error_msg)
 
     new_api_key = request.api_key or secrets.token_hex(32)
-    account_id = getattr(authorization_service.principal_context, "account_id", None)
     agent_api_key_entity = await agent_api_key_use_case.create(
         agent_id=agent.id,
         api_key=str(new_api_key),
         name=request.name,
         api_key_type=request.api_key_type,
-        account_id=account_id,
     )
     return CreateAPIKeyResponse(
         id=agent_api_key_entity.id,
@@ -165,10 +161,8 @@ async def get_agent_api_key(
 async def delete_agent_api_key(
     id: str,
     agent_api_key_use_case: DAgentAPIKeysUseCase,
-    authorization_service: DAuthorizationService,
 ) -> str:
-    account_id = getattr(authorization_service.principal_context, "account_id", None)
-    await agent_api_key_use_case.delete(id=id, account_id=account_id)
+    await agent_api_key_use_case.delete(id=id)
     return f"Agent API key with ID {id} deleted"
 
 
@@ -182,7 +176,6 @@ async def delete_agent_api_key_by_name(
     api_key_name: str,
     agent_api_key_use_case: DAgentAPIKeysUseCase,
     agent_use_case: DAgentsUseCase,
-    authorization_service: DAuthorizationService,
     agent_id: str | None = None,
     agent_name: str | None = None,
     api_key_type: AgentAPIKeyType = AgentAPIKeyType.EXTERNAL,
@@ -198,12 +191,10 @@ async def delete_agent_api_key_by_name(
             detail="Only one of 'agent_id' or 'agent_name' should be provided to delete an agent api_key.",
         )
     agent = await agent_use_case.get(id=agent_id, name=agent_name)
-    account_id = getattr(authorization_service.principal_context, "account_id", None)
     await agent_api_key_use_case.delete_by_agent_id_and_key_name(
         agent_id=agent.id,
         key_name=api_key_name,
         api_key_type=api_key_type,
-        account_id=account_id,
     )
 
     return f"Agent api_key '{api_key_name}' deleted"
