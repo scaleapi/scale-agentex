@@ -293,12 +293,11 @@ async def test_delete_by_agent_id_and_key_name_revokes_existing(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_delete_api_key_skips_deregister_when_row_does_not_exist(
+async def test_delete_api_key_skips_when_row_does_not_exist(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When the api_key id doesn't exist, the pre-fetch raises and the
-    deregister call is skipped — matches the delete_by_* pattern and avoids
-    a wasted auth round-trip on a no-op delete."""
+    """When the api_key id doesn't exist, the pre-fetch raises and we early-
+    return — no DB delete, no auth deregister. Avoids round-trips on a no-op."""
     use_case, repo, _, deregister = _build_use_case(
         principal=_principal(user_id="user-A", account_id="acct-1"),
         monkeypatch=monkeypatch,
@@ -308,5 +307,5 @@ async def test_delete_api_key_skips_deregister_when_row_does_not_exist(
 
     await use_case.delete(id=orm_id())
 
-    repo.delete.assert_awaited_once()
+    repo.delete.assert_not_called()
     deregister.assert_not_called()

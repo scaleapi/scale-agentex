@@ -206,15 +206,14 @@ class AgentAPIKeysUseCase:
         )
 
     async def delete(self, id: str) -> None:
-        # Pre-fetch so we skip deregister when the row never existed, matching
-        # the delete_by_* methods.
+        # Pre-fetch so we skip both the delete and the deregister when the row
+        # never existed — no DB round-trip, no auth round-trip for a no-op.
         try:
-            existing = await self.agent_api_key_repo.get(id=id)
+            await self.agent_api_key_repo.get(id=id)
         except ItemDoesNotExist:
-            existing = None
+            return
         await self.agent_api_key_repo.delete(id=id)
-        if existing is not None:
-            await self._deregister_api_key_from_auth(api_key_id=id)
+        await self._deregister_api_key_from_auth(api_key_id=id)
 
     async def delete_by_agent_id_and_key_name(
         self,
