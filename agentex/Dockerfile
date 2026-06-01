@@ -1,6 +1,13 @@
 FROM python:3.12-slim-trixie AS base
 ARG SOURCE_DIR=agentex
 
+# Optional package index overrides for environments where the default PyPI
+# (files.pythonhosted.org) is unreachable, empty defaults preserve standard PyPI behavior
+ARG UV_INDEX_URL=
+ARG UV_EXTRA_INDEX_URL=
+ENV UV_INDEX_URL=${UV_INDEX_URL}
+ENV UV_EXTRA_INDEX_URL=${UV_EXTRA_INDEX_URL}
+
 # Install uv package manager
 COPY --from=ghcr.io/astral-sh/uv:0.7.3 /uv /uvx /bin/
 

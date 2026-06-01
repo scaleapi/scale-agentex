@@ -20,8 +20,12 @@ COPY ${SOURCE_DIR}/package.json ${SOURCE_DIR}/package-lock.json ./
 ENV npm_config_cache=/tmp/.npm
 RUN npm config set maxsockets 3
 
+# Optional npm registry override for environments where registry.npmjs.org is
+# unreachable, default preserves public npm behavior
+ARG NPM_REGISTRY=https://registry.npmjs.org/
+
 # Install all dependencies (including dev for build tooling)
-RUN npm config set registry https://registry.npmjs.org/ && \
+RUN npm config set registry ${NPM_REGISTRY} && \
     npm ci --verbose
 
 # Copy source code
