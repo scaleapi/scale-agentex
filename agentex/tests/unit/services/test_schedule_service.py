@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, Mock
 from uuid import uuid4
 
 import pytest
@@ -49,9 +50,25 @@ def mock_temporal_adapter():
 
 
 @pytest.fixture
-def schedule_service(mock_temporal_adapter):
+def mock_authorization_service():
+    """Mock authorization service with a resolvable creator principal so the
+    dual-write register/deregister calls run as no-ops in these unit tests."""
+    mock = Mock()
+    mock.principal_context = SimpleNamespace(
+        user_id="user-test", service_account_id=None, account_id="acct-test"
+    )
+    mock.register_resource = AsyncMock(return_value=None)
+    mock.deregister_resource = AsyncMock(return_value=None)
+    return mock
+
+
+@pytest.fixture
+def schedule_service(mock_temporal_adapter, mock_authorization_service):
     """Create ScheduleService instance with mocked temporal adapter"""
-    return ScheduleService(temporal_adapter=mock_temporal_adapter)
+    return ScheduleService(
+        temporal_adapter=mock_temporal_adapter,
+        authorization_service=mock_authorization_service,
+    )
 
 
 @pytest.fixture
