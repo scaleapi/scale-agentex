@@ -226,10 +226,8 @@ async def register_agent(
     response_model=Agent,
     summary="Register Build",
     description=(
-        "Register an agent at build time, before it is deployed. Creates the "
-        "agent row in BUILD_ONLY status without an acp_url (there is no running "
-        "pod yet) so it can be permissioned and shared prior to deploy. Unlike "
-        "/register, this does not mint an API key. Idempotent by name."
+        "Register an agent at build time, before it is deployed, so it can be "
+        "permissioned and shared prior to deploy. Idempotent by name."
     ),
 )
 async def register_build(
