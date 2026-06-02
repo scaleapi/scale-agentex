@@ -3,13 +3,31 @@ Shared service fixtures for both unit and integration tests.
 Provides factory functions and specific fixtures for creating services with test repositories.
 """
 
-from unittest.mock import MagicMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 
 # =============================================================================
 # SERVICE FACTORY FUNCTIONS - Shared logic
 # =============================================================================
+
+
+def make_noop_authorization_service() -> Mock:
+    """Shared noop AuthorizationService mock for tests that don't exercise authz.
+
+    ``principal_context`` is ``None``, and
+    ``grant``/``revoke``/``register_resource``/``deregister_resource`` are async
+    no-ops returning ``None`` — matching the real service signature. Use this
+    anywhere a test just needs to construct ``AgentTaskService`` without caring
+    about authorization behavior.
+    """
+    svc = Mock()
+    svc.principal_context = None
+    svc.grant = AsyncMock(return_value=None)
+    svc.revoke = AsyncMock(return_value=None)
+    svc.register_resource = AsyncMock(return_value=None)
+    svc.deregister_resource = AsyncMock(return_value=None)
+    return svc
 
 
 def create_task_message_service(task_message_repository):
@@ -52,9 +70,13 @@ def create_task_service(
     event_repository,
     agent_acp_service,
     redis_stream_repository,
+    authorization_service=None,
 ):
-    """Factory function to create AgentTaskService with given repositories and services"""
+    """Factory function to create AgentTaskService with given repositories and services."""
     from src.domain.services.task_service import AgentTaskService
+
+    if authorization_service is None:
+        authorization_service = make_noop_authorization_service()
 
     return AgentTaskService(
         task_repository=task_repository,
@@ -62,6 +84,7 @@ def create_task_service(
         event_repository=event_repository,
         acp_client=agent_acp_service,
         stream_repository=redis_stream_repository,
+        authorization_service=authorization_service,
     )
 
 

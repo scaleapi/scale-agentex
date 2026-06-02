@@ -11,7 +11,6 @@ from src.api.schemas.authorization_types import (
     TaskChildResourceType,
 )
 from src.domain.repositories.agent_repository import DAgentRepository
-from src.domain.repositories.event_repository import DEventRepository
 from src.domain.repositories.task_message_repository import DTaskMessageRepository
 from src.domain.repositories.task_repository import DTaskRepository
 from src.domain.repositories.task_state_repository import DTaskStateRepository
@@ -24,14 +23,12 @@ from src.utils.schedule_authorization import _check_schedule_or_collapse_to_404
 async def _get_parent_task_id(
     resource_type: TaskChildResourceType,
     resource_id: str,
-    event_repository: DEventRepository,
     state_repository: DTaskStateRepository,
     message_repository: DTaskMessageRepository,
 ) -> str:
-    """Get the parent task ID for a child resource."""
+    """Get the parent task ID for a task-child resource."""
     registry = {
         TaskChildResourceType.state: state_repository,
-        TaskChildResourceType.event: event_repository,
         TaskChildResourceType.message: message_repository,
     }
 
@@ -50,7 +47,6 @@ def DAuthorizedId(
 
     async def _ensure_authorized_id(
         authorization: DAuthorizationService,
-        event_repository: DEventRepository,
         state_repository: DTaskStateRepository,
         message_repository: DTaskMessageRepository,
         resource_id: str = Path(..., alias=param_name),
@@ -62,7 +58,6 @@ def DAuthorizedId(
             task_id = await _get_parent_task_id(
                 resource_type,
                 resource_id,
-                event_repository,
                 state_repository,
                 message_repository,
             )
@@ -105,7 +100,6 @@ def DAuthorizedQuery(
 
     async def _ensure_authorized_query(
         authorization: DAuthorizationService,
-        event_repository: DEventRepository,
         state_repository: DTaskStateRepository,
         message_repository: DTaskMessageRepository,
         resource_id: str = Query(..., alias=param_name, description=description),
@@ -117,7 +111,6 @@ def DAuthorizedQuery(
             task_id = await _get_parent_task_id(
                 resource_type,
                 resource_id,
-                event_repository,
                 state_repository,
                 message_repository,
             )
