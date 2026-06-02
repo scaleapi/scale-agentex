@@ -66,7 +66,5 @@ class AgentexResourceOptionalSelector(BaseModel):
         return cls(type=AgentexResourceType.api_key, selector=selector)
 
     @classmethod
-    def schedule(
-        cls, selector: str | None = None
-    ) -> "AgentexResourceOptionalSelector":
+    def schedule(cls, selector: str | None = None) -> "AgentexResourceOptionalSelector":
         return cls(type=AgentexResourceType.schedule, selector=selector)
