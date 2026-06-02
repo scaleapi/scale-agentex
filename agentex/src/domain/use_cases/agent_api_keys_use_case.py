@@ -246,10 +246,23 @@ class AgentAPIKeysUseCase:
             await self._deregister_api_key_from_auth(api_key_id=existing.id)
 
     async def list(
-        self, agent_id: str, limit: int, page_number: int
+        self,
+        agent_id: str,
+        limit: int,
+        page_number: int,
+        id: list[str] | None = None,
     ) -> list[AgentAPIKeyEntity]:
+        # ``id`` is the FGAC-filter shape used by route deps (DAuthorizedResourceIds).
+        # ``None`` means "no filter" (e.g. authz bypass); an empty list means
+        # "caller can see no api_keys" and must short-circuit to avoid the
+        # base repo translating ``id=[]`` into an unfiltered query.
+        if id is not None and not id:
+            return []
+        filters: dict = {"agent_id": agent_id}
+        if id is not None:
+            filters["id"] = id
         return await self.agent_api_key_repo.list(
-            limit=limit, page_number=page_number, filters={"agent_id": agent_id}
+            limit=limit, page_number=page_number, filters=filters
         )
 
     async def forward_agent_request(
