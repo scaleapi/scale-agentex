@@ -229,6 +229,50 @@ class TestNameRouteCollapse:
         called_kwargs = authorization.check.await_args.kwargs
         assert called_kwargs["operation"] == AuthorizedOperationType.delete
 
+    async def test_absent_and_denied_404_bodies_are_identical(self):
+        """Cross-tenant existence-leak guard: an absent row and a present-but-
+        denied row must surface byte-for-byte identical 404 bodies. Any
+        identifier in either path lets a caller probe by diffing responses."""
+        from src.api.routes.agent_api_keys import get_agent_api_key_by_name
+        from src.utils.agent_api_key_authorization import API_KEY_NOT_FOUND_MESSAGE
+
+        agent_use_case = MagicMock()
+        agent_use_case.get = AsyncMock(return_value=MagicMock(id="agent-1"))
+
+        # Path A: row absent.
+        absent_use_case = MagicMock()
+        absent_use_case.get_by_agent_id_and_name = AsyncMock(return_value=None)
+        with pytest.raises(ItemDoesNotExist) as absent_exc:
+            await get_agent_api_key_by_name(
+                name="prod-key",
+                agent_api_key_use_case=absent_use_case,
+                agent_use_case=agent_use_case,
+                authorization_service=MagicMock(),
+                agent_id="agent-1",
+                agent_name=None,
+            )
+
+        # Path B: row present, authz denied.
+        denied_use_case = MagicMock()
+        denied_use_case.get_by_agent_id_and_name = AsyncMock(
+            return_value=MagicMock(id="api-key-named")
+        )
+        denied_authz = MagicMock()
+        denied_authz.check = AsyncMock(side_effect=AuthorizationError("denied"))
+        with pytest.raises(ItemDoesNotExist) as denied_exc:
+            await get_agent_api_key_by_name(
+                name="prod-key",
+                agent_api_key_use_case=denied_use_case,
+                agent_use_case=agent_use_case,
+                authorization_service=denied_authz,
+                agent_id="agent-1",
+                agent_name=None,
+            )
+
+        assert (
+            str(absent_exc.value) == str(denied_exc.value) == API_KEY_NOT_FOUND_MESSAGE
+        )
+
 
 @pytest.mark.unit
 @pytest.mark.asyncio

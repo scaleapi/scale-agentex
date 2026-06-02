@@ -2,6 +2,7 @@ import secrets
 
 from fastapi import APIRouter, HTTPException, Query
 
+from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.api.schemas.agent_api_keys import (
     AgentAPIKey,
     CreateAPIKeyRequest,
@@ -16,7 +17,10 @@ from src.domain.entities.agent_api_keys import AgentAPIKeyType
 from src.domain.services.authorization_service import DAuthorizationService
 from src.domain.use_cases.agent_api_keys_use_case import DAgentAPIKeysUseCase
 from src.domain.use_cases.agents_use_case import DAgentsUseCase
-from src.utils.agent_api_key_authorization import _check_api_key_or_collapse_to_404
+from src.utils.agent_api_key_authorization import (
+    API_KEY_NOT_FOUND_MESSAGE,
+    _check_api_key_or_collapse_to_404,
+)
 from src.utils.authorization_shortcuts import (
     DAuthorizedId,
     DAuthorizedResourceIds,
@@ -163,10 +167,10 @@ async def get_agent_api_key_by_name(
         agent_id=agent.id, name=name, api_key_type=api_key_type
     )
     if not agent_api_key_entity:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Agent api_key '{name}' not found for agent ID {agent.id}",
-        )
+        # Identifier-free message must match the denied-resource branch of
+        # ``_check_api_key_or_collapse_to_404`` so absent-vs-denied 404s are
+        # byte-for-byte indistinguishable (cross-tenant existence leak).
+        raise ItemDoesNotExist(API_KEY_NOT_FOUND_MESSAGE)
     # Name routes for api_key don't fit ``DAuthorizedName`` (the lookup key is
     # ``(agent_id, name, api_key_type)``, not a single globally-unique name
     # path param). Apply the collapse helper explicitly so present-but-denied
@@ -258,10 +262,9 @@ async def delete_agent_api_key_by_name(
         agent_id=agent.id, name=api_key_name, api_key_type=api_key_type
     )
     if not existing:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Agent api_key '{api_key_name}' not found for agent ID {agent.id}",
-        )
+        # Same identifier-free 404 as the denied branch — see the analogous
+        # comment in ``get_agent_api_key_by_name`` above.
+        raise ItemDoesNotExist(API_KEY_NOT_FOUND_MESSAGE)
     await _check_api_key_or_collapse_to_404(
         authorization_service,
         existing.id,

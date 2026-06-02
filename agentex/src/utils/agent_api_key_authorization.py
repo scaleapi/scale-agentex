@@ -5,6 +5,13 @@ from src.api.schemas.authorization_types import (
     AuthorizedOperationType,
 )
 
+# Generic, identifier-free message reused by both the denied-resource branch
+# below AND by the name routes when the row is absent. Without a shared message
+# the two 404s are body-distinguishable, letting a cross-tenant caller probe
+# existence by comparing response bodies — defeating the whole point of the
+# 404 collapse.
+API_KEY_NOT_FOUND_MESSAGE = "Agent api_key not found."
+
 
 async def _check_api_key_or_collapse_to_404(
     authorization,
@@ -39,4 +46,4 @@ async def _check_api_key_or_collapse_to_404(
             operation=operation,
         )
     except AuthorizationError:
-        raise ItemDoesNotExist(f"Item with id '{api_key_id}' does not exist.") from None
+        raise ItemDoesNotExist(API_KEY_NOT_FOUND_MESSAGE) from None
