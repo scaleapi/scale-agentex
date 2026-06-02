@@ -1,13 +1,15 @@
 from fastapi import APIRouter, Query
 
+from src.adapters.authorization.exceptions import AuthorizationError
+from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.api.schemas.authorization_types import (
+    AgentexResource,
     AgentexResourceType,
     AuthorizedOperationType,
 )
 from src.api.schemas.events import Event
 from src.domain.services.authorization_service import DAuthorizationService
 from src.domain.use_cases.events_use_case import DEventUseCase
-from src.utils.agent_authorization import check_agent_or_collapse_to_404
 from src.utils.authorization_shortcuts import DAuthorizedQuery
 from src.utils.logging import make_logger
 
@@ -25,11 +27,16 @@ async def get_event(
     event_use_case: DEventUseCase,
     authorization: DAuthorizationService,
 ) -> Event:
-    # Events delegate authz to the parent agent.
+    # Events delegate authz to the parent agent; collapse denial to 404 so
+    # callers can't probe cross-tenant existence by comparing 403 vs 404.
     event_entity = await event_use_case.get(event_id)
-    await check_agent_or_collapse_to_404(
-        authorization, event_entity.agent_id, AuthorizedOperationType.read
-    )
+    try:
+        await authorization.check(
+            resource=AgentexResource.agent(event_entity.agent_id),
+            operation=AuthorizedOperationType.read,
+        )
+    except AuthorizationError:
+        raise ItemDoesNotExist(f"Item with id '{event_id}' does not exist.") from None
     return Event.model_validate(event_entity)
 
 
