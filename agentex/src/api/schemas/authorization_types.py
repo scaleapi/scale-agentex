@@ -15,6 +15,7 @@ class AgentexResourceType(StrEnum):
     agent = "agent"
     task = "task"
     api_key = "api_key"
+    schedule = "schedule"
 
 
 # Resources that inherit permissions from their parent task
@@ -43,6 +44,10 @@ class AgentexResource(BaseModel):
     def api_key(cls, selector: str) -> "AgentexResource":
         return cls(type=AgentexResourceType.api_key, selector=selector)
 
+    @classmethod
+    def schedule(cls, selector: str) -> "AgentexResource":
+        return cls(type=AgentexResourceType.schedule, selector=selector)
+
 
 class AgentexResourceOptionalSelector(BaseModel):
     type: AgentexResourceType
@@ -59,3 +64,9 @@ class AgentexResourceOptionalSelector(BaseModel):
     @classmethod
     def api_key(cls, selector: str | None = None) -> "AgentexResourceOptionalSelector":
         return cls(type=AgentexResourceType.api_key, selector=selector)
+
+    @classmethod
+    def schedule(
+        cls, selector: str | None = None
+    ) -> "AgentexResourceOptionalSelector":
+        return cls(type=AgentexResourceType.schedule, selector=selector)
