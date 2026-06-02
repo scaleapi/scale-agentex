@@ -49,3 +49,29 @@ class AuthorizationGateway(Generic[PrincipalT], ABC):
         filter_operation: AuthorizedOperationType = AuthorizedOperationType.read,
     ) -> Iterable[str]:
         """List resource_ids for a given principal"""
+
+    @abstractmethod
+    async def register_resource(
+        self,
+        principal: PrincipalT,
+        resource: AgentexResource,
+        parent: AgentexResource | None = None,
+    ) -> None:
+        """Register a newly created resource in SpiceDB with the principal as
+        owner. Optionally writes a lifecycle parent edge.
+
+        Use this on resource create instead of ``grant`` when the resource
+        type's SpiceDB definition has a parent relation that permission
+        checks cascade through (e.g. ``agent_api_key`` declares
+        ``parent_agent``). Without writing that edge here the cascade fails
+        closed.
+        """
+
+    @abstractmethod
+    async def deregister_resource(
+        self,
+        principal: PrincipalT,
+        resource: AgentexResource,
+    ) -> None:
+        """Deregister a deleted resource and all of its relationships
+        (owner, parent, grantees) in a single atomic call."""
