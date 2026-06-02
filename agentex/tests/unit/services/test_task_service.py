@@ -19,6 +19,8 @@ from src.domain.repositories.task_repository import TaskRepository
 from src.domain.repositories.task_state_repository import TaskStateRepository
 from src.domain.services.task_service import AgentTaskService
 
+from tests.fixtures.services import make_noop_authorization_service
+
 
 async def create_or_get_agent(agent_repository, agent):
     """Helper to create agent or get existing one if name already exists"""
@@ -84,6 +86,7 @@ def task_service(
         task_state_repository=task_state_repository,
         event_repository=event_repository,
         stream_repository=redis_stream_repository,
+        authorization_service=make_noop_authorization_service(),
     )
 
 

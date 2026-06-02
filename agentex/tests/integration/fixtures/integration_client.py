@@ -22,6 +22,8 @@ from src.api.authentication_cache import reset_auth_cache
 from src.config.dependencies import GlobalDependencies
 from src.config.environment_variables import EnvironmentVariables
 
+from tests.fixtures.services import make_noop_authorization_service
+
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -455,6 +457,7 @@ async def isolated_integration_app(
             task_repository=isolated_repositories["task_repository"],
             event_repository=isolated_repositories["event_repository"],
             stream_repository=isolated_repositories["redis_stream_repository"],
+            authorization_service=make_noop_authorization_service(),
         )
 
         return TasksUseCase(task_service=task_service)
