@@ -39,6 +39,8 @@ def agent_api_keys_use_case(
     authorization_service.principal_context = None
     authorization_service.grant = AsyncMock(return_value={})
     authorization_service.revoke = AsyncMock(return_value=None)
+    authorization_service.register_resource = AsyncMock(return_value=None)
+    authorization_service.deregister_resource = AsyncMock(return_value=None)
     return AgentAPIKeysUseCase(
         agent_api_key_repository=agent_api_key_repository,
         agent_repository=agent_repository,

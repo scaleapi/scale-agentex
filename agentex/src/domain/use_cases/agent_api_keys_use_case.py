@@ -80,7 +80,6 @@ class AgentAPIKeysUseCase:
         agent_id: str,
         api_key_type: AgentAPIKeyType,
         api_key: str,
-        account_id: str | None = None,
     ) -> AgentAPIKeyEntity:
         agent = await self.get_agent(agent_id=agent_id)
         if not agent:
@@ -91,15 +90,11 @@ class AgentAPIKeysUseCase:
 
         api_key_id = orm_id()
 
-        # Always call register_resource. agentex-auth's per-account routing
-        # (FGAC_AGENTEX_AUTH_SPARK, scaleapi/agentex#353) decides whether
-        # the call lands on Spark AuthZ or falls back to the legacy SGP
-        # backend for this caller's account. scale-agentex is intentionally
-        # decoupled from egp-api-backend's feature-flag service.
+        # Unconditional — agentex-auth decides per-account whether the call
+        # routes to Spark or the legacy backend.
         await self._register_api_key_in_auth(
             api_key_id=api_key_id,
             agent_id=agent.id,
-            account_id=account_id,
         )
 
         # TODO: encrypt API key before storing it
@@ -118,7 +113,6 @@ class AgentAPIKeysUseCase:
         *,
         api_key_id: str,
         agent_id: str,
-        account_id: str | None,
     ) -> None:
         """Register a new agent_api_key with the auth service, including the
         parent_agent edge so permissions cascade from the owning agent.
@@ -138,7 +132,6 @@ class AgentAPIKeysUseCase:
                 extra={
                     "api_key_id": api_key_id,
                     "agent_id": agent_id,
-                    "account_id": account_id,
                 },
             )
             return
@@ -154,15 +147,12 @@ class AgentAPIKeysUseCase:
                 extra={
                     "api_key_id": api_key_id,
                     "agent_id": agent_id,
-                    "account_id": account_id,
                     "error_type": type(exc).__name__,
                 },
             )
             raise
 
-    async def _deregister_api_key_from_auth(
-        self, *, api_key_id: str, account_id: str | None
-    ) -> None:
+    async def _deregister_api_key_from_auth(self, *, api_key_id: str) -> None:
         """Best-effort deregistration of an api_key's auth tuples on delete.
 
         ``deregister_resource`` removes the resource and all of its
@@ -181,7 +171,6 @@ class AgentAPIKeysUseCase:
                 "Auth deregister failed for agent_api_key; tuple may be orphaned",
                 extra={
                     "api_key_id": api_key_id,
-                    "account_id": account_id,
                     "error_type": type(exc).__name__,
                 },
                 exc_info=True,
@@ -216,16 +205,21 @@ class AgentAPIKeysUseCase:
             agent_id=agent_id, api_key=api_key
         )
 
-    async def delete(self, id: str, account_id: str | None = None) -> None:
+    async def delete(self, id: str) -> None:
+        # Pre-fetch so we skip both the delete and the deregister when the row
+        # never existed — no DB round-trip, no auth round-trip for a no-op.
+        try:
+            await self.agent_api_key_repo.get(id=id)
+        except ItemDoesNotExist:
+            return
         await self.agent_api_key_repo.delete(id=id)
-        await self._deregister_api_key_from_auth(api_key_id=id, account_id=account_id)
+        await self._deregister_api_key_from_auth(api_key_id=id)
 
     async def delete_by_agent_id_and_key_name(
         self,
         agent_id: str,
         key_name: str,
         api_key_type: AgentAPIKeyType,
-        account_id: str | None = None,
     ) -> None:
         existing = await self.agent_api_key_repo.get_by_agent_id_and_name(
             agent_id=agent_id, name=key_name, api_key_type=api_key_type
@@ -234,16 +228,13 @@ class AgentAPIKeysUseCase:
             agent_id=agent_id, key_name=key_name, api_key_type=api_key_type
         )
         if existing is not None:
-            await self._deregister_api_key_from_auth(
-                api_key_id=existing.id, account_id=account_id
-            )
+            await self._deregister_api_key_from_auth(api_key_id=existing.id)
 
     async def delete_by_agent_name_and_key_name(
         self,
         agent_name: str,
         key_name: str,
         api_key_type: AgentAPIKeyType,
-        account_id: str | None = None,
     ) -> None:
         existing = await self.agent_api_key_repo.get_by_agent_name_and_key_name(
             agent_name, key_name, api_key_type
@@ -252,9 +243,7 @@ class AgentAPIKeysUseCase:
             agent_name=agent_name, key_name=key_name, api_key_type=api_key_type
         )
         if existing is not None:
-            await self._deregister_api_key_from_auth(
-                api_key_id=existing.id, account_id=account_id
-            )
+            await self._deregister_api_key_from_auth(api_key_id=existing.id)
 
     async def list(
         self, agent_id: str, limit: int, page_number: int

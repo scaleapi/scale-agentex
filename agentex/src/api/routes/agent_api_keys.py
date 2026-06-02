@@ -74,13 +74,11 @@ async def create_api_key(
         raise HTTPException(status_code=409, detail=error_msg)
 
     new_api_key = request.api_key or secrets.token_hex(32)
-    account_id = getattr(authorization_service.principal_context, "account_id", None)
     agent_api_key_entity = await agent_api_key_use_case.create(
         agent_id=agent.id,
         api_key=str(new_api_key),
         name=request.name,
         api_key_type=request.api_key_type,
-        account_id=account_id,
     )
     return CreateAPIKeyResponse(
         id=agent_api_key_entity.id,
@@ -208,7 +206,6 @@ async def get_agent_api_key(
 async def delete_agent_api_key(
     id: str,
     agent_api_key_use_case: DAgentAPIKeysUseCase,
-    authorization_service: DAuthorizationService,
     _authorized_id: DAuthorizedId(
         AgentexResourceType.api_key,
         AuthorizedOperationType.delete,
@@ -221,8 +218,7 @@ async def delete_agent_api_key(
     # and the parent-agent.update factor. No explicit second
     # ``authorization_service.check`` on the parent agent is needed (matches
     # Asher's PR #249 approach for tasks).
-    account_id = getattr(authorization_service.principal_context, "account_id", None)
-    await agent_api_key_use_case.delete(id=id, account_id=account_id)
+    await agent_api_key_use_case.delete(id=id)
     return f"Agent API key with ID {id} deleted"
 
 
@@ -271,12 +267,10 @@ async def delete_agent_api_key_by_name(
         AuthorizedOperationType.delete,
     )
 
-    account_id = getattr(authorization_service.principal_context, "account_id", None)
     await agent_api_key_use_case.delete_by_agent_id_and_key_name(
         agent_id=agent.id,
         key_name=api_key_name,
         api_key_type=api_key_type,
-        account_id=account_id,
     )
 
     return f"Agent api_key '{api_key_name}' deleted"

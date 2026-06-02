@@ -13,6 +13,9 @@ class AgentStatus(str, Enum):
     UNKNOWN = "Unknown"
     DELETED = "Deleted"
     UNHEALTHY = "Unhealthy"
+    # Agent row created at build time, before any deployment exists. It has no
+    # acp_url yet and is not routable; deploy-time registration flips it to READY.
+    BUILD_ONLY = "BuildOnly"
 
 
 class ACPType(str, Enum):
@@ -102,4 +105,28 @@ class RegisterAgentResponse(Agent):
 
     agent_api_key: str | None = Field(
         None, description="The API key for the agent, if applicable."
+    )
+
+
+class RegisterBuildRequest(BaseModel):
+    """Request model for registering an agent at build time (pre-deploy).
+
+    Unlike RegisterAgentRequest, there is no acp_url (the agent is not running
+    yet) and no acp_type is required. The created agent is left in BUILD_ONLY
+    status so it can be permissioned/shared before it is deployed.
+    """
+
+    name: str = Field(
+        ..., pattern=r"^[a-z0-9-]+$", description="The unique name of the agent."
+    )
+    description: str = Field(..., description="The description of the agent.")
+    principal_context: Any | None = Field(
+        default=None, description="Principal used for authorization"
+    )
+    registration_metadata: dict[str, Any] | None = Field(
+        default=None,
+        description="The metadata for the agent's build registration.",
+    )
+    agent_input_type: AgentInputType | None = Field(
+        default=None, description="The type of input the agent expects."
     )
