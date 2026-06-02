@@ -192,7 +192,9 @@ async def delete_agent_api_key_by_name(
         )
     agent = await agent_use_case.get(id=agent_id, name=agent_name)
     await agent_api_key_use_case.delete_by_agent_id_and_key_name(
-        agent_id=agent.id, key_name=api_key_name, api_key_type=api_key_type
+        agent_id=agent.id,
+        key_name=api_key_name,
+        api_key_type=api_key_type,
     )
 
     return f"Agent api_key '{api_key_name}' deleted"

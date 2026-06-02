@@ -13,6 +13,7 @@ from src.adapters.authentication.adapter_agentex_authn_proxy import (
 )
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.api.middleware_utils import get_request_headers_to_forward, verify_auth_gateway
+from src.api.schemas.authorization_types import AgentexResource
 from src.config.dependencies import (
     DHttpxClient,
     resolve_environment_variable_dependency,
@@ -27,6 +28,7 @@ from src.domain.repositories.agent_api_key_repository import (
     DAgentAPIKeyRepository,
 )
 from src.domain.repositories.agent_repository import DAgentRepository
+from src.domain.services.authorization_service import DAuthorizationService
 from src.utils.ids import orm_id
 from src.utils.logging import make_logger
 
@@ -39,10 +41,12 @@ class AgentAPIKeysUseCase:
         agent_api_key_repository: DAgentAPIKeyRepository,
         agent_repository: DAgentRepository,
         client: DHttpxClient,
+        authorization_service: DAuthorizationService,
     ):
         self.agent_api_key_repo = agent_api_key_repository
         self.agent_repo = agent_repository
         self.client = client
+        self.authorization_service = authorization_service
         self.auth_gateway_enabled = bool(
             resolve_environment_variable_dependency(EnvVarKeys.AGENTEX_AUTH_URL)
         )
@@ -83,16 +87,94 @@ class AgentAPIKeysUseCase:
                 status_code=404,
                 detail=f"Agent ID {agent_id} not found.",
             )
+
+        api_key_id = orm_id()
+
+        # Unconditional — agentex-auth decides per-account whether the call
+        # routes to Spark or the legacy backend.
+        await self._register_api_key_in_auth(
+            api_key_id=api_key_id,
+            agent_id=agent.id,
+        )
+
         # TODO: encrypt API key before storing it
         # Initialize a new agent api_key
         agent_api_key = AgentAPIKeyEntity(
-            id=orm_id(),
+            id=api_key_id,
             name=name,
             agent_id=agent.id,
             api_key_type=api_key_type,
             api_key=api_key,
         )
         return await self.agent_api_key_repo.create(item=agent_api_key)
+
+    async def _register_api_key_in_auth(
+        self,
+        *,
+        api_key_id: str,
+        agent_id: str,
+    ) -> None:
+        """Register a new agent_api_key with the auth service, including the
+        parent_agent edge so permissions cascade from the owning agent.
+
+        Called BEFORE the Postgres write — a failure raises and prevents the
+        row from being persisted, so there is no compensating action. Skipped
+        with a warning when no usable creator identity is available on the
+        principal context (e.g. internal-key creation paths without an
+        authenticated user).
+        """
+        principal_context = self.authorization_service.principal_context
+        user_id = getattr(principal_context, "user_id", None)
+        service_account_id = getattr(principal_context, "service_account_id", None)
+        if user_id is None and service_account_id is None:
+            logger.warning(
+                "Skipping auth registration for api_key: no creator resolvable",
+                extra={
+                    "api_key_id": api_key_id,
+                    "agent_id": agent_id,
+                },
+            )
+            return
+        try:
+            await self.authorization_service.register_resource(
+                resource=AgentexResource.api_key(api_key_id),
+                parent=AgentexResource.agent(agent_id),
+            )
+        except Exception as exc:
+            # Fail closed: log + re-raise so the Postgres row is never written.
+            logger.exception(
+                "Auth register_resource failed for agent_api_key; aborting create",
+                extra={
+                    "api_key_id": api_key_id,
+                    "agent_id": agent_id,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise
+
+    async def _deregister_api_key_from_auth(self, *, api_key_id: str) -> None:
+        """Best-effort deregistration of an api_key's auth tuples on delete.
+
+        ``deregister_resource`` removes the resource and all of its
+        relationships (owner, parent, grantees) atomically. Always invoked;
+        agentex-auth's per-account routing (#353) decides whether the call
+        targets Spark or the legacy backend. Failures are logged but do not
+        block the delete.
+        """
+        try:
+            await self.authorization_service.deregister_resource(
+                resource=AgentexResource.api_key(api_key_id),
+            )
+        except Exception as exc:
+            # Best-effort: log and continue. Postgres row already deleted.
+            logger.warning(
+                "Auth deregister failed for agent_api_key; tuple may be orphaned",
+                extra={
+                    "api_key_id": api_key_id,
+                    "error_type": type(exc).__name__,
+                },
+                exc_info=True,
+            )
 
     async def get(self, id: str) -> AgentAPIKeyEntity:
         return await self.agent_api_key_repo.get(id=id)
@@ -124,21 +206,44 @@ class AgentAPIKeysUseCase:
         )
 
     async def delete(self, id: str) -> None:
-        return await self.agent_api_key_repo.delete(id=id)
+        # Pre-fetch so we skip both the delete and the deregister when the row
+        # never existed — no DB round-trip, no auth round-trip for a no-op.
+        try:
+            await self.agent_api_key_repo.get(id=id)
+        except ItemDoesNotExist:
+            return
+        await self.agent_api_key_repo.delete(id=id)
+        await self._deregister_api_key_from_auth(api_key_id=id)
 
     async def delete_by_agent_id_and_key_name(
-        self, agent_id: str, key_name: str, api_key_type: AgentAPIKeyType
+        self,
+        agent_id: str,
+        key_name: str,
+        api_key_type: AgentAPIKeyType,
     ) -> None:
-        return await self.agent_api_key_repo.delete_by_agent_id_and_key_name(
+        existing = await self.agent_api_key_repo.get_by_agent_id_and_name(
+            agent_id=agent_id, name=key_name, api_key_type=api_key_type
+        )
+        await self.agent_api_key_repo.delete_by_agent_id_and_key_name(
             agent_id=agent_id, key_name=key_name, api_key_type=api_key_type
         )
+        if existing is not None:
+            await self._deregister_api_key_from_auth(api_key_id=existing.id)
 
     async def delete_by_agent_name_and_key_name(
-        self, agent_name: str, key_name: str, api_key_type: AgentAPIKeyType
+        self,
+        agent_name: str,
+        key_name: str,
+        api_key_type: AgentAPIKeyType,
     ) -> None:
-        return await self.agent_api_key_repo.delete_by_agent_name_and_key_name(
+        existing = await self.agent_api_key_repo.get_by_agent_name_and_key_name(
+            agent_name, key_name, api_key_type
+        )
+        await self.agent_api_key_repo.delete_by_agent_name_and_key_name(
             agent_name=agent_name, key_name=key_name, api_key_type=api_key_type
         )
+        if existing is not None:
+            await self._deregister_api_key_from_auth(api_key_id=existing.id)
 
     async def list(
         self, agent_id: str, limit: int, page_number: int
