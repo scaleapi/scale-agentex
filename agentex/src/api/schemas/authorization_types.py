@@ -23,6 +23,7 @@ class TaskChildResourceType(StrEnum):
 
     event = "event"
     state = "state"
+    message = "message"
 
 
 class AgentexResource(BaseModel):
