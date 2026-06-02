@@ -3264,18 +3264,18 @@ paths:
       description: Get details of a schedule by its name.
       operationId: get_schedule_agents__agent_id__schedules__schedule_name__get
       parameters:
-      - name: schedule_name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Schedule Name
       - name: agent_id
         in: path
         required: true
         schema:
           type: string
           title: Agent Id
+      - name: schedule_name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Name
       responses:
         '200':
           description: Successful Response
@@ -3296,18 +3296,18 @@ paths:
       description: Delete a schedule permanently.
       operationId: delete_schedule_agents__agent_id__schedules__schedule_name__delete
       parameters:
-      - name: schedule_name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Schedule Name
       - name: agent_id
         in: path
         required: true
         schema:
           type: string
           title: Agent Id
+      - name: schedule_name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Name
       responses:
         '200':
           description: Successful Response
@@ -3329,18 +3329,18 @@ paths:
       description: Pause a schedule to stop it from executing.
       operationId: pause_schedule_agents__agent_id__schedules__schedule_name__pause_post
       parameters:
-      - name: schedule_name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Schedule Name
       - name: agent_id
         in: path
         required: true
         schema:
           type: string
           title: Agent Id
+      - name: schedule_name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Name
       requestBody:
         content:
           application/json:
@@ -3370,18 +3370,18 @@ paths:
       description: Unpause/resume a schedule to allow it to execute again.
       operationId: unpause_schedule_agents__agent_id__schedules__schedule_name__unpause_post
       parameters:
-      - name: schedule_name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Schedule Name
       - name: agent_id
         in: path
         required: true
         schema:
           type: string
           title: Agent Id
+      - name: schedule_name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Name
       requestBody:
         content:
           application/json:
@@ -3412,18 +3412,18 @@ paths:
         schedule.
       operationId: trigger_schedule_agents__agent_id__schedules__schedule_name__trigger_post
       parameters:
-      - name: schedule_name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Schedule Name
       - name: agent_id
         in: path
         required: true
         schema:
           type: string
           title: Agent Id
+      - name: schedule_name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Name
       responses:
         '200':
           description: Successful Response
