@@ -1,24 +1,7 @@
-"""Tests for AGX1-263 — agent_api_keys route migration to Spark AuthZ.
+"""AGX1-263 — agent_api_keys route migration to Spark AuthZ.
 
-Mirrors the structure of ``test_tasks_authz.py`` (AGX1-275, PR #249). Covers:
-
-  1. The ``_check_api_key_or_collapse_to_404`` helper (allow + denied-collapses).
-  2. ``DAuthorizedId`` for ``api_key`` routes the check through the collapse
-     wrap so denied id-path calls return 404, not 403.
-  3. The name-route handlers (``get_agent_api_key_by_name`` /
-     ``delete_agent_api_key_by_name``) call the collapse helper explicitly so
-     present-but-denied surfaces as 404 (the critical no-existence-leak path).
-  4. ``list_agent_api_keys`` filters to the set returned by
-     ``DAuthorizedResourceIds``.
-  5. ``create_api_key`` enforces parent ``agent.update`` (the only route where
-     no api_key resource exists yet).
-
-Cross-tenant / two-factor-via-SpiceDB checks belong in an end-to-end suite
-gated on a live spark-authz cluster (the schema's ``api_key.delete =
-internal_effective_editor & parent_agent->update & internal_tenant_gate``
-expansion is owned by spark-authz, not this repo). Here we only assert that
-the route layer issues the correct ``check`` call with the correct operation
-and surfaces denials as 404.
+Asserts the route layer issues correct ``check`` calls and collapses denials
+to 404. Two-factor SpiceDB expansion is owned by spark-authz; not tested here.
 """
 
 from __future__ import annotations
@@ -45,9 +28,7 @@ def _dep_callable(annotation):
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestCheckApiKeyOrCollapseTo404:
-    """The api_key-resource authz wrap collapses every denial to 404 so callers
-    can't distinguish "present in another tenant" from "absent" via the name or
-    id routes."""
+    """Helper collapses every denial to 404 (no cross-tenant existence leak)."""
 
     async def test_allowed_check_returns_normally(self):
         authorization = MagicMock()
@@ -65,9 +46,7 @@ class TestCheckApiKeyOrCollapseTo404:
         assert called_kwargs["operation"] == AuthorizedOperationType.read
 
     async def test_denied_collapses_to_not_found_regardless_of_existence(self):
-        """Both "denied + api_key exists" and "denied + api_key missing"
-        surface as ``ItemDoesNotExist`` (→ 404). The wrap doesn't consult any
-        repository — collapsing avoids the cross-tenant existence leak."""
+        """Denial surfaces as 404 regardless of existence."""
         authorization = MagicMock()
         authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
 
@@ -79,9 +58,7 @@ class TestCheckApiKeyOrCollapseTo404:
             )
 
     async def test_uses_delete_operation_on_delete_routes(self):
-        """Sanity-check that the helper forwards the operation verbatim — the
-        two-factor SpiceDB expansion for ``delete`` is what bundles in the
-        ``parent_agent->update`` factor."""
+        """Helper forwards the operation verbatim."""
         authorization = MagicMock()
         authorization.check = AsyncMock(return_value=True)
 
@@ -98,9 +75,7 @@ class TestCheckApiKeyOrCollapseTo404:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestDAuthorizedIdApiKeyWrap:
-    """``DAuthorizedId`` for ``AgentexResourceType.api_key`` must route the
-    check through the collapse wrap so denied id-path calls surface as 404,
-    matching the name-route behavior."""
+    """``DAuthorizedId(api_key, ...)`` routes through the collapse wrap → 404 on denial."""
 
     async def test_api_key_id_routes_through_wrap_on_denial(self):
         annotation = DAuthorizedId(
@@ -145,9 +120,7 @@ class TestDAuthorizedIdApiKeyWrap:
         assert called_kwargs["resource"] == AgentexResource.api_key("api-key-9")
 
     async def test_api_key_delete_op_propagated_to_check(self):
-        """Two-factor mutations rely on SpiceDB's transitive expansion of
-        ``api_key.delete`` (which includes ``parent_agent->update``), so the
-        route layer just needs to forward the ``delete`` operation correctly."""
+        """Delete op is forwarded to ``authorization.check``."""
         annotation = DAuthorizedId(
             AgentexResourceType.api_key,
             AuthorizedOperationType.delete,
@@ -167,9 +140,7 @@ class TestDAuthorizedIdApiKeyWrap:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestNameRouteCollapse:
-    """The name-route handlers don't fit ``DAuthorizedName`` (the lookup is
-    ``(agent_id, name, api_key_type)``), so they call the collapse helper
-    inline. Tests verify that direct call collapses denials to 404."""
+    """Name-route handlers call the collapse helper inline → 404 on denial."""
 
     async def test_get_by_name_handler_collapses_denial_to_404(self):
         from src.api.routes.agent_api_keys import get_agent_api_key_by_name
@@ -230,9 +201,7 @@ class TestNameRouteCollapse:
         assert called_kwargs["operation"] == AuthorizedOperationType.delete
 
     async def test_absent_and_denied_404_bodies_are_identical(self):
-        """Cross-tenant existence-leak guard: an absent row and a present-but-
-        denied row must surface byte-for-byte identical 404 bodies. Any
-        identifier in either path lets a caller probe by diffing responses."""
+        """Absent-row and denied-row 404 bodies must be byte-for-byte identical."""
         from src.api.routes.agent_api_keys import get_agent_api_key_by_name
         from src.utils.agent_api_key_authorization import API_KEY_NOT_FOUND_MESSAGE
 
@@ -277,14 +246,11 @@ class TestNameRouteCollapse:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestListFiltering:
-    """``list_agent_api_keys`` must filter rows to those the caller has
-    ``read`` on, per the ``DAuthorizedResourceIds`` enumeration."""
+    """List filters to api_keys the caller has ``read`` on."""
 
     async def test_authorized_ids_pushed_into_use_case(self):
-        """The route forwards ``authorized_api_key_ids`` to
-        ``use_case.list(id=...)`` so the repo filters at the SQL layer.
-        Pagination/limit then apply post-filter, which the old in-Python
-        filter broke."""
+        """Route forwards ``authorized_api_key_ids`` as ``id=`` so the repo
+        filters at the SQL layer (correct pagination)."""
         from src.api.routes.agent_api_keys import list_agent_api_keys
 
         agent_use_case = MagicMock()
@@ -310,8 +276,7 @@ class TestListFiltering:
         )
 
     async def test_none_authorized_ids_passes_through(self):
-        """``None`` from the authz backend = "couldn't enumerate" (e.g. bypass
-        mode). Must forward ``id=None`` so the use case skips the filter."""
+        """``None`` (bypass) must pass through as ``id=None`` (no filter)."""
         from src.api.routes.agent_api_keys import list_agent_api_keys
 
         agent_use_case = MagicMock()
@@ -340,9 +305,7 @@ class TestListFiltering:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestCreateParentAgentCheck:
-    """``create_api_key`` is the only route where no api_key resource exists
-    yet, so SpiceDB cannot transitively gate on it. The route MUST explicitly
-    check ``agent.update`` on the parent."""
+    """``create_api_key`` gates on parent ``agent.update`` (no api_key row yet)."""
 
     async def test_create_checks_parent_agent_update(self):
         from src.api.routes.agent_api_keys import create_api_key
@@ -387,9 +350,7 @@ class TestCreateParentAgentCheck:
         assert called_kwargs["operation"] == AuthorizedOperationType.update
 
     async def test_create_denied_on_parent_agent_propagates_403(self):
-        """Create-time denial bubbles out as ``AuthorizationError`` (→ 403),
-        NOT collapsed to 404 — there is no api_key resource yet whose
-        existence could be leaked. Mirrors agent-side denial UX."""
+        """Create denial surfaces as 403 — no api_key exists yet, no leak possible."""
         from src.api.routes.agent_api_keys import create_api_key
         from src.api.schemas.agent_api_keys import CreateAPIKeyRequest
         from src.domain.entities.agent_api_keys import AgentAPIKeyType

@@ -5,11 +5,8 @@ from src.api.schemas.authorization_types import (
     AuthorizedOperationType,
 )
 
-# Generic, identifier-free message reused by both the denied-resource branch
-# below AND by the name routes when the row is absent. Without a shared message
-# the two 404s are body-distinguishable, letting a cross-tenant caller probe
-# existence by comparing response bodies — defeating the whole point of the
-# 404 collapse.
+# Identifier-free 404 detail, reused by the denied-resource branch below and
+# by the name routes when the row is absent — keeps both 404s indistinguishable.
 API_KEY_NOT_FOUND_MESSAGE = "Agent api_key not found."
 
 
@@ -18,27 +15,10 @@ async def _check_api_key_or_collapse_to_404(
     api_key_id: str,
     operation: AuthorizedOperationType,
 ) -> None:
-    """Issue a check on an api_key resource. On any denial, surface 404 — even
-    when the api_key exists.
+    """Check an api_key resource; collapse any denial to 404 to avoid leaking
+    cross-tenant existence. Mirrors ``_check_task_or_collapse_to_404``.
 
-    Same rationale as :func:`src.utils.task_authorization._check_task_or_collapse_to_404`:
-    the deny-reason discriminator needed to safely return 403 (in-tenant but
-    lacking the operation) vs 404 (cross-tenant or absent) is not available
-    here. ``api_key.name`` is unique only per (agent_id, name, api_key_type) —
-    not globally — but the existence-leak risk via the name routes is still
-    real: a caller probing ``GET /agent_api_keys/name/{name}?agent_id=...``
-    against another tenant's agent would otherwise be able to distinguish
-    "agent has a key with that name (403)" from "no such key (404)".
-
-    Until api_keys carry tenant scope at the data layer (or agentex-auth's
-    deny distinguishes "cross-tenant" from "in-tenant lacking permission"),
-    the safer default is to collapse both into 404. Trade-off: a user with
-    ``read`` but not ``delete`` permission on an in-tenant api_key sees 404
-    on delete attempts instead of 403. UX regression for in-tenant permission
-    granularity, but eliminates the cross-tenant existence leak.
-
-    TODO(AGX1-290): Restore the 403/404 split for same-tenant calls once
-    api_keys carry tenant/account_id scope at the data layer.
+    TODO(AGX1-290): restore the 403/404 split once api_keys carry tenant scope.
     """
     try:
         await authorization.check(

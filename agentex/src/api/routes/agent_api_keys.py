@@ -57,10 +57,8 @@ async def create_api_key(
         )
     agent = await agent_use_case.get(id=request.agent_id, name=request.agent_name)
 
-    # Parent-agent FGAC: only callers with ``update`` on the parent agent may
-    # mint a new api_key under it. The new api_key has no resource row yet, so
-    # this is the only enforcement surface at create time. SpiceDB cannot
-    # transitively gate on a not-yet-created child.
+    # No api_key resource exists yet, so SpiceDB can't gate transitively —
+    # gate on parent ``agent.update`` directly.
     await authorization_service.check(
         resource=AgentexResource.agent(agent.id),
         operation=AuthorizedOperationType.update,
@@ -122,9 +120,8 @@ async def list_agent_api_keys(
             detail="Only one of 'agent_id' or 'agent_name' should be provided to list agent api_keys.",
         )
     agent = await agent_use_case.get(id=agent_id, name=agent_name)
-    # Push the FGAC id-filter into the repo so pagination + limit apply
-    # post-filter at the SQL layer. ``None`` means the authz backend declined
-    # to enumerate (e.g. bypass) — pass through unfiltered.
+    # ``id`` filter runs at the SQL layer so limit/offset apply post-filter.
+    # ``None`` = authz declined to enumerate (e.g. bypass); pass through.
     agent_api_key_entities = await agent_api_key_use_case.list(
         agent_id=agent.id,
         limit=limit,
@@ -167,14 +164,11 @@ async def get_agent_api_key_by_name(
         agent_id=agent.id, name=name, api_key_type=api_key_type
     )
     if not agent_api_key_entity:
-        # Identifier-free message must match the denied-resource branch of
-        # ``_check_api_key_or_collapse_to_404`` so absent-vs-denied 404s are
-        # byte-for-byte indistinguishable (cross-tenant existence leak).
+        # Absent and denied 404s must be byte-for-byte identical — see
+        # ``API_KEY_NOT_FOUND_MESSAGE``.
         raise ItemDoesNotExist(API_KEY_NOT_FOUND_MESSAGE)
-    # Name routes for api_key don't fit ``DAuthorizedName`` (the lookup key is
-    # ``(agent_id, name, api_key_type)``, not a single globally-unique name
-    # path param). Apply the collapse helper explicitly so present-but-denied
-    # surfaces as 404, mirroring tasks' name route in PR #249.
+    # Composite lookup key ``(agent_id, name, api_key_type)`` doesn't fit
+    # ``DAuthorizedName`` — apply the collapse inline.
     await _check_api_key_or_collapse_to_404(
         authorization_service,
         agent_api_key_entity.id,
@@ -217,12 +211,8 @@ async def delete_agent_api_key(
         param_name="id",
     ),
 ) -> str:
-    # Two-factor mutation: SpiceDB's ``api_key.delete`` permission depends
-    # transitively on ``parent_agent->update`` per the schema, so the
-    # ``DAuthorizedId(..., delete)`` dep above enforces both api_key.delete
-    # and the parent-agent.update factor. No explicit second
-    # ``authorization_service.check`` on the parent agent is needed (matches
-    # Asher's PR #249 approach for tasks).
+    # SpiceDB's ``api_key.delete`` expands transitively to
+    # ``parent_agent->update``, so the dep above enforces both factors.
     await agent_api_key_use_case.delete(id=id)
     return f"Agent API key with ID {id} deleted"
 
@@ -254,27 +244,20 @@ async def delete_agent_api_key_by_name(
         )
     agent = await agent_use_case.get(id=agent_id, name=agent_name)
 
-    # Resolve name -> id, then run the collapse-wrapped delete check before
-    # mutating. Two-factor (api_key.delete & parent_agent->update) is
-    # transitively enforced by the SpiceDB schema definition of
-    # ``api_key.delete``; we don't repeat a parent check here.
+    # Resolve name -> id, check, then delete by the resolved id. Deleting by
+    # name would race: if the row were replaced between check and delete, the
+    # check would evaluate the old id but the mutation would land on the new
+    # one.
     existing = await agent_api_key_use_case.get_by_agent_id_and_name(
         agent_id=agent.id, name=api_key_name, api_key_type=api_key_type
     )
     if not existing:
-        # Same identifier-free 404 as the denied branch — see the analogous
-        # comment in ``get_agent_api_key_by_name`` above.
         raise ItemDoesNotExist(API_KEY_NOT_FOUND_MESSAGE)
     await _check_api_key_or_collapse_to_404(
         authorization_service,
         existing.id,
         AuthorizedOperationType.delete,
     )
-
-    await agent_api_key_use_case.delete_by_agent_id_and_key_name(
-        agent_id=agent.id,
-        key_name=api_key_name,
-        api_key_type=api_key_type,
-    )
+    await agent_api_key_use_case.delete(id=existing.id)
 
     return f"Agent api_key '{api_key_name}' deleted"
