@@ -1,7 +1,8 @@
-"""AGX1-263 — agent_api_keys route migration to Spark AuthZ.
+"""Tests for agent_api_keys route authorization.
 
 Asserts the route layer issues correct ``check`` calls and collapses denials
-to 404. Two-factor SpiceDB expansion is owned by spark-authz; not tested here.
+to 404. Two-factor expansion is owned by the authorization service;
+not tested here.
 """
 
 from __future__ import annotations
