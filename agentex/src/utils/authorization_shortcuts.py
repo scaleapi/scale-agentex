@@ -12,6 +12,7 @@ from src.api.schemas.authorization_types import (
 )
 from src.domain.repositories.agent_repository import DAgentRepository
 from src.domain.repositories.event_repository import DEventRepository
+from src.domain.repositories.task_message_repository import DTaskMessageRepository
 from src.domain.repositories.task_repository import DTaskRepository
 from src.domain.repositories.task_state_repository import DTaskStateRepository
 from src.domain.services.authorization_service import DAuthorizationService
@@ -22,11 +23,13 @@ async def _get_parent_task_id(
     resource_id: str,
     event_repository: DEventRepository,
     state_repository: DTaskStateRepository,
+    message_repository: DTaskMessageRepository,
 ) -> str:
     """Get the parent task ID for a child resource."""
     registry = {
         TaskChildResourceType.state: state_repository,
         TaskChildResourceType.event: event_repository,
+        TaskChildResourceType.message: message_repository,
     }
 
     repository = registry[resource_type]
@@ -46,17 +49,29 @@ def DAuthorizedId(
         authorization: DAuthorizationService,
         event_repository: DEventRepository,
         state_repository: DTaskStateRepository,
+        message_repository: DTaskMessageRepository,
         resource_id: str = Path(..., alias=param_name),
     ) -> str:
-        # For child resources, check the parent task
+        # For child resources, check the parent task. Collapse a denied check
+        # into 404 so callers cannot use 403 vs 404 to probe whether a resource
+        # exists in another tenant.
         if isinstance(resource_type, TaskChildResourceType):
             task_id = await _get_parent_task_id(
-                resource_type, resource_id, event_repository, state_repository
+                resource_type,
+                resource_id,
+                event_repository,
+                state_repository,
+                message_repository,
             )
-            await authorization.check(
-                resource=AgentexResource.task(task_id),
-                operation=operation,
-            )
+            try:
+                await authorization.check(
+                    resource=AgentexResource.task(task_id),
+                    operation=operation,
+                )
+            except AuthorizationError:
+                raise ItemDoesNotExist(
+                    f"Item with id '{resource_id}' does not exist."
+                ) from None
         else:
             # For direct resources, check directly
             await authorization.check(
@@ -83,17 +98,29 @@ def DAuthorizedQuery(
         authorization: DAuthorizationService,
         event_repository: DEventRepository,
         state_repository: DTaskStateRepository,
+        message_repository: DTaskMessageRepository,
         resource_id: str = Query(..., alias=param_name, description=description),
     ) -> str:
-        # For child resources, check the parent task
+        # For child resources, check the parent task. Collapse a denied check
+        # into 404 so callers cannot use 403 vs 404 to probe whether a resource
+        # exists in another tenant.
         if isinstance(resource_type, TaskChildResourceType):
             task_id = await _get_parent_task_id(
-                resource_type, resource_id, event_repository, state_repository
+                resource_type,
+                resource_id,
+                event_repository,
+                state_repository,
+                message_repository,
             )
-            await authorization.check(
-                resource=AgentexResource.task(task_id),
-                operation=operation,
-            )
+            try:
+                await authorization.check(
+                    resource=AgentexResource.task(task_id),
+                    operation=operation,
+                )
+            except AuthorizationError:
+                raise ItemDoesNotExist(
+                    f"Item with id '{resource_id}' does not exist."
+                ) from None
         else:
             # For direct resources, check directly
             await authorization.check(
