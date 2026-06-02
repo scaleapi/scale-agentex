@@ -1,6 +1,8 @@
 # Build stage — install build deps, build the Next.js app
-FROM node:20-trixie-slim AS builder
+ARG DOCKER_REGISTRY=
+FROM ${DOCKER_REGISTRY}node:20-trixie-slim AS builder
 ARG SOURCE_DIR=agentex-ui
+ARG NPM_REGISTRY=https://registry.npmjs.org/
 
 # Install system dependencies for native modules (node-gyp)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -20,10 +22,6 @@ COPY ${SOURCE_DIR}/package.json ${SOURCE_DIR}/package-lock.json ./
 ENV npm_config_cache=/tmp/.npm
 RUN npm config set maxsockets 3
 
-# Optional npm registry override for environments where registry.npmjs.org is
-# unreachable, default preserves public npm behavior
-ARG NPM_REGISTRY=https://registry.npmjs.org/
-
 # Install all dependencies (including dev for build tooling)
 RUN npm config set registry ${NPM_REGISTRY} && \
     npm ci --verbose
@@ -42,7 +40,8 @@ RUN npm run build
 RUN npm prune --production
 
 # Production stage — clean image without build tools
-FROM node:20-trixie-slim AS production
+ARG DOCKER_REGISTRY=
+FROM ${DOCKER_REGISTRY}node:20-trixie-slim AS production
 ENTRYPOINT []
 
 WORKDIR /app
