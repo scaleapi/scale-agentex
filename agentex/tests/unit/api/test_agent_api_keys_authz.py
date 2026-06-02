@@ -87,14 +87,12 @@ class TestDAuthorizedIdApiKeyWrap:
 
         authorization = MagicMock()
         authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
-        event_repository = MagicMock()
         state_repository = MagicMock()
-
         message_repository = MagicMock()
+
         with pytest.raises(ItemDoesNotExist):
             await dep(
                 authorization,
-                event_repository,
                 state_repository,
                 message_repository,
                 "api-key-7",
@@ -111,9 +109,7 @@ class TestDAuthorizedIdApiKeyWrap:
         authorization = MagicMock()
         authorization.check = AsyncMock(return_value=True)
 
-        result = await dep(
-            authorization, MagicMock(), MagicMock(), MagicMock(), "api-key-9"
-        )
+        result = await dep(authorization, MagicMock(), MagicMock(), "api-key-9")
 
         assert result == "api-key-9"
         called_kwargs = authorization.check.await_args.kwargs
@@ -131,7 +127,7 @@ class TestDAuthorizedIdApiKeyWrap:
         authorization = MagicMock()
         authorization.check = AsyncMock(return_value=True)
 
-        await dep(authorization, MagicMock(), MagicMock(), MagicMock(), "api-key-del")
+        await dep(authorization, MagicMock(), MagicMock(), "api-key-del")
 
         called_kwargs = authorization.check.await_args.kwargs
         assert called_kwargs["operation"] == AuthorizedOperationType.delete
