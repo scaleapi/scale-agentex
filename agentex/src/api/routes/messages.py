@@ -7,6 +7,7 @@ from pydantic import Field
 from src.api.schemas.authorization_types import (
     AgentexResourceType,
     AuthorizedOperationType,
+    TaskChildResourceType,
 )
 from src.api.schemas.task_messages import (
     BatchCreateTaskMessagesRequest,
@@ -20,7 +21,11 @@ from src.domain.entities.task_messages import (
     convert_task_message_content_to_entity,
 )
 from src.domain.use_cases.messages_use_case import DMessageUseCase
-from src.utils.authorization_shortcuts import DAuthorizedBodyId, DAuthorizedQuery
+from src.utils.authorization_shortcuts import (
+    DAuthorizedBodyId,
+    DAuthorizedId,
+    DAuthorizedQuery,
+)
 from src.utils.model_utils import BaseModel
 from src.utils.pagination import decode_cursor, encode_cursor
 
@@ -319,12 +324,14 @@ async def list_messages_paginated(
     response_model=TaskMessage,
 )
 async def get_message(
-    message_id: str,
+    message_id: DAuthorizedId(
+        TaskChildResourceType.message,
+        AuthorizedOperationType.read,
+        param_name="message_id",
+    ),
     message_use_case: DMessageUseCase,
-) -> TaskMessage | None:
+) -> TaskMessage:
     task_message_entity = await message_use_case.get_message(
         message_id=message_id,
     )
-    return (
-        TaskMessage.model_validate(task_message_entity) if task_message_entity else None
-    )
+    return TaskMessage.model_validate(task_message_entity)

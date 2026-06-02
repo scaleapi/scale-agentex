@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
@@ -35,10 +35,17 @@ def agent_api_keys_use_case(
     agent_api_key_repository, agent_repository, mock_http_client
 ):
     """Real AgentAPIKeysUseCase instance with real repositories"""
+    authorization_service = Mock()
+    authorization_service.principal_context = None
+    authorization_service.grant = AsyncMock(return_value={})
+    authorization_service.revoke = AsyncMock(return_value=None)
+    authorization_service.register_resource = AsyncMock(return_value=None)
+    authorization_service.deregister_resource = AsyncMock(return_value=None)
     return AgentAPIKeysUseCase(
         agent_api_key_repository=agent_api_key_repository,
         agent_repository=agent_repository,
         client=mock_http_client,
+        authorization_service=authorization_service,
     )
 
 

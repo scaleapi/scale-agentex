@@ -13,6 +13,9 @@ class AgentStatus(str, Enum):
     UNKNOWN = "Unknown"
     DELETED = "Deleted"
     UNHEALTHY = "Unhealthy"
+    # Agent row created at build time, before any deployment exists. It has no
+    # acp_url yet and is not routable; deploy-time registration flips it to READY.
+    BUILD_ONLY = "BuildOnly"
 
 
 class ACPType(str, Enum):

@@ -2,14 +2,29 @@ import secrets
 
 from fastapi import APIRouter, HTTPException, Query
 
+from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.api.schemas.agent_api_keys import (
     AgentAPIKey,
     CreateAPIKeyRequest,
     CreateAPIKeyResponse,
 )
+from src.api.schemas.authorization_types import (
+    AgentexResource,
+    AgentexResourceType,
+    AuthorizedOperationType,
+)
 from src.domain.entities.agent_api_keys import AgentAPIKeyType
+from src.domain.services.authorization_service import DAuthorizationService
 from src.domain.use_cases.agent_api_keys_use_case import DAgentAPIKeysUseCase
 from src.domain.use_cases.agents_use_case import DAgentsUseCase
+from src.utils.agent_api_key_authorization import (
+    API_KEY_NOT_FOUND_MESSAGE,
+    _check_api_key_or_collapse_to_404,
+)
+from src.utils.authorization_shortcuts import (
+    DAuthorizedId,
+    DAuthorizedResourceIds,
+)
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
@@ -28,6 +43,7 @@ async def create_api_key(
     request: CreateAPIKeyRequest,
     agent_api_key_use_case: DAgentAPIKeysUseCase,
     agent_use_case: DAgentsUseCase,
+    authorization_service: DAuthorizationService,
 ) -> CreateAPIKeyResponse:
     if not request.agent_id and not request.agent_name:
         raise HTTPException(
@@ -40,6 +56,14 @@ async def create_api_key(
             detail="Only one of 'agent_id' or 'agent_name' should be provided to create an agent api_key.",
         )
     agent = await agent_use_case.get(id=request.agent_id, name=request.agent_name)
+
+    # No api_key resource exists yet, so SpiceDB can't gate transitively —
+    # gate on parent ``agent.update`` directly.
+    await authorization_service.check(
+        resource=AgentexResource.agent(agent.id),
+        operation=AuthorizedOperationType.update,
+    )
+
     # Check if external agent API key already exists for this name and agent ID
     existing_api_key = await agent_api_key_use_case.get_by_agent_id_and_name(
         agent_id=agent.id,
@@ -77,6 +101,9 @@ async def create_api_key(
 async def list_agent_api_keys(
     agent_api_key_use_case: DAgentAPIKeysUseCase,
     agent_use_case: DAgentsUseCase,
+    authorized_api_key_ids: DAuthorizedResourceIds(
+        AgentexResourceType.api_key, AuthorizedOperationType.read
+    ),
     agent_id: str | None = None,
     agent_name: str | None = None,
     limit: int = Query(default=50, ge=1, le=1000),
@@ -93,8 +120,13 @@ async def list_agent_api_keys(
             detail="Only one of 'agent_id' or 'agent_name' should be provided to list agent api_keys.",
         )
     agent = await agent_use_case.get(id=agent_id, name=agent_name)
+    # ``id`` filter runs at the SQL layer so limit/offset apply post-filter.
+    # ``None`` = authz declined to enumerate (e.g. bypass); pass through.
     agent_api_key_entities = await agent_api_key_use_case.list(
-        agent_id=agent.id, limit=limit, page_number=page_number
+        agent_id=agent.id,
+        limit=limit,
+        page_number=page_number,
+        id=authorized_api_key_ids,
     )
     return [
         AgentAPIKey.model_validate(agent_api_key_entity)
@@ -112,6 +144,7 @@ async def get_agent_api_key_by_name(
     name: str,
     agent_api_key_use_case: DAgentAPIKeysUseCase,
     agent_use_case: DAgentsUseCase,
+    authorization_service: DAuthorizationService,
     agent_id: str | None = None,
     agent_name: str | None = None,
     api_key_type: AgentAPIKeyType = AgentAPIKeyType.EXTERNAL,
@@ -131,10 +164,16 @@ async def get_agent_api_key_by_name(
         agent_id=agent.id, name=name, api_key_type=api_key_type
     )
     if not agent_api_key_entity:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Agent api_key '{name}' not found for agent ID {agent.id}",
-        )
+        # Absent and denied 404s must be byte-for-byte identical — see
+        # ``API_KEY_NOT_FOUND_MESSAGE``.
+        raise ItemDoesNotExist(API_KEY_NOT_FOUND_MESSAGE)
+    # Composite lookup key ``(agent_id, name, api_key_type)`` doesn't fit
+    # ``DAuthorizedName`` — apply the collapse inline.
+    await _check_api_key_or_collapse_to_404(
+        authorization_service,
+        agent_api_key_entity.id,
+        AuthorizedOperationType.read,
+    )
     return AgentAPIKey.model_validate(agent_api_key_entity)
 
 
@@ -147,6 +186,11 @@ async def get_agent_api_key_by_name(
 async def get_agent_api_key(
     id: str,
     agent_api_key_use_case: DAgentAPIKeysUseCase,
+    _authorized_id: DAuthorizedId(
+        AgentexResourceType.api_key,
+        AuthorizedOperationType.read,
+        param_name="id",
+    ),
 ) -> AgentAPIKey:
     agent_api_key_entity = await agent_api_key_use_case.get(id=id)
     return AgentAPIKey.model_validate(agent_api_key_entity)
@@ -161,7 +205,14 @@ async def get_agent_api_key(
 async def delete_agent_api_key(
     id: str,
     agent_api_key_use_case: DAgentAPIKeysUseCase,
+    _authorized_id: DAuthorizedId(
+        AgentexResourceType.api_key,
+        AuthorizedOperationType.delete,
+        param_name="id",
+    ),
 ) -> str:
+    # SpiceDB's ``api_key.delete`` expands transitively to
+    # ``parent_agent->update``, so the dep above enforces both factors.
     await agent_api_key_use_case.delete(id=id)
     return f"Agent API key with ID {id} deleted"
 
@@ -176,6 +227,7 @@ async def delete_agent_api_key_by_name(
     api_key_name: str,
     agent_api_key_use_case: DAgentAPIKeysUseCase,
     agent_use_case: DAgentsUseCase,
+    authorization_service: DAuthorizationService,
     agent_id: str | None = None,
     agent_name: str | None = None,
     api_key_type: AgentAPIKeyType = AgentAPIKeyType.EXTERNAL,
@@ -191,8 +243,21 @@ async def delete_agent_api_key_by_name(
             detail="Only one of 'agent_id' or 'agent_name' should be provided to delete an agent api_key.",
         )
     agent = await agent_use_case.get(id=agent_id, name=agent_name)
-    await agent_api_key_use_case.delete_by_agent_id_and_key_name(
-        agent_id=agent.id, key_name=api_key_name, api_key_type=api_key_type
+
+    # Resolve name -> id, check, then delete by the resolved id. Deleting by
+    # name would race: if the row were replaced between check and delete, the
+    # check would evaluate the old id but the mutation would land on the new
+    # one.
+    existing = await agent_api_key_use_case.get_by_agent_id_and_name(
+        agent_id=agent.id, name=api_key_name, api_key_type=api_key_type
     )
+    if not existing:
+        raise ItemDoesNotExist(API_KEY_NOT_FOUND_MESSAGE)
+    await _check_api_key_or_collapse_to_404(
+        authorization_service,
+        existing.id,
+        AuthorizedOperationType.delete,
+    )
+    await agent_api_key_use_case.delete(id=existing.id)
 
     return f"Agent api_key '{api_key_name}' deleted"

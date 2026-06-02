@@ -85,6 +85,34 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
         )
         return response["items"]
 
+    async def register_resource(
+        self,
+        principal: AgentexAuthPrincipalContext,
+        resource: AgentexResource,
+        parent: AgentexResource | None = None,
+    ) -> None:
+        payload = {
+            "principal": principal,
+            "resource": resource.model_dump(),
+            "parent": parent.model_dump() if parent is not None else None,
+        }
+        await HttpRequestHandler.post_with_error_handling(
+            self.agentex_auth_url, "/v1/authz/register", json=payload
+        )
+
+    async def deregister_resource(
+        self,
+        principal: AgentexAuthPrincipalContext,
+        resource: AgentexResource,
+    ) -> None:
+        payload = {
+            "principal": principal,
+            "resource": resource.model_dump(),
+        }
+        await HttpRequestHandler.post_with_error_handling(
+            self.agentex_auth_url, "/v1/authz/deregister", json=payload
+        )
+
 
 DAgentexAuthorization = Annotated[
     AgentexAuthorizationProxy, Depends(AgentexAuthorizationProxy)
