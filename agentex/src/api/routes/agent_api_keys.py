@@ -118,14 +118,15 @@ async def list_agent_api_keys(
             detail="Only one of 'agent_id' or 'agent_name' should be provided to list agent api_keys.",
         )
     agent = await agent_use_case.get(id=agent_id, name=agent_name)
+    # Push the FGAC id-filter into the repo so pagination + limit apply
+    # post-filter at the SQL layer. ``None`` means the authz backend declined
+    # to enumerate (e.g. bypass) — pass through unfiltered.
     agent_api_key_entities = await agent_api_key_use_case.list(
-        agent_id=agent.id, limit=limit, page_number=page_number
+        agent_id=agent.id,
+        limit=limit,
+        page_number=page_number,
+        id=authorized_api_key_ids,
     )
-    # Filter to the set of api_keys the caller can read. ``None`` means the
-    # authz backend declined to enumerate (e.g. bypass) — pass through.
-    if authorized_api_key_ids is not None:
-        allowed = set(authorized_api_key_ids)
-        agent_api_key_entities = [e for e in agent_api_key_entities if e.id in allowed]
     return [
         AgentAPIKey.model_validate(agent_api_key_entity)
         for agent_api_key_entity in agent_api_key_entities

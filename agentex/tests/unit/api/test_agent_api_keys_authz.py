@@ -232,71 +232,61 @@ class TestListFiltering:
     """``list_agent_api_keys`` must filter rows to those the caller has
     ``read`` on, per the ``DAuthorizedResourceIds`` enumeration."""
 
-    async def test_filters_to_authorized_subset(self):
+    async def test_authorized_ids_pushed_into_use_case(self):
+        """The route forwards ``authorized_api_key_ids`` to
+        ``use_case.list(id=...)`` so the repo filters at the SQL layer.
+        Pagination/limit then apply post-filter, which the old in-Python
+        filter broke."""
         from src.api.routes.agent_api_keys import list_agent_api_keys
 
         agent_use_case = MagicMock()
         agent_use_case.get = AsyncMock(return_value=MagicMock(id="agent-1"))
         api_key_use_case = MagicMock()
-        api_key_use_case.list = AsyncMock(
-            return_value=[
-                MagicMock(id="api-key-a"),
-                MagicMock(id="api-key-b"),
-                MagicMock(id="api-key-c"),
-            ]
+        api_key_use_case.list = AsyncMock(return_value=[])
+
+        await list_agent_api_keys(
+            agent_api_key_use_case=api_key_use_case,
+            agent_use_case=agent_use_case,
+            authorized_api_key_ids=["api-key-a", "api-key-c"],
+            agent_id="agent-1",
+            agent_name=None,
+            limit=50,
+            page_number=1,
         )
 
-        # Patch model_validate to a passthrough so we can assert on ids.
-        import src.api.routes.agent_api_keys as routes_mod
-
-        original = routes_mod.AgentAPIKey.model_validate
-        routes_mod.AgentAPIKey.model_validate = staticmethod(lambda e: e)
-        try:
-            result = await list_agent_api_keys(
-                agent_api_key_use_case=api_key_use_case,
-                agent_use_case=agent_use_case,
-                authorized_api_key_ids=["api-key-a", "api-key-c"],
-                agent_id="agent-1",
-                agent_name=None,
-                limit=50,
-                page_number=1,
-            )
-        finally:
-            routes_mod.AgentAPIKey.model_validate = original
-
-        result_ids = [r.id for r in result]
-        assert result_ids == ["api-key-a", "api-key-c"]
+        api_key_use_case.list.assert_awaited_once_with(
+            agent_id="agent-1",
+            limit=50,
+            page_number=1,
+            id=["api-key-a", "api-key-c"],
+        )
 
     async def test_none_authorized_ids_passes_through(self):
         """``None`` from the authz backend = "couldn't enumerate" (e.g. bypass
-        mode). Must pass through unfiltered — not collapse to empty list."""
+        mode). Must forward ``id=None`` so the use case skips the filter."""
         from src.api.routes.agent_api_keys import list_agent_api_keys
 
         agent_use_case = MagicMock()
         agent_use_case.get = AsyncMock(return_value=MagicMock(id="agent-1"))
         api_key_use_case = MagicMock()
-        api_key_use_case.list = AsyncMock(
-            return_value=[MagicMock(id="api-key-a"), MagicMock(id="api-key-b")]
+        api_key_use_case.list = AsyncMock(return_value=[])
+
+        await list_agent_api_keys(
+            agent_api_key_use_case=api_key_use_case,
+            agent_use_case=agent_use_case,
+            authorized_api_key_ids=None,
+            agent_id="agent-1",
+            agent_name=None,
+            limit=50,
+            page_number=1,
         )
 
-        import src.api.routes.agent_api_keys as routes_mod
-
-        original = routes_mod.AgentAPIKey.model_validate
-        routes_mod.AgentAPIKey.model_validate = staticmethod(lambda e: e)
-        try:
-            result = await list_agent_api_keys(
-                agent_api_key_use_case=api_key_use_case,
-                agent_use_case=agent_use_case,
-                authorized_api_key_ids=None,
-                agent_id="agent-1",
-                agent_name=None,
-                limit=50,
-                page_number=1,
-            )
-        finally:
-            routes_mod.AgentAPIKey.model_validate = original
-
-        assert len(result) == 2
+        api_key_use_case.list.assert_awaited_once_with(
+            agent_id="agent-1",
+            limit=50,
+            page_number=1,
+            id=None,
+        )
 
 
 @pytest.mark.unit
