@@ -37,9 +37,20 @@ class StatesUseCase:
         agent_id: str | None = None,
         order_by: str | None = None,
         order_direction: str = "desc",
+        authorized_task_ids: list[str] | None = None,
     ) -> list[StateEntity]:
         filters = {}
-        if task_id:
+        if authorized_task_ids is not None:
+            allowed_task_ids = set(authorized_task_ids)
+            if task_id:
+                if task_id not in allowed_task_ids:
+                    return []
+                filters["task_id"] = task_id
+            else:
+                if not allowed_task_ids:
+                    return []
+                filters["task_id"] = {"$in": sorted(allowed_task_ids)}
+        elif task_id:
             filters["task_id"] = task_id
         if agent_id:
             filters["agent_id"] = agent_id

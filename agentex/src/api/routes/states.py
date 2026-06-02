@@ -7,13 +7,22 @@ from src.api.schemas.authorization_types import (
 )
 from src.api.schemas.states import CreateStateRequest, State, UpdateStateRequest
 from src.domain.use_cases.states_use_case import DStatesUseCase
-from src.utils.authorization_shortcuts import DAuthorizedBodyId, DAuthorizedId
+from src.utils.authorization_shortcuts import (
+    DAuthorizedBodyId,
+    DAuthorizedId,
+    DAuthorizedResourceIds,
+)
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
 
 
 router = APIRouter(prefix="/states", tags=["States"])
+
+# TODO(AGX1-237): replace this with a dedicated state create/upsert task
+# permission if agentex-auth adds one. Today task.execute maps to OWNER while
+# task.update also allows editors.
+_STATE_WRITE_OPERATION = AuthorizedOperationType.execute
 
 
 @router.post(
@@ -24,7 +33,7 @@ async def create_task_state(
     request: CreateStateRequest,
     states_use_case: DStatesUseCase,
     _authorized_task_id: DAuthorizedBodyId(
-        AgentexResourceType.task, AuthorizedOperationType.update
+        AgentexResourceType.task, _STATE_WRITE_OPERATION
     ),
 ) -> State:
     state_entity = await states_use_case.create(
@@ -58,6 +67,9 @@ async def get_state(
 )
 async def filter_states(
     states_use_case: DStatesUseCase,
+    authorized_task_ids: DAuthorizedResourceIds(
+        AgentexResourceType.task, AuthorizedOperationType.read
+    ),
     task_id: str | None = Query(None, description="Task ID"),
     agent_id: str | None = Query(None, description="Agent ID"),
     limit: int = Query(50, description="Limit", ge=1),
@@ -72,6 +84,7 @@ async def filter_states(
         page_number=page_number,
         order_by=order_by,
         order_direction=order_direction,
+        authorized_task_ids=authorized_task_ids,
     )
     logger.info(f"Listing states: {state_entities}")
     return [State.model_validate(state_entity) for state_entity in state_entities]
@@ -83,9 +96,7 @@ async def filter_states(
 )
 async def update_task_state(
     request: UpdateStateRequest,
-    state_id: DAuthorizedId(
-        TaskChildResourceType.state, AuthorizedOperationType.update
-    ),
+    state_id: DAuthorizedId(TaskChildResourceType.state, _STATE_WRITE_OPERATION),
     states_use_case: DStatesUseCase,
 ) -> State:
     state_entity = await states_use_case.update(
