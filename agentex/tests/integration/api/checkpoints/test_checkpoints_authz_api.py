@@ -328,6 +328,104 @@ class TestCheckpointsAuthzAPIIntegration:
             )
         assert response.status_code == 404
 
+    # ── put-writes ──
+
+    @pytest.mark.asyncio
+    @patch(
+        "src.api.authentication_middleware.AgentexAuthMiddleware.is_enabled",
+        return_value=True,
+    )
+    @patch(
+        "src.domain.services.authorization_service.AuthorizationService.is_enabled",
+        return_value=True,
+    )
+    @patch(
+        "src.utils.http_request_handler.HttpRequestHandler.post_with_error_handling",
+        side_effect=_mock_post_factory(),
+    )
+    async def test_put_writes_authorized_returns_204(
+        self,
+        post_with_error_handling_mock,
+        is_enabled_authorization_mock,
+        is_enabled_mock,
+        isolated_client,
+        test_task,
+    ):
+        response = await isolated_client.post(
+            "/checkpoints/put-writes",
+            json={
+                "thread_id": test_task.id,
+                "checkpoint_ns": "",
+                "checkpoint_id": "cp-1",
+                "writes": [
+                    {
+                        "task_id": "lg-task-1",
+                        "idx": 0,
+                        "channel": "messages",
+                        "type": "json",
+                        "blob": "eyJyb2xlIjogImFpIn0=",
+                        "task_path": "",
+                    }
+                ],
+                "upsert": False,
+            },
+        )
+        assert response.status_code == 204
+
+        # Like put, put-writes checks the parent task with the update operation.
+        check_calls = [
+            call
+            for call in post_with_error_handling_mock.call_args_list
+            if call[0][1] == "/v1/authz/check"
+        ]
+        assert len(check_calls) == 1
+        authz_data = check_calls[0][1]["json"]
+        assert authz_data["resource"]["type"] == AgentexResourceType.task.value
+        assert authz_data["resource"]["selector"] == test_task.id
+        assert authz_data["operation"] == "update"
+
+    @pytest.mark.asyncio
+    @patch(
+        "src.api.authentication_middleware.AgentexAuthMiddleware.is_enabled",
+        return_value=True,
+    )
+    @patch(
+        "src.domain.services.authorization_service.AuthorizationService.is_enabled",
+        return_value=True,
+    )
+    async def test_put_writes_unauthorized_returns_404(
+        self,
+        is_enabled_authorization_mock,
+        is_enabled_mock,
+        isolated_client,
+        test_task,
+    ):
+        # A denied write on the parent task collapses to 404 (not 403).
+        with patch(
+            "src.utils.http_request_handler.HttpRequestHandler.post_with_error_handling",
+            side_effect=_mock_post_factory(deny_task_ids={test_task.id}),
+        ):
+            response = await isolated_client.post(
+                "/checkpoints/put-writes",
+                json={
+                    "thread_id": test_task.id,
+                    "checkpoint_ns": "",
+                    "checkpoint_id": "cp-1",
+                    "writes": [
+                        {
+                            "task_id": "lg-task-1",
+                            "idx": 0,
+                            "channel": "messages",
+                            "type": "json",
+                            "blob": "eyJyb2xlIjogImFpIn0=",
+                            "task_path": "",
+                        }
+                    ],
+                    "upsert": False,
+                },
+            )
+        assert response.status_code == 404
+
     # ── delete-thread ──
 
     @pytest.mark.asyncio
@@ -367,3 +465,32 @@ class TestCheckpointsAuthzAPIIntegration:
         assert authz_data["resource"]["type"] == AgentexResourceType.task.value
         assert authz_data["resource"]["selector"] == test_task.id
         assert authz_data["operation"] == "delete"
+
+    @pytest.mark.asyncio
+    @patch(
+        "src.api.authentication_middleware.AgentexAuthMiddleware.is_enabled",
+        return_value=True,
+    )
+    @patch(
+        "src.domain.services.authorization_service.AuthorizationService.is_enabled",
+        return_value=True,
+    )
+    async def test_delete_thread_unauthorized_returns_404(
+        self,
+        is_enabled_authorization_mock,
+        is_enabled_mock,
+        isolated_client,
+        test_checkpoint,
+        test_task,
+    ):
+        # delete-thread maps to task.delete (owner-only, the most restrictive
+        # permission). A denied check must collapse to 404 (not 403) so the
+        # route preserves the cross-tenant opacity guarantee.
+        with patch(
+            "src.utils.http_request_handler.HttpRequestHandler.post_with_error_handling",
+            side_effect=_mock_post_factory(deny_task_ids={test_task.id}),
+        ):
+            response = await isolated_client.post(
+                "/checkpoints/delete-thread", json={"thread_id": test_task.id}
+            )
+        assert response.status_code == 404
