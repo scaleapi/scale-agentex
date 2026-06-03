@@ -87,7 +87,7 @@ async def batch_create_messages(
     request: BatchCreateTaskMessagesRequest,
     message_use_case: DMessageUseCase,
     _authorized_task_id: DAuthorizedBodyId(
-        AgentexResourceType.task, AuthorizedOperationType.execute
+        AgentexResourceType.task, AuthorizedOperationType.update
     ),
 ) -> list[TaskMessage]:
     # Convert each content from API schema to entity schema
@@ -115,7 +115,7 @@ async def batch_update_messages(
     request: BatchUpdateTaskMessagesRequest,
     message_use_case: DMessageUseCase,
     _authorized_task_id: DAuthorizedBodyId(
-        AgentexResourceType.task, AuthorizedOperationType.execute
+        AgentexResourceType.task, AuthorizedOperationType.update
     ),
 ) -> list[TaskMessage]:
     task_message_entities = await message_use_case.update_batch(
@@ -136,7 +136,7 @@ async def create_message(
     request: CreateTaskMessageRequest,
     message_use_case: DMessageUseCase,
     _authorized_task_id: DAuthorizedBodyId(
-        AgentexResourceType.task, AuthorizedOperationType.execute
+        AgentexResourceType.task, AuthorizedOperationType.update
     ),
 ) -> TaskMessage:
     task_message_entity = await message_use_case.create(
@@ -157,7 +157,7 @@ async def update_message(
     message_id: str,
     message_use_case: DMessageUseCase,
     _authorized_task_id: DAuthorizedBodyId(
-        AgentexResourceType.task, AuthorizedOperationType.execute
+        AgentexResourceType.task, AuthorizedOperationType.update
     ),
 ) -> TaskMessage:
     task_message_entity = await message_use_case.update(

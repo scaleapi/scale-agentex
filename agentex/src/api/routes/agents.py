@@ -43,6 +43,7 @@ from src.utils.authorization_shortcuts import (
     DAuthorizedResourceIds,
 )
 from src.utils.logging import make_logger
+from src.utils.task_authorization import check_task_or_collapse_to_404
 
 logger = make_logger(__name__)
 
@@ -375,25 +376,30 @@ async def _authorize_rpc_request(
             task_name = request.params.task_name
 
             if task_id is not None:
-                # Direct task ID provided - check execute permission on that specific task
-                await authorization_service.check(
-                    resource=AgentexResource.task(task_id),
-                    operation=AuthorizedOperationType.execute,
+                await check_task_or_collapse_to_404(
+                    authorization_service,
+                    task_id,
+                    AuthorizedOperationType.update,
                 )
             elif task_name is not None:
-                # Task name provided - check if task exists
+                # try/else (not try/except wrapping the whole block): a denied
+                # update on an existing task must surface as 404 to the caller,
+                # NOT silently fall through to the create check below — that
+                # would let "I'm denied update" masquerade as "task is absent"
+                # and grant create access.
                 try:
                     existing_task = await task_service.get_task(name=task_name)
-                    # Task exists - require execute permission on the specific task
-                    await authorization_service.check(
-                        resource=AgentexResource.task(existing_task.id),
-                        operation=AuthorizedOperationType.execute,
-                    )
                 except ItemDoesNotExist:
                     # Task doesn't exist - will be created, require create permission
                     await authorization_service.check(
                         resource=AgentexResource.task("*"),
                         operation=AuthorizedOperationType.create,
+                    )
+                else:
+                    await check_task_or_collapse_to_404(
+                        authorization_service,
+                        existing_task.id,
+                        AuthorizedOperationType.update,
                     )
             else:
                 # No identifier provided - creating new task, require create permission
@@ -407,20 +413,22 @@ async def _authorize_rpc_request(
             task_name = request.params.task_name
 
             if task_id is not None:
-                # Direct task ID provided - check execute permission on that specific task
-                await authorization_service.check(
-                    resource=AgentexResource.task(task_id),
-                    operation=AuthorizedOperationType.execute,
+                await check_task_or_collapse_to_404(
+                    authorization_service,
+                    task_id,
+                    AuthorizedOperationType.update,
                 )
             elif task_name is not None:
-                # Task name provided - look up task and check execute permission
+                # `get_task` raises ItemDoesNotExist for absent rows (= 404
+                # naturally); the wrap collapses present-but-denied to the same
+                # shape so callers can't distinguish.
                 existing_task = await task_service.get_task(name=task_name)
-                await authorization_service.check(
-                    resource=AgentexResource.task(existing_task.id),
-                    operation=AuthorizedOperationType.execute,
+                await check_task_or_collapse_to_404(
+                    authorization_service,
+                    existing_task.id,
+                    AuthorizedOperationType.update,
                 )
             else:
-                # No identifier provided - this shouldn't happen but handle gracefully
                 raise ValueError(
                     "Either task_id or task_name must be provided for event/send"
                 )
@@ -430,25 +438,27 @@ async def _authorize_rpc_request(
             task_name = request.params.task_name
 
             if task_id is not None:
-                # Direct task ID provided - check execute permission on that specific task
-                await authorization_service.check(
-                    resource=AgentexResource.task(task_id),
-                    operation=AuthorizedOperationType.execute,
+                await check_task_or_collapse_to_404(
+                    authorization_service,
+                    task_id,
+                    AuthorizedOperationType.cancel,
                 )
             elif task_name is not None:
-                # Task name provided - look up task and check execute permission
                 existing_task = await task_service.get_task(name=task_name)
-                await authorization_service.check(
-                    resource=AgentexResource.task(existing_task.id),
-                    operation=AuthorizedOperationType.execute,
+                await check_task_or_collapse_to_404(
+                    authorization_service,
+                    existing_task.id,
+                    AuthorizedOperationType.cancel,
                 )
             else:
-                # No identifier provided - this shouldn't happen but handle gracefully
                 raise ValueError(
                     "Either task_id or task_name must be provided for task/cancel"
                 )
         case _:
-            pass
+            raise NotImplementedError(
+                f"_authorize_rpc_request has no case for {request.method}; "
+                "RPC methods must be wired explicitly before they can dispatch."
+            )
 
 
 async def _handle_agent_rpc(

@@ -2,8 +2,6 @@ from typing import Annotated
 
 from fastapi import Depends, Path, Query, Request
 
-from src.adapters.authorization.exceptions import AuthorizationError
-from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.api.schemas.authorization_types import (
     AgentexResource,
     AgentexResourceType,
@@ -18,6 +16,7 @@ from src.domain.services.authorization_service import DAuthorizationService
 from src.domain.services.schedule_service import build_schedule_id
 from src.utils.agent_api_key_authorization import _check_api_key_or_collapse_to_404
 from src.utils.schedule_authorization import _check_schedule_or_collapse_to_404
+from src.utils.task_authorization import check_task_or_collapse_to_404
 
 
 async def _get_parent_task_id(
@@ -61,15 +60,9 @@ def DAuthorizedId(
                 state_repository,
                 message_repository,
             )
-            try:
-                await authorization.check(
-                    resource=AgentexResource.task(task_id),
-                    operation=operation,
-                )
-            except AuthorizationError:
-                raise ItemDoesNotExist(
-                    f"Item with id '{resource_id}' does not exist."
-                ) from None
+            await check_task_or_collapse_to_404(authorization, task_id, operation)
+        elif resource_type == AgentexResourceType.task:
+            await check_task_or_collapse_to_404(authorization, resource_id, operation)
         elif resource_type == AgentexResourceType.api_key:
             # Collapse api_key denials to 404 so name/id probes can't
             # distinguish "present in another tenant" from "absent".
@@ -77,7 +70,6 @@ def DAuthorizedId(
                 authorization, resource_id, operation
             )
         else:
-            # For direct resources, check directly
             await authorization.check(
                 resource=AgentexResource(type=resource_type, selector=resource_id),
                 operation=operation,
@@ -114,17 +106,10 @@ def DAuthorizedQuery(
                 state_repository,
                 message_repository,
             )
-            try:
-                await authorization.check(
-                    resource=AgentexResource.task(task_id),
-                    operation=operation,
-                )
-            except AuthorizationError:
-                raise ItemDoesNotExist(
-                    f"Item with id '{resource_id}' does not exist."
-                ) from None
+            await check_task_or_collapse_to_404(authorization, task_id, operation)
+        elif resource_type == AgentexResourceType.task:
+            await check_task_or_collapse_to_404(authorization, resource_id, operation)
         else:
-            # For direct resources, check directly
             await authorization.check(
                 resource=AgentexResource(type=resource_type, selector=resource_id),
                 operation=operation,
@@ -149,19 +134,8 @@ def DAuthorizedBodyId(
         body = await request.json()
         field_value = body[field_name]
 
-        # Collapse a denied task check into 404 so callers cannot use 403 vs
-        # 404 to probe whether a task exists in another tenant.
-        # TODO: Refactor to use the canonical task body-id wrap landed by AGX1-275 / #249.
         if resource_type == AgentexResourceType.task:
-            try:
-                await authorization.check(
-                    resource=AgentexResource.task(field_value),
-                    operation=operation,
-                )
-            except AuthorizationError:
-                raise ItemDoesNotExist(
-                    f"Item with id '{field_value}' does not exist."
-                ) from None
+            await check_task_or_collapse_to_404(authorization, field_value, operation)
         else:
             await authorization.check(
                 resource=AgentexResource(type=resource_type, selector=field_value),
@@ -209,12 +183,21 @@ def DAuthorizedName(
         resource_id = resource_name
         repository = registry[resource_type]
 
+        # Lookup-before-authz: if the name isn't present, `repository.get` raises
+        # ItemDoesNotExist (→ 404), which is what we want for absent resources.
+        # The present-but-denied case is handled per-resource below.
         resource = await repository.get(name=resource_id)
 
-        await authorization.check(
-            resource=AgentexResource(type=resource_type, selector=resource.id),
-            operation=operation,
-        )
+        if resource_type == AgentexResourceType.task:
+            # Tasks: collapse denial to 404 so name probes can't distinguish
+            # "present in another tenant" from "absent" (tasks.name is globally
+            # unique — any 403 leak here probes the whole system, not a tenant).
+            await check_task_or_collapse_to_404(authorization, resource.id, operation)
+        else:
+            await authorization.check(
+                resource=AgentexResource(type=resource_type, selector=resource.id),
+                operation=operation,
+            )
         return resource_id
 
     return Annotated[str, Depends(_ensure_authorized_name)]

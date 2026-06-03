@@ -57,8 +57,8 @@ async def create_api_key(
         )
     agent = await agent_use_case.get(id=request.agent_id, name=request.agent_name)
 
-    # No api_key resource exists yet, so SpiceDB can't gate transitively —
-    # gate on parent ``agent.update`` directly.
+    # No api_key resource exists yet, so the authorization service can't gate
+    # transitively — gate on parent ``agent.update`` directly.
     await authorization_service.check(
         resource=AgentexResource.agent(agent.id),
         operation=AuthorizedOperationType.update,
@@ -211,8 +211,8 @@ async def delete_agent_api_key(
         param_name="id",
     ),
 ) -> str:
-    # SpiceDB's ``api_key.delete`` expands transitively to
-    # ``parent_agent->update``, so the dep above enforces both factors.
+    # ``api_key.delete`` expands transitively to ``parent_agent->update``,
+    # so the dep above enforces both factors.
     await agent_api_key_use_case.delete(id=id)
     return f"Agent API key with ID {id} deleted"
 

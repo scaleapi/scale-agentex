@@ -1,9 +1,9 @@
 """
 Integration tests for message-route authorization.
 
-Covers the AGX1-277 deliverable: list/get messages enforce ``task.read`` on
-the parent task, with denied checks collapsing to 404 (not 403) so callers
-cannot probe cross-tenant existence by comparing response codes.
+List/get message routes enforce ``task.read`` on the parent task, with denied
+checks collapsing to 404 (not 403) so callers cannot probe cross-tenant
+existence by comparing response codes.
 """
 
 from typing import Any

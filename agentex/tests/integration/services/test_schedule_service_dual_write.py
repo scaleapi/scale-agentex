@@ -1,18 +1,18 @@
-"""Integration tests for ScheduleService dual-write to Spark AuthZ.
+"""Integration tests for ScheduleService dual-write to the authorization service.
 
 scale-agentex calls ``register_resource`` / ``deregister_resource``
-unconditionally; per-account routing (Spark vs legacy SGP) is owned by
-agentex-auth so scale-agentex does NOT couple to a feature-flag service.
+unconditionally; per-account routing is owned by the authorization gateway,
+so scale-agentex does NOT couple to a feature-flag service.
 
 Schedule-specific shape (vs the agent_api_key dual-write): schedules have no
 Postgres row — Temporal is the store and the auth selector is the schedule id
-``{agent_id}--{schedule_name}``. The dual-write is therefore Temporal + Spark,
+``{agent_id}--{schedule_name}``. The dual-write is therefore Temporal + authorization,
 so the dual-write lives in ``ScheduleService`` (where the Temporal write is)
 rather than the use case, and the compensation boundary is scoped to the
 Temporal create only:
 
 - Create registers register_resource with parent=agent (the parent_agent edge
-  is load-bearing for the SpiceDB cascade) BEFORE the Temporal create.
+  is load-bearing for the authorization cascade) BEFORE the Temporal create.
 - Register failure prevents the Temporal create (fail-closed).
 - A Temporal create failure after a successful register triggers a
   compensating deregister (best-effort), then the original error re-raises.
@@ -26,7 +26,7 @@ Temporal create only:
 
 The tests mock the Temporal adapter and authorization service and stub the
 post-create read-back; the behaviour under test is the call sequencing inside
-``ScheduleService`` — not Temporal or Spark itself.
+``ScheduleService`` — not Temporal or the authorization cluster itself.
 """
 
 from __future__ import annotations
@@ -132,7 +132,7 @@ async def test_create_schedule_calls_register_resource_with_parent() -> None:
     registered_resource: AgentexResource = register.await_args.kwargs["resource"]
     assert registered_resource.type == AgentexResourceType.schedule
     assert registered_resource.selector == build_schedule_id(agent.id, request.name)
-    # parent_agent edge is load-bearing — without it the SpiceDB cascade
+    # parent_agent edge is load-bearing — without it the authorization cascade
     # `read = ... & parent_agent->read` fails closed for every reader.
     registered_parent: AgentexResource = register.await_args.kwargs["parent"]
     assert registered_parent is not None
