@@ -261,7 +261,7 @@ Tests are organized by type and use different strategies:
 ### Key Domain Concepts
 
 - **Agents**: Autonomous entities that execute tasks, managed via ACP protocol
-- **Tasks**: Work units with lifecycle states (pending → running → completed/failed)
+- **Tasks**: Work units with lifecycle states (pending → running → completed/failed). Identified by a UUID `id`; the human-readable `name` is **optional** (nullable) and, when set, globally unique. `task/create` is get-or-create keyed on `name`, so reusing an existing name returns that task with its prior history instead of creating a new one — omit `name` (or make it unique) whenever each call should produce a fresh task.
 - **Messages**: Communication between system and agents (stored in MongoDB)
 - **Spans**: Execution traces for observability (OpenTelemetry-style)
 - **Events**: Domain events for async communication
