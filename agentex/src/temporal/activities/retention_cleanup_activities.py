@@ -58,6 +58,9 @@ class RetentionCleanupActivities:
         RETENTION_CLEANUP_* env var and restarting the worker takes effect on the
         next scheduled run without recreating the schedule.
         """
+        # Lives on this class (rather than as a free function) only so the worker
+        # can register it alongside the other activities; it intentionally uses
+        # none of the injected repositories/use case.
         env = EnvironmentVariables.refresh(force_refresh=True)
         return {
             "idle_days": env.RETENTION_CLEANUP_IDLE_DAYS,
