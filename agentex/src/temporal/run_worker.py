@@ -23,7 +23,6 @@ from src.config.dependencies import (
 )
 from src.config.environment_variables import EnvironmentVariables
 from src.domain.repositories.agent_repository import AgentRepository
-from src.domain.repositories.task_repository import TaskRepository
 from src.temporal.activities.healthcheck_activities import HealthCheckActivities
 from src.temporal.activities.retention_cleanup_activities import (
     RetentionCleanupActivities,
@@ -173,11 +172,10 @@ def create_retention_cleanup_worker(
     """Create a worker that serves the retention-cleanup workflows + activities."""
     task_queue = os.environ.get("AGENTEX_SERVER_TASK_QUEUE", AGENTEX_SERVER_TASK_QUEUE)
 
-    engine = database_async_read_write_engine()
-    rw_session_maker = database_async_read_write_session_maker(engine)
-    ro_session_maker = database_async_read_only_session_maker(engine)
-    task_repository = TaskRepository(rw_session_maker, ro_session_maker)
     use_case = build_task_retention_use_case(global_dependencies)
+    # Reuse the repository the factory already built (avoids a second TaskRepository
+    # / connection pool for the same database).
+    task_repository = use_case.retention_service.task_repository
 
     retention_activities = RetentionCleanupActivities(
         task_repository=task_repository,
@@ -199,6 +197,7 @@ def create_retention_cleanup_worker(
 
 
 async def run_retention_cleanup_worker_main() -> None:
+    """Entrypoint: run the retention-cleanup worker as its own process."""
     global_dependencies = GlobalDependencies()
     await global_dependencies.load()
     worker_task = create_retention_cleanup_worker(global_dependencies)
