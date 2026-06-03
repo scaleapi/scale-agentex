@@ -1,7 +1,9 @@
 """
 Temporal activities for the scheduled task-retention cleanup sweep.
 
-Two activities:
+Three activities:
+- load_cleanup_config: reads RETENTION_CLEANUP_* env vars at run time so policy
+  changes take effect on the next scheduled run without recreating the schedule.
 - find_cleanup_candidates: cheap pre-filtered, keyset-paginated discovery.
 - clean_task: delegates to TaskRetentionUseCase.clean_task; catches ClientError
   (the three policy/safety refusals) and maps it to a 'skipped' outcome so the
@@ -14,6 +16,7 @@ Pydantic models).
 
 from typing import TypedDict
 
+from src.config.environment_variables import EnvironmentVariables
 from src.domain.exceptions import ClientError
 from src.domain.repositories.task_repository import TaskRepository
 from src.domain.use_cases.task_retention_use_case import TaskRetentionUseCase
@@ -22,6 +25,7 @@ from temporalio import activity
 
 logger = make_logger(__name__)
 
+LOAD_CLEANUP_CONFIG_ACTIVITY = "load_cleanup_config_activity"
 FIND_CLEANUP_CANDIDATES_ACTIVITY = "find_cleanup_candidates_activity"
 CLEAN_TASK_ACTIVITY = "clean_task_activity"
 
@@ -43,6 +47,24 @@ class RetentionCleanupActivities:
     ):
         self.task_repository = task_repository
         self.use_case = use_case
+
+    @activity.defn(name=LOAD_CLEANUP_CONFIG_ACTIVITY)
+    async def load_cleanup_config(self) -> dict:
+        """
+        Read the current retention-cleanup policy from the environment.
+
+        Policy (allowlist, idle threshold, paging) is intentionally NOT baked into
+        the Temporal Schedule. The sweep loads it here at run time so changing a
+        RETENTION_CLEANUP_* env var and restarting the worker takes effect on the
+        next scheduled run without recreating the schedule.
+        """
+        env = EnvironmentVariables.refresh(force_refresh=True)
+        return {
+            "idle_days": env.RETENTION_CLEANUP_IDLE_DAYS,
+            "agent_names": env.RETENTION_CLEANUP_AGENT_ALLOWLIST,
+            "page_size": env.RETENTION_CLEANUP_PAGE_SIZE,
+            "max_in_flight": env.RETENTION_CLEANUP_MAX_IN_FLIGHT,
+        }
 
     @activity.defn(name=FIND_CLEANUP_CANDIDATES_ACTIVITY)
     async def find_cleanup_candidates(

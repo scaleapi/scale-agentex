@@ -187,6 +187,7 @@ def create_retention_cleanup_worker(
             task_queue=task_queue,
             workflows=[RetentionCleanupSweepWorkflow, RetentionCleanupTaskWorkflow],
             activities=[
+                retention_activities.load_cleanup_config,
                 retention_activities.find_cleanup_candidates,
                 retention_activities.clean_task,
             ],

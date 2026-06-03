@@ -17,6 +17,7 @@ from datetime import timedelta
 from src.temporal.activities.retention_cleanup_activities import (
     CLEAN_TASK_ACTIVITY,
     FIND_CLEANUP_CANDIDATES_ACTIVITY,
+    LOAD_CLEANUP_CONFIG_ACTIVITY,
 )
 from src.utils.logging import make_logger
 from temporalio import workflow
@@ -48,7 +49,24 @@ class RetentionCleanupTaskWorkflow:
 @workflow.defn
 class RetentionCleanupSweepWorkflow:
     @workflow.run
-    async def run(self, args: dict) -> dict:
+    async def run(self, args: dict | None = None) -> dict:
+        args = args or {}
+
+        # First page of a sweep: load policy from env (via activity) and carry it
+        # across continue_as_new pages so a single sweep stays consistent even if
+        # env changes mid-run. Subsequent pages already have it in args.
+        if "idle_days" not in args:
+            config = await workflow.execute_activity(
+                LOAD_CLEANUP_CONFIG_ACTIVITY,
+                start_to_close_timeout=timedelta(seconds=15),
+                retry_policy=RetryPolicy(
+                    maximum_attempts=3,
+                    initial_interval=timedelta(seconds=1),
+                    backoff_coefficient=2.0,
+                ),
+            )
+            args = {**args, **config}
+
         idle_days = args["idle_days"]
         agent_names = args["agent_names"]
         page_size = args.get("page_size", 200)

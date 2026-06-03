@@ -4,6 +4,7 @@ import pytest
 from src.temporal.activities.retention_cleanup_activities import (
     CLEAN_TASK_ACTIVITY,
     FIND_CLEANUP_CANDIDATES_ACTIVITY,
+    LOAD_CLEANUP_CONFIG_ACTIVITY,
 )
 from src.temporal.workflows.retention_cleanup_workflow import (
     RetentionCleanupSweepWorkflow,
@@ -68,3 +69,49 @@ async def test_sweep_cleans_all_pages_and_aggregates():
     assert summary["cleaned"] == 1  # t1
     assert summary["skipped"] == 1  # t2
     assert summary["failed"] == 1  # t3
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sweep_loads_config_from_activity_when_no_args():
+    pages = {None: ["t1"], "t1": []}
+
+    @activity.defn(name=LOAD_CLEANUP_CONFIG_ACTIVITY)
+    async def fake_load() -> dict:
+        return {
+            "idle_days": 7,
+            "agent_names": ["a"],
+            "page_size": 2,
+            "max_in_flight": 2,
+        }
+
+    @activity.defn(name=FIND_CLEANUP_CANDIDATES_ACTIVITY)
+    async def fake_find(after_id, limit, idle_days, agent_names) -> list[str]:
+        assert agent_names == ["a"]  # policy from load activity flowed through
+        return pages[after_id]
+
+    @activity.defn(name=CLEAN_TASK_ACTIVITY)
+    async def fake_clean(task_id: str, idle_days: int) -> dict:
+        return {
+            "task_id": task_id,
+            "status": "cleaned",
+            "reason": None,
+            "messages_deleted": 1,
+            "task_states_deleted": 0,
+            "events_deleted": 0,
+        }
+
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        async with Worker(
+            env.client,
+            task_queue="test-retention-load",
+            workflows=[RetentionCleanupSweepWorkflow, RetentionCleanupTaskWorkflow],
+            activities=[fake_load, fake_find, fake_clean],
+            workflow_runner=UnsandboxedWorkflowRunner(),
+        ):
+            summary = await env.client.execute_workflow(
+                RetentionCleanupSweepWorkflow.run,
+                id=f"sweep-{uuid.uuid4()}",
+                task_queue="test-retention-load",
+            )
+    assert summary["cleaned"] == 1

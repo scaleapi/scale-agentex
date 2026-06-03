@@ -78,3 +78,22 @@ async def test_clean_task_unexpected_error_propagates():
 
     with pytest.raises(RuntimeError):
         await activities.clean_task(task_id="t1", idle_days=7)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_load_cleanup_config_reads_env(monkeypatch):
+    monkeypatch.setenv("RETENTION_CLEANUP_AGENT_ALLOWLIST", "x,y")
+    monkeypatch.setenv("RETENTION_CLEANUP_IDLE_DAYS", "9")
+    monkeypatch.setenv("RETENTION_CLEANUP_PAGE_SIZE", "33")
+    monkeypatch.setenv("RETENTION_CLEANUP_MAX_IN_FLIGHT", "4")
+    activities = RetentionCleanupActivities(
+        task_repository=AsyncMock(), use_case=AsyncMock()
+    )
+    config = await activities.load_cleanup_config()
+    assert config == {
+        "idle_days": 9,
+        "agent_names": ["x", "y"],
+        "page_size": 33,
+        "max_in_flight": 4,
+    }
