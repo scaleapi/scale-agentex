@@ -273,9 +273,9 @@ class AgentsACPUseCase(TaskMessageMixin):
 
         Lookup is by id or name. A non-null *task_name* must be globally unique: if it
         matches an existing task, that task is returned (get-or-create) with its prior
-        history rather than a fresh one. Note that this is not a pure read — when
-        *task_params* is provided and differs from the stored value, it overwrites the
-        existing task's params before the task is returned (*task_metadata* is only
+        history rather than a fresh one. This branch can also mutate the existing task:
+        when *task_params* is provided and differs from the stored value, it overwrites
+        the existing task's params before the task is returned (*task_metadata* is only
         applied at creation time). When neither an id nor a matching name is given, a
         brand-new task is created (name may be None).
 
