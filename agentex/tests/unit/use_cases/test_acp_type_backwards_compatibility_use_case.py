@@ -250,6 +250,7 @@ class TestACPTypeBackwardsCompatibility:
             deployment_repository=deployment_repo,
             # Not testing temporal adapter in this test
             temporal_adapter=TemporalAdapter(),
+            authorization_service=make_noop_authorization_service(),
         )
 
         # Mock repository to return a new agent
@@ -292,6 +293,7 @@ class TestACPTypeBackwardsCompatibility:
             deployment_repository=deployment_repo,
             # Not testing temporal adapter in this test
             temporal_adapter=TemporalAdapter(),
+            authorization_service=make_noop_authorization_service(),
         )
 
         # Mock repository to return an AGENTIC agent

@@ -397,6 +397,7 @@ async def isolated_integration_app(
                 "deployment_history_repository"
             ],
             deployment_repository=isolated_repositories["deployment_repository"],
+            authorization_service=make_noop_authorization_service(),
         )
 
     def create_agent_api_keys_use_case():

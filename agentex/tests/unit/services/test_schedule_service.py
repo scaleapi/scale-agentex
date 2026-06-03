@@ -51,8 +51,7 @@ def mock_temporal_adapter():
 
 @pytest.fixture
 def mock_authorization_service():
-    """Mock authorization service with a resolvable creator principal so the
-    dual-write register/deregister calls run as no-ops in these unit tests."""
+    """Mock authorization service with a resolvable creator principal."""
     mock = Mock()
     mock.principal_context = SimpleNamespace(
         user_id="user-test", service_account_id=None, account_id="acct-test"

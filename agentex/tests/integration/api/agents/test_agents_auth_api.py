@@ -36,6 +36,10 @@ async def _mock_post_with_error_handling(
         return {"success": True}
     elif path == "/v1/authz/revoke":
         return {"success": True}
+    elif path == "/v1/authz/register":
+        return {"success": True}
+    elif path == "/v1/authz/deregister":
+        return {"success": True}
     raise Exception(f"Unknown path: {path}")
 
 
@@ -184,14 +188,20 @@ class TestAgentsAuthAPIIntegration:
         "src.utils.http_request_handler.HttpRequestHandler.post_with_error_handling",
         side_effect=_mock_post_with_error_handling,
     )
-    async def test_agent_grant_revoke(
+    async def test_agent_create_and_delete_gate_and_write_legacy_authz(
         self,
         post_with_error_handling_mock,
         is_enabled_mock,
         is_enabled_authorization_mock,
         isolated_client,
     ):
-        # Registering a new agent will grant the agent permission
+        def _payloads(path: str):
+            return [
+                call[1]["json"]
+                for call in post_with_error_handling_mock.call_args_list
+                if call[0][1] == path
+            ]
+
         response = await isolated_client.post(
             "/agents/register",
             json={
@@ -204,56 +214,37 @@ class TestAgentsAuthAPIIntegration:
         assert response.status_code == 200
         agent = response.json()
 
-        assert post_with_error_handling_mock.call_count == 2
-        assert (
-            post_with_error_handling_mock.call_args_list[0][0][1] == "/v1/authz/check"
-        )
-        authz_data = post_with_error_handling_mock.call_args_list[0][1]["json"]
-        assert authz_data["resource"]["type"] == AgentexResourceType.agent.value
-        assert authz_data["resource"]["selector"] == "*"
-        assert authz_data["operation"] == "create"
-        assert (
-            post_with_error_handling_mock.call_args_list[1][0][1] == "/v1/authz/grant"
-        )
-        assert post_with_error_handling_mock.call_args_list[1][1]["json"][
-            "resource"
-        ] == {
-            "type": AgentexResourceType.agent.value,
-            "selector": agent["id"],
-        }
-        assert (
-            post_with_error_handling_mock.call_args_list[1][1]["json"]["operation"]
-            == "create"
-        )
+        create_checks = _payloads("/v1/authz/check")
+        assert len(create_checks) == 1
+        assert create_checks[0]["resource"]["type"] == AgentexResourceType.agent.value
+        assert create_checks[0]["resource"]["selector"] == "*"
+        assert create_checks[0]["operation"] == "create"
 
-        # Deleting the agent will revoke the agent permission
+        agent_grants = [
+            payload
+            for payload in _payloads("/v1/authz/grant")
+            if payload["resource"]["type"] == AgentexResourceType.agent.value
+        ]
+        assert len(agent_grants) == 1
+        assert agent_grants[0]["resource"]["selector"] == agent["id"]
+        assert agent_grants[0]["operation"] == "create"
+
         post_with_error_handling_mock.reset_mock()
         response = await isolated_client.delete("/agents/name/test-agent")
         assert response.status_code == 200
-        assert post_with_error_handling_mock.call_count == 3
-        assert post_with_error_handling_mock.call_args_list[0][0][1] == "/v1/authn"
-        assert (
-            post_with_error_handling_mock.call_args_list[1][0][1] == "/v1/authz/check"
-        )
-        authz_data = post_with_error_handling_mock.call_args_list[1][1]["json"]
-        assert authz_data["resource"]["type"] == AgentexResourceType.agent.value
-        assert authz_data["resource"]["selector"] == agent["id"]
-        assert authz_data["operation"] == "delete"
-        assert authz_data["principal"] == MOCK_PRINCIPAL_CONTEXT
-        assert (
-            post_with_error_handling_mock.call_args_list[2][0][1] == "/v1/authz/revoke"
-        )
-        assert (
-            post_with_error_handling_mock.call_args_list[2][1]["json"]["principal"]
-            == MOCK_PRINCIPAL_CONTEXT
-        )
-        assert post_with_error_handling_mock.call_args_list[2][1]["json"][
-            "resource"
-        ] == {
-            "type": AgentexResourceType.agent.value,
-            "selector": agent["id"],
-        }
-        assert (
-            post_with_error_handling_mock.call_args_list[2][1]["json"]["operation"]
-            == "delete"
-        )
+
+        delete_checks = _payloads("/v1/authz/check")
+        assert len(delete_checks) == 1
+        assert delete_checks[0]["resource"]["type"] == AgentexResourceType.agent.value
+        assert delete_checks[0]["resource"]["selector"] == agent["id"]
+        assert delete_checks[0]["operation"] == "delete"
+        assert delete_checks[0]["principal"] == MOCK_PRINCIPAL_CONTEXT
+
+        agent_revokes = [
+            payload
+            for payload in _payloads("/v1/authz/revoke")
+            if payload["resource"]["type"] == AgentexResourceType.agent.value
+        ]
+        assert len(agent_revokes) == 1
+        assert agent_revokes[0]["resource"]["selector"] == agent["id"]
+        assert agent_revokes[0]["operation"] == "delete"
