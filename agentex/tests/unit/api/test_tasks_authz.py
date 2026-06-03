@@ -470,9 +470,11 @@ class TestDAuthorizedNameTaskWrap:
         # The selector is the resolved row id, not the user-provided name.
         assert called_kwargs["resource"] == AgentexResource.task("task-allow")
 
-    async def test_non_task_name_skips_wrap(self):
-        """Agent FGAC is out of scope for AGX1-264 — the wrap must NOT extend
-        to agent name-routes, which keep the existing 403-on-deny behavior."""
+    async def test_agent_name_collapses_to_404(self):
+        """Agent name-routes collapse a denial to 404 through their own wrap,
+        like tasks. Full agent coverage lives in test_agents_authz.py; here we
+        only guard that the shared name dependency routes agents through a
+        collapse wrap rather than the plain check that surfaces a denial as 403."""
         annotation = DAuthorizedName(
             AgentexResourceType.agent, AuthorizedOperationType.read
         )
@@ -484,5 +486,5 @@ class TestDAuthorizedNameTaskWrap:
         agent_repository.get = AsyncMock(return_value=MagicMock(id="agent-1"))
         task_repository = MagicMock()
 
-        with pytest.raises(AuthorizationError):
+        with pytest.raises(ItemDoesNotExist):
             await dep(authorization, agent_repository, task_repository, "agent-name")
