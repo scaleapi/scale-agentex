@@ -1,4 +1,4 @@
-"""AGX1-244: event routes delegate authz to the parent agent."""
+"""Tests for event route authorization — routes delegate checks to the parent agent."""
 
 from typing import Any
 from unittest.mock import patch
