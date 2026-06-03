@@ -20,7 +20,6 @@ logger = make_logger(__name__)
 
 router = APIRouter(prefix="/states", tags=["States"])
 
-# AGX1-237 defines manage_access as a creator/owner-only task permission.
 _STATE_WRITE_OPERATION = AuthorizedOperationType.manage_access
 
 
