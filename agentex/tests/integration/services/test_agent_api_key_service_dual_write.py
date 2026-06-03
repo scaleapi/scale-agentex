@@ -1,15 +1,14 @@
-"""Integration tests for AgentAPIKeysUseCase dual-write to Spark AuthZ.
+"""Integration tests for AgentAPIKeysUseCase dual-write to the authorization service.
 
-These cover the AGX1-272 dual-write path. scale-agentex calls
-``register_resource`` / ``deregister_resource`` unconditionally; per-account
-routing (Spark vs legacy SGP) is owned by agentex-auth (scaleapi/agentex#353)
-so scale-agentex does NOT couple to egp-api-backend's feature-flag service.
+scale-agentex calls ``register_resource`` / ``deregister_resource``
+unconditionally; per-account routing is owned by the authorization gateway,
+so scale-agentex does NOT couple to the authorization flag service.
 
 - Create calls register_resource with parent=agent (the parent_agent edge
-  is load-bearing for the SpiceDB cascade).
+  is load-bearing for the authorization cascade).
 - Delete calls deregister_resource after the Postgres row is gone.
-- Spark failure prevents row: when register_resource raises, the api_key
-  is NOT persisted.
+- Registration failure prevents row: when register_resource raises, the
+  api_key is NOT persisted.
 - Deregister failure does not block delete: when deregister_resource
   raises, the DB delete still completes and the failure is logged.
 - No creator → no register: if neither user_id nor service_account_id is
@@ -17,9 +16,10 @@ so scale-agentex does NOT couple to egp-api-backend's feature-flag service.
 
 The tests intentionally mock the repository, authorization service, agent
 repository, and HTTP client. The behaviour under test is the call sequencing
-inside ``AgentAPIKeysUseCase`` — not Postgres or Spark itself.
+inside ``AgentAPIKeysUseCase`` — not the underlying persistence or authorization
+cluster itself.
 
-Note on structural divergence from the task PR (AGX1-274): tasks live behind
+Note on structural divergence from the task dual-write: tasks live behind
 ``AgentTaskService``; agent_api_keys have no service layer, so the dual-write
 logic is colocated in ``AgentAPIKeysUseCase``.
 """
@@ -154,7 +154,7 @@ async def test_create_api_key_calls_register_resource_with_parent(
     registered_resource: AgentexResource = register.await_args.kwargs["resource"]
     assert registered_resource.type == AgentexResourceType.api_key
     assert registered_resource.selector == api_key.id
-    # parent_agent edge is load-bearing — without it the SpiceDB cascade
+    # parent_agent edge is load-bearing — without it the authorization cascade
     # `read = ... & parent_agent->read & ...` fails closed for every reader.
     registered_parent: AgentexResource = register.await_args.kwargs["parent"]
     assert registered_parent is not None

@@ -18,7 +18,7 @@ async def _check_api_key_or_collapse_to_404(
     """Check an api_key resource; collapse any denial to 404 to avoid leaking
     cross-tenant existence. Mirrors ``_check_task_or_collapse_to_404``.
 
-    TODO(AGX1-290): restore the 403/404 split once api_keys carry tenant scope.
+    TODO: Restore the 403/404 split once api_keys carry tenant scope.
     """
     try:
         await authorization.check(

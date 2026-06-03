@@ -197,7 +197,7 @@ class AuthorizationService:
     ) -> None:
         """Register a newly created resource with the principal as owner.
 
-        Prefer this over ``grant`` when the resource's SpiceDB schema has
+        Prefer this over ``grant`` when the resource's authorization schema has
         a parent relation that permissions cascade through (e.g.
         ``agent_api_key`` declares ``parent_agent``). Pass ``parent`` to
         link the child to its parent atomically; without it the cascade

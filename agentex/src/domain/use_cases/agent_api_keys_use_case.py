@@ -90,8 +90,6 @@ class AgentAPIKeysUseCase:
 
         api_key_id = orm_id()
 
-        # Unconditional — agentex-auth decides per-account whether the call
-        # routes to Spark or the legacy backend.
         await self._register_api_key_in_auth(
             api_key_id=api_key_id,
             agent_id=agent.id,
@@ -157,9 +155,8 @@ class AgentAPIKeysUseCase:
 
         ``deregister_resource`` removes the resource and all of its
         relationships (owner, parent, grantees) atomically. Always invoked;
-        agentex-auth's per-account routing (#353) decides whether the call
-        targets Spark or the legacy backend. Failures are logged but do not
-        block the delete.
+        the authorization service decides how to route the call. Failures are
+        logged but do not block the delete.
         """
         try:
             await self.authorization_service.deregister_resource(
@@ -252,7 +249,7 @@ class AgentAPIKeysUseCase:
         page_number: int,
         id: list[str] | None = None,
     ) -> list[AgentAPIKeyEntity]:
-        # ``id`` is the FGAC-filter shape used by route deps (DAuthorizedResourceIds).
+        # ``id`` is the authorization-filter shape used by route deps (DAuthorizedResourceIds).
         # ``None`` means "no filter" (e.g. authz bypass); an empty list means
         # "caller can see no api_keys" and must short-circuit to avoid the
         # base repo translating ``id=[]`` into an unfiltered query.
