@@ -128,7 +128,7 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
             .where(
                 TaskORM.cleaned_at.is_(None),
                 TaskORM.updated_at < cutoff,
-                AgentORM.name.in_(list(agent_names)),
+                AgentORM.name.in_(agent_names),
             )
             .order_by(TaskORM.id.asc())
             .limit(limit)
@@ -137,7 +137,7 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
         if after_id is not None:
             query = query.where(TaskORM.id > after_id)
 
-        async with self.start_async_db_session(False) as session:
+        async with self.start_async_db_session(allow_writes=False) as session:
             result = await session.execute(query)
             return [row[0] for row in result.all()]
 
