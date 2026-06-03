@@ -23,6 +23,7 @@ from src.domain.services.agent_acp_service import AgentACPService
 from src.domain.services.task_service import AgentTaskService
 from src.domain.use_cases.agents_acp_use_case import AgentsACPUseCase
 from src.domain.use_cases.agents_use_case import AgentsUseCase
+from tests.fixtures.services import make_noop_authorization_service
 
 
 @pytest.mark.unit
@@ -35,9 +36,9 @@ class TestACPTypeBackwardsCompatibility:
         agentic_methods = set(ACP_TYPE_TO_ALLOWED_RPC_METHODS[ACPType.AGENTIC])
         async_methods = set(ACP_TYPE_TO_ALLOWED_RPC_METHODS[ACPType.ASYNC])
 
-        assert (
-            agentic_methods == async_methods
-        ), "AGENTIC and ASYNC should have identical allowed RPC methods"
+        assert agentic_methods == async_methods, (
+            "AGENTIC and ASYNC should have identical allowed RPC methods"
+        )
 
         # Verify they include the expected methods
         expected_methods = {
@@ -95,6 +96,7 @@ class TestACPTypeBackwardsCompatibility:
             task_repository=task_repo,
             event_repository=event_repo,
             stream_repository=stream_repo,
+            authorization_service=make_noop_authorization_service(),
         )
 
         # Create AGENTIC agent
@@ -148,6 +150,7 @@ class TestACPTypeBackwardsCompatibility:
             task_repository=task_repo,
             event_repository=event_repo,
             stream_repository=stream_repo,
+            authorization_service=make_noop_authorization_service(),
         )
 
         # Create SYNC agent
@@ -195,6 +198,7 @@ class TestACPTypeBackwardsCompatibility:
             task_repository=task_repo,
             event_repository=event_repo,
             stream_repository=stream_repo,
+            authorization_service=make_noop_authorization_service(),
         )
 
         # Create ASYNC agent
@@ -355,6 +359,6 @@ class TestACPTypeBackwardsCompatibility:
         # Both AGENTIC and ASYNC should pass the same conditional checks
         agentic_is_not_sync = agentic_agent.acp_type != ACPType.SYNC
         async_is_not_sync = async_agent.acp_type != ACPType.SYNC
-        assert (
-            agentic_is_not_sync == async_is_not_sync
-        ), "AGENTIC and ASYNC should have identical behavior in != SYNC checks"
+        assert agentic_is_not_sync == async_is_not_sync, (
+            "AGENTIC and ASYNC should have identical behavior in != SYNC checks"
+        )

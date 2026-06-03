@@ -95,7 +95,7 @@ async def put_checkpoint(
     request: PutCheckpointRequest,
     checkpoints_use_case: DCheckpointsUseCase,
     _authorized_task_id: DAuthorizedBodyId(
-        AgentexResourceType.task, AuthorizedOperationType.execute, field_name="thread_id"
+        AgentexResourceType.task, AuthorizedOperationType.update, field_name="thread_id"
     ),
 ) -> PutCheckpointResponse:
     blobs = [
@@ -133,7 +133,7 @@ async def put_writes(
     request: PutWritesRequest,
     checkpoints_use_case: DCheckpointsUseCase,
     _authorized_task_id: DAuthorizedBodyId(
-        AgentexResourceType.task, AuthorizedOperationType.execute, field_name="thread_id"
+        AgentexResourceType.task, AuthorizedOperationType.update, field_name="thread_id"
     ),
 ) -> Response:
     writes = [
