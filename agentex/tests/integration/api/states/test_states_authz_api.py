@@ -148,7 +148,7 @@ class TestStatesAuthzAPIIntegration:
             "src.utils.http_request_handler.HttpRequestHandler.post_with_error_handling",
             side_effect=_mock_post_factory(
                 accessible_task_ids={test_task.id},
-                denied_task_operations={test_task.id: {"manage_access"}},
+                denied_task_operations={test_task.id: {"update"}},
             ),
         ) as post_with_error_handling_mock:
             response = await isolated_client.post(
@@ -172,8 +172,7 @@ class TestStatesAuthzAPIIntegration:
         authz_data = check_calls[0][1]["json"]
         assert authz_data["resource"]["type"] == AgentexResourceType.task.value
         assert authz_data["resource"]["selector"] == test_task.id
-        # AGX1-237 exposes manage_access as an owner-only task permission.
-        assert authz_data["operation"] == "manage_access"
+        assert authz_data["operation"] == "update"
 
     @pytest.mark.asyncio
     @patch(
@@ -312,7 +311,7 @@ class TestStatesAuthzAPIIntegration:
             "src.utils.http_request_handler.HttpRequestHandler.post_with_error_handling",
             side_effect=_mock_post_factory(
                 accessible_task_ids={test_task.id},
-                denied_task_operations={test_task.id: {"manage_access"}},
+                denied_task_operations={test_task.id: {"update"}},
             ),
         ) as post_with_error_handling_mock:
             response = await isolated_client.put(
@@ -334,7 +333,7 @@ class TestStatesAuthzAPIIntegration:
         authz_data = check_calls[0][1]["json"]
         assert authz_data["resource"]["type"] == AgentexResourceType.task.value
         assert authz_data["resource"]["selector"] == test_task.id
-        assert authz_data["operation"] == "manage_access"
+        assert authz_data["operation"] == "update"
 
     @pytest.mark.asyncio
     @patch(
@@ -412,7 +411,7 @@ class TestStatesAuthzAPIIntegration:
             if call[0][1] == "/v1/authz/check"
         ]
         assert len(check_calls) == 1
-        assert check_calls[0][1]["json"]["operation"] == "manage_access"
+        assert check_calls[0][1]["json"]["operation"] == "update"
         assert not any(
             call[0][1] == "/v1/authz/register"
             for call in post_with_error_handling_mock.call_args_list

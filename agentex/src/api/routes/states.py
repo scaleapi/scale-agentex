@@ -20,8 +20,6 @@ logger = make_logger(__name__)
 
 router = APIRouter(prefix="/states", tags=["States"])
 
-_STATE_WRITE_OPERATION = AuthorizedOperationType.manage_access
-
 
 @router.post(
     "",
@@ -31,7 +29,7 @@ async def create_task_state(
     request: CreateStateRequest,
     states_use_case: DStatesUseCase,
     _authorized_task_id: DAuthorizedBodyId(
-        AgentexResourceType.task, _STATE_WRITE_OPERATION
+        AgentexResourceType.task, AuthorizedOperationType.update
     ),
 ) -> State:
     state_entity = await states_use_case.create(
@@ -108,7 +106,9 @@ async def filter_states(
 )
 async def update_task_state(
     request: UpdateStateRequest,
-    state_id: DAuthorizedId(TaskChildResourceType.state, _STATE_WRITE_OPERATION),
+    state_id: DAuthorizedId(
+        TaskChildResourceType.state, AuthorizedOperationType.update
+    ),
     states_use_case: DStatesUseCase,
 ) -> State:
     state_entity = await states_use_case.update(
