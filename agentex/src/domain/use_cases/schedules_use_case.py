@@ -76,10 +76,8 @@ class SchedulesUseCase:
         Args:
             agent_id: The agent ID
             page_size: Number of results to return
-            authorized_schedule_ids: Ownership filter. ``None`` means "no
-                filter" (authorization bypass) and returns every schedule under
-                the agent; a list restricts results to those schedule ids, and
-                an empty list returns nothing.
+            authorized_schedule_ids: Ownership filter forwarded to the service
+                (``None`` = bypass → all; a list restricts; empty → none).
 
         Returns:
             ScheduleListResponse with list of schedules

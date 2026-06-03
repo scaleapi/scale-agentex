@@ -224,10 +224,11 @@ class ScheduleService:
             ``page_size`` caps the upstream Temporal listing, which is then
             filtered in-process by ``agent_id`` and ``authorized_schedule_ids``,
             so fewer than ``page_size`` rows may be returned even when more
-            matching schedules exist. This pre-dates the ownership filter (the
-            ``agent_id`` filter already had it); the ownership filter only
-            narrows further. A complete fix needs server-side filtering or
-            paginate-until-full.
+            matching schedules exist. Pre-dates the ownership filter (the
+            ``agent_id`` filter already had it). Server-side filtering isn't
+            available (Temporal standard visibility can't filter on the schedule
+            id); the fix is to loop pages until the requested page is filled,
+            tracked separately.
         """
         schedules = await self.temporal_adapter.list_schedules(page_size=page_size)
 
