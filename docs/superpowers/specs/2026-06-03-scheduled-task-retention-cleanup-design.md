@@ -54,9 +54,16 @@ discovers idle tasks and drives them through `clean_task`.
 ## Configuration
 
 All configuration is via environment variables (consistent with the existing
-`ENABLE_HEALTH_CHECK_WORKFLOW` pattern). The master flag and cron are read at
-**schedule-bootstrap** time; the allowlist and idle threshold are passed into the
-scheduled workflow as input args so the schedule encodes the policy it runs with.
+`ENABLE_HEALTH_CHECK_WORKFLOW` pattern). The master flag (`RETENTION_CLEANUP_ENABLED`)
+and `RETENTION_CLEANUP_CRON` are read at **schedule-bootstrap** time — they are
+inherent schedule properties (whether the schedule exists, and its cadence). The
+**policy** (allowlist, idle threshold, paging) is deliberately **not** baked into
+the schedule: it is read at **sweep run time** by a `load_cleanup_config` activity
+from the worker's environment, then carried across the sweep's `continue_as_new`
+pages. This means changing the allowlist / idle days / paging is a matter of
+editing the env var and restarting the worker — the next scheduled run picks up
+the new policy with **no schedule recreation**. (Changing the *cron* cadence still
+requires updating/recreating the schedule, since cron is a schedule property.)
 
 | Env var | Meaning | Default |
 |---|---|---|
@@ -78,16 +85,18 @@ blast radius to named agents only.
 |---|---|---|
 | `RetentionCleanupSweepWorkflow` | `agentex/src/temporal/workflows/retention_cleanup_workflow.py` | Paginate candidates → fan out child workflows in bounded batches → aggregate summary → `continue_as_new` across pages. |
 | `RetentionCleanupTaskWorkflow` | same file | Per-task child workflow: invoke the clean activity, return a structured outcome. |
-| `RetentionCleanupActivities` | `agentex/src/temporal/activities/retention_cleanup_activities.py` | `find_cleanup_candidates(...)` and `clean_task(...)` (the latter catches `ClientError` and maps it to a `skipped` outcome). |
+| `RetentionCleanupActivities` | `agentex/src/temporal/activities/retention_cleanup_activities.py` | `load_cleanup_config(...)` (reads policy from env), `find_cleanup_candidates(...)`, and `clean_task(...)` (the latter catches `ClientError` and maps it to a `skipped` outcome). |
 | Discovery query | `agentex/src/domain/repositories/task_repository.py` (extend) | Keyset-paginated query for idle, uncleaned candidate task ids filtered by agent name. |
-| Schedule bootstrap | `agentex/src/temporal/run_retention_cleanup_schedule.py` | On startup, when enabled, create/update the Temporal Schedule (mirrors `run_healthcheck_workflow.py`). |
+| Schedule bootstrap | `agentex/src/temporal/run_retention_cleanup_schedule.py` | On startup, when enabled + Temporal configured, create the Temporal Schedule with **no policy args** (cron + identity only; idempotent, leaves an existing schedule as-is). Mirrors `run_healthcheck_workflow.py`. |
 | Worker registration | `agentex/src/temporal/run_worker.py` (edit) | Register both workflows + the activities on the `agentex-server` task queue. |
 
 ### Data flow
 
 ```
-Temporal Schedule (cron; created at bootstrap only when RETENTION_CLEANUP_ENABLED)
-  └─> RetentionCleanupSweepWorkflow(idle_days, allowlist, page_size, max_in_flight)
+Temporal Schedule (cron; created at bootstrap only when RETENTION_CLEANUP_ENABLED; no policy args)
+  └─> RetentionCleanupSweepWorkflow()        # no policy baked in
+        ├─ (first page only) activity load_cleanup_config() -> {idle_days, allowlist, page_size, max_in_flight}
+        │     (read from worker env; carried across continue_as_new pages so a sweep stays consistent)
         ├─ activity find_cleanup_candidates(cursor, limit, idle_days, allowlist) -> [task_id...]
         ├─ for each batch (size ≤ max_in_flight) of task_ids:
         │     start child RetentionCleanupTaskWorkflow(task_id, idle_days)
