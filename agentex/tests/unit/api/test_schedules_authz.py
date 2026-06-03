@@ -34,7 +34,6 @@ from src.api.schemas.authorization_types import (
     AuthorizedOperationType,
 )
 from src.domain.services.schedule_service import ScheduleService, build_schedule_id
-from src.utils.authorization_shortcuts import DAuthorizedScheduleId
 from src.utils.schedule_authorization import _check_schedule_or_collapse_to_404
 
 
@@ -97,45 +96,92 @@ class TestCheckScheduleOrCollapseTo404:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestDAuthorizedScheduleId:
-    """``DAuthorizedScheduleId`` builds the composite selector from two path
-    params and routes the check through the collapse wrap."""
+class TestSingleResourceRouteAuthz:
+    """The single-resource routes (get/pause/unpause/trigger/delete) check the
+    schedule resource on the composite ``{agent_id}--{schedule_name}`` selector
+    inline, collapsing denials to 404 — mirroring the agent_api_key name routes.
+    Verifies per-route operation routing and that a denial skips the use case."""
 
-    async def test_allowed_returns_schedule_name_and_checks_composite_selector(self):
-        dep = _dep_callable(DAuthorizedScheduleId(AuthorizedOperationType.read))
+    async def test_get_authorized_checks_read_and_calls_use_case(self):
+        from src.api.routes.schedules import get_schedule
 
         authorization = MagicMock()
         authorization.check = AsyncMock(return_value=True)
+        use_case = MagicMock()
+        use_case.get_schedule = AsyncMock(return_value=MagicMock())
 
-        result = await dep(authorization, "agent-1", "nightly")
+        await get_schedule(
+            agent_id="agent-1",
+            schedule_name="nightly",
+            schedules_use_case=use_case,
+            authorization=authorization,
+        )
 
-        assert result == "nightly"
-        called_kwargs = authorization.check.await_args.kwargs
-        assert called_kwargs["resource"] == AgentexResource.schedule(
+        called = authorization.check.await_args.kwargs
+        assert called["resource"] == AgentexResource.schedule(
             build_schedule_id("agent-1", "nightly")
         )
-        assert called_kwargs["resource"].selector == "agent-1--nightly"
-        assert called_kwargs["operation"] == AuthorizedOperationType.read
+        assert called["operation"] == AuthorizedOperationType.read
+        use_case.get_schedule.assert_awaited_once_with("agent-1", "nightly")
 
-    async def test_denied_collapses_to_404(self):
-        dep = _dep_callable(DAuthorizedScheduleId(AuthorizedOperationType.update))
+    async def test_get_denied_collapses_to_404_and_skips_use_case(self):
+        from src.api.routes.schedules import get_schedule
 
         authorization = MagicMock()
         authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
+        use_case = MagicMock()
+        use_case.get_schedule = AsyncMock()
 
         with pytest.raises(ItemDoesNotExist):
-            await dep(authorization, "agent-1", "nightly")
+            await get_schedule(
+                agent_id="agent-1",
+                schedule_name="nightly",
+                schedules_use_case=use_case,
+                authorization=authorization,
+            )
+        # The check runs before the Temporal lookup, so a denial never reaches it.
+        use_case.get_schedule.assert_not_called()
 
-    async def test_mutation_operation_propagated(self):
-        dep = _dep_callable(DAuthorizedScheduleId(AuthorizedOperationType.delete))
+    async def test_pause_uses_update_op(self):
+        from src.api.routes.schedules import pause_schedule
 
         authorization = MagicMock()
         authorization.check = AsyncMock(return_value=True)
+        use_case = MagicMock()
+        use_case.pause_schedule = AsyncMock(return_value=MagicMock())
 
-        await dep(authorization, "agent-1", "nightly")
+        await pause_schedule(
+            agent_id="agent-1",
+            schedule_name="nightly",
+            schedules_use_case=use_case,
+            authorization=authorization,
+            request=None,
+        )
 
-        called_kwargs = authorization.check.await_args.kwargs
-        assert called_kwargs["operation"] == AuthorizedOperationType.delete
+        called = authorization.check.await_args.kwargs
+        assert called["resource"] == AgentexResource.schedule("agent-1--nightly")
+        assert called["operation"] == AuthorizedOperationType.update
+
+    async def test_delete_uses_delete_op_and_denied_skips_delete(self):
+        from src.api.routes.schedules import delete_schedule
+
+        authorization = MagicMock()
+        authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
+        use_case = MagicMock()
+        use_case.delete_schedule = AsyncMock()
+
+        with pytest.raises(ItemDoesNotExist):
+            await delete_schedule(
+                agent_id="agent-1",
+                schedule_name="nightly",
+                schedules_use_case=use_case,
+                authorization=authorization,
+            )
+        use_case.delete_schedule.assert_not_called()
+        assert (
+            authorization.check.await_args.kwargs["operation"]
+            == AuthorizedOperationType.delete
+        )
 
 
 @pytest.mark.unit

@@ -13,9 +13,7 @@ from src.domain.repositories.task_message_repository import DTaskMessageReposito
 from src.domain.repositories.task_repository import DTaskRepository
 from src.domain.repositories.task_state_repository import DTaskStateRepository
 from src.domain.services.authorization_service import DAuthorizationService
-from src.domain.services.schedule_service import build_schedule_id
 from src.utils.agent_api_key_authorization import _check_api_key_or_collapse_to_404
-from src.utils.schedule_authorization import _check_schedule_or_collapse_to_404
 from src.utils.task_authorization import check_task_or_collapse_to_404
 
 
@@ -201,31 +199,3 @@ def DAuthorizedName(
         return resource_id
 
     return Annotated[str, Depends(_ensure_authorized_name)]
-
-
-def DAuthorizedScheduleId(
-    operation: AuthorizedOperationType = AuthorizedOperationType.read,
-):
-    """Authorize a single schedule, keyed by the composite ``{agent_id}--
-    {schedule_name}`` selector built from the ``agent_id`` and ``schedule_name``
-    path params.
-
-    A schedule has no single-id path param (only ``agent_id`` + ``schedule_name``),
-    so it can't ride the generic ``DAuthorizedId``. Denials collapse to 404 via
-    :func:`_check_schedule_or_collapse_to_404` so callers can't probe
-    cross-tenant existence. Returns the ``schedule_name`` for the handler.
-    """
-
-    async def _ensure_authorized_schedule(
-        authorization: DAuthorizationService,
-        agent_id: str = Path(...),
-        schedule_name: str = Path(...),
-    ) -> str:
-        await _check_schedule_or_collapse_to_404(
-            authorization,
-            build_schedule_id(agent_id, schedule_name),
-            operation,
-        )
-        return schedule_name
-
-    return Annotated[str, Depends(_ensure_authorized_schedule)]
