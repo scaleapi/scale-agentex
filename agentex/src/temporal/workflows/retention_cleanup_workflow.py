@@ -1,0 +1,103 @@
+"""
+Scheduled task-retention cleanup workflows.
+
+RetentionCleanupSweepWorkflow: started by a Temporal Schedule. Pulls one page of
+candidate task ids, fans out one child workflow per task (bounded by
+max_in_flight), aggregates cleaned/skipped/failed counts, then continue_as_new's
+to the next page so workflow history stays bounded regardless of backlog size.
+
+RetentionCleanupTaskWorkflow: per-task child. Invokes the clean activity, which
+already maps the policy/safety ClientError refusals to a 'skipped' outcome; only
+genuine transient errors surface as activity failures (and are retried).
+"""
+
+import asyncio
+from datetime import timedelta
+
+from src.temporal.activities.retention_cleanup_activities import (
+    CLEAN_TASK_ACTIVITY,
+    FIND_CLEANUP_CANDIDATES_ACTIVITY,
+)
+from src.utils.logging import make_logger
+from temporalio import workflow
+from temporalio.common import RetryPolicy
+
+logger = make_logger(__name__)
+
+
+def _chunked(items: list[str], size: int) -> list[list[str]]:
+    return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+@workflow.defn
+class RetentionCleanupTaskWorkflow:
+    @workflow.run
+    async def run(self, args: dict) -> dict:
+        return await workflow.execute_activity(
+            CLEAN_TASK_ACTIVITY,
+            args=[args["task_id"], args["idle_days"]],
+            start_to_close_timeout=timedelta(seconds=60),
+            retry_policy=RetryPolicy(
+                maximum_attempts=3,
+                initial_interval=timedelta(seconds=1),
+                backoff_coefficient=2.0,
+            ),
+        )
+
+
+@workflow.defn
+class RetentionCleanupSweepWorkflow:
+    @workflow.run
+    async def run(self, args: dict) -> dict:
+        idle_days = args["idle_days"]
+        agent_names = args["agent_names"]
+        page_size = args.get("page_size", 200)
+        max_in_flight = args.get("max_in_flight", 20)
+        after_id = args.get("after_id")
+        totals = args.get("totals", {"cleaned": 0, "skipped": 0, "failed": 0})
+
+        task_ids = await workflow.execute_activity(
+            FIND_CLEANUP_CANDIDATES_ACTIVITY,
+            args=[after_id, page_size, idle_days, agent_names],
+            start_to_close_timeout=timedelta(seconds=30),
+            retry_policy=RetryPolicy(
+                maximum_attempts=3,
+                initial_interval=timedelta(seconds=1),
+                backoff_coefficient=2.0,
+            ),
+        )
+
+        if not task_ids:
+            logger.info("retention_cleanup_sweep_completed", extra=totals)
+            return totals
+
+        for batch in _chunked(task_ids, max_in_flight):
+            results = await asyncio.gather(
+                *[
+                    workflow.execute_child_workflow(
+                        RetentionCleanupTaskWorkflow.run,
+                        {"task_id": task_id, "idle_days": idle_days},
+                        id=f"retention-cleanup-task-{task_id}",
+                        retry_policy=RetryPolicy(maximum_attempts=1),
+                    )
+                    for task_id in batch
+                ],
+                return_exceptions=True,
+            )
+            for result in results:
+                if isinstance(result, BaseException):
+                    totals["failed"] += 1
+                else:
+                    status = result.get("status", "failed")
+                    totals[status] = totals.get(status, 0) + 1
+
+        workflow.continue_as_new(
+            arg={
+                "idle_days": idle_days,
+                "agent_names": agent_names,
+                "page_size": page_size,
+                "max_in_flight": max_in_flight,
+                "after_id": task_ids[-1],
+                "totals": totals,
+            }
+        )
