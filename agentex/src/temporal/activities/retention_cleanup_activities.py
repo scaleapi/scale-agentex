@@ -1,0 +1,77 @@
+"""
+Temporal activities for the scheduled task-retention cleanup sweep.
+
+Two activities:
+- find_cleanup_candidates: cheap pre-filtered, keyset-paginated discovery.
+- clean_task: delegates to TaskRetentionUseCase.clean_task; catches ClientError
+  (the three policy/safety refusals) and maps it to a 'skipped' outcome so the
+  caller's child workflow completes cleanly. Genuine transient errors propagate
+  so Temporal retries them.
+
+Boundary types are JSON-native (the backend data converter does not serialize
+Pydantic models).
+"""
+
+from src.domain.exceptions import ClientError
+from src.domain.repositories.task_repository import TaskRepository
+from src.domain.use_cases.task_retention_use_case import TaskRetentionUseCase
+from src.utils.logging import make_logger
+from temporalio import activity
+
+logger = make_logger(__name__)
+
+FIND_CLEANUP_CANDIDATES_ACTIVITY = "find_cleanup_candidates_activity"
+CLEAN_TASK_ACTIVITY = "clean_task_activity"
+
+
+class RetentionCleanupActivities:
+    def __init__(
+        self,
+        task_repository: TaskRepository,
+        use_case: TaskRetentionUseCase,
+    ):
+        self.task_repository = task_repository
+        self.use_case = use_case
+
+    @activity.defn(name=FIND_CLEANUP_CANDIDATES_ACTIVITY)
+    async def find_cleanup_candidates(
+        self,
+        after_id: str | None,
+        limit: int,
+        idle_days: int,
+        agent_names: list[str],
+    ) -> list[str]:
+        return await self.task_repository.list_cleanup_candidate_ids(
+            idle_days=idle_days,
+            agent_names=agent_names,
+            after_id=after_id,
+            limit=limit,
+        )
+
+    @activity.defn(name=CLEAN_TASK_ACTIVITY)
+    async def clean_task(self, task_id: str, idle_days: int) -> dict:
+        try:
+            result = await self.use_case.clean_task(
+                task_id=task_id, force=False, idle_days=idle_days
+            )
+            return {
+                "task_id": result.task_id,
+                "status": "cleaned",
+                "reason": None,
+                "messages_deleted": result.messages_deleted,
+                "task_states_deleted": result.task_states_deleted,
+                "events_deleted": result.events_deleted,
+            }
+        except ClientError as e:
+            logger.info(
+                "task_cleanup_skipped",
+                extra={"task_id": task_id, "reason": str(e)},
+            )
+            return {
+                "task_id": task_id,
+                "status": "skipped",
+                "reason": str(e),
+                "messages_deleted": 0,
+                "task_states_deleted": 0,
+                "events_deleted": 0,
+            }
