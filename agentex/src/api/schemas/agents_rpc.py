@@ -33,7 +33,11 @@ class CreateTaskRequest(BaseModel):
         ),
     )
     params: dict[str, Any] | None = Field(
-        None, description="The parameters for the task"
+        None,
+        description=(
+            "The parameters for the task. On a get-or-create by name, providing params "
+            "overwrites the existing task's params (it is not a pure read)."
+        ),
     )
     task_metadata: dict[str, Any] | None = Field(
         None,

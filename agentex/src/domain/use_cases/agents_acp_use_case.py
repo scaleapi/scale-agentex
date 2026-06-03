@@ -271,10 +271,13 @@ class AgentsACPUseCase(TaskMessageMixin):
     ) -> TaskEntity:
         """Return the existing task if *task_id* is provided, otherwise create a new one.
 
-        Lookup is by id or name. If *task_name* matches an existing task it is returned
-        as-is (get-or-create), so a non-null name must be globally unique and reusing a
-        name yields the prior task with its history rather than a fresh one. When neither
-        an id nor a matching name is given, a brand-new task is created (name may be None).
+        Lookup is by id or name. A non-null *task_name* must be globally unique: if it
+        matches an existing task, that task is returned (get-or-create) with its prior
+        history rather than a fresh one. Note that this is not a pure read — when
+        *task_params* is provided and differs from the stored value, it overwrites the
+        existing task's params before the task is returned (*task_metadata* is only
+        applied at creation time). When neither an id nor a matching name is given, a
+        brand-new task is created (name may be None).
 
         Note: Only one of task_id or task_name should be provided (enforced by validators).
         """
