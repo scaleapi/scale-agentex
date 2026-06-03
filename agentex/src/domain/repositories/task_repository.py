@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
 from fastapi import Depends
@@ -93,6 +94,52 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
             page_number=page_number,
             relationships=relationships,
         )
+
+    async def list_cleanup_candidate_ids(
+        self,
+        *,
+        idle_days: int,
+        agent_names: Sequence[str],
+        after_id: str | None,
+        limit: int,
+    ) -> list[str]:
+        """
+        Return ids of tasks eligible for scheduled retention cleanup.
+
+        Cheap, index-friendly PRE-FILTER only — the authoritative idle / status /
+        unprocessed-events checks live in TaskRetentionService.clean_task. This
+        deliberately omits a status filter: status is race-prone (a task can flip
+        to RUNNING between this query and the clean call), so the trustworthy
+        RUNNING guard is enforced at clean-time. `updated_at < cutoff` is a correct
+        superset of truly-idle tasks (true idleness also requires the latest Mongo
+        message to predate the cutoff), so we never under-include.
+
+        Keyset-paginated by id ascending; pass the last returned id as `after_id`
+        to fetch the next page. Fail-closed: empty `agent_names` returns [].
+        """
+        if not agent_names:
+            return []
+
+        cutoff = datetime.now(UTC) - timedelta(days=idle_days)
+        query = (
+            select(TaskORM.id)
+            .join(TaskAgentORM, TaskORM.id == TaskAgentORM.task_id)
+            .join(AgentORM, TaskAgentORM.agent_id == AgentORM.id)
+            .where(
+                TaskORM.cleaned_at.is_(None),
+                TaskORM.updated_at < cutoff,
+                AgentORM.name.in_(list(agent_names)),
+            )
+            .order_by(TaskORM.id.asc())
+            .limit(limit)
+            .distinct()
+        )
+        if after_id is not None:
+            query = query.where(TaskORM.id > after_id)
+
+        async with self.start_async_db_session(False) as session:
+            result = await session.execute(query)
+            return [row[0] for row in result.all()]
 
     async def create(self, agent_id: str, task: TaskEntity) -> TaskEntity:
         """Create task and establish agent relationships"""
