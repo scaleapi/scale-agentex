@@ -170,6 +170,12 @@ services:
       - ALLOWED_ORIGINS=http://localhost:3000
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://agentex-otel-collector:4317
       - OTEL_SERVICE_NAME=agentex-api
+      - RETENTION_CLEANUP_ENABLED=${RETENTION_CLEANUP_ENABLED:-false}
+      - RETENTION_CLEANUP_AGENT_ALLOWLIST=${RETENTION_CLEANUP_AGENT_ALLOWLIST:-}
+      - RETENTION_CLEANUP_IDLE_DAYS=${RETENTION_CLEANUP_IDLE_DAYS:-7}
+      - RETENTION_CLEANUP_CRON=${RETENTION_CLEANUP_CRON:-0 4 * * *}
+      - RETENTION_CLEANUP_PAGE_SIZE=${RETENTION_CLEANUP_PAGE_SIZE:-200}
+      - RETENTION_CLEANUP_MAX_IN_FLIGHT=${RETENTION_CLEANUP_MAX_IN_FLIGHT:-20}
     ports:
       - "5003:5003"
     volumes:
@@ -200,6 +206,7 @@ services:
         alembic upgrade head &&
         popd &&
         python src/temporal/run_healthcheck_workflow.py &&
+        python src/temporal/run_retention_cleanup_schedule.py &&
         echo 'Starting API server...' &&
         uvicorn src.api.app:app --host 0.0.0.0 --port 5003 --reload --reload-dir /app/src --reload-include '*.py' --workers 1
       "
@@ -248,6 +255,53 @@ services:
         export TEMPORAL_HOST=agentex-temporal &&
         export MONGODB_URI=mongodb://agentex-mongodb:27017 &&
         python src/temporal/run_worker.py
+      "
+    user: root
+    restart: unless-stopped
+
+  agentex-retention-cleanup-worker:
+    container_name: agentex-retention-cleanup-worker
+    build:
+      context: ..
+      dockerfile: agentex/Dockerfile
+      target: dev
+      args:
+        SOURCE_DIR: agentex
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql://postgres:postgres@agentex-postgres:5432/agentex
+      - TEMPORAL_ADDRESS=agentex-temporal:7233
+      - TEMPORAL_HOST=agentex-temporal
+      - REDIS_URL=redis://agentex-redis:6379
+      - MONGODB_URI=mongodb://agentex-mongodb:27017
+      - MONGODB_DATABASE_NAME=agentex
+      - AGENTEX_SERVER_TASK_QUEUE=agentex-server
+      - RETENTION_CLEANUP_ENABLED=${RETENTION_CLEANUP_ENABLED:-false}
+      - RETENTION_CLEANUP_AGENT_ALLOWLIST=${RETENTION_CLEANUP_AGENT_ALLOWLIST:-}
+      - RETENTION_CLEANUP_IDLE_DAYS=${RETENTION_CLEANUP_IDLE_DAYS:-7}
+      - RETENTION_CLEANUP_CRON=${RETENTION_CLEANUP_CRON:-0 4 * * *}
+      - RETENTION_CLEANUP_PAGE_SIZE=${RETENTION_CLEANUP_PAGE_SIZE:-200}
+      - RETENTION_CLEANUP_MAX_IN_FLIGHT=${RETENTION_CLEANUP_MAX_IN_FLIGHT:-20}
+    volumes:
+      - .:/app:cached
+    depends_on:
+      agentex-temporal:
+        condition: service_healthy
+      agentex-redis:
+        condition: service_healthy
+      agentex-postgres:
+        condition: service_healthy
+      agentex-mongodb:
+        condition: service_healthy
+    networks:
+      - agentex-network
+    command: |
+      bash -c "
+        echo 'Starting Retention Cleanup Worker...' &&
+        export TEMPORAL_ADDRESS=agentex-temporal:7233 &&
+        export TEMPORAL_HOST=agentex-temporal &&
+        export MONGODB_URI=mongodb://agentex-mongodb:27017 &&
+        python -c \"import asyncio; from src.temporal.run_worker import run_retention_cleanup_worker_main; asyncio.run(run_retention_cleanup_worker_main())\"
       "
     user: root
     restart: unless-stopped
