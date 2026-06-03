@@ -1,9 +1,6 @@
 from fastapi import APIRouter, Query
 
-from src.adapters.authorization.exceptions import AuthorizationError
-from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.api.schemas.authorization_types import (
-    AgentexResource,
     AgentexResourceType,
     AuthorizedOperationType,
     TaskChildResourceType,
@@ -16,6 +13,7 @@ from src.utils.authorization_shortcuts import (
     DAuthorizedId,
 )
 from src.utils.logging import make_logger
+from src.utils.task_authorization import check_task_or_collapse_to_404
 
 logger = make_logger(__name__)
 
@@ -78,13 +76,11 @@ async def filter_states(
 ) -> list[State]:
     authorized_task_ids: list[str] | None = None
     if task_id is not None:
-        try:
-            await authorization.check(
-                resource=AgentexResource.task(task_id),
-                operation=AuthorizedOperationType.read,
-            )
-        except AuthorizationError:
-            raise ItemDoesNotExist(f"Item with id '{task_id}' does not exist.") from None
+        await check_task_or_collapse_to_404(
+            authorization,
+            task_id,
+            AuthorizedOperationType.read,
+        )
     else:
         maybe_ids_iterable = await authorization.list_resources(
             filter_resource=AgentexResourceType.task,
