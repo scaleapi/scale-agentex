@@ -14,6 +14,7 @@ from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from src.adapters.temporal.client_factory import TemporalClientFactory
 from src.config.dependencies import (
+    GlobalDependencies,
     database_async_read_only_session_maker,
     database_async_read_write_engine,
     database_async_read_write_session_maker,
@@ -22,8 +23,17 @@ from src.config.dependencies import (
 )
 from src.config.environment_variables import EnvironmentVariables
 from src.domain.repositories.agent_repository import AgentRepository
+from src.domain.repositories.task_repository import TaskRepository
 from src.temporal.activities.healthcheck_activities import HealthCheckActivities
+from src.temporal.activities.retention_cleanup_activities import (
+    RetentionCleanupActivities,
+)
+from src.temporal.task_retention_factory import build_task_retention_use_case
 from src.temporal.workflows.healthcheck_workflow import HealthCheckWorkflow
+from src.temporal.workflows.retention_cleanup_workflow import (
+    RetentionCleanupSweepWorkflow,
+    RetentionCleanupTaskWorkflow,
+)
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
@@ -155,6 +165,44 @@ def create_health_check_worker(
             max_concurrent_activities=50,
         )
     )
+
+
+def create_retention_cleanup_worker(
+    global_dependencies: GlobalDependencies,
+) -> asyncio.Task:
+    """Create a worker that serves the retention-cleanup workflows + activities."""
+    task_queue = os.environ.get("AGENTEX_SERVER_TASK_QUEUE", AGENTEX_SERVER_TASK_QUEUE)
+
+    engine = database_async_read_write_engine()
+    rw_session_maker = database_async_read_write_session_maker(engine)
+    ro_session_maker = database_async_read_only_session_maker(engine)
+    task_repository = TaskRepository(rw_session_maker, ro_session_maker)
+    use_case = build_task_retention_use_case(global_dependencies)
+
+    retention_activities = RetentionCleanupActivities(
+        task_repository=task_repository,
+        use_case=use_case,
+    )
+
+    return asyncio.create_task(
+        run_worker(
+            task_queue=task_queue,
+            workflows=[RetentionCleanupSweepWorkflow, RetentionCleanupTaskWorkflow],
+            activities=[
+                retention_activities.find_cleanup_candidates,
+                retention_activities.clean_task,
+            ],
+            max_workers=50,
+            max_concurrent_activities=50,
+        )
+    )
+
+
+async def run_retention_cleanup_worker_main() -> None:
+    global_dependencies = GlobalDependencies()
+    await global_dependencies.load()
+    worker_task = create_retention_cleanup_worker(global_dependencies)
+    await worker_task
 
 
 async def main() -> None:
