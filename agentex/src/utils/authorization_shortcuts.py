@@ -147,10 +147,24 @@ def DAuthorizedBodyId(
         body = await request.json()
         field_value = body[field_name]
 
-        await authorization.check(
-            resource=AgentexResource(type=resource_type, selector=field_value),
-            operation=operation,
-        )
+        # Collapse a denied task check into 404 so callers cannot use 403 vs
+        # 404 to probe whether a task exists in another tenant.
+        # TODO: Refactor to use the canonical task body-id wrap landed by AGX1-275 / #249.
+        if resource_type == AgentexResourceType.task:
+            try:
+                await authorization.check(
+                    resource=AgentexResource.task(field_value),
+                    operation=operation,
+                )
+            except AuthorizationError:
+                raise ItemDoesNotExist(
+                    f"Item with id '{field_value}' does not exist."
+                ) from None
+        else:
+            await authorization.check(
+                resource=AgentexResource(type=resource_type, selector=field_value),
+                operation=operation,
+            )
         return field_value
 
     return Annotated[str, Depends(_ensure_authorized_body_field)]

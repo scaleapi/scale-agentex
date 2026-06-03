@@ -8,6 +8,7 @@ class AuthorizedOperationType(StrEnum):
     read = "read"
     update = "update"
     delete = "delete"
+    manage_access = "manage_access"
     execute = "execute"
 
 

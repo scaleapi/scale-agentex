@@ -148,7 +148,7 @@ class TestStatesAuthzAPIIntegration:
             "src.utils.http_request_handler.HttpRequestHandler.post_with_error_handling",
             side_effect=_mock_post_factory(
                 accessible_task_ids={test_task.id},
-                denied_task_operations={test_task.id: {"execute"}},
+                denied_task_operations={test_task.id: {"manage_access"}},
             ),
         ) as post_with_error_handling_mock:
             response = await isolated_client.post(
@@ -160,7 +160,9 @@ class TestStatesAuthzAPIIntegration:
                 },
             )
 
-        assert response.status_code == 403
+        # Denied parent-task checks collapse to 404 so task ids cannot be
+        # probed through the states API.
+        assert response.status_code == 404
         check_calls = [
             call
             for call in post_with_error_handling_mock.call_args_list
@@ -170,10 +172,8 @@ class TestStatesAuthzAPIIntegration:
         authz_data = check_calls[0][1]["json"]
         assert authz_data["resource"]["type"] == AgentexResourceType.task.value
         assert authz_data["resource"]["selector"] == test_task.id
-        # Placeholder owner-level task permission until AGX1-237 gives state
-        # creation an exact task action. In agentex-auth today, execute maps
-        # to ResourceRole.OWNER while update maps to editor + owner.
-        assert authz_data["operation"] == "execute"
+        # AGX1-237 exposes manage_access as an owner-only task permission.
+        assert authz_data["operation"] == "manage_access"
 
     @pytest.mark.asyncio
     @patch(
@@ -204,10 +204,52 @@ class TestStatesAuthzAPIIntegration:
             )
             get_response = await isolated_client.get(f"/states/{test_state.id}")
 
-        assert list_response.status_code == 200
-        assert list_response.json() == []
-        # GET denial on the parent task must collapse to 404, not 403.
+        # Explicit task-id list and GET denials on the parent task must
+        # collapse to 404, not 403.
+        assert list_response.status_code == 404
         assert get_response.status_code == 404
+
+    @pytest.mark.asyncio
+    @patch(
+        "src.api.authentication_middleware.AgentexAuthMiddleware.is_enabled",
+        return_value=True,
+    )
+    @patch(
+        "src.domain.services.authorization_service.AuthorizationService.is_enabled",
+        return_value=True,
+    )
+    async def test_list_states_with_task_id_checks_that_task_directly(
+        self,
+        is_enabled_authorization_mock,
+        is_enabled_mock,
+        isolated_client,
+        test_state,
+        test_task,
+    ):
+        with patch(
+            "src.utils.http_request_handler.HttpRequestHandler.post_with_error_handling",
+            side_effect=_mock_post_factory(accessible_task_ids=set()),
+        ) as post_with_error_handling_mock:
+            response = await isolated_client.get(
+                "/states", params={"task_id": test_task.id}
+            )
+
+        assert response.status_code == 200
+        assert [state["id"] for state in response.json()] == [test_state.id]
+        check_calls = [
+            call
+            for call in post_with_error_handling_mock.call_args_list
+            if call[0][1] == "/v1/authz/check"
+        ]
+        assert len(check_calls) == 1
+        authz_data = check_calls[0][1]["json"]
+        assert authz_data["resource"]["type"] == AgentexResourceType.task.value
+        assert authz_data["resource"]["selector"] == test_task.id
+        assert authz_data["operation"] == "read"
+        assert not any(
+            call[0][1] == "/v1/authz/search"
+            for call in post_with_error_handling_mock.call_args_list
+        )
 
     @pytest.mark.asyncio
     @patch(
@@ -231,7 +273,10 @@ class TestStatesAuthzAPIIntegration:
     ):
         with patch(
             "src.utils.http_request_handler.HttpRequestHandler.post_with_error_handling",
-            side_effect=_mock_post_factory(accessible_task_ids={test_task.id}),
+            side_effect=_mock_post_factory(
+                accessible_task_ids={test_task.id},
+                denied_task_operations={other_task.id: {"read"}},
+            ),
         ):
             response = await isolated_client.get(
                 "/states", params={"agent_id": test_agent.id}
@@ -243,8 +288,91 @@ class TestStatesAuthzAPIIntegration:
         assert response.status_code == 200
         body = response.json()
         assert [state["id"] for state in body] == [test_state.id]
-        assert denied_task_response.status_code == 200
-        assert denied_task_response.json() == []
+        assert denied_task_response.status_code == 404
+
+    @pytest.mark.asyncio
+    @patch(
+        "src.api.authentication_middleware.AgentexAuthMiddleware.is_enabled",
+        return_value=True,
+    )
+    @patch(
+        "src.domain.services.authorization_service.AuthorizationService.is_enabled",
+        return_value=True,
+    )
+    async def test_user_with_task_view_but_not_owner_cannot_update_state(
+        self,
+        is_enabled_authorization_mock,
+        is_enabled_mock,
+        isolated_client,
+        test_state,
+        test_task,
+        test_agent,
+    ):
+        with patch(
+            "src.utils.http_request_handler.HttpRequestHandler.post_with_error_handling",
+            side_effect=_mock_post_factory(
+                accessible_task_ids={test_task.id},
+                denied_task_operations={test_task.id: {"manage_access"}},
+            ),
+        ) as post_with_error_handling_mock:
+            response = await isolated_client.put(
+                f"/states/{test_state.id}",
+                json={
+                    "task_id": test_task.id,
+                    "agent_id": test_agent.id,
+                    "state": {"blocked": True},
+                },
+            )
+
+        assert response.status_code == 404
+        check_calls = [
+            call
+            for call in post_with_error_handling_mock.call_args_list
+            if call[0][1] == "/v1/authz/check"
+        ]
+        assert len(check_calls) == 1
+        authz_data = check_calls[0][1]["json"]
+        assert authz_data["resource"]["type"] == AgentexResourceType.task.value
+        assert authz_data["resource"]["selector"] == test_task.id
+        assert authz_data["operation"] == "manage_access"
+
+    @pytest.mark.asyncio
+    @patch(
+        "src.api.authentication_middleware.AgentexAuthMiddleware.is_enabled",
+        return_value=True,
+    )
+    @patch(
+        "src.domain.services.authorization_service.AuthorizationService.is_enabled",
+        return_value=True,
+    )
+    async def test_user_without_task_delete_cannot_delete_state(
+        self,
+        is_enabled_authorization_mock,
+        is_enabled_mock,
+        isolated_client,
+        test_state,
+        test_task,
+    ):
+        with patch(
+            "src.utils.http_request_handler.HttpRequestHandler.post_with_error_handling",
+            side_effect=_mock_post_factory(
+                accessible_task_ids={test_task.id},
+                denied_task_operations={test_task.id: {"delete"}},
+            ),
+        ) as post_with_error_handling_mock:
+            response = await isolated_client.delete(f"/states/{test_state.id}")
+
+        assert response.status_code == 404
+        check_calls = [
+            call
+            for call in post_with_error_handling_mock.call_args_list
+            if call[0][1] == "/v1/authz/check"
+        ]
+        assert len(check_calls) == 1
+        authz_data = check_calls[0][1]["json"]
+        assert authz_data["resource"]["type"] == AgentexResourceType.task.value
+        assert authz_data["resource"]["selector"] == test_task.id
+        assert authz_data["operation"] == "delete"
 
     @pytest.mark.asyncio
     @patch(
@@ -284,7 +412,7 @@ class TestStatesAuthzAPIIntegration:
             if call[0][1] == "/v1/authz/check"
         ]
         assert len(check_calls) == 1
-        assert check_calls[0][1]["json"]["operation"] == "execute"
+        assert check_calls[0][1]["json"]["operation"] == "manage_access"
         assert not any(
             call[0][1] == "/v1/authz/register"
             for call in post_with_error_handling_mock.call_args_list
