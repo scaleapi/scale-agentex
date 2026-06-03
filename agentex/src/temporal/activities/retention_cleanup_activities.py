@@ -12,6 +12,8 @@ Boundary types are JSON-native (the backend data converter does not serialize
 Pydantic models).
 """
 
+from typing import TypedDict
+
 from src.domain.exceptions import ClientError
 from src.domain.repositories.task_repository import TaskRepository
 from src.domain.use_cases.task_retention_use_case import TaskRetentionUseCase
@@ -22,6 +24,15 @@ logger = make_logger(__name__)
 
 FIND_CLEANUP_CANDIDATES_ACTIVITY = "find_cleanup_candidates_activity"
 CLEAN_TASK_ACTIVITY = "clean_task_activity"
+
+
+class CleanTaskOutcome(TypedDict):
+    task_id: str
+    status: str  # "cleaned" | "skipped"
+    reason: str | None
+    messages_deleted: int
+    task_states_deleted: int
+    events_deleted: int
 
 
 class RetentionCleanupActivities:
@@ -41,15 +52,48 @@ class RetentionCleanupActivities:
         idle_days: int,
         agent_names: list[str],
     ) -> list[str]:
-        return await self.task_repository.list_cleanup_candidate_ids(
+        """
+        Return a page of task IDs that are eligible for content cleanup.
+
+        Args:
+            after_id: Keyset cursor — return only IDs strictly after this value,
+                or None to start from the beginning.
+            limit: Maximum number of IDs to return.
+            idle_days: Minimum number of days a task must have been idle to qualify.
+            agent_names: Restrict candidates to tasks belonging to these agents.
+
+        Returns:
+            list[str]: Up to *limit* task IDs ordered by ID, suitable for passing
+                back as *after_id* on the next page.
+        """
+        logger.info(
+            "find_cleanup_candidates_started",
+            extra={"after_id": after_id, "limit": limit},
+        )
+        result = await self.task_repository.list_cleanup_candidate_ids(
             idle_days=idle_days,
             agent_names=agent_names,
             after_id=after_id,
             limit=limit,
         )
+        logger.info("find_cleanup_candidates_completed", extra={"count": len(result)})
+        return result
 
     @activity.defn(name=CLEAN_TASK_ACTIVITY)
-    async def clean_task(self, task_id: str, idle_days: int) -> dict:
+    async def clean_task(self, task_id: str, idle_days: int) -> CleanTaskOutcome:
+        """
+        Delete the stored content (messages, states, events) for a single task.
+
+        Args:
+            task_id: ID of the task to clean.
+            idle_days: Passed through to the use case for policy checks.
+
+        Returns:
+            CleanTaskOutcome with ``status`` set to ``"cleaned"`` when content was
+            deleted, or ``"skipped"`` when the use case refused via ``ClientError``
+            (e.g. task is still active, not yet idle long enough, or already
+            cleaned).  Other exceptions propagate so Temporal can retry them.
+        """
         try:
             result = await self.use_case.clean_task(
                 task_id=task_id, force=False, idle_days=idle_days
