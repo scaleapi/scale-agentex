@@ -74,6 +74,10 @@ class RetentionCleanupSweepWorkflow:
         after_id = args.get("after_id")
         totals = args.get("totals", {"cleaned": 0, "skipped": 0, "failed": 0})
 
+        if not args.get("enabled", True):
+            logger.info("retention_cleanup_sweep_disabled", extra=totals)
+            return totals
+
         task_ids = await workflow.execute_activity(
             FIND_CLEANUP_CANDIDATES_ACTIVITY,
             args=[after_id, page_size, idle_days, agent_names],

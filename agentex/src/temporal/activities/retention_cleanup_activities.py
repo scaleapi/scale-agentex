@@ -63,6 +63,7 @@ class RetentionCleanupActivities:
         # none of the injected repositories/use case.
         env = EnvironmentVariables.refresh(force_refresh=True)
         return {
+            "enabled": env.RETENTION_CLEANUP_ENABLED,
             "idle_days": env.RETENTION_CLEANUP_IDLE_DAYS,
             "agent_names": env.RETENTION_CLEANUP_AGENT_ALLOWLIST,
             "page_size": env.RETENTION_CLEANUP_PAGE_SIZE,

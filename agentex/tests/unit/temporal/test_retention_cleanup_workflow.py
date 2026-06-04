@@ -115,3 +115,41 @@ async def test_sweep_loads_config_from_activity_when_no_args():
                 task_queue="test-retention-load",
             )
     assert summary["cleaned"] == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sweep_noops_when_runtime_config_disabled():
+    @activity.defn(name=LOAD_CLEANUP_CONFIG_ACTIVITY)
+    async def fake_load() -> dict:
+        return {
+            "enabled": False,
+            "idle_days": 7,
+            "agent_names": ["a"],
+            "page_size": 2,
+            "max_in_flight": 2,
+        }
+
+    @activity.defn(name=FIND_CLEANUP_CANDIDATES_ACTIVITY)
+    async def fake_find(after_id, limit, idle_days, agent_names) -> list[str]:
+        raise AssertionError("disabled cleanup should not discover candidates")
+
+    @activity.defn(name=CLEAN_TASK_ACTIVITY)
+    async def fake_clean(task_id: str, idle_days: int) -> dict:
+        raise AssertionError("disabled cleanup should not clean tasks")
+
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        async with Worker(
+            env.client,
+            task_queue="test-retention-disabled",
+            workflows=[RetentionCleanupSweepWorkflow, RetentionCleanupTaskWorkflow],
+            activities=[fake_load, fake_find, fake_clean],
+            workflow_runner=UnsandboxedWorkflowRunner(),
+        ):
+            summary = await env.client.execute_workflow(
+                RetentionCleanupSweepWorkflow.run,
+                id=f"sweep-{uuid.uuid4()}",
+                task_queue="test-retention-disabled",
+            )
+
+    assert summary == {"cleaned": 0, "skipped": 0, "failed": 0}

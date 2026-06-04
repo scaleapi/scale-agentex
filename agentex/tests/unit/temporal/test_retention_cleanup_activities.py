@@ -83,6 +83,7 @@ async def test_clean_task_unexpected_error_propagates():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_load_cleanup_config_reads_env(monkeypatch):
+    monkeypatch.setenv("RETENTION_CLEANUP_ENABLED", "true")
     monkeypatch.setenv("RETENTION_CLEANUP_AGENT_ALLOWLIST", "x,y")
     monkeypatch.setenv("RETENTION_CLEANUP_IDLE_DAYS", "9")
     monkeypatch.setenv("RETENTION_CLEANUP_PAGE_SIZE", "33")
@@ -92,6 +93,7 @@ async def test_load_cleanup_config_reads_env(monkeypatch):
     )
     config = await activities.load_cleanup_config()
     assert config == {
+        "enabled": True,
         "idle_days": 9,
         "agent_names": ["x", "y"],
         "page_size": 33,
