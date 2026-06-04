@@ -6,9 +6,14 @@ from src.api.schemas.authorization_types import (
     TaskChildResourceType,
 )
 from src.api.schemas.states import CreateStateRequest, State, UpdateStateRequest
+from src.domain.services.authorization_service import DAuthorizationService
 from src.domain.use_cases.states_use_case import DStatesUseCase
-from src.utils.authorization_shortcuts import DAuthorizedBodyId, DAuthorizedId
+from src.utils.authorization_shortcuts import (
+    DAuthorizedBodyId,
+    DAuthorizedId,
+)
 from src.utils.logging import make_logger
+from src.utils.task_authorization import check_task_or_collapse_to_404
 
 logger = make_logger(__name__)
 
@@ -58,6 +63,7 @@ async def get_state(
 )
 async def filter_states(
     states_use_case: DStatesUseCase,
+    authorization: DAuthorizationService,
     task_id: str | None = Query(None, description="Task ID"),
     agent_id: str | None = Query(None, description="Agent ID"),
     limit: int = Query(50, description="Limit", ge=1),
@@ -65,6 +71,22 @@ async def filter_states(
     order_by: str | None = Query(None, description="Field to order by"),
     order_direction: str = Query("desc", description="Order direction (asc or desc)"),
 ) -> list[State]:
+    authorized_task_ids: list[str] | None = None
+    if task_id is not None:
+        await check_task_or_collapse_to_404(
+            authorization,
+            task_id,
+            AuthorizedOperationType.read,
+        )
+    else:
+        maybe_ids_iterable = await authorization.list_resources(
+            filter_resource=AgentexResourceType.task,
+            filter_operation=AuthorizedOperationType.read,
+        )
+        authorized_task_ids = (
+            list(maybe_ids_iterable) if maybe_ids_iterable is not None else None
+        )
+
     state_entities = await states_use_case.list(
         task_id=task_id,
         agent_id=agent_id,
@@ -72,6 +94,7 @@ async def filter_states(
         page_number=page_number,
         order_by=order_by,
         order_direction=order_direction,
+        authorized_task_ids=authorized_task_ids,
     )
     logger.info(f"Listing states: {state_entities}")
     return [State.model_validate(state_entity) for state_entity in state_entities]
