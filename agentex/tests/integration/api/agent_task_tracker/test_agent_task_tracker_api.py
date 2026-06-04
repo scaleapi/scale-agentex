@@ -315,13 +315,19 @@ class TestAgentTaskTrackerAPIIntegration:
         # Then - Should return 400
         assert response.status_code == 400
 
-    async def test_get_tracker_non_existent_returns_400(self, isolated_client):
-        """Test getting a non-existent tracker returns proper error"""
+    async def test_get_tracker_non_existent_returns_404(self, isolated_client):
+        """Test getting a non-existent tracker returns 404.
+
+        The ``DAuthorizedId`` dependency resolves ``tracker -> task_id`` before
+        the handler runs (on every request, even when authz is bypassed). A
+        missing tracker raises ``ItemDoesNotExist`` during that resolution,
+        which surfaces as a 404 rather than the handler's ClientError 400.
+        """
         # When - Get a non-existent tracker
         response = await isolated_client.get("/tracker/non-existent-tracker-id")
 
-        # Then - Should return 400 (based on the actual API behavior)
-        assert response.status_code == 400
+        # Then - Should return 404 (parent-task resolution raises ItemDoesNotExist)
+        assert response.status_code == 404
 
     @mock.patch(
         "src.api.schemas.agent_task_tracker.AgentTaskTracker.model_validate",

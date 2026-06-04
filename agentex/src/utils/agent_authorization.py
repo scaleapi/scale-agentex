@@ -15,7 +15,7 @@ async def check_agent_or_collapse_to_404(
     cross-tenant existence. Mirrors ``check_task_or_collapse_to_404`` in
     ``task_authorization.py`` — see that docstring for the full rationale.
 
-    TODO(AGX1-290): restore 403/404 split once agents carry tenant scope.
+    TODO: Restore the 403/404 split once agents carry tenant scope.
     """
     try:
         await authorization.check(

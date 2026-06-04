@@ -1,17 +1,15 @@
 """
 Integration tests for checkpoint-route authorization.
 
-Covers the AGX1-302 deliverable: checkpoint routes have no SpiceDB type of
-their own. Each route enforces on the owning task (``thread_id`` is the task id)
-via ``DAuthorizedBodyId(task, ...)``:
+Checkpoint routes have no authorization type of their own. Each route enforces
+on the owning task (``thread_id`` is the task id) via ``DAuthorizedBodyId(task, ...)``:
 
 * get-tuple / list -> ``task.read`` (view).
 * put / put-writes -> ``task.update`` (editor + owner); delete-thread -> ``task.delete``.
 
-Per the canonical ``DAuthorizedBodyId`` task wrap (the 404/403 collapse landed
-by AGX1-275 / #249), a denied check on the parent task collapses to 404 (not
-403) on every route — reads and writes alike — so callers cannot probe
-cross-tenant existence by comparing response codes.
+Per the canonical ``DAuthorizedBodyId`` task wrap, a denied check on the parent
+task collapses to 404 (not 403) on every route — reads and writes alike — so
+callers cannot probe cross-tenant existence by comparing response codes.
 """
 
 from typing import Any

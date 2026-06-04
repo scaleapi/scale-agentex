@@ -9,6 +9,9 @@ from src.api.schemas.authorization_types import (
     TaskChildResourceType,
 )
 from src.domain.repositories.agent_repository import DAgentRepository
+from src.domain.repositories.agent_task_tracker_repository import (
+    DAgentTaskTrackerRepository,
+)
 from src.domain.repositories.task_message_repository import DTaskMessageRepository
 from src.domain.repositories.task_repository import DTaskRepository
 from src.domain.repositories.task_state_repository import DTaskStateRepository
@@ -22,11 +25,13 @@ async def _get_parent_task_id(
     resource_id: str,
     state_repository: DTaskStateRepository,
     message_repository: DTaskMessageRepository,
+    tracker_repository: DAgentTaskTrackerRepository,
 ) -> str:
     """Get the parent task ID for a task-child resource."""
     registry = {
         TaskChildResourceType.state: state_repository,
         TaskChildResourceType.message: message_repository,
+        TaskChildResourceType.agent_task_tracker: tracker_repository,
     }
 
     repository = registry[resource_type]
@@ -46,6 +51,7 @@ def DAuthorizedId(
         authorization: DAuthorizationService,
         state_repository: DTaskStateRepository,
         message_repository: DTaskMessageRepository,
+        tracker_repository: DAgentTaskTrackerRepository,
         resource_id: str = Path(..., alias=param_name),
     ) -> str:
         # For child resources, check the parent task. Collapse a denied check
@@ -57,6 +63,7 @@ def DAuthorizedId(
                 resource_id,
                 state_repository,
                 message_repository,
+                tracker_repository,
             )
             await check_task_or_collapse_to_404(authorization, task_id, operation)
         elif resource_type == AgentexResourceType.task:
@@ -92,6 +99,7 @@ def DAuthorizedQuery(
         authorization: DAuthorizationService,
         state_repository: DTaskStateRepository,
         message_repository: DTaskMessageRepository,
+        tracker_repository: DAgentTaskTrackerRepository,
         resource_id: str = Query(..., alias=param_name, description=description),
     ) -> str:
         # For child resources, check the parent task. Collapse a denied check
@@ -103,6 +111,7 @@ def DAuthorizedQuery(
                 resource_id,
                 state_repository,
                 message_repository,
+                tracker_repository,
             )
             await check_task_or_collapse_to_404(authorization, task_id, operation)
         elif resource_type == AgentexResourceType.task:

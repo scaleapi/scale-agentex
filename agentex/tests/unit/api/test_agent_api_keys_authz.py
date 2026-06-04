@@ -1,7 +1,8 @@
-"""AGX1-263 — agent_api_keys route migration to Spark AuthZ.
+"""Tests for agent_api_keys route authorization.
 
 Asserts the route layer issues correct ``check`` calls and collapses denials
-to 404. Two-factor SpiceDB expansion is owned by spark-authz; not tested here.
+to 404. Two-factor expansion is owned by the authorization service;
+not tested here.
 """
 
 from __future__ import annotations
@@ -89,12 +90,14 @@ class TestDAuthorizedIdApiKeyWrap:
         authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
         state_repository = MagicMock()
         message_repository = MagicMock()
+        tracker_repository = MagicMock()
 
         with pytest.raises(ItemDoesNotExist):
             await dep(
                 authorization,
                 state_repository,
                 message_repository,
+                tracker_repository,
                 "api-key-7",
             )
 
@@ -109,7 +112,9 @@ class TestDAuthorizedIdApiKeyWrap:
         authorization = MagicMock()
         authorization.check = AsyncMock(return_value=True)
 
-        result = await dep(authorization, MagicMock(), MagicMock(), "api-key-9")
+        result = await dep(
+            authorization, MagicMock(), MagicMock(), MagicMock(), "api-key-9"
+        )
 
         assert result == "api-key-9"
         called_kwargs = authorization.check.await_args.kwargs
@@ -127,7 +132,7 @@ class TestDAuthorizedIdApiKeyWrap:
         authorization = MagicMock()
         authorization.check = AsyncMock(return_value=True)
 
-        await dep(authorization, MagicMock(), MagicMock(), "api-key-del")
+        await dep(authorization, MagicMock(), MagicMock(), MagicMock(), "api-key-del")
 
         called_kwargs = authorization.check.await_args.kwargs
         assert called_kwargs["operation"] == AuthorizedOperationType.delete
