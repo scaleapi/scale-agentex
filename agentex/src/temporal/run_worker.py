@@ -154,9 +154,10 @@ def create_agentex_server_worker(
     )
 
     retention_use_case = build_task_retention_use_case(global_dependencies)
-    # Reuse the repository the factory already built (one connection pool).
+    # Reuse the repository the factory already built (avoids a duplicate
+    # TaskRepository) via the use case's stable accessor.
     retention_activities = RetentionCleanupActivities(
-        task_repository=retention_use_case.retention_service.task_repository,
+        task_repository=retention_use_case.task_repository,
         use_case=retention_use_case,
     )
 

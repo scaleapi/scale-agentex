@@ -93,13 +93,17 @@ class RetentionCleanupSweepWorkflow:
             logger.info("retention_cleanup_sweep_completed", extra=totals)
             return totals
 
+        # Scope child workflow IDs to this run so a task re-discovered in a later
+        # sweep (e.g. one that was skipped) doesn't collide with a prior cycle's
+        # completed child under a REJECT_DUPLICATE workflow-id-reuse policy.
+        sweep_run_id = workflow.info().run_id[:8]
         for batch in _chunked(task_ids, max_in_flight):
             results = await asyncio.gather(
                 *[
                     workflow.execute_child_workflow(
                         RetentionCleanupTaskWorkflow.run,
                         {"task_id": task_id, "idle_days": idle_days},
-                        id=f"retention-cleanup-task-{task_id}",
+                        id=f"retention-cleanup-task-{sweep_run_id}-{task_id}",
                         retry_policy=RetryPolicy(maximum_attempts=1),
                     )
                     for task_id in batch
@@ -115,6 +119,7 @@ class RetentionCleanupSweepWorkflow:
 
         workflow.continue_as_new(
             arg={
+                "enabled": args.get("enabled", True),
                 "idle_days": idle_days,
                 "agent_names": agent_names,
                 "page_size": page_size,
