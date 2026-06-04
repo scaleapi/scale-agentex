@@ -25,6 +25,7 @@ class TaskChildResourceType(StrEnum):
 
     state = "state"
     message = "message"
+    agent_task_tracker = "agent_task_tracker"
 
 
 class AgentexResource(BaseModel):
