@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from src.utils.model_utils import BaseModel
 
@@ -33,14 +33,8 @@ class GetStatesRequest(BaseModel):
 
 
 class UpdateStateRequest(BaseModel):
-    task_id: str = Field(
-        ...,
-        title="The unique id of the task to update the state of",
-    )
-    agent_id: str = Field(
-        ...,
-        title="The unique id of the agent to update the state of",
-    )
+    model_config = ConfigDict(extra="forbid")
+
     state: dict[str, Any] = Field(
         ...,
         title="The state to update the state with.",
