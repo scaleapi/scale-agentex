@@ -7,6 +7,8 @@ from src.domain.use_cases.streams_use_case import StreamsUseCase
 from src.domain.use_cases.tasks_use_case import TasksUseCase
 from src.utils.ids import orm_id
 
+from tests.fixtures.services import make_noop_authorization_service
+
 
 @pytest.mark.asyncio
 @pytest.mark.integration
@@ -76,6 +78,7 @@ class TestTaskEventStream:
             task_repository=isolated_repositories["task_repository"],
             event_repository=isolated_repositories["event_repository"],
             stream_repository=isolated_repositories["redis_stream_repository"],
+            authorization_service=make_noop_authorization_service(),
         )
 
         return TasksUseCase(task_service=task_service)
@@ -103,6 +106,7 @@ class TestTaskEventStream:
             task_repository=isolated_repositories["task_repository"],
             event_repository=isolated_repositories["event_repository"],
             stream_repository=isolated_repositories["redis_stream_repository"],
+            authorization_service=make_noop_authorization_service(),
         )
 
         environment_variables = EnvironmentVariables.refresh()
@@ -194,17 +198,17 @@ class TestTaskEventStream:
                 pass
 
         # Then - Verify the stream event was received
-        assert (
-            len(stream_events) >= 1
-        ), f"Expected at least 1 stream event, got {len(stream_events)}"
+        assert len(stream_events) >= 1, (
+            f"Expected at least 1 stream event, got {len(stream_events)}"
+        )
 
         # Find the task_updated event
         task_updated_events = [
             e for e in stream_events if e.get("type") == "task_updated"
         ]
-        assert (
-            len(task_updated_events) >= 1
-        ), f"Expected task_updated event, got events: {[e.get('type') for e in stream_events]}"
+        assert len(task_updated_events) >= 1, (
+            f"Expected task_updated event, got events: {[e.get('type') for e in stream_events]}"
+        )
 
         task_updated_event = task_updated_events[0]
 
@@ -389,9 +393,9 @@ class TestTaskEventStream:
         task_updated_events = [
             e for e in stream_events if e.get("type") == "task_updated"
         ]
-        assert (
-            len(task_updated_events) >= 3
-        ), f"Expected at least 3 task_updated events, got {len(task_updated_events)}"
+        assert len(task_updated_events) >= 3, (
+            f"Expected at least 3 task_updated events, got {len(task_updated_events)}"
+        )
 
         # Verify each event has the correct metadata for its update
         versions = [
@@ -599,8 +603,8 @@ class TestTaskEventStream:
                 pass
 
         # Then - Verify we received at least 2 pings
-        assert (
-            ping_count >= 2
-        ), f"Expected at least 2 ping messages during idle period, got {ping_count}"
+        assert ping_count >= 2, (
+            f"Expected at least 2 ping messages during idle period, got {ping_count}"
+        )
 
         print(f"✅ Stream sent {ping_count} keepalive pings during idle period")

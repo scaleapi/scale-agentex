@@ -13,6 +13,21 @@ A **Task** represents a stateful conversation or workflow session. It's the top-
 
 Think of a task like a chat session, customer support ticket, or workflow execution that can span multiple interactions over time.
 
+## Task Identity: `id` and `name`
+
+Every task has two identifiers:
+
+- **`id`** — a UUID assigned by Agentex. Always present and always unique.
+- **`name`** — an **optional**, human-readable label. It is nullable, but when you do set it, it must be **globally unique** (the uniqueness is platform-wide, not per-agent).
+
+`task/create` is **get-or-create keyed on `name`**:
+
+- If you **omit `name`** (or pass `null`), Agentex always creates a brand-new task. This is the right default when each call should be independent — for example, an orchestrator delegating a fresh sub-task on every invocation.
+- If you **provide a `name` that already exists**, Agentex returns the **existing** task — including its prior message history — rather than creating a new one. The incoming `params` overwrite the existing row, while `task_metadata` is only applied at creation time.
+
+!!! warning "Reusing a name returns the old task"
+    Because `task/create` reuses a task by name, sending the same `name` twice does **not** give you two tasks — the second call resolves to the first task with its existing conversation. If you want a new task every time, leave `name` unset or append a unique suffix (e.g. a UUID). Use `task_metadata.display_name` or `params` for a human-facing label rather than relying on `name`.
+
 ## Task Relationships
 
 !!! info "For Detailed Implementation"

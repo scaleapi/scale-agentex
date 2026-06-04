@@ -1,5 +1,7 @@
-FROM python:3.12-slim-trixie AS base
+ARG DOCKER_REGISTRY=
+FROM ${DOCKER_REGISTRY}python:3.12-slim-trixie AS base
 ARG SOURCE_DIR=agentex
+ARG UV_INDEX_URL=
 
 # Install uv package manager
 COPY --from=ghcr.io/astral-sh/uv:0.7.3 /uv /uvx /bin/
@@ -23,15 +25,32 @@ COPY ${SOURCE_DIR}/pyproject.toml ${SOURCE_DIR}/README.md ./${SOURCE_DIR}/
 
 # Install core dependencies to system Python (Debian installs to /usr/local)
 ENV UV_PROJECT_ENVIRONMENT=/usr/local
-RUN uv sync --frozen --no-dev --package agentex-backend
+RUN if [ -n "${UV_INDEX_URL}" ]; then \
+        uv export --frozen --no-dev --no-emit-project --package agentex-backend \
+            -o /tmp/requirements.txt && \
+        uv pip install --system --index-url "${UV_INDEX_URL}" \
+            -r /tmp/requirements.txt && \
+        rm /tmp/requirements.txt; \
+    else \
+        uv sync --frozen --no-dev --package agentex-backend; \
+    fi
 
 # Development stage (for docker-compose)
 FROM base AS dev
 ENTRYPOINT []
 ARG SOURCE_DIR=agentex
+ARG UV_INDEX_URL=
 
 # Install dev dependencies to system Python
-RUN uv sync --frozen --group dev --package agentex-backend
+RUN if [ -n "${UV_INDEX_URL}" ]; then \
+        uv export --frozen --group dev --no-emit-project --package agentex-backend \
+            -o /tmp/requirements.txt && \
+        uv pip install --system --index-url "${UV_INDEX_URL}" \
+            -r /tmp/requirements.txt && \
+        rm /tmp/requirements.txt; \
+    else \
+        uv sync --frozen --group dev --package agentex-backend; \
+    fi
 
 COPY ${SOURCE_DIR}/src/ ./src/
 EXPOSE 5003
@@ -44,16 +63,26 @@ CMD ["ddtrace-run", "uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port",
 # Docs builder stage
 FROM base AS docs-builder
 ARG SOURCE_DIR=agentex
+ARG UV_INDEX_URL=
 
 # Install docs dependencies to system Python
-RUN uv sync --frozen --group docs --package agentex-backend
+RUN if [ -n "${UV_INDEX_URL}" ]; then \
+        uv export --frozen --group docs --no-emit-project --package agentex-backend \
+            -o /tmp/requirements.txt && \
+        uv pip install --system --index-url "${UV_INDEX_URL}" \
+            -r /tmp/requirements.txt && \
+        rm /tmp/requirements.txt; \
+    else \
+        uv sync --frozen --group docs --package agentex-backend; \
+    fi
 
 COPY ${SOURCE_DIR}/docs/ docs/
 COPY ${SOURCE_DIR}/src/ src/
 RUN cd docs && mkdocs build
 
 # Production stage
-FROM python:3.12-slim-trixie AS production
+ARG DOCKER_REGISTRY=
+FROM ${DOCKER_REGISTRY}python:3.12-slim-trixie AS production
 ENTRYPOINT []
 ARG INCLUDE_DOCS=false
 ARG SOURCE_DIR=agentex

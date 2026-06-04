@@ -36,6 +36,7 @@ from src.domain.services.agent_acp_service import AgentACPService
 from src.domain.services.task_message_service import TaskMessageService
 from src.domain.services.task_service import AgentTaskService
 from src.domain.use_cases.agents_acp_use_case import AgentsACPUseCase
+from tests.fixtures.services import make_noop_authorization_service
 
 # UTC timezone constant
 UTC = ZoneInfo("UTC")
@@ -135,6 +136,7 @@ def task_service(
         event_repository=event_repository,
         acp_client=agent_acp_service,
         stream_repository=redis_stream_repository,
+        authorization_service=make_noop_authorization_service(),
     )
 
 
@@ -552,9 +554,9 @@ class TestAgentsACPUseCase:
 
         # Verify database interactions - should have created messages
         final_message_count = len(await task_message_repository.list())
-        assert (
-            final_message_count > initial_message_count
-        ), "New messages should have been created in database"
+        assert final_message_count > initial_message_count, (
+            "New messages should have been created in database"
+        )
 
         # Get all messages from database to verify content
         all_messages = await task_message_repository.list()
@@ -563,33 +565,33 @@ class TestAgentsACPUseCase:
         ]  # Only the newly created messages
 
         # Should have at least 2 new messages (input + response)
-        assert (
-            len(new_messages) >= 2
-        ), f"Expected at least 2 new messages (input + response), got {len(new_messages)}"
+        assert len(new_messages) >= 2, (
+            f"Expected at least 2 new messages (input + response), got {len(new_messages)}"
+        )
 
         # Verify we have both user input and agent response messages
         content_authors = {msg.content.author.value for msg in new_messages}
         assert "user" in content_authors, "Should have user input message in database"
-        assert (
-            "agent" in content_authors
-        ), "Should have agent response message in database"
+        assert "agent" in content_authors, (
+            "Should have agent response message in database"
+        )
 
         # Find the agent response message and verify its final accumulated content
         agent_messages = [
             msg for msg in new_messages if msg.content.author == MessageAuthor.AGENT
         ]
-        assert (
-            len(agent_messages) >= 1
-        ), "Should have at least one agent response message"
+        assert len(agent_messages) >= 1, (
+            "Should have at least one agent response message"
+        )
 
         # Verify the final accumulated content includes both deltas
         response_message = agent_messages[0]  # First agent response
-        assert (
-            "Hello" in response_message.content.content
-        ), f"Expected 'Hello' in final content, got '{response_message.content.content}'"
-        assert (
-            "world!" in response_message.content.content
-        ), f"Expected 'world!' in final content, got '{response_message.content.content}'"
+        assert "Hello" in response_message.content.content, (
+            f"Expected 'Hello' in final content, got '{response_message.content.content}'"
+        )
+        assert "world!" in response_message.content.content, (
+            f"Expected 'world!' in final content, got '{response_message.content.content}'"
+        )
 
     async def test_handle_message_send_stream_full_message(
         self,
@@ -662,9 +664,9 @@ class TestAgentsACPUseCase:
 
         # Verify database interactions - should have created messages
         final_message_count = len(await task_message_repository.list())
-        assert (
-            final_message_count > initial_message_count
-        ), "New messages should have been created in database"
+        assert final_message_count > initial_message_count, (
+            "New messages should have been created in database"
+        )
 
         # Get all messages from database to verify content
         all_messages = await task_message_repository.list()
@@ -673,30 +675,30 @@ class TestAgentsACPUseCase:
         ]  # Only the newly created messages
 
         # Should have at least 2 new messages (input + response)
-        assert (
-            len(new_messages) >= 2
-        ), f"Expected at least 2 new messages (input + response), got {len(new_messages)}"
+        assert len(new_messages) >= 2, (
+            f"Expected at least 2 new messages (input + response), got {len(new_messages)}"
+        )
 
         # Verify we have both user input and agent response messages
         content_authors = {msg.content.author.value for msg in new_messages}
         assert "user" in content_authors, "Should have user input message in database"
-        assert (
-            "agent" in content_authors
-        ), "Should have agent response message in database"
+        assert "agent" in content_authors, (
+            "Should have agent response message in database"
+        )
 
         # Find the agent response message and verify its content
         agent_messages = [
             msg for msg in new_messages if msg.content.author == MessageAuthor.AGENT
         ]
-        assert (
-            len(agent_messages) >= 1
-        ), "Should have at least one agent response message"
+        assert len(agent_messages) >= 1, (
+            "Should have at least one agent response message"
+        )
 
         # Verify the FULL message content is correctly stored
         response_message = agent_messages[0]  # First agent response
-        assert (
-            response_message.content.content == "Complete message in one chunk"
-        ), f"Expected complete message content, got '{response_message.content.content}'"
+        assert response_message.content.content == "Complete message in one chunk", (
+            f"Expected complete message content, got '{response_message.content.content}'"
+        )
 
     async def test_handle_message_send_stream_multiple_indexes(
         self,
@@ -820,9 +822,9 @@ class TestAgentsACPUseCase:
 
         # Verify database interactions - should have created messages
         final_message_count = len(await task_message_repository.list())
-        assert (
-            final_message_count > initial_message_count
-        ), "New messages should have been created in database"
+        assert final_message_count > initial_message_count, (
+            "New messages should have been created in database"
+        )
 
         # Get all messages from database to verify content
         all_messages = await task_message_repository.list()
@@ -831,30 +833,30 @@ class TestAgentsACPUseCase:
         ]  # Only the newly created messages
 
         # Should have at least 3 new messages (input + 2 response messages for different indexes)
-        assert (
-            len(new_messages) >= 3
-        ), f"Expected at least 3 new messages (input + 2 responses), got {len(new_messages)}"
+        assert len(new_messages) >= 3, (
+            f"Expected at least 3 new messages (input + 2 responses), got {len(new_messages)}"
+        )
 
         # Verify we have both user input and agent response messages
         content_authors = {msg.content.author.value for msg in new_messages}
         assert "user" in content_authors, "Should have user input message in database"
-        assert (
-            "agent" in content_authors
-        ), "Should have agent response messages in database"
+        assert "agent" in content_authors, (
+            "Should have agent response messages in database"
+        )
 
         # Find the agent response messages - should have multiple for different indexes
         agent_messages = [
             msg for msg in new_messages if msg.content.author == MessageAuthor.AGENT
         ]
-        assert (
-            len(agent_messages) >= 2
-        ), f"Should have at least 2 agent response messages for different indexes, got {len(agent_messages)}"
+        assert len(agent_messages) >= 2, (
+            f"Should have at least 2 agent response messages for different indexes, got {len(agent_messages)}"
+        )
 
         # Verify the content includes expected text from both indexes
         agent_content = " ".join([msg.content.content for msg in agent_messages])
-        assert (
-            "First" in agent_content or "Second" in agent_content
-        ), f"Expected content from multiple indexes, got '{agent_content}'"
+        assert "First" in agent_content or "Second" in agent_content, (
+            f"Expected content from multiple indexes, got '{agent_content}'"
+        )
 
     async def test_handle_task_create_error(
         self,
@@ -1160,9 +1162,9 @@ class TestAgentsACPUseCase:
 
         # Verify database interactions - should have created messages
         final_message_count = len(await task_message_repository.list())
-        assert (
-            final_message_count > initial_message_count
-        ), "New messages should have been created in database"
+        assert final_message_count > initial_message_count, (
+            "New messages should have been created in database"
+        )
 
         # Get all messages from database to verify content
         all_messages = await task_message_repository.list()
@@ -1171,33 +1173,33 @@ class TestAgentsACPUseCase:
         ]  # Only the newly created messages
 
         # Should have at least 2 new messages (input + response)
-        assert (
-            len(new_messages) >= 2
-        ), f"Expected at least 2 new messages (input + response), got {len(new_messages)}"
+        assert len(new_messages) >= 2, (
+            f"Expected at least 2 new messages (input + response), got {len(new_messages)}"
+        )
 
         # Verify we have both user input and agent response messages
         content_authors = {msg.content.author.value for msg in new_messages}
         assert "user" in content_authors, "Should have user input message in database"
-        assert (
-            "agent" in content_authors
-        ), "Should have agent response message in database"
+        assert "agent" in content_authors, (
+            "Should have agent response message in database"
+        )
 
         # Find the agent response message and verify accumulated content was flushed
         agent_messages = [
             msg for msg in new_messages if msg.content.author == MessageAuthor.AGENT
         ]
-        assert (
-            len(agent_messages) >= 1
-        ), "Should have at least one agent response message"
+        assert len(agent_messages) >= 1, (
+            "Should have at least one agent response message"
+        )
 
         # Verify the deltas were properly accumulated and flushed to database
         response_message = agent_messages[0]  # First agent response
-        assert (
-            "Incomplete" in response_message.content.content
-        ), f"Expected 'Incomplete' in flushed content, got '{response_message.content.content}'"
-        assert (
-            "message" in response_message.content.content
-        ), f"Expected 'message' in flushed content, got '{response_message.content.content}'"
+        assert "Incomplete" in response_message.content.content, (
+            f"Expected 'Incomplete' in flushed content, got '{response_message.content.content}'"
+        )
+        assert "message" in response_message.content.content, (
+            f"Expected 'message' in flushed content, got '{response_message.content.content}'"
+        )
 
     async def test_handle_message_send_stream_complex_mixed_content_types(
         self,
@@ -1432,9 +1434,9 @@ class TestAgentsACPUseCase:
 
         # Verify database interactions - should have created messages
         final_message_count = len(await task_message_repository.list())
-        assert (
-            final_message_count > initial_message_count
-        ), "New messages should have been created in database"
+        assert final_message_count > initial_message_count, (
+            "New messages should have been created in database"
+        )
 
         # Get all messages from database to verify content
         all_messages = await task_message_repository.list()
@@ -1443,18 +1445,18 @@ class TestAgentsACPUseCase:
         ]  # Only the newly created messages
 
         # Should have at least 3 new messages (one for each index) plus deltas potentially stored
-        assert (
-            len(new_messages) >= 3
-        ), f"Expected at least 3 new messages, got {len(new_messages)}"
+        assert len(new_messages) >= 3, (
+            f"Expected at least 3 new messages, got {len(new_messages)}"
+        )
 
         # Verify we have messages with different content types
         content_types_found = {msg.content.type.value for msg in new_messages}
         expected_types = {"tool_request", "tool_response", "text"}
 
         # At least some of the expected types should be present (depends on how deltas vs full messages are stored)
-        assert (
-            len(content_types_found.intersection(expected_types)) > 0
-        ), f"Expected some of {expected_types}, got {content_types_found}"
+        assert len(content_types_found.intersection(expected_types)) > 0, (
+            f"Expected some of {expected_types}, got {content_types_found}"
+        )
 
         # Verify index distribution - should have messages for different indexes
         indexes_found = {getattr(update, "index", None) for update in updates}
@@ -1478,18 +1480,18 @@ class TestAgentsACPUseCase:
             u for u in updates if isinstance(u, StreamTaskMessageDoneEntity)
         ]
 
-        assert (
-            len(start_updates) == 3
-        ), f"Expected 3 START updates, got {len(start_updates)}"
-        assert (
-            len(delta_updates) == 6
-        ), f"Expected 6 DELTA updates, got {len(delta_updates)}"
-        assert (
-            len(full_updates) == 1
-        ), f"Expected 1 FULL update, got {len(full_updates)}"
-        assert (
-            len(done_updates) == 2
-        ), f"Expected 2 DONE updates, got {len(done_updates)} (index 0 completed with FULL message)"
+        assert len(start_updates) == 3, (
+            f"Expected 3 START updates, got {len(start_updates)}"
+        )
+        assert len(delta_updates) == 6, (
+            f"Expected 6 DELTA updates, got {len(delta_updates)}"
+        )
+        assert len(full_updates) == 1, (
+            f"Expected 1 FULL update, got {len(full_updates)}"
+        )
+        assert len(done_updates) == 2, (
+            f"Expected 2 DONE updates, got {len(done_updates)} (index 0 completed with FULL message)"
+        )
 
         # Verify content types in START messages
         start_content_types = {update.content.type.value for update in start_updates}
@@ -1641,27 +1643,27 @@ class TestAgentsACPUseCase:
 
         # Verify database interactions - should have created an event
         final_event_count = len(await event_repository.list())
-        assert (
-            final_event_count > initial_event_count
-        ), "New event should have been created in database"
+        assert final_event_count > initial_event_count, (
+            "New event should have been created in database"
+        )
 
         # Get all events from database to verify content
         all_events = await event_repository.list()
         new_events = all_events[initial_event_count:]  # Only the newly created events
 
         # Should have exactly 1 new event
-        assert (
-            len(new_events) == 1
-        ), f"Expected exactly 1 new event, got {len(new_events)}"
+        assert len(new_events) == 1, (
+            f"Expected exactly 1 new event, got {len(new_events)}"
+        )
 
         # Verify the event was properly stored
         created_event = new_events[0]
-        assert (
-            created_event.task_id == created_task.id
-        ), f"Expected task_id {created_task.id}, got {created_event.task_id}"
-        assert (
-            created_event.content == sample_text_content
-        ), "Expected event content to match input"
+        assert created_event.task_id == created_task.id, (
+            f"Expected task_id {created_task.id}, got {created_event.task_id}"
+        )
+        assert created_event.content == sample_text_content, (
+            "Expected event content to match input"
+        )
 
     async def test_handle_event_send_with_task_name(
         self,
@@ -1713,27 +1715,27 @@ class TestAgentsACPUseCase:
 
         # Verify database interactions - should have created an event
         final_event_count = len(await event_repository.list())
-        assert (
-            final_event_count > initial_event_count
-        ), "New event should have been created in database"
+        assert final_event_count > initial_event_count, (
+            "New event should have been created in database"
+        )
 
         # Get all events from database to verify content
         all_events = await event_repository.list()
         new_events = all_events[initial_event_count:]  # Only the newly created events
 
         # Should have exactly 1 new event
-        assert (
-            len(new_events) == 1
-        ), f"Expected exactly 1 new event, got {len(new_events)}"
+        assert len(new_events) == 1, (
+            f"Expected exactly 1 new event, got {len(new_events)}"
+        )
 
         # Verify the event was properly stored
         created_event = new_events[0]
-        assert (
-            created_event.task_id == created_task.id
-        ), f"Expected task_id {created_task.id}, got {created_event.task_id}"
-        assert (
-            created_event.content == sample_text_content
-        ), "Expected event content to match input"
+        assert created_event.task_id == created_task.id, (
+            f"Expected task_id {created_task.id}, got {created_event.task_id}"
+        )
+        assert created_event.content == sample_text_content, (
+            "Expected event content to match input"
+        )
 
     async def test_handle_event_send_with_request_headers(
         self,
@@ -1811,9 +1813,9 @@ class TestAgentsACPUseCase:
 
         # Verify database interactions - should have created an event
         final_event_count = len(await event_repository.list())
-        assert (
-            final_event_count > initial_event_count
-        ), "New event should have been created in database"
+        assert final_event_count > initial_event_count, (
+            "New event should have been created in database"
+        )
 
         # Verify HTTP call was made (mock_async_call will assert headers)
         mock_http_gateway.async_call.assert_called_once()
@@ -1871,9 +1873,9 @@ class TestAgentsACPUseCase:
 
         # Verify database interactions - should have created an event
         final_event_count = len(await event_repository.list())
-        assert (
-            final_event_count > initial_event_count
-        ), "New event should have been created in database"
+        assert final_event_count > initial_event_count, (
+            "New event should have been created in database"
+        )
 
         # Verify HTTP call was made (mock_async_call will assert no headers)
         mock_http_gateway.async_call.assert_called_once()
@@ -2056,9 +2058,9 @@ class TestAgentsACPUseCase:
 
         # Verify database interactions - should have created messages
         final_message_count = len(await task_message_repository.list())
-        assert (
-            final_message_count > initial_message_count
-        ), "New messages should have been created in database"
+        assert final_message_count > initial_message_count, (
+            "New messages should have been created in database"
+        )
 
         # Get all messages from database to verify content
         all_messages = await task_message_repository.list()
@@ -2067,26 +2069,26 @@ class TestAgentsACPUseCase:
         # Verify we have both user input and agent response messages
         content_authors = {msg.content.author.value for msg in new_messages}
         assert "user" in content_authors, "Should have user input message in database"
-        assert (
-            "agent" in content_authors
-        ), "Should have agent response message in database"
+        assert "agent" in content_authors, (
+            "Should have agent response message in database"
+        )
 
         # Find the agent response message and verify its final accumulated content
         agent_messages = [
             msg for msg in new_messages if msg.content.author == MessageAuthor.AGENT
         ]
-        assert (
-            len(agent_messages) >= 1
-        ), "Should have at least one agent response message"
+        assert len(agent_messages) >= 1, (
+            "Should have at least one agent response message"
+        )
 
         # Verify the final accumulated content includes both deltas
         response_message = agent_messages[0]
-        assert (
-            "Stream response" in response_message.content.content
-        ), f"Expected 'Stream response' in final content, got '{response_message.content.content}'"
-        assert (
-            "to named task" in response_message.content.content
-        ), f"Expected 'to named task' in final content, got '{response_message.content.content}'"
+        assert "Stream response" in response_message.content.content, (
+            f"Expected 'Stream response' in final content, got '{response_message.content.content}'"
+        )
+        assert "to named task" in response_message.content.content, (
+            f"Expected 'to named task' in final content, got '{response_message.content.content}'"
+        )
 
     async def test_handle_message_send_sync_with_task_params(
         self,

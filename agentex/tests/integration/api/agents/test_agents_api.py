@@ -48,6 +48,142 @@ class TestAgentsAPIIntegration:
         assert updated_agent_data["id"] == agent_data["id"]
 
     @pytest.mark.asyncio
+    async def test_register_build_creates_build_only_agent(self, isolated_client):
+        """register-build creates a BUILD_ONLY agent with no acp_url and no api key."""
+        response = await isolated_client.post(
+            "/agents/register-build",
+            json={
+                "name": "test-build-only-agent",
+                "description": "Created via register-build",
+            },
+        )
+        assert response.status_code == 200
+        agent_data = response.json()
+        assert agent_data["name"] == "test-build-only-agent"
+        assert agent_data["description"] == "Created via register-build"
+        assert agent_data["status"] == "BuildOnly"
+        assert agent_data["id"] is not None
+        # Minimal endpoint: no API key is minted at build time
+        assert "agent_api_key" not in agent_data
+        # No running pod yet, so acp_url must not be populated
+        assert agent_data.get("acp_url") is None
+
+        # And - the build-only agent is retrievable and listed like any agent
+        get_response = await isolated_client.get(f"/agents/{agent_data['id']}")
+        assert get_response.status_code == 200
+        assert get_response.json()["status"] == "BuildOnly"
+
+    @pytest.mark.asyncio
+    async def test_register_build_is_idempotent_by_name(self, isolated_client):
+        """A second register-build for the same name returns the existing agent."""
+        payload = {
+            "name": "test-build-idempotent-agent",
+            "description": "first",
+        }
+        first = await isolated_client.post("/agents/register-build", json=payload)
+        assert first.status_code == 200
+        first_id = first.json()["id"]
+
+        second = await isolated_client.post(
+            "/agents/register-build",
+            json={**payload, "description": "second"},
+        )
+        assert second.status_code == 200
+        # Same row returned; an existing agent is not clobbered by a rebuild
+        assert second.json()["id"] == first_id
+        assert second.json()["status"] == "BuildOnly"
+
+    @pytest.mark.asyncio
+    async def test_build_only_agent_promoted_to_ready_on_register(
+        self, isolated_client
+    ):
+        """register-build then /register (with the agent_id) flips status to Ready."""
+        build = await isolated_client.post(
+            "/agents/register-build",
+            json={
+                "name": "test-build-then-deploy-agent",
+                "description": "build first",
+            },
+        )
+        assert build.status_code == 200
+        assert build.json()["status"] == "BuildOnly"
+        agent_id = build.json()["id"]
+
+        registered = await isolated_client.post(
+            "/agents/register",
+            json={
+                "agent_id": agent_id,
+                "name": "test-build-then-deploy-agent",
+                "description": "now deployed",
+                "acp_url": "http://test-acp-server:8000",
+                "acp_type": "async",
+            },
+        )
+        assert registered.status_code == 200
+        assert registered.json()["id"] == agent_id
+        assert registered.json()["status"] == "Ready"
+
+    @pytest.mark.asyncio
+    async def test_build_only_agent_promoted_to_ready_via_deployment(
+        self, isolated_client
+    ):
+        """Deployment-scoped flow: /register (with a deployment_id) leaves the
+        agent row untouched, and promoting the deployment is what flips a
+        BUILD_ONLY agent to Ready and sets its acp_url."""
+        # Build-time: create the agent row up front (BUILD_ONLY, no acp_url).
+        build = await isolated_client.post(
+            "/agents/register-build",
+            json={
+                "name": "test-build-then-promote-agent",
+                "description": "build first",
+            },
+        )
+        assert build.status_code == 200
+        assert build.json()["status"] == "BuildOnly"
+        agent_id = build.json()["id"]
+
+        # Deploy-time step 1: create a deployment record (PENDING).
+        created = await isolated_client.post(
+            f"/agents/{agent_id}/deployments",
+            json={"docker_image": "test-image:latest"},
+        )
+        assert created.status_code == 200
+        deployment_id = created.json()["id"]
+
+        # Deploy-time step 2: deployment-scoped /register. Because a deployment_id
+        # is present, this updates only the deployment record (-> Ready); the
+        # agent row is deliberately left in BUILD_ONLY (acp_url changes only via
+        # promotion).
+        registered = await isolated_client.post(
+            "/agents/register",
+            json={
+                "agent_id": agent_id,
+                "name": "test-build-then-promote-agent",
+                "description": "now deployed",
+                "acp_url": "http://test-acp-server:8000",
+                "acp_type": "async",
+                "registration_metadata": {"deployment_id": deployment_id},
+            },
+        )
+        assert registered.status_code == 200
+        assert registered.json()["status"] == "BuildOnly"
+
+        # Promotion is the step that makes a build-only agent live.
+        promoted = await isolated_client.post(
+            f"/agents/{agent_id}/deployments/{deployment_id}/promote",
+        )
+        assert promoted.status_code == 200
+        assert promoted.json()["is_production"] is True
+        assert promoted.json()["acp_url"] == "http://test-acp-server:8000"
+
+        # The agent row is now Ready and points at the promoted deployment.
+        get_response = await isolated_client.get(f"/agents/{agent_id}")
+        assert get_response.status_code == 200
+        agent_after = get_response.json()
+        assert agent_after["status"] == "Ready"
+        assert agent_after["production_deployment_id"] == deployment_id
+
+    @pytest.mark.asyncio
     async def test_register_agent_success_and_retrieve(self, isolated_client):
         """Test agent registration and retrieval via API endpoints"""
         # Given - No existing agents (verify with GET)

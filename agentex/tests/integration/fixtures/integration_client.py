@@ -6,7 +6,7 @@ Uses FastAPI TestClient with minimal dependency overrides.
 import asyncio
 import os
 import uuid
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pymongo
 import pytest
@@ -21,6 +21,8 @@ from src.api.app import app, fastapi_app
 from src.api.authentication_cache import reset_auth_cache
 from src.config.dependencies import GlobalDependencies
 from src.config.environment_variables import EnvironmentVariables
+
+from tests.fixtures.services import make_noop_authorization_service
 
 
 @pytest.fixture(scope="session")
@@ -398,10 +400,17 @@ async def isolated_integration_app(
         )
 
     def create_agent_api_keys_use_case():
+        noop_authorization_service = Mock()
+        noop_authorization_service.principal_context = None
+        noop_authorization_service.grant = AsyncMock(return_value={})
+        noop_authorization_service.revoke = AsyncMock(return_value=None)
+        noop_authorization_service.register_resource = AsyncMock(return_value=None)
+        noop_authorization_service.deregister_resource = AsyncMock(return_value=None)
         return AgentAPIKeysUseCase(
             agent_api_key_repository=isolated_repositories["agent_api_key_repository"],
             agent_repository=isolated_repositories["agent_repository"],
             client=isolated_api_key_http_client,  # Use mock client for forwarding requests
+            authorization_service=noop_authorization_service,
         )
 
     def create_deployment_history_use_case():
@@ -448,6 +457,7 @@ async def isolated_integration_app(
             task_repository=isolated_repositories["task_repository"],
             event_repository=isolated_repositories["event_repository"],
             stream_repository=isolated_repositories["redis_stream_repository"],
+            authorization_service=make_noop_authorization_service(),
         )
 
         return TasksUseCase(task_service=task_service)

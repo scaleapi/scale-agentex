@@ -188,5 +188,62 @@ class AuthorizationService:
         )
         return result
 
+    async def register_resource(
+        self,
+        resource: AgentexResource,
+        parent: AgentexResource | None = None,
+        *,
+        principal_context=...,
+    ) -> None:
+        """Register a newly created resource with the principal as owner.
+
+        Prefer this over ``grant`` when the resource's authorization schema has
+        a parent relation that permissions cascade through (e.g.
+        ``agent_api_key`` declares ``parent_agent``). Pass ``parent`` to
+        link the child to its parent atomically; without it the cascade
+        fails closed.
+        """
+        if self._bypass():
+            logger.info(f"Authorization bypassed for register_resource on {resource}")
+            return None
+
+        effective_principal = (
+            principal_context
+            if principal_context is not ...
+            else self.principal_context
+        )
+        logger.info(
+            "[authorization_service] Registering %s:%s for principal %s (parent=%s)",
+            resource.type,
+            resource.selector,
+            effective_principal,
+            f"{parent.type}:{parent.selector}" if parent is not None else None,
+        )
+        await self.gateway.register_resource(effective_principal, resource, parent)
+
+    async def deregister_resource(
+        self,
+        resource: AgentexResource,
+        *,
+        principal_context=...,
+    ) -> None:
+        """Deregister a deleted resource and all of its relationships."""
+        if self._bypass():
+            logger.info(f"Authorization bypassed for deregister_resource on {resource}")
+            return None
+
+        effective_principal = (
+            principal_context
+            if principal_context is not ...
+            else self.principal_context
+        )
+        logger.info(
+            "[authorization_service] Deregistering %s:%s for principal %s",
+            resource.type,
+            resource.selector,
+            effective_principal,
+        )
+        await self.gateway.deregister_resource(effective_principal, resource)
+
 
 DAuthorizationService = Annotated[AuthorizationService, Depends(AuthorizationService)]

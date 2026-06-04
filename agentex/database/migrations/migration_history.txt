@@ -1,4 +1,5 @@
-a9959ebcbe98 -> 6c942325c828 (head), adding task cleaned at
+6c942325c828 -> c7a1b2d3e4f5 (head), add build_only agent status
+a9959ebcbe98 -> 6c942325c828, adding task cleaned at
 e9c4ff9e6542 -> a9959ebcbe98, finalize_spans_task_id
 9ff3ee32c81b -> e9c4ff9e6542, add_tasks_metadata_gin_index
 57c5ed4f59ae -> 9ff3ee32c81b, uppercase deployment status enum labels

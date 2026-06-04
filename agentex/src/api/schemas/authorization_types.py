@@ -9,19 +9,23 @@ class AuthorizedOperationType(StrEnum):
     update = "update"
     delete = "delete"
     execute = "execute"
+    cancel = "cancel"
 
 
 class AgentexResourceType(StrEnum):
     agent = "agent"
     task = "task"
+    api_key = "api_key"
+    schedule = "schedule"
 
 
 # Resources that inherit permissions from their parent task
 class TaskChildResourceType(StrEnum):
     """Resources that inherit permissions from their parent task."""
 
-    event = "event"
     state = "state"
+    message = "message"
+    agent_task_tracker = "agent_task_tracker"
 
 
 class AgentexResource(BaseModel):
@@ -37,6 +41,14 @@ class AgentexResource(BaseModel):
     def task(cls, selector: str) -> "AgentexResource":
         return cls(type=AgentexResourceType.task, selector=selector)
 
+    @classmethod
+    def api_key(cls, selector: str) -> "AgentexResource":
+        return cls(type=AgentexResourceType.api_key, selector=selector)
+
+    @classmethod
+    def schedule(cls, selector: str) -> "AgentexResource":
+        return cls(type=AgentexResourceType.schedule, selector=selector)
+
 
 class AgentexResourceOptionalSelector(BaseModel):
     type: AgentexResourceType
@@ -49,3 +61,11 @@ class AgentexResourceOptionalSelector(BaseModel):
     @classmethod
     def task(cls, selector: str | None = None) -> "AgentexResourceOptionalSelector":
         return cls(type=AgentexResourceType.task, selector=selector)
+
+    @classmethod
+    def api_key(cls, selector: str | None = None) -> "AgentexResourceOptionalSelector":
+        return cls(type=AgentexResourceType.api_key, selector=selector)
+
+    @classmethod
+    def schedule(cls, selector: str | None = None) -> "AgentexResourceOptionalSelector":
+        return cls(type=AgentexResourceType.schedule, selector=selector)

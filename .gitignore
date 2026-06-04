@@ -4,6 +4,11 @@ logs
 npm-debug.log*
 *.pth
 
+# Spurious root-level OpenAPI spec written by the agentex gen-openapi
+# pre-commit hook when uv resolves the workspace root as cwd. The canonical
+# spec lives at agentex/openapi.yaml.
+/openapi.yaml
+
 # Runtime data
 pids
 *.pid
