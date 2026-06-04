@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from src.utils.model_utils import BaseModel
 
@@ -33,8 +33,6 @@ class GetStatesRequest(BaseModel):
 
 
 class UpdateStateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     state: dict[str, Any] = Field(
         ...,
         title="The state to update the state with.",
