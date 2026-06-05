@@ -76,25 +76,39 @@ def record_cache_access(cache_name: str, result: CacheResult) -> None:
     Args:
         cache_name: Logical cache name (e.g. "auth_gateway", "agent_api_key").
         result: One of "hit", "miss_expired", "miss_absent".
+
+    Never raises: emission failures (e.g. a StatsD UDP socket error or an OTel
+    SDK fault) are swallowed so instrumentation can never disrupt a caller on
+    the critical auth path.
     """
-    _ensure_instruments()
+    try:
+        _ensure_instruments()
 
-    if _access_counter is not None:
-        _access_counter.add(1, {"cache": cache_name, "result": result})
+        if _access_counter is not None:
+            _access_counter.add(1, {"cache": cache_name, "result": result})
 
-    if _STATSD_ENABLED:
-        statsd.increment(
-            "auth_cache.access",
-            tags=[f"cache:{cache_name}", f"result:{result}"],
-        )
+        if _STATSD_ENABLED:
+            statsd.increment(
+                "auth_cache.access",
+                tags=[f"cache:{cache_name}", f"result:{result}"],
+            )
+    except Exception:
+        logger.debug("Failed to emit auth_cache.access metric", exc_info=True)
 
 
 def record_cache_eviction(cache_name: str) -> None:
-    """Record a single capacity-driven (LRU) eviction."""
-    _ensure_instruments()
+    """
+    Record a single capacity-driven (LRU) eviction.
 
-    if _eviction_counter is not None:
-        _eviction_counter.add(1, {"cache": cache_name})
+    Never raises: see ``record_cache_access``.
+    """
+    try:
+        _ensure_instruments()
 
-    if _STATSD_ENABLED:
-        statsd.increment("auth_cache.eviction", tags=[f"cache:{cache_name}"])
+        if _eviction_counter is not None:
+            _eviction_counter.add(1, {"cache": cache_name})
+
+        if _STATSD_ENABLED:
+            statsd.increment("auth_cache.eviction", tags=[f"cache:{cache_name}"])
+    except Exception:
+        logger.debug("Failed to emit auth_cache.eviction metric", exc_info=True)
