@@ -311,7 +311,7 @@ class TestSchedulesUseCase:
         assert result.total == 2
         assert len(result.schedules) == 2
         mock_schedule_service.list_schedules.assert_called_once_with(
-            agent_id=sample_agent.id, page_size=100
+            agent_id=sample_agent.id, page_size=100, authorized_schedule_ids=None
         )
 
     async def test_list_schedules_with_page_size(
@@ -328,7 +328,7 @@ class TestSchedulesUseCase:
         # Then
         assert result is not None
         mock_schedule_service.list_schedules.assert_called_once_with(
-            agent_id=sample_agent.id, page_size=50
+            agent_id=sample_agent.id, page_size=50, authorized_schedule_ids=None
         )
 
     async def test_pause_schedule(

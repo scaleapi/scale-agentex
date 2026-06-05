@@ -65,7 +65,10 @@ class SchedulesUseCase:
         return await self.schedule_service.get_schedule(agent_id, schedule_name)
 
     async def list_schedules(
-        self, agent_id: str, page_size: int = 100
+        self,
+        agent_id: str,
+        page_size: int = 100,
+        authorized_schedule_ids: list[str] | None = None,
     ) -> ScheduleListResponse:
         """
         List schedules for an agent.
@@ -73,12 +76,16 @@ class SchedulesUseCase:
         Args:
             agent_id: The agent ID
             page_size: Number of results to return
+            authorized_schedule_ids: Ownership filter forwarded to the service
+                (``None`` = bypass → all; a list restricts; empty → none).
 
         Returns:
             ScheduleListResponse with list of schedules
         """
         return await self.schedule_service.list_schedules(
-            agent_id=agent_id, page_size=page_size
+            agent_id=agent_id,
+            page_size=page_size,
+            authorized_schedule_ids=authorized_schedule_ids,
         )
 
     async def pause_schedule(
