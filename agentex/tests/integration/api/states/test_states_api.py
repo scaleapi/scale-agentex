@@ -190,30 +190,13 @@ class TestStatesAPIIntegration:
         assert created_state["agent_id"] == state_data["agent_id"]
         assert created_state["state"] == state_value
 
-        # API-first validation: UPDATE with wrong task_id does nothing
-        update_response = await isolated_client.put(
-            f"/states/{state_id}",
-            json={
-                "state": {},
-                "task_id": "some-other-task-id",
-                "agent_id": test_agent.id,
-            },
-        )
-        assert update_response.status_code == 200
-        updated_state = update_response.json()
-
-        assert updated_state["id"] == state_id
-        assert updated_state["task_id"] == state_data["task_id"]
-        assert updated_state["agent_id"] == state_data["agent_id"]
-        assert updated_state["state"] == state_value
-
-        # API-first validation: UPDATE the created state
+        # API-first validation: UPDATE accepts legacy parent identifiers in the body
         state_value_updated = {"test": "updated"}
         update_response = await isolated_client.put(
             f"/states/{state_id}",
             json={
                 "state": state_value_updated,
-                "task_id": test_task.id,
+                "task_id": "some-other-task-id",
                 "agent_id": test_agent.id,
             },
         )

@@ -2,6 +2,7 @@ from typing import Annotated, Any
 
 from fastapi import Depends
 
+from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.domain.entities.states import StateEntity
 from src.domain.repositories.task_state_repository import DTaskStateRepository
 from src.utils.logging import make_logger
@@ -37,10 +38,16 @@ class StatesUseCase:
         agent_id: str | None = None,
         order_by: str | None = None,
         order_direction: str = "desc",
+        authorized_task_ids: list[str] | None = None,
     ) -> list[StateEntity]:
         filters = {}
-        if task_id:
+        if task_id is not None:
             filters["task_id"] = task_id
+        elif authorized_task_ids is not None:
+            allowed_task_ids = set(authorized_task_ids)
+            if not allowed_task_ids:
+                return []
+            filters["task_id"] = {"$in": sorted(allowed_task_ids)}
         if agent_id:
             filters["agent_id"] = agent_id
 
@@ -52,13 +59,14 @@ class StatesUseCase:
             order_direction=order_direction,
         )
 
-    async def update(self, id: str, task_id: str, state: dict[str, Any]) -> StateEntity:
+    async def update(self, id: str, state: dict[str, Any]) -> StateEntity:
         task_state = await self.task_state_repository.get(id=id)
-        if task_state and task_state.task_id == task_id:
-            # Update the state field but preserve other fields
-            task_state.state = state
-            return await self.task_state_repository.update(task_state)
-        return task_state
+        if task_state is None:
+            raise ItemDoesNotExist(f"State {id} not found")
+
+        # Update the state field but preserve other fields.
+        task_state.state = state
+        return await self.task_state_repository.update(task_state)
 
     async def delete(self, id: str) -> None:
         return await self.task_state_repository.delete(id=id)

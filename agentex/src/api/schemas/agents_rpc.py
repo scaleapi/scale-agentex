@@ -22,9 +22,22 @@ class AgentRPCMethod(str, Enum):
 
 
 class CreateTaskRequest(BaseModel):
-    name: str | None = Field(None, description="The name of the task to create")
+    name: str | None = Field(
+        None,
+        description=(
+            "Optional human-readable name for the task. When set it must be globally "
+            "unique. task/create is get-or-create by name: reusing an existing name "
+            "returns the existing task (with its prior history) instead of creating a "
+            "new one, so omit name (or make it unique, e.g. by appending a UUID) "
+            "whenever each call should produce a fresh task."
+        ),
+    )
     params: dict[str, Any] | None = Field(
-        None, description="The parameters for the task"
+        None,
+        description=(
+            "The parameters for the task. On a get-or-create by name, providing params "
+            "overwrites the existing task's params (it is not a pure read)."
+        ),
     )
     task_metadata: dict[str, Any] | None = Field(
         None,
