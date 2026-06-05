@@ -204,7 +204,11 @@ class TestCreateParentAgentCheck:
         authorization = MagicMock()
         authorization.check = AsyncMock(return_value=True)
 
-        result = await dep(authorization, MagicMock(), MagicMock(), "agent-1")
+        # Repos are unused on the agent path; bind resource_id by keyword so an
+        # added repo dep fails loudly instead of silently mis-binding the id.
+        result = await dep(
+            authorization, MagicMock(), MagicMock(), MagicMock(), resource_id="agent-1"
+        )
 
         assert result == "agent-1"
         called_kwargs = authorization.check.await_args.kwargs
@@ -219,7 +223,9 @@ class TestCreateParentAgentCheck:
 
         # Direct agent denial bubbles out as AuthorizationError (→ 403), NOT 404.
         with pytest.raises(AuthorizationError):
-            await dep(authorization, MagicMock(), MagicMock(), "agent-1")
+            await dep(
+                authorization, MagicMock(), MagicMock(), MagicMock(), resource_id="agent-1"
+            )
 
 
 def _fake_schedule(schedule_id: str, *, paused: bool = False):
