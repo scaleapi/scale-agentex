@@ -6629,20 +6629,12 @@ components:
       title: UpdateSpanRequest
     UpdateStateRequest:
       properties:
-        task_id:
-          type: string
-          title: The unique id of the task to update the state of
-        agent_id:
-          type: string
-          title: The unique id of the agent to update the state of
         state:
           additionalProperties: true
           type: object
           title: The state to update the state with.
       type: object
       required:
-      - task_id
-      - agent_id
       - state
       title: UpdateStateRequest
     UpdateTaskMessageRequest:
