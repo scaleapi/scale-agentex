@@ -39,6 +39,21 @@ class AuthorizationService:
     def is_enabled(self) -> bool:
         return self.enabled
 
+    def _effective_principal(self, principal_context):
+        """Resolve the principal to authorize as.
+
+        Callers pass the ``...`` sentinel to mean "not supplied", in which case
+        we fall back to the request's authenticated principal. We treat an
+        explicit ``None`` the same way: ``None`` is never a valid principal for
+        the authz gateway (it rejects it with a 422), and callers that forward
+        an optional, unset request field (e.g. ``request.principal_context``)
+        would otherwise defeat the fallback and authorize as nobody. Falling
+        back to the authenticated principal is always the safe default.
+        """
+        if principal_context is ... or principal_context is None:
+            return self.principal_context
+        return principal_context
+
     async def grant(
         self, resource: AgentexResource, *, commit: bool = True, principal_context=...
     ) -> None:
@@ -56,9 +71,7 @@ class AuthorizationService:
             self.principal_context,
         )
         result = await self.gateway.grant(
-            principal_context
-            if principal_context is not ...
-            else self.principal_context,
+            self._effective_principal(principal_context),
             resource,
             AuthorizedOperationType.create,
         )
@@ -80,9 +93,7 @@ class AuthorizationService:
         )
 
         result = await self.gateway.revoke(
-            principal_context
-            if principal_context is not ...
-            else self.principal_context,
+            self._effective_principal(principal_context),
             resource,
             AuthorizedOperationType.delete,
         )
@@ -103,11 +114,7 @@ class AuthorizationService:
             return True
 
         # Determine which principal context to use
-        effective_principal = (
-            principal_context
-            if principal_context is not ...
-            else self.principal_context
-        )
+        effective_principal = self._effective_principal(principal_context)
 
         # Try to get cached result first
         auth_cache = await get_auth_cache()
@@ -177,9 +184,7 @@ class AuthorizationService:
             self.principal_context,
         )
         result = await self.gateway.list_resources(
-            principal_context
-            if principal_context is not ...
-            else self.principal_context,
+            self._effective_principal(principal_context),
             filter_resource,
             filter_operation,
         )
@@ -207,11 +212,7 @@ class AuthorizationService:
             logger.info(f"Authorization bypassed for register_resource on {resource}")
             return None
 
-        effective_principal = (
-            principal_context
-            if principal_context is not ...
-            else self.principal_context
-        )
+        effective_principal = self._effective_principal(principal_context)
         logger.info(
             "[authorization_service] Registering %s:%s for principal %s (parent=%s)",
             resource.type,
@@ -232,11 +233,7 @@ class AuthorizationService:
             logger.info(f"Authorization bypassed for deregister_resource on {resource}")
             return None
 
-        effective_principal = (
-            principal_context
-            if principal_context is not ...
-            else self.principal_context
-        )
+        effective_principal = self._effective_principal(principal_context)
         logger.info(
             "[authorization_service] Deregistering %s:%s for principal %s",
             resource.type,
