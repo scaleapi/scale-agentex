@@ -200,7 +200,10 @@ class ScheduleService:
         return self._description_to_response(schedule_id, description)
 
     async def list_schedules(
-        self, agent_id: str | None = None, page_size: int = 100
+        self,
+        agent_id: str | None = None,
+        page_size: int = 100,
+        authorized_schedule_ids: list[str] | None = None,
     ) -> ScheduleListResponse:
         """
         List schedules, optionally filtered by agent.
@@ -208,19 +211,43 @@ class ScheduleService:
         Args:
             agent_id: Optional agent ID to filter schedules
             page_size: Number of results to return
+            authorized_schedule_ids: Ownership filter applied against the
+                schedule id ({agent_id}--{schedule_name}). ``None`` means "no
+                filter" (authorization bypass); any list (including empty)
+                restricts results to those ids, so an empty list yields no
+                schedules.
 
         Returns:
             ScheduleListResponse with list of schedules
+
+        Note:
+            ``page_size`` caps the upstream Temporal listing, which is then
+            filtered in-process by ``agent_id`` and ``authorized_schedule_ids``,
+            so fewer than ``page_size`` rows may be returned even when more
+            matching schedules exist. Pre-dates the ownership filter (the
+            ``agent_id`` filter already had it). Server-side filtering isn't
+            available (Temporal standard visibility can't filter on the schedule
+            id); the fix is to loop pages until the requested page is filled,
+            tracked separately.
         """
         schedules = await self.temporal_adapter.list_schedules(page_size=page_size)
 
+        # Gate on ``is not None``, not truthiness: an empty list means the caller
+        # owns nothing and must filter everything out, not pass through unfiltered.
+        authorized_ids = (
+            set(authorized_schedule_ids)
+            if authorized_schedule_ids is not None
+            else None
+        )
+
         items = []
         for schedule in schedules:
-            # Parse agent_id from schedule_id
             parsed_agent_id, schedule_name = parse_schedule_id(schedule.id)
 
-            # Filter by agent_id if provided
             if agent_id and parsed_agent_id != agent_id:
+                continue
+
+            if authorized_ids is not None and schedule.id not in authorized_ids:
                 continue
 
             # Extract workflow name from action if available
