@@ -236,7 +236,7 @@ async def register_build(
     agents_use_case: DAgentsUseCase,
     authorization_service: DAuthorizationService,
 ) -> Agent:
-    """Create a build-only agent row and grant the caller access to it."""
+    """Create a build-only agent row and register its authz resource."""
     await authorization_service.check(
         AgentexResource.agent("*"),
         AuthorizedOperationType.create,
@@ -252,7 +252,7 @@ async def register_build(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    await authorization_service.grant(
+    await authorization_service.register_resource(
         AgentexResource.agent(agent_entity.id),
         principal_context=request.principal_context,
     )
