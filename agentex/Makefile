@@ -6,7 +6,7 @@
 # Development Commands
 #
 
-.PHONY: install install-dev install-docs clean help
+.PHONY: install install-dev clean help
 
 help: ## Show this help message
 	@echo "AgentEx Development Commands:"
@@ -24,10 +24,6 @@ install-dev: ../repo-setup ## Install dependencies including dev group
 
 ../repo-setup:
 	@$(MAKE) -C .. repo-setup
-
-install-docs: ## Install docs dependencies
-	@echo "🚀 Installing docs dependencies..."
-	uv sync --group docs
 
 clean: ## Clean virtual environment and lock file
 	@echo "🧹 Cleaning virtual environment..."
