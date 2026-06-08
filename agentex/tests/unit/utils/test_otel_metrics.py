@@ -109,6 +109,23 @@ def test_init_creates_meter_provider_when_none_configured(monkeypatch):
 
 
 @pytest.mark.unit
+def test_init_retries_after_provider_creation_failure(monkeypatch):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+
+    with patch.object(
+        metrics, "set_meter_provider", side_effect=RuntimeError("blocked")
+    ):
+        with pytest.raises(RuntimeError):
+            otel_metrics.init_otel_metrics()
+        assert otel_metrics._initialized is False
+
+    result = otel_metrics.init_otel_metrics()
+
+    assert isinstance(result, MeterProvider)
+    assert otel_metrics._initialized is True
+
+
+@pytest.mark.unit
 def test_init_disabled_without_endpoint(monkeypatch):
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", raising=False)

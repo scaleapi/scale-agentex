@@ -119,14 +119,14 @@ def init_otel_metrics(
     if _initialized:
         return _meter_provider or _global_meter_provider()
 
-    _initialized = True
-
     if existing := _global_meter_provider():
+        _initialized = True
         logger.info("OpenTelemetry metrics using existing MeterProvider")
         return existing
 
     endpoint = _metrics_endpoint(otlp_endpoint)
     if not endpoint:
+        _initialized = True
         logger.info("OpenTelemetry metrics disabled: no OTLP endpoint configured")
         return None
 
@@ -159,6 +159,7 @@ def init_otel_metrics(
 
     _meter_provider = MeterProvider(resource=resource, metric_readers=[reader])
     metrics.set_meter_provider(_meter_provider)
+    _initialized = True
     logger.info(
         f"OpenTelemetry metrics initialized: endpoint={endpoint}, "
         f"protocol={protocol}, service={resolved_service_name}, "
