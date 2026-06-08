@@ -14,6 +14,7 @@ from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from src.adapters.temporal.client_factory import TemporalClientFactory
 from src.config.dependencies import (
+    GlobalDependencies,
     database_async_read_only_session_maker,
     database_async_read_write_engine,
     database_async_read_write_session_maker,
@@ -23,7 +24,15 @@ from src.config.dependencies import (
 from src.config.environment_variables import EnvironmentVariables
 from src.domain.repositories.agent_repository import AgentRepository
 from src.temporal.activities.healthcheck_activities import HealthCheckActivities
+from src.temporal.activities.retention_cleanup_activities import (
+    RetentionCleanupActivities,
+)
+from src.temporal.task_retention_factory import build_task_retention_use_case
 from src.temporal.workflows.healthcheck_workflow import HealthCheckWorkflow
+from src.temporal.workflows.retention_cleanup_workflow import (
+    RetentionCleanupSweepWorkflow,
+    RetentionCleanupTaskWorkflow,
+)
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
@@ -121,36 +130,53 @@ async def run_worker(
             await health_check_worker.shutdown()
 
 
-def create_health_check_worker(
-    agent_repo: AgentRepository, http_client: httpx.AsyncClient
+def create_agentex_server_worker(
+    agent_repo: AgentRepository,
+    http_client: httpx.AsyncClient,
+    global_dependencies: GlobalDependencies,
 ) -> asyncio.Task:
     """
-    Create a Health Check worker.
+    Create the single Temporal worker that serves the `agentex-server` task queue.
+
+    Registers ALL workflows + activities that run on this queue — health checks
+    AND retention cleanup — in one worker. Workers polling the same task queue
+    must register the same set of types (the queue is not typed), so these live
+    together in one worker rather than as separate processes/containers.
     """
-    # Get task queue from environment or use default
     task_queue = os.environ.get("AGENTEX_SERVER_TASK_QUEUE", AGENTEX_SERVER_TASK_QUEUE)
 
-    logger.info("Starting Temporal Health Check Worker")
+    logger.info("Starting agentex-server Temporal worker")
     logger.info(f"Task queue: {task_queue}")
 
-    # Create activities instance with dependencies
     health_check_activities = HealthCheckActivities(
         agent_repo=agent_repo,
-        http_client=httpx_client(),
+        http_client=http_client,
     )
 
-    # Extract activity methods
-    activities = [
-        health_check_activities.check_status_activity,
-        health_check_activities.update_agent_status_activity,
-    ]
+    retention_use_case = build_task_retention_use_case(global_dependencies)
+    # Reuse the repository the factory already built (avoids a duplicate
+    # TaskRepository) via the use case's stable accessor.
+    retention_activities = RetentionCleanupActivities(
+        task_repository=retention_use_case.task_repository,
+        use_case=retention_use_case,
+    )
 
-    # Create and run worker task
     return asyncio.create_task(
         run_worker(
             task_queue=task_queue,
-            workflows=[HealthCheckWorkflow],
-            activities=activities,
+            workflows=[
+                HealthCheckWorkflow,
+                RetentionCleanupSweepWorkflow,
+                RetentionCleanupTaskWorkflow,
+            ],
+            activities=[
+                health_check_activities.check_status_activity,
+                health_check_activities.update_agent_status_activity,
+                retention_activities.load_cleanup_config,
+                retention_activities.find_cleanup_candidates,
+                retention_activities.find_multi_agent_cleanup_candidates,
+                retention_activities.clean_task,
+            ],
             max_workers=50,
             max_concurrent_activities=50,
         )
@@ -158,23 +184,22 @@ def create_health_check_worker(
 
 
 async def main() -> None:
-    """
-    Main entry point for the Health Check worker.
-    """
+    """Main entry point for the agentex-server Temporal worker."""
     try:
-        # Initialize global dependencies for this thread
         await startup_global_dependencies()
-        # Create session maker
+        global_dependencies = GlobalDependencies()
+
         engine = database_async_read_write_engine()
         session_maker = database_async_read_write_session_maker(engine)
         read_only_session_maker = database_async_read_only_session_maker(engine)
         agent_repo = AgentRepository(session_maker, read_only_session_maker)
-        health_check_worker_task = create_health_check_worker(
+
+        worker_task = create_agentex_server_worker(
             agent_repo=agent_repo,
             http_client=httpx_client(),
+            global_dependencies=global_dependencies,
         )
-        # Wait for the worker to complete
-        await health_check_worker_task
+        await worker_task
 
     except KeyboardInterrupt:
         logger.info("Received interrupt signal, shutting down worker...")

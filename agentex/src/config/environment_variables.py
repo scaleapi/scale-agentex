@@ -58,6 +58,13 @@ class EnvVarKeys(str, Enum):
     AGENTEX_SERVER_TASK_QUEUE = "AGENTEX_SERVER_TASK_QUEUE"
     ENABLE_HEALTH_CHECK_WORKFLOW = "ENABLE_HEALTH_CHECK_WORKFLOW"
     WEBHOOK_REQUEST_TIMEOUT = "WEBHOOK_REQUEST_TIMEOUT"
+    RETENTION_CLEANUP_ENABLED = "RETENTION_CLEANUP_ENABLED"
+    RETENTION_CLEANUP_AGENT_ALLOWLIST = "RETENTION_CLEANUP_AGENT_ALLOWLIST"
+    RETENTION_CLEANUP_IDLE_DAYS = "RETENTION_CLEANUP_IDLE_DAYS"
+    RETENTION_CLEANUP_CRON = "RETENTION_CLEANUP_CRON"
+    RETENTION_CLEANUP_PAGE_SIZE = "RETENTION_CLEANUP_PAGE_SIZE"
+    RETENTION_CLEANUP_MAX_IN_FLIGHT = "RETENTION_CLEANUP_MAX_IN_FLIGHT"
+    RETENTION_CLEANUP_DRY_RUN = "RETENTION_CLEANUP_DRY_RUN"
 
 
 class Environment(str, Enum):
@@ -114,6 +121,13 @@ class EnvironmentVariables(BaseModel):
     AGENTEX_SERVER_TASK_QUEUE: str | None = None
     ENABLE_HEALTH_CHECK_WORKFLOW: bool = False
     WEBHOOK_REQUEST_TIMEOUT: float = 15.0  # Webhook request timeout in seconds
+    RETENTION_CLEANUP_ENABLED: bool = False
+    RETENTION_CLEANUP_AGENT_ALLOWLIST: list[str] = []
+    RETENTION_CLEANUP_IDLE_DAYS: int = 7
+    RETENTION_CLEANUP_CRON: str = "0 4 * * *"
+    RETENTION_CLEANUP_PAGE_SIZE: int = 200
+    RETENTION_CLEANUP_MAX_IN_FLIGHT: int = 20
+    RETENTION_CLEANUP_DRY_RUN: bool = True
 
     @classmethod
     def refresh(cls, force_refresh: bool = False) -> EnvironmentVariables | None:
@@ -202,6 +216,31 @@ class EnvironmentVariables(BaseModel):
             ),
             WEBHOOK_REQUEST_TIMEOUT=float(
                 os.environ.get(EnvVarKeys.WEBHOOK_REQUEST_TIMEOUT, "15.0")
+            ),
+            RETENTION_CLEANUP_ENABLED=(
+                os.environ.get(EnvVarKeys.RETENTION_CLEANUP_ENABLED, "false") == "true"
+            ),
+            RETENTION_CLEANUP_AGENT_ALLOWLIST=[
+                name.strip()
+                for name in os.environ.get(
+                    EnvVarKeys.RETENTION_CLEANUP_AGENT_ALLOWLIST, ""
+                ).split(",")
+                if name.strip()
+            ],
+            RETENTION_CLEANUP_IDLE_DAYS=int(
+                os.environ.get(EnvVarKeys.RETENTION_CLEANUP_IDLE_DAYS, "7")
+            ),
+            RETENTION_CLEANUP_CRON=os.environ.get(
+                EnvVarKeys.RETENTION_CLEANUP_CRON, "0 4 * * *"
+            ),
+            RETENTION_CLEANUP_PAGE_SIZE=int(
+                os.environ.get(EnvVarKeys.RETENTION_CLEANUP_PAGE_SIZE, "200")
+            ),
+            RETENTION_CLEANUP_MAX_IN_FLIGHT=int(
+                os.environ.get(EnvVarKeys.RETENTION_CLEANUP_MAX_IN_FLIGHT, "20")
+            ),
+            RETENTION_CLEANUP_DRY_RUN=(
+                os.environ.get(EnvVarKeys.RETENTION_CLEANUP_DRY_RUN, "true") == "true"
             ),
         )
         refreshed_environment_variables = environment_variables
