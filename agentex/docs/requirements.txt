@@ -1,14 +1,16 @@
-# Documentation build dependencies.
+# Docs build deps — resolved independently of the workspace uv.lock so docs
+# track the latest published SDK without forcing backend dep bumps. Consumed via
+# `uv run --isolated --no-project --with-requirements` (CI, Makefile) and
+# `uv pip install -r` (Dockerfile docs-builder stage).
 #
-# Resolved independently of the workspace uv.lock so the docs always render
-# against the latest published SDK without forcing backend dependency bumps.
-# Consumed via `uv run --isolated --no-project --with-requirements` (CI, Makefile)
-# and `uv pip install -r` (Dockerfile docs-builder stage).
+# agentex-sdk floats by design (docs track the latest SDK release); the mkdocs
+# toolchain is pinned for reproducible builds — Dependabot keeps the pins current.
 agentex-sdk>=0.12.0
-mkdocs
-mkdocs-material
-mkdocs-macros-plugin
-mkdocstrings-python
-griffe-pydantic
-pymdown-extensions
-Pygments
+
+mkdocs==1.6.1
+mkdocs-material==9.7.6
+mkdocs-macros-plugin==1.5.0
+mkdocstrings-python==2.0.4
+griffe-pydantic==1.3.1
+pymdown-extensions==10.21.3
+Pygments==2.20.0
