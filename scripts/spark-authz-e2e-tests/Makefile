@@ -28,16 +28,21 @@ PYTEST := $(VENV)/bin/pytest
 
 # Test-file globs. Update these (NOT individual case targets) when adding
 # a new test file for an existing resource.
-EVENT_TESTS := tests/test_event_authz.py
+API_KEY_TESTS := tests/test_api_key_create.py tests/test_api_key_get.py tests/test_api_key_list.py tests/test_api_key_delete.py
+EVENT_TESTS   := tests/test_event_authz.py
 
 # Aggregate groupings — extend these as resources are added.
-# Direct-resource targets land with their own PRs (e.g. api_key).
+DIRECT_RESOURCE_TESTS := $(API_KEY_TESTS)
+# Future direct-resource additions go here:
+#   DIRECT_RESOURCE_TESTS += $(AGENT_TESTS) $(TASK_TESTS)
+
 SUB_RESOURCE_TESTS := $(EVENT_TESTS)
 # Future sub-resource additions go here:
 #   SUB_RESOURCE_TESTS += $(STATE_TESTS) $(MESSAGE_TESTS) $(TRACKER_TESTS) $(CHECKPOINT_TESTS)
 
 .PHONY: install test \
-        test-sub-resources \
+        test-direct-resources test-sub-resources \
+        test-api-key test-api-key-create test-api-key-get test-api-key-list test-api-key-delete \
         test-event \
         clean help
 
@@ -51,10 +56,15 @@ help:
 	@echo "  make test                    all tests"
 	@echo ""
 	@echo "Run a logical group:"
+	@echo "  make test-direct-resources   resources with their own SpiceDB type"
 	@echo "  make test-sub-resources      resources that delegate to a parent"
 	@echo ""
 	@echo "Run one resource:"
+	@echo "  make test-api-key            all AGX1-325 cases"
 	@echo "  make test-event              all AGX1-331 cases"
+	@echo ""
+	@echo "Run one case:"
+	@echo "  make test-api-key-{create,get,list,delete}"
 
 install:
 	$(PYTHON) -m venv $(VENV)
@@ -67,8 +77,31 @@ test:
 # Logical groupings
 # ---------------------------------------------------------------------------
 
+test-direct-resources:
+	$(PYTEST) $(DIRECT_RESOURCE_TESTS) -v
+
 test-sub-resources:
 	$(PYTEST) $(SUB_RESOURCE_TESTS) -v
+
+# ---------------------------------------------------------------------------
+# Direct resources
+# ---------------------------------------------------------------------------
+
+# AGX1-325 — agent_api_keys
+test-api-key:
+	$(PYTEST) $(API_KEY_TESTS) -v
+
+test-api-key-create:
+	$(PYTEST) tests/test_api_key_create.py -v
+
+test-api-key-get:
+	$(PYTEST) tests/test_api_key_get.py -v
+
+test-api-key-list:
+	$(PYTEST) tests/test_api_key_list.py -v
+
+test-api-key-delete:
+	$(PYTEST) tests/test_api_key_delete.py -v
 
 # ---------------------------------------------------------------------------
 # Sub-resources (delegate authz to a parent)

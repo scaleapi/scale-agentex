@@ -10,10 +10,14 @@ Modeled after the equivalent KB suite in
 
 ## Scope
 
-This PR establishes the e2e test scaffolding (clients, conftest, factories,
-cleanup) and ships the first resource: **events**. Subsequent PRs add new
-resource test files on top of this infrastructure (e.g. AGX1-325 api_keys
-in a follow-up).
+### AGX1-325 — `agent_api_keys`
+
+Routes: create / get / get-by-name / list / delete / delete-by-name.
+
+- **create** dual-writes to SpiceDB with the `parent_agent` edge populated.
+- **get** / **get-by-name** are gated by `api_key.read`; denial collapses to 404.
+- **list** filters to the api_keys the caller has `read` on.
+- **delete** / **delete-by-name** dual-write deregisters; denial collapses to 404.
 
 ### AGX1-331 — `events` (read-only, parent-agent-delegated)
 
@@ -25,20 +29,10 @@ Routes: `GET /events/{id}` and `GET /events?task_id=...&agent_id=...`.
   `tests/test_event_authz.py`); only the denied paths are exercised, which
   is what the ticket asks for.
 
-### Scaffolding shipped with this PR
-
-- `clients/agentex_client.py` — HTTP client for `scale-agentex` routes
-  (agent + api_key + event surfaces; api_key methods land here ahead of
-  AGX1-325's tests so the client doesn't grow in two places).
-- `clients/spark_authz_client.py` — direct SpiceDB-state client (HTTP-
-  transcoded). Copied verbatim from the EGP suite — repo-agnostic.
-- `conftest.py` — config loader, identity credentials, two `AgentexClient`
-  instances (user_a / user_b), a `SparkAuthzClient`, an `authz_reachable`
-  probe with graceful-skip semantics, `parent_agent` fixture that falls
-  back to a pre-existing `agentex.agent_id` when the test user lacks
-  `agent.create` on the tenant, function-scoped `cleanup` tracker.
-- `helpers/cleanup.py` + `helpers/factories.py` — LIFO teardown +
-  unique-name generators.
+This PR layers the api_key test files on top of the scaffolding established
+in [#277](https://github.com/scaleapi/scale-agentex/pull/277). The clients,
+conftest, factories, and cleanup tracker all live there; this PR is purely
+the AGX1-325 test cases + `MANUAL_SMOKE.md`.
 
 ## Setup
 
@@ -121,10 +115,18 @@ resource, all tests in a logical category, or the whole suite.
 make test
 
 # Logical groups
+make test-direct-resources    # resources with their own SpiceDB type (api_key, …)
 make test-sub-resources       # resources that delegate to a parent (event, …)
 
 # One resource (all cases)
+make test-api-key             # AGX1-325 — all api_key cases
 make test-event               # AGX1-331 — all event cases
+
+# One case
+make test-api-key-create
+make test-api-key-get
+make test-api-key-list
+make test-api-key-delete
 ```
 
 Adding a new resource? Add a `<RESOURCE>_TESTS` variable in the Makefile,
@@ -139,10 +141,10 @@ for direct permission assertions. The suite degrades gracefully:
 
 - Tests that **only hit scale-agentex HTTP routes** (most of the suite) run
   normally and assert on response codes + bodies.
-- Tests that **assert directly against SpiceDB** skip with a clear reason
-  when `spark_authz.host` doesn't answer `/healthz` with 2xx. The event
-  suite this PR ships doesn't have any SpiceDB-asserting tests, but the
-  scaffolding is here so future resource PRs land cleanly.
+- Tests that **assert directly against SpiceDB** (currently:
+  `test_api_key_create.py` and `test_owner_delete_deregisters_in_spicedb`)
+  skip with a clear reason when `spark_authz.host` doesn't answer `/healthz`
+  with 2xx.
 - The factory cleanup falls back to REST-only when spark-authz isn't
   reachable (no SpiceDB delete-resource call). Tuples may leak in this
   mode, but routes are the unit under test.
@@ -160,6 +162,10 @@ helpers/
   cleanup.py               # LIFO cleanup tracker honoring config knobs
   factories.py             # unique_agent_name, unique_api_key_name
 tests/
+  test_api_key_create.py   # AGX1-325: dual-write + parent_agent edge
+  test_api_key_get.py      # AGX1-325: 200 owner / 404 non-owner on id + name
+  test_api_key_list.py     # AGX1-325: FGAC list filter
+  test_api_key_delete.py   # AGX1-325: deregister on delete + non-owner 404
   test_event_authz.py      # AGX1-331: GET /events/{id} + /events denied paths
 conftest.py                # config, identities, clients, factories, cleanup
 config.json.example        # template — copy to config.json and fill in
