@@ -159,7 +159,11 @@ def init_otel_metrics(
     )
 
     provider = MeterProvider(resource=resource, metric_readers=[reader])
-    metrics.set_meter_provider(provider)
+    try:
+        metrics.set_meter_provider(provider)
+    except Exception:
+        provider.shutdown()
+        raise
     _meter_provider = provider
     _initialized = True
     logger.info(
