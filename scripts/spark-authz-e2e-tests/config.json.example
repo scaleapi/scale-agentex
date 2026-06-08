@@ -1,0 +1,32 @@
+{
+  "agentex_api": {
+    "base_url": "https://scale-agentex.dev.scale.com"
+  },
+  "spark_authz": {
+    "host": "spark-authz.dev.scale.com:443",
+    "use_tls": true
+  },
+  "users": {
+    "user_a": {
+      "headers": {
+        "Authorization": "Bearer <user_a_token>"
+      },
+      "identity_id": "<user_a_identity_uuid>",
+      "account_id": "<shared_account_uuid>",
+      "subject_type": "identity"
+    },
+    "user_b": {
+      "headers": {
+        "Authorization": "Bearer <user_b_token>"
+      },
+      "identity_id": "<user_b_identity_uuid>",
+      "account_id": "<shared_account_uuid>",
+      "subject_type": "identity"
+    }
+  },
+  "test_settings": {
+    "request_timeout_seconds": 30,
+    "cleanup_on_success": true,
+    "cleanup_on_failure": true
+  }
+}
