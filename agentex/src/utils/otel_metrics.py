@@ -157,8 +157,9 @@ def init_otel_metrics(
         export_interval_millis=resolved_export_interval_ms,
     )
 
-    _meter_provider = MeterProvider(resource=resource, metric_readers=[reader])
-    metrics.set_meter_provider(_meter_provider)
+    provider = MeterProvider(resource=resource, metric_readers=[reader])
+    metrics.set_meter_provider(provider)
+    _meter_provider = provider
     _initialized = True
     logger.info(
         f"OpenTelemetry metrics initialized: endpoint={endpoint}, "
