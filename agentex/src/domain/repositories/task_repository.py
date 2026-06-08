@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
 from fastapi import Depends
-from sqlalchemy import select, update
+from sqlalchemy import distinct, func, select, update
 from sqlalchemy.orm import selectinload
 from src.adapters.crud_store.adapter_postgres import (
     ColumnPrimitiveValue,
@@ -136,6 +136,28 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
         )
         if after_id is not None:
             query = query.where(TaskORM.id > after_id)
+
+        async with self.start_async_db_session(allow_writes=False) as session:
+            result = await session.execute(query)
+            return [row[0] for row in result.all()]
+
+    async def list_multi_agent_task_ids(self, *, task_ids: Sequence[str]) -> list[str]:
+        """
+        Return task IDs from the provided candidate set that are linked to >1 agent.
+
+        Scheduled cleanup is task-wide, so multi-agent tasks are skipped by the
+        sweep even when one associated agent is allowlisted.
+        """
+        if not task_ids:
+            return []
+
+        query = (
+            select(TaskAgentORM.task_id)
+            .where(TaskAgentORM.task_id.in_(task_ids))
+            .group_by(TaskAgentORM.task_id)
+            .having(func.count(distinct(TaskAgentORM.agent_id)) > 1)
+            .order_by(TaskAgentORM.task_id.asc())
+        )
 
         async with self.start_async_db_session(allow_writes=False) as session:
             result = await session.execute(query)

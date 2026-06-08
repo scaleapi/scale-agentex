@@ -5,6 +5,7 @@ Three activities:
 - load_cleanup_config: reads RETENTION_CLEANUP_* env vars at run time so policy
   changes take effect on the next scheduled run without recreating the schedule.
 - find_cleanup_candidates: cheap pre-filtered, keyset-paginated discovery.
+- find_multi_agent_cleanup_candidates: preflight guard for task-wide cleanup.
 - clean_task: delegates to TaskRetentionUseCase.clean_task; catches ClientError
   (the three policy/safety refusals) and maps it to a 'skipped' outcome so the
   caller's child workflow completes cleanly. Genuine transient errors propagate
@@ -27,12 +28,15 @@ logger = make_logger(__name__)
 
 LOAD_CLEANUP_CONFIG_ACTIVITY = "load_cleanup_config_activity"
 FIND_CLEANUP_CANDIDATES_ACTIVITY = "find_cleanup_candidates_activity"
+FIND_MULTI_AGENT_CLEANUP_CANDIDATES_ACTIVITY = (
+    "find_multi_agent_cleanup_candidates_activity"
+)
 CLEAN_TASK_ACTIVITY = "clean_task_activity"
 
 
 class CleanTaskOutcome(TypedDict):
     task_id: str
-    status: str  # "cleaned" | "skipped"
+    status: str  # "cleaned" | "dry_run" | "skipped"
     reason: str | None
     messages_deleted: int
     task_states_deleted: int
@@ -68,6 +72,7 @@ class RetentionCleanupActivities:
             "agent_names": env.RETENTION_CLEANUP_AGENT_ALLOWLIST,
             "page_size": env.RETENTION_CLEANUP_PAGE_SIZE,
             "max_in_flight": env.RETENTION_CLEANUP_MAX_IN_FLIGHT,
+            "dry_run": env.RETENTION_CLEANUP_DRY_RUN,
         }
 
     @activity.defn(name=FIND_CLEANUP_CANDIDATES_ACTIVITY)
@@ -105,8 +110,27 @@ class RetentionCleanupActivities:
         logger.info("find_cleanup_candidates_completed", extra={"count": len(result)})
         return result
 
+    @activity.defn(name=FIND_MULTI_AGENT_CLEANUP_CANDIDATES_ACTIVITY)
+    async def find_multi_agent_cleanup_candidates(
+        self, task_ids: list[str]
+    ) -> list[str]:
+        """
+        Return candidate task IDs that are associated with more than one agent.
+
+        Cleanup deletes task-wide content, so these are skipped by the scheduled
+        workflow before any per-task child workflow can run.
+        """
+        result = await self.task_repository.list_multi_agent_task_ids(task_ids=task_ids)
+        logger.info(
+            "find_multi_agent_cleanup_candidates_completed",
+            extra={"count": len(result)},
+        )
+        return result
+
     @activity.defn(name=CLEAN_TASK_ACTIVITY)
-    async def clean_task(self, task_id: str, idle_days: int) -> CleanTaskOutcome:
+    async def clean_task(
+        self, task_id: str, idle_days: int, dry_run: bool = False
+    ) -> CleanTaskOutcome:
         """
         Delete the stored content (messages, states, events) for a single task.
 
@@ -121,6 +145,22 @@ class RetentionCleanupActivities:
             cleaned).  Other exceptions propagate so Temporal can retry them.
         """
         try:
+            if dry_run:
+                result = await self.use_case.preview_clean_task(
+                    task_id=task_id, force=False, idle_days=idle_days
+                )
+                logger.info(
+                    "task_cleanup_dry_run",
+                    extra={"task_id": result.task_id},
+                )
+                return {
+                    "task_id": result.task_id,
+                    "status": "dry_run",
+                    "reason": "would_clean",
+                    "messages_deleted": 0,
+                    "task_states_deleted": 0,
+                    "events_deleted": 0,
+                }
             result = await self.use_case.clean_task(
                 task_id=task_id, force=False, idle_days=idle_days
             )

@@ -17,6 +17,7 @@ from datetime import timedelta
 from src.temporal.activities.retention_cleanup_activities import (
     CLEAN_TASK_ACTIVITY,
     FIND_CLEANUP_CANDIDATES_ACTIVITY,
+    FIND_MULTI_AGENT_CLEANUP_CANDIDATES_ACTIVITY,
     LOAD_CLEANUP_CONFIG_ACTIVITY,
 )
 from src.utils.logging import make_logger
@@ -36,7 +37,7 @@ class RetentionCleanupTaskWorkflow:
     async def run(self, args: dict) -> dict:
         return await workflow.execute_activity(
             CLEAN_TASK_ACTIVITY,
-            args=[args["task_id"], args["idle_days"]],
+            args=[args["task_id"], args["idle_days"], args.get("dry_run", False)],
             start_to_close_timeout=timedelta(seconds=60),
             retry_policy=RetryPolicy(
                 maximum_attempts=3,
@@ -71,6 +72,7 @@ class RetentionCleanupSweepWorkflow:
         agent_names = args["agent_names"]
         page_size = args.get("page_size", 200)
         max_in_flight = args.get("max_in_flight", 20)
+        dry_run = args.get("dry_run", False)
         after_id = args.get("after_id")
         totals = args.get("totals", {"cleaned": 0, "skipped": 0, "failed": 0})
 
@@ -93,6 +95,33 @@ class RetentionCleanupSweepWorkflow:
             logger.info("retention_cleanup_sweep_completed", extra=totals)
             return totals
 
+        page_last_id = task_ids[-1]
+        multi_agent_task_ids = await workflow.execute_activity(
+            FIND_MULTI_AGENT_CLEANUP_CANDIDATES_ACTIVITY,
+            args=[task_ids],
+            start_to_close_timeout=timedelta(seconds=30),
+            retry_policy=RetryPolicy(
+                maximum_attempts=3,
+                initial_interval=timedelta(seconds=1),
+                backoff_coefficient=2.0,
+            ),
+        )
+        if multi_agent_task_ids:
+            multi_agent_task_id_set = set(multi_agent_task_ids)
+            totals["skipped"] = totals.get("skipped", 0) + len(multi_agent_task_ids)
+            totals["skipped_multi_agent"] = totals.get("skipped_multi_agent", 0) + len(
+                multi_agent_task_ids
+            )
+            logger.warning(
+                "retention_cleanup_multi_agent_candidates_skipped",
+                extra={"task_ids": multi_agent_task_ids},
+            )
+            task_ids = [
+                task_id
+                for task_id in task_ids
+                if task_id not in multi_agent_task_id_set
+            ]
+
         # Scope child workflow IDs to this run so a task re-discovered in a later
         # sweep (e.g. one that was skipped) doesn't collide with a prior cycle's
         # completed child under a REJECT_DUPLICATE workflow-id-reuse policy.
@@ -102,7 +131,11 @@ class RetentionCleanupSweepWorkflow:
                 *[
                     workflow.execute_child_workflow(
                         RetentionCleanupTaskWorkflow.run,
-                        {"task_id": task_id, "idle_days": idle_days},
+                        {
+                            "task_id": task_id,
+                            "idle_days": idle_days,
+                            "dry_run": dry_run,
+                        },
                         id=f"retention-cleanup-task-{sweep_run_id}-{task_id}",
                         retry_policy=RetryPolicy(maximum_attempts=1),
                     )
@@ -124,7 +157,8 @@ class RetentionCleanupSweepWorkflow:
                 "agent_names": agent_names,
                 "page_size": page_size,
                 "max_in_flight": max_in_flight,
-                "after_id": task_ids[-1],
+                "dry_run": dry_run,
+                "after_id": page_last_id,
                 "totals": totals,
             }
         )

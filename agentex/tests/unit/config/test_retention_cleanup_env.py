@@ -10,6 +10,7 @@ def test_retention_cleanup_env_parses_enabled_and_allowlist(monkeypatch):
     monkeypatch.setenv("RETENTION_CLEANUP_CRON", "0 3 * * *")
     monkeypatch.setenv("RETENTION_CLEANUP_PAGE_SIZE", "50")
     monkeypatch.setenv("RETENTION_CLEANUP_MAX_IN_FLIGHT", "5")
+    monkeypatch.setenv("RETENTION_CLEANUP_DRY_RUN", "true")
 
     env = EnvironmentVariables.refresh(force_refresh=True)
 
@@ -19,6 +20,7 @@ def test_retention_cleanup_env_parses_enabled_and_allowlist(monkeypatch):
     assert env.RETENTION_CLEANUP_CRON == "0 3 * * *"
     assert env.RETENTION_CLEANUP_PAGE_SIZE == 50
     assert env.RETENTION_CLEANUP_MAX_IN_FLIGHT == 5
+    assert env.RETENTION_CLEANUP_DRY_RUN is True
 
 
 @pytest.mark.unit
@@ -30,6 +32,7 @@ def test_retention_cleanup_env_defaults(monkeypatch):
         "RETENTION_CLEANUP_CRON",
         "RETENTION_CLEANUP_PAGE_SIZE",
         "RETENTION_CLEANUP_MAX_IN_FLIGHT",
+        "RETENTION_CLEANUP_DRY_RUN",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -41,3 +44,4 @@ def test_retention_cleanup_env_defaults(monkeypatch):
     assert env.RETENTION_CLEANUP_CRON == "0 4 * * *"
     assert env.RETENTION_CLEANUP_PAGE_SIZE == 200
     assert env.RETENTION_CLEANUP_MAX_IN_FLIGHT == 20
+    assert env.RETENTION_CLEANUP_DRY_RUN is False

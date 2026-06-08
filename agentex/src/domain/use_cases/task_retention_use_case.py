@@ -58,6 +58,22 @@ class TaskRetentionUseCase:
             idle_days=idle_days,
         )
 
+    async def preview_clean_task(
+        self,
+        task_id: str,
+        force: bool = False,
+        idle_days: int = 7,
+    ) -> TaskCleanupResultEntity:
+        """
+        Dry-run counterpart to clean_task: runs the same safety checks without
+        deleting content or setting cleaned_at.
+        """
+        return await self.retention_service.preview_clean_task(
+            task_id=task_id,
+            enforce_idle_threshold=not force,
+            idle_days=idle_days,
+        )
+
     async def rehydrate_task(
         self,
         task_id: str,

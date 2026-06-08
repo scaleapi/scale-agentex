@@ -174,6 +174,7 @@ def create_agentex_server_worker(
                 health_check_activities.update_agent_status_activity,
                 retention_activities.load_cleanup_config,
                 retention_activities.find_cleanup_candidates,
+                retention_activities.find_multi_agent_cleanup_candidates,
                 retention_activities.clean_task,
             ],
             max_workers=50,

@@ -287,6 +287,56 @@ class TaskRetentionService:
 
         return result
 
+    async def preview_clean_task(
+        self,
+        task_id: str,
+        *,
+        enforce_idle_threshold: bool = True,
+        idle_days: int = 7,
+    ) -> TaskCleanupResultEntity:
+        """
+        Run the same safety checks as clean_task without deleting or updating data.
+
+        This supports scheduled cleanup dry-runs in deployed environments: operators
+        can confirm which tasks would pass the final deletion guards before enabling
+        writes. The returned counts are intentionally zero because no write was
+        attempted.
+        """
+        task = await self.task_repository.get(id=task_id)
+        if task.cleaned_at is not None:
+            cleaned_at = task.cleaned_at
+        else:
+            if task.status == TaskStatus.RUNNING:
+                raise ClientError(
+                    f"Cannot clean task {task_id}: status is RUNNING (active)"
+                )
+            if enforce_idle_threshold and not await self._is_task_idle(task, idle_days):
+                raise ClientError(
+                    f"Cannot clean task {task_id}: not idle for {idle_days} days "
+                    f"(use force=true to override)"
+                )
+            if await self._has_unprocessed_events(task_id):
+                raise ClientError(
+                    f"Cannot clean task {task_id}: unprocessed events remain"
+                )
+            cleaned_at = datetime.now(UTC)
+
+        result = TaskCleanupResultEntity(
+            task_id=task_id,
+            cleaned_at=cleaned_at,
+            messages_deleted=0,
+            task_states_deleted=0,
+            events_deleted=0,
+        )
+        logger.info(
+            "task_cleanup_dry_run_completed",
+            extra={
+                "task_id": result.task_id,
+                "checked_at": result.cleaned_at.isoformat(),
+            },
+        )
+        return result
+
     async def rehydrate_task(
         self,
         task_id: str,

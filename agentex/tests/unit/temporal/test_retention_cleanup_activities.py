@@ -28,6 +28,19 @@ async def test_find_cleanup_candidates_delegates_to_repo():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_find_multi_agent_cleanup_candidates_delegates_to_repo():
+    repo = AsyncMock()
+    repo.list_multi_agent_task_ids.return_value = ["t2"]
+    activities = RetentionCleanupActivities(task_repository=repo, use_case=AsyncMock())
+
+    result = await activities.find_multi_agent_cleanup_candidates(["t1", "t2"])
+
+    assert result == ["t2"]
+    repo.list_multi_agent_task_ids.assert_awaited_once_with(task_ids=["t1", "t2"])
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_clean_task_cleaned_outcome():
     use_case = AsyncMock()
     use_case.clean_task.return_value = TaskCleanupResultEntity(
@@ -41,12 +54,38 @@ async def test_clean_task_cleaned_outcome():
         task_repository=AsyncMock(), use_case=use_case
     )
 
-    outcome = await activities.clean_task(task_id="t1", idle_days=7)
+    outcome = await activities.clean_task(task_id="t1", idle_days=7, dry_run=False)
 
     assert outcome["status"] == "cleaned"
     assert outcome["task_id"] == "t1"
     assert outcome["messages_deleted"] == 3
     use_case.clean_task.assert_awaited_once_with(task_id="t1", force=False, idle_days=7)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_clean_task_dry_run_validates_without_writes():
+    use_case = AsyncMock()
+    use_case.preview_clean_task.return_value = TaskCleanupResultEntity(
+        task_id="t1",
+        cleaned_at=datetime.now(UTC),
+        messages_deleted=0,
+        task_states_deleted=0,
+        events_deleted=0,
+    )
+    activities = RetentionCleanupActivities(
+        task_repository=AsyncMock(), use_case=use_case
+    )
+
+    outcome = await activities.clean_task(task_id="t1", idle_days=7, dry_run=True)
+
+    assert outcome["status"] == "dry_run"
+    assert outcome["task_id"] == "t1"
+    assert outcome["reason"] == "would_clean"
+    use_case.preview_clean_task.assert_awaited_once_with(
+        task_id="t1", force=False, idle_days=7
+    )
+    use_case.clean_task.assert_not_awaited()
 
 
 @pytest.mark.unit
@@ -60,7 +99,7 @@ async def test_clean_task_clienterror_maps_to_skipped():
         task_repository=AsyncMock(), use_case=use_case
     )
 
-    outcome = await activities.clean_task(task_id="t1", idle_days=7)
+    outcome = await activities.clean_task(task_id="t1", idle_days=7, dry_run=False)
 
     assert outcome["status"] == "skipped"
     assert "RUNNING" in outcome["reason"]
@@ -77,7 +116,7 @@ async def test_clean_task_unexpected_error_propagates():
     )
 
     with pytest.raises(RuntimeError):
-        await activities.clean_task(task_id="t1", idle_days=7)
+        await activities.clean_task(task_id="t1", idle_days=7, dry_run=False)
 
 
 @pytest.mark.unit
@@ -88,6 +127,7 @@ async def test_load_cleanup_config_reads_env(monkeypatch):
     monkeypatch.setenv("RETENTION_CLEANUP_IDLE_DAYS", "9")
     monkeypatch.setenv("RETENTION_CLEANUP_PAGE_SIZE", "33")
     monkeypatch.setenv("RETENTION_CLEANUP_MAX_IN_FLIGHT", "4")
+    monkeypatch.setenv("RETENTION_CLEANUP_DRY_RUN", "true")
     activities = RetentionCleanupActivities(
         task_repository=AsyncMock(), use_case=AsyncMock()
     )
@@ -98,4 +138,5 @@ async def test_load_cleanup_config_reads_env(monkeypatch):
         "agent_names": ["x", "y"],
         "page_size": 33,
         "max_in_flight": 4,
+        "dry_run": True,
     }

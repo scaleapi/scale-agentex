@@ -43,6 +43,12 @@ async def _seed_task(
     )
 
 
+async def _link_task_to_agent(session, *, task_id: str, agent_id: str) -> None:
+    await session.execute(
+        insert(TaskAgentORM).values(task_id=task_id, agent_id=agent_id)
+    )
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_discovery_filters_and_keyset_paging(isolated_repositories):
@@ -113,3 +119,42 @@ async def test_discovery_empty_allowlist_returns_nothing(isolated_repositories):
         idle_days=7, agent_names=[], after_id=None, limit=100
     )
     assert ids == []
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_multi_agent_preflight_flags_candidate_with_multiple_agents(
+    isolated_repositories,
+):
+    repo = isolated_repositories["task_repository"]
+    now = datetime.now(UTC)
+    old = now - timedelta(days=30)
+
+    async with isolated_repositories["postgres_rw_session_factory"]() as session:
+        await _seed_agent(session, "agent-allowed", "allowed-agent")
+        await _seed_agent(session, "agent-sidecar", "sidecar-agent")
+        await _seed_task(
+            session,
+            task_id="t-single",
+            agent_id="agent-allowed",
+            updated_at=old,
+            cleaned_at=None,
+        )
+        await _seed_task(
+            session,
+            task_id="t-multi",
+            agent_id="agent-allowed",
+            updated_at=old,
+            cleaned_at=None,
+        )
+        await _link_task_to_agent(session, task_id="t-multi", agent_id="agent-sidecar")
+        await session.commit()
+
+    ids = await repo.list_cleanup_candidate_ids(
+        idle_days=7, agent_names=["allowed-agent"], after_id=None, limit=100
+    )
+    assert ids == ["t-multi", "t-single"]
+
+    multi_agent_ids = await repo.list_multi_agent_task_ids(task_ids=ids)
+
+    assert multi_agent_ids == ["t-multi"]
