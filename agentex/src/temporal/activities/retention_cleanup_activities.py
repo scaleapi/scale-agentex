@@ -129,7 +129,7 @@ class RetentionCleanupActivities:
 
     @activity.defn(name=CLEAN_TASK_ACTIVITY)
     async def clean_task(
-        self, task_id: str, idle_days: int, dry_run: bool = False
+        self, task_id: str, idle_days: int, dry_run: bool = True
     ) -> CleanTaskOutcome:
         """
         Delete the stored content (messages, states, events) for a single task.
@@ -137,6 +137,8 @@ class RetentionCleanupActivities:
         Args:
             task_id: ID of the task to clean.
             idle_days: Passed through to the use case for policy checks.
+            dry_run: When omitted, preview only. Operators must pass False to
+                enable writes.
 
         Returns:
             CleanTaskOutcome with ``status`` set to ``"cleaned"`` when content was

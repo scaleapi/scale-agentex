@@ -64,7 +64,7 @@ async def test_clean_task_cleaned_outcome():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_clean_task_dry_run_validates_without_writes():
+async def test_clean_task_defaults_to_dry_run_and_validates_without_writes():
     use_case = AsyncMock()
     use_case.preview_clean_task.return_value = TaskCleanupResultEntity(
         task_id="t1",
@@ -77,7 +77,7 @@ async def test_clean_task_dry_run_validates_without_writes():
         task_repository=AsyncMock(), use_case=use_case
     )
 
-    outcome = await activities.clean_task(task_id="t1", idle_days=7, dry_run=True)
+    outcome = await activities.clean_task(task_id="t1", idle_days=7)
 
     assert outcome["status"] == "dry_run"
     assert outcome["task_id"] == "t1"

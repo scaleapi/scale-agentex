@@ -127,7 +127,7 @@ class EnvironmentVariables(BaseModel):
     RETENTION_CLEANUP_CRON: str = "0 4 * * *"
     RETENTION_CLEANUP_PAGE_SIZE: int = 200
     RETENTION_CLEANUP_MAX_IN_FLIGHT: int = 20
-    RETENTION_CLEANUP_DRY_RUN: bool = False
+    RETENTION_CLEANUP_DRY_RUN: bool = True
 
     @classmethod
     def refresh(cls, force_refresh: bool = False) -> EnvironmentVariables | None:
@@ -240,7 +240,7 @@ class EnvironmentVariables(BaseModel):
                 os.environ.get(EnvVarKeys.RETENTION_CLEANUP_MAX_IN_FLIGHT, "20")
             ),
             RETENTION_CLEANUP_DRY_RUN=(
-                os.environ.get(EnvVarKeys.RETENTION_CLEANUP_DRY_RUN, "false") == "true"
+                os.environ.get(EnvVarKeys.RETENTION_CLEANUP_DRY_RUN, "true") == "true"
             ),
         )
         refreshed_environment_variables = environment_variables

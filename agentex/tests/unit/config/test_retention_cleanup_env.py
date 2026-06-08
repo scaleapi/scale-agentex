@@ -44,4 +44,13 @@ def test_retention_cleanup_env_defaults(monkeypatch):
     assert env.RETENTION_CLEANUP_CRON == "0 4 * * *"
     assert env.RETENTION_CLEANUP_PAGE_SIZE == 200
     assert env.RETENTION_CLEANUP_MAX_IN_FLIGHT == 20
+    assert env.RETENTION_CLEANUP_DRY_RUN is True
+
+
+@pytest.mark.unit
+def test_retention_cleanup_env_allows_explicit_dry_run_false(monkeypatch):
+    monkeypatch.setenv("RETENTION_CLEANUP_DRY_RUN", "false")
+
+    env = EnvironmentVariables.refresh(force_refresh=True)
+
     assert env.RETENTION_CLEANUP_DRY_RUN is False

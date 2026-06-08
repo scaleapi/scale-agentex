@@ -67,6 +67,7 @@ async def test_sweep_cleans_all_pages_and_aggregates():
                     "agent_names": ["a"],
                     "page_size": 2,
                     "max_in_flight": 2,
+                    "dry_run": False,
                 },
                 id=f"sweep-{uuid.uuid4()}",
                 task_queue="test-retention",
@@ -102,12 +103,12 @@ async def test_sweep_loads_config_from_activity_when_no_args():
 
     @activity.defn(name=CLEAN_TASK_ACTIVITY)
     async def fake_clean(task_id: str, idle_days: int, dry_run: bool) -> dict:
-        assert dry_run is False
+        assert dry_run is True
         return {
             "task_id": task_id,
-            "status": "cleaned",
-            "reason": None,
-            "messages_deleted": 1,
+            "status": "dry_run",
+            "reason": "would_clean",
+            "messages_deleted": 0,
             "task_states_deleted": 0,
             "events_deleted": 0,
         }
@@ -125,7 +126,8 @@ async def test_sweep_loads_config_from_activity_when_no_args():
                 id=f"sweep-{uuid.uuid4()}",
                 task_queue="test-retention-load",
             )
-    assert summary["cleaned"] == 1
+    assert summary["dry_run"] == 1
+    assert summary["cleaned"] == 0
 
 
 @pytest.mark.unit
@@ -212,6 +214,7 @@ async def test_sweep_skips_multi_agent_candidates_before_cleanup():
                     "agent_names": ["a"],
                     "page_size": 3,
                     "max_in_flight": 2,
+                    "dry_run": False,
                 },
                 id=f"sweep-{uuid.uuid4()}",
                 task_queue="test-retention-multi-agent",

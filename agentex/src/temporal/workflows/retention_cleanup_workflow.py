@@ -37,7 +37,7 @@ class RetentionCleanupTaskWorkflow:
     async def run(self, args: dict) -> dict:
         return await workflow.execute_activity(
             CLEAN_TASK_ACTIVITY,
-            args=[args["task_id"], args["idle_days"], args.get("dry_run", False)],
+            args=[args["task_id"], args["idle_days"], args.get("dry_run", True)],
             start_to_close_timeout=timedelta(seconds=60),
             retry_policy=RetryPolicy(
                 maximum_attempts=3,
@@ -72,7 +72,7 @@ class RetentionCleanupSweepWorkflow:
         agent_names = args["agent_names"]
         page_size = args.get("page_size", 200)
         max_in_flight = args.get("max_in_flight", 20)
-        dry_run = args.get("dry_run", False)
+        dry_run = args.get("dry_run", True)
         after_id = args.get("after_id")
         totals = args.get("totals", {"cleaned": 0, "skipped": 0, "failed": 0})
 
