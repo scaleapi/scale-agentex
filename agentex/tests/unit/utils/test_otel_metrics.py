@@ -13,8 +13,10 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
     OTLPMetricExporter as OTLPHttpMetricExporter,
 )
 from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from opentelemetry.sdk.resources import Resource
 from src.utils import otel_metrics
+from src.utils import cache_metrics
 
 
 def _set_global_meter_provider(provider: object | None = None) -> None:
@@ -184,6 +186,49 @@ def test_metrics_endpoint_takes_precedence_over_general_endpoint(monkeypatch):
 
 
 @pytest.mark.unit
+def test_custom_metrics_preserve_instrument_attributes_in_shared_mode():
+    """Instrument names and point attributes must not change when attaching to operator provider."""
+    cache_metrics._instruments_initialized = False
+    cache_metrics._access_counter = None
+    cache_metrics._eviction_counter = None
+
+    reader = InMemoryMetricReader()
+    operator_provider = MeterProvider(
+        resource=Resource.create({"service.name": "operator-svc"}),
+        metric_readers=[reader],
+    )
+    _set_global_meter_provider(operator_provider)
+
+    otel_metrics.init_otel_metrics()
+    cache_metrics.record_cache_access("auth_gateway", "hit")
+    cache_metrics.record_cache_eviction("agent_api_key")
+
+    data = reader.get_metrics_data()
+    assert data is not None
+    points = [
+        (
+            metric.name,
+            scope.scope.name,
+            dict(data_point.attributes),
+        )
+        for resource_metrics in data.resource_metrics
+        for scope in resource_metrics.scope_metrics
+        for metric in scope.metrics
+        for data_point in metric.data.data_points
+    ]
+    assert (
+        "auth_cache.access",
+        "agentex.auth_cache",
+        {"cache": "auth_gateway", "result": "hit"},
+    ) in points
+    assert (
+        "auth_cache.eviction",
+        "agentex.auth_cache",
+        {"cache": "agent_api_key"},
+    ) in points
+
+
+@pytest.mark.unit
 def test_init_after_shutdown_in_standalone_mode(monkeypatch):
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
 
@@ -195,6 +240,20 @@ def test_init_after_shutdown_in_standalone_mode(monkeypatch):
     assert second is not None
     assert second is not first
     assert otel_metrics.get_meter("agentex.test") is not None
+
+
+@pytest.mark.unit
+def test_shutdown_resets_state_when_provider_shutdown_raises(monkeypatch):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+    provider = otel_metrics.init_otel_metrics()
+    assert provider is not None
+
+    with patch.object(provider, "shutdown", side_effect=RuntimeError("export failed")):
+        otel_metrics.shutdown_otel_metrics()
+
+    assert otel_metrics._initialized is False
+    assert otel_metrics._meter_provider is None
+    assert otel_metrics.init_otel_metrics() is not None
 
 
 @pytest.mark.unit

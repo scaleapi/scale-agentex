@@ -198,13 +198,20 @@ def shutdown_otel_metrics() -> None:
     """
     global _meter_provider, _initialized
 
-    if _meter_provider is not None:
-        _meter_provider.shutdown()
-        metrics.set_meter_provider(NoOpMeterProvider())
-        logger.info("OpenTelemetry metrics shut down")
-
-    _meter_provider = None
-    _initialized = False
+    try:
+        if _meter_provider is not None:
+            _meter_provider.shutdown()
+            logger.info("OpenTelemetry metrics shut down")
+    except Exception:
+        logger.exception("OpenTelemetry metrics shutdown failed")
+    finally:
+        if _meter_provider is not None:
+            try:
+                metrics.set_meter_provider(NoOpMeterProvider())
+            except Exception:
+                logger.exception("Failed to reset global MeterProvider after shutdown")
+        _meter_provider = None
+        _initialized = False
 
 
 def is_otel_configured() -> bool:
