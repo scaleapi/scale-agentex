@@ -45,6 +45,10 @@ logger = make_logger(__name__)
 _meter_provider: MeterProvider | None = None # Set only when this module creates the provider
 _initialized: bool = False
 
+# Default configuration
+DEFAULT_SERVICE_NAME = "agentex"
+DEFAULT_EXPORT_INTERVAL_MS = 30000  # 30 seconds
+
 
 def _global_meter_provider() -> MeterProvider | None:
     """Return the global MeterProvider if installed, else None (proxy is ignored)."""
@@ -128,12 +132,16 @@ def init_otel_metrics(
 
     protocol = _metrics_protocol()
     resolved_service_name = service_name or os.environ.get(
-        "OTEL_SERVICE_NAME", "agentex"
+        "OTEL_SERVICE_NAME", DEFAULT_SERVICE_NAME
     )
     resolved_export_interval_ms = (
         export_interval_ms
         if export_interval_ms is not None
-        else int(os.environ.get("OTEL_METRICS_EXPORT_INTERVAL_MS", 30000))
+        else int(
+            os.environ.get(
+                "OTEL_METRICS_EXPORT_INTERVAL_MS", DEFAULT_EXPORT_INTERVAL_MS
+            )
+        )
     )
     resource = Resource.create(
         {
