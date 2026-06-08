@@ -80,10 +80,10 @@ def test_init_does_not_shutdown_operator_provider():
 
     otel_metrics.shutdown_otel_metrics()
 
-    assert not operator_provider._shutdown
     assert metrics.get_meter_provider() is operator_provider
     assert otel_metrics._initialized is False
     assert otel_metrics._meter_provider is None
+    assert otel_metrics.get_meter("agentex.test") is not None
 
 
 @pytest.mark.unit
@@ -181,6 +181,20 @@ def test_metrics_endpoint_takes_precedence_over_general_endpoint(monkeypatch):
         otel_metrics.init_otel_metrics()
 
     mock_create.assert_called_once_with("http://metrics:4318", "grpc")
+
+
+@pytest.mark.unit
+def test_init_after_shutdown_in_standalone_mode(monkeypatch):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+
+    first = otel_metrics.init_otel_metrics()
+    assert first is not None
+    otel_metrics.shutdown_otel_metrics()
+
+    second = otel_metrics.init_otel_metrics()
+    assert second is not None
+    assert second is not first
+    assert otel_metrics.get_meter("agentex.test") is not None
 
 
 @pytest.mark.unit

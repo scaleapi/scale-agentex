@@ -23,6 +23,7 @@ import os
 from typing import TYPE_CHECKING
 
 from opentelemetry import metrics
+from opentelemetry.metrics import NoOpMeterProvider
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
     OTLPMetricExporter as OTLPGrpcMetricExporter,
 )
@@ -199,6 +200,7 @@ def shutdown_otel_metrics() -> None:
 
     if _meter_provider is not None:
         _meter_provider.shutdown()
+        metrics.set_meter_provider(NoOpMeterProvider())
         logger.info("OpenTelemetry metrics shut down")
 
     _meter_provider = None
