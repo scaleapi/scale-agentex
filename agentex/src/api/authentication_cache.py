@@ -7,6 +7,7 @@ import time
 from collections import OrderedDict
 from typing import Any
 
+from src.utils.cache_metrics import record_cache_access, record_cache_eviction
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
@@ -27,14 +28,16 @@ Thread-safe and async-safe implementation using asyncio locks.
 class AsyncTTLCache:
     """Async-safe TTL cache implementation using OrderedDict with asyncio locks."""
 
-    def __init__(self, max_size: int = 1000, ttl_seconds: int = 300):
+    def __init__(self, name: str, max_size: int = 1000, ttl_seconds: int = 300):
         """
         Initialize async-safe TTL cache.
 
         Args:
+            name: Logical cache name, used as the ``cache`` tag on emitted metrics
             max_size: Maximum number of entries in the cache
             ttl_seconds: Time-to-live for cache entries in seconds
         """
+        self.name = name
         self.cache: OrderedDict[str, tuple[Any, float]] = OrderedDict()
         self.max_size = max_size
         self.ttl_seconds = ttl_seconds
@@ -44,6 +47,10 @@ class AsyncTTLCache:
         """Get value from cache if it exists and hasn't expired."""
         async with self._lock:
             if key not in self.cache:
+                # MISS: the key was never cached (or was already evicted). In a
+                # load test this dominating means the key never repeats (unique
+                # creds/cookies per request) or the cache is cold per-worker.
+                record_cache_access(self.name, "miss_absent")
                 return None
 
             value, timestamp = self.cache[key]
@@ -51,10 +58,15 @@ class AsyncTTLCache:
             # Check if entry has expired
             if time.time() - timestamp > self.ttl_seconds:
                 del self.cache[key]
+                # MISS: the key was present but past its TTL. This dominating
+                # means the TTL is too short for the request rate (churn).
+                record_cache_access(self.name, "miss_expired")
                 return None
 
             # Move to end (most recently used)
             self.cache.move_to_end(key)
+            # HIT: present and fresh.
+            record_cache_access(self.name, "hit")
             return value
 
     async def set(self, key: str, value: Any) -> None:
@@ -63,6 +75,7 @@ class AsyncTTLCache:
             # Remove oldest entry if cache is full
             if len(self.cache) >= self.max_size and key not in self.cache:
                 self.cache.popitem(last=False)
+                record_cache_eviction(self.name)
 
             self.cache[key] = (value, time.time())
             self.cache.move_to_end(key)
@@ -117,12 +130,20 @@ class AuthenticationCache:
             authorization_cache_ttl: TTL for authorization checks in seconds
             max_cache_size: Maximum number of entries per cache
         """
-        # Separate async-safe caches for different authentication types
-        self.agent_identity_cache = AsyncTTLCache(max_cache_size, agent_cache_ttl)
-        self.agent_api_key_cache = AsyncTTLCache(max_cache_size, agent_cache_ttl)
-        self.auth_gateway_cache = AsyncTTLCache(max_cache_size, auth_gateway_cache_ttl)
+        # Separate async-safe caches for different authentication types.
+        # The name is used as the ``cache`` tag on emitted metrics so hit rate
+        # can be broken down per flow.
+        self.agent_identity_cache = AsyncTTLCache(
+            "agent_identity", max_cache_size, agent_cache_ttl
+        )
+        self.agent_api_key_cache = AsyncTTLCache(
+            "agent_api_key", max_cache_size, agent_cache_ttl
+        )
+        self.auth_gateway_cache = AsyncTTLCache(
+            "auth_gateway", max_cache_size, auth_gateway_cache_ttl
+        )
         self.authorization_check_cache = AsyncTTLCache(
-            max_cache_size, authorization_cache_ttl
+            "authorization_check", max_cache_size, authorization_cache_ttl
         )
 
         logger.info(
