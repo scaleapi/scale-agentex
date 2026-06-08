@@ -139,7 +139,7 @@ class AgentTaskService:
         task: TaskEntity,
         task_params: dict[str, Any] | None = None,
         acp_url: str | None = None,
-    ) -> None:
+    ) -> TaskEntity:
         try:
             await self.acp_client.create_task(
                 agent=agent,
@@ -151,6 +151,18 @@ class AgentTaskService:
             logger.error(f"Error creating task in ACP: {e}")
             await self.fail_task(task, str(e))
             raise e from e
+
+        # The forward succeeded: the agent has accepted the task. If this task
+        # was left FAILED by an earlier forward attempt (e.g. the agent was
+        # unavailable the first time task/create was called), clear that stale
+        # failure now that the agent has accepted it. Otherwise the task — and
+        # the task/create RPC response — would keep reporting the old error even
+        # though the task is actually running.
+        if task.status == TaskStatus.FAILED:
+            task.status = TaskStatus.RUNNING
+            task.status_reason = "Task forwarded to ACP server"
+            task = await self.update_task(task)
+        return task
 
     async def fail_task(self, task: TaskEntity, reason: str) -> None:
         task.status = TaskStatus.FAILED

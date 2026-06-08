@@ -430,7 +430,7 @@ class AgentsACPUseCase(TaskMessageMixin):
         )
 
         if agent.acp_type in [ACPType.AGENTIC, ACPType.ASYNC]:
-            await self.task_service.forward_task_to_acp(
+            task = await self.task_service.forward_task_to_acp(
                 agent=agent,
                 task=task,
                 task_params=params.params,

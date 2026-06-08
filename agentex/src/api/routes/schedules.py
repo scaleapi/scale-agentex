@@ -12,10 +12,16 @@ from src.api.schemas.schedules import (
     ScheduleResponse,
     UnpauseScheduleRequest,
 )
+from src.domain.services.authorization_service import DAuthorizationService
+from src.domain.services.schedule_service import build_schedule_id
 from src.domain.use_cases.agents_use_case import DAgentsUseCase
 from src.domain.use_cases.schedules_use_case import DSchedulesUseCase
-from src.utils.authorization_shortcuts import DAuthorizedId
+from src.utils.authorization_shortcuts import (
+    DAuthorizedId,
+    DAuthorizedResourceIds,
+)
 from src.utils.logging import make_logger
+from src.utils.schedule_authorization import _check_schedule_or_collapse_to_404
 
 logger = make_logger(__name__)
 
@@ -32,12 +38,17 @@ router = APIRouter(
     description="Create a new schedule for recurring workflow execution for an agent.",
 )
 async def create_schedule(
-    agent_id: DAuthorizedId(AgentexResourceType.agent, AuthorizedOperationType.execute),
+    agent_id: DAuthorizedId(AgentexResourceType.agent, AuthorizedOperationType.update),
     request: CreateScheduleRequest,
     agents_use_case: DAgentsUseCase,
     schedules_use_case: DSchedulesUseCase,
 ) -> ScheduleResponse:
-    """Create a new schedule for an agent's workflow."""
+    """Create a new schedule for an agent's workflow.
+
+    Only route with a standalone parent-agent check (no schedule resource exists
+    yet). ``agent.update`` matches the ``parent_agent->update`` gate every
+    schedule mutation transitively requires.
+    """
     agent = await agents_use_case.get(id=agent_id)
     return await schedules_use_case.create_schedule(agent, request)
 
@@ -49,12 +60,21 @@ async def create_schedule(
     description="List all schedules for an agent.",
 )
 async def list_schedules(
-    agent_id: DAuthorizedId(AgentexResourceType.agent, AuthorizedOperationType.read),
+    agent_id: str,
     schedules_use_case: DSchedulesUseCase,
+    authorized_schedule_ids: DAuthorizedResourceIds(AgentexResourceType.schedule),
     page_size: int = Query(default=100, ge=1, le=1000),
 ) -> ScheduleListResponse:
-    """List all schedules for an agent."""
-    return await schedules_use_case.list_schedules(agent_id, page_size=page_size)
+    """List schedules for an agent, filtered to those the caller owns.
+
+    Filter-only (never 403s): ``authorized_schedule_ids`` is ``None`` under authz
+    bypass (return all), else the set of readable ids (empty returns nothing).
+    """
+    return await schedules_use_case.list_schedules(
+        agent_id,
+        page_size=page_size,
+        authorized_schedule_ids=authorized_schedule_ids,
+    )
 
 
 @router.get(
@@ -64,11 +84,17 @@ async def list_schedules(
     description="Get details of a schedule by its name.",
 )
 async def get_schedule(
-    agent_id: DAuthorizedId(AgentexResourceType.agent, AuthorizedOperationType.read),
+    agent_id: str,
     schedule_name: str,
     schedules_use_case: DSchedulesUseCase,
+    authorization: DAuthorizationService,
 ) -> ScheduleResponse:
     """Get details of a schedule."""
+    await _check_schedule_or_collapse_to_404(
+        authorization,
+        build_schedule_id(agent_id, schedule_name),
+        AuthorizedOperationType.read,
+    )
     return await schedules_use_case.get_schedule(agent_id, schedule_name)
 
 
@@ -79,12 +105,18 @@ async def get_schedule(
     description="Pause a schedule to stop it from executing.",
 )
 async def pause_schedule(
-    agent_id: DAuthorizedId(AgentexResourceType.agent, AuthorizedOperationType.execute),
+    agent_id: str,
     schedule_name: str,
     schedules_use_case: DSchedulesUseCase,
+    authorization: DAuthorizationService,
     request: PauseScheduleRequest | None = None,
 ) -> ScheduleResponse:
     """Pause a schedule."""
+    await _check_schedule_or_collapse_to_404(
+        authorization,
+        build_schedule_id(agent_id, schedule_name),
+        AuthorizedOperationType.update,
+    )
     note = request.note if request else None
     return await schedules_use_case.pause_schedule(agent_id, schedule_name, note=note)
 
@@ -96,12 +128,18 @@ async def pause_schedule(
     description="Unpause/resume a schedule to allow it to execute again.",
 )
 async def unpause_schedule(
-    agent_id: DAuthorizedId(AgentexResourceType.agent, AuthorizedOperationType.execute),
+    agent_id: str,
     schedule_name: str,
     schedules_use_case: DSchedulesUseCase,
+    authorization: DAuthorizationService,
     request: UnpauseScheduleRequest | None = None,
 ) -> ScheduleResponse:
     """Unpause/resume a schedule."""
+    await _check_schedule_or_collapse_to_404(
+        authorization,
+        build_schedule_id(agent_id, schedule_name),
+        AuthorizedOperationType.update,
+    )
     note = request.note if request else None
     return await schedules_use_case.unpause_schedule(agent_id, schedule_name, note=note)
 
@@ -113,11 +151,17 @@ async def unpause_schedule(
     description="Trigger a schedule to run immediately, regardless of its regular schedule.",
 )
 async def trigger_schedule(
-    agent_id: DAuthorizedId(AgentexResourceType.agent, AuthorizedOperationType.execute),
+    agent_id: str,
     schedule_name: str,
     schedules_use_case: DSchedulesUseCase,
+    authorization: DAuthorizationService,
 ) -> ScheduleResponse:
     """Trigger a schedule to run immediately."""
+    await _check_schedule_or_collapse_to_404(
+        authorization,
+        build_schedule_id(agent_id, schedule_name),
+        AuthorizedOperationType.update,
+    )
     return await schedules_use_case.trigger_schedule(agent_id, schedule_name)
 
 
@@ -128,13 +172,18 @@ async def trigger_schedule(
     description="Delete a schedule permanently.",
 )
 async def delete_schedule(
-    agent_id: DAuthorizedId(AgentexResourceType.agent, AuthorizedOperationType.delete),
+    agent_id: str,
     schedule_name: str,
     schedules_use_case: DSchedulesUseCase,
+    authorization: DAuthorizationService,
 ) -> DeleteResponse:
     """Delete a schedule."""
+    schedule_id = build_schedule_id(agent_id, schedule_name)
+    await _check_schedule_or_collapse_to_404(
+        authorization, schedule_id, AuthorizedOperationType.delete
+    )
     await schedules_use_case.delete_schedule(agent_id, schedule_name)
     return DeleteResponse(
-        id=f"{agent_id}--{schedule_name}",
+        id=schedule_id,
         message=f"Schedule '{schedule_name}' deleted successfully",
     )

@@ -359,6 +359,72 @@ class TestAgentTaskService:
         assert updated_task.status == TaskStatus.FAILED
         assert updated_task.status_reason == reason
 
+    async def test_forward_task_to_acp_clears_stale_failed_status(
+        self,
+        task_service,
+        mock_acp_client,
+        task_repository,
+        agent_repository,
+        sample_agent,
+    ):
+        """A task left FAILED by a forward attempt while the agent was down is
+        reset to RUNNING once a later forward succeeds.
+
+        Regression test: previously forward_task_to_acp only ever wrote status
+        on failure, so a task that failed to forward while the agent was
+        unavailable stayed FAILED forever even after the agent recovered and the
+        workflow was actually created — making the task/create RPC response
+        report a misleading failure.
+        """
+        # Given - an agent and a task that fails to forward while the agent is down
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent, task_name="recovering-task"
+        )
+        mock_acp_client.create_task.side_effect = Exception(
+            "All connection attempts failed"
+        )
+        with pytest.raises(Exception, match="All connection attempts failed"):
+            await task_service.forward_task_to_acp(agent=sample_agent, task=task)
+
+        failed = await task_service.get_task(id=task.id)
+        assert failed.status == TaskStatus.FAILED
+        assert failed.status_reason == "All connection attempts failed"
+
+        # When - the agent recovers and the same task is forwarded again
+        mock_acp_client.create_task.side_effect = None
+        mock_acp_client.create_task.return_value = None
+        result = await task_service.forward_task_to_acp(agent=sample_agent, task=failed)
+
+        # Then - the returned task and the persisted row reflect RUNNING again
+        assert result.status == TaskStatus.RUNNING
+        assert result.status_reason == "Task forwarded to ACP server"
+        refreshed = await task_service.get_task(id=task.id)
+        assert refreshed.status == TaskStatus.RUNNING
+        assert refreshed.status_reason == "Task forwarded to ACP server"
+
+    async def test_forward_task_to_acp_success_preserves_healthy_status(
+        self,
+        task_service,
+        mock_acp_client,
+        task_repository,
+        agent_repository,
+        sample_agent,
+    ):
+        """A successful forward returns the task and leaves a non-FAILED status
+        untouched (only a stale FAILED status is rewritten)."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent, task_name="healthy-task"
+        )
+        mock_acp_client.create_task.return_value = None
+
+        result = await task_service.forward_task_to_acp(agent=sample_agent, task=task)
+
+        assert result.id == task.id
+        assert result.status == TaskStatus.RUNNING
+        assert result.status_reason == "Task created, forwarding to ACP server"
+
     async def test_get_task_by_id(
         self, task_service, task_repository, agent_repository, sample_agent
     ):

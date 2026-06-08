@@ -113,7 +113,6 @@ async def update_task_state(
 ) -> State:
     state_entity = await states_use_case.update(
         id=state_id,
-        task_id=request.task_id,
         state=request.state,
     )
     return State.model_validate(state_entity)

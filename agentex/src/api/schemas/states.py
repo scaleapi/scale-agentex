@@ -33,14 +33,6 @@ class GetStatesRequest(BaseModel):
 
 
 class UpdateStateRequest(BaseModel):
-    task_id: str = Field(
-        ...,
-        title="The unique id of the task to update the state of",
-    )
-    agent_id: str = Field(
-        ...,
-        title="The unique id of the agent to update the state of",
-    )
     state: dict[str, Any] = Field(
         ...,
         title="The state to update the state with.",
