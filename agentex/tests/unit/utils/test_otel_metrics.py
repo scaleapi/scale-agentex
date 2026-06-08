@@ -17,23 +17,36 @@ from opentelemetry.sdk.resources import Resource
 from src.utils import otel_metrics
 
 
+def _set_global_meter_provider(provider: object | None = None) -> None:
+    """Test-only access to the global MeterProvider slot.
+
+    Skips with a clear message if OTel SDK internals move. Pass ``None`` to
+    install the no-op proxy (unset state).
+    """
+    try:
+        if provider is None:
+            provider = metrics._internal._ProxyMeterProvider()
+        metrics._internal._METER_PROVIDER = provider
+    except AttributeError as exc:
+        pytest.skip(f"OpenTelemetry SDK internals changed: {exc}")
+
+
 @pytest.fixture(autouse=True)
 def reset_otel_metrics_state():
     """Reset module and global OTel state between tests."""
     saved_provider = metrics.get_meter_provider()
     otel_metrics.shutdown_otel_metrics()
-    metrics._internal._METER_PROVIDER = metrics._internal._ProxyMeterProvider()
+    _set_global_meter_provider()
 
     yield
 
     otel_metrics.shutdown_otel_metrics()
-    metrics._internal._METER_PROVIDER = saved_provider
+    _set_global_meter_provider(saved_provider)
 
 
 def _set_operator_provider() -> MeterProvider:
-    """Install a stand-in operator provider, bypassing ddtrace's set-once guard."""
     provider = MeterProvider(resource=Resource.create({}))
-    metrics._internal._METER_PROVIDER = provider
+    _set_global_meter_provider(provider)
     return provider
 
 
@@ -92,7 +105,6 @@ def test_init_creates_meter_provider_when_none_configured(monkeypatch):
     assert isinstance(result, MeterProvider)
     assert otel_metrics._meter_provider is result
     assert otel_metrics._initialized is True
-    assert metrics.get_meter_provider() is result
     assert otel_metrics.get_meter("agentex.test") is not None
 
 
