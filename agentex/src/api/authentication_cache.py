@@ -240,9 +240,20 @@ class AuthenticationCache:
         self, headers: dict[str, str], principal_context: Any
     ) -> None:
         """Cache auth gateway response."""
+        if self._contains_api_key(principal_context):
+            logger.debug("Skipping auth gateway cache for API key principal")
+            return
         cache_key = self._create_headers_cache_key(headers)
         await self.auth_gateway_cache.set(f"gateway:{cache_key}", principal_context)
         logger.debug("Cached auth gateway response")
+
+    @staticmethod
+    def _contains_api_key(principal_context: Any) -> bool:
+        if principal_context is None:
+            return False
+        if isinstance(principal_context, dict):
+            return bool(principal_context.get("api_key"))
+        return bool(getattr(principal_context, "api_key", None))
 
     # Authorization Check Cache Methods (Async)
 
