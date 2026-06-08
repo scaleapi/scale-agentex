@@ -80,14 +80,12 @@ gen-openapi: ## Regenerate openapi.yaml from the FastAPI app
 #
 
 serve-docs: ## Serve documentation locally
-	@echo "📚 Installing docs dependencies..."
-	uv sync --group docs
-	cd docs && uv run mkdocs serve -a localhost:8001
+	@echo "📚 Serving documentation..."
+	cd docs && uv run --isolated --no-project --with-requirements requirements.txt mkdocs serve -a localhost:8001
 
 build-docs: ## Build documentation
 	@echo "📚 Building documentation..."
-	uv sync --group docs
-	cd docs && uv run mkdocs build
+	cd docs && uv run --isolated --no-project --with-requirements requirements.txt mkdocs build
 
 docker-build: ## Build production Docker image
 	@echo "🐳 Building production Docker image..."

@@ -1,0 +1,14 @@
+# Documentation build dependencies.
+#
+# Resolved independently of the workspace uv.lock so the docs always render
+# against the latest published SDK without forcing backend dependency bumps.
+# Consumed via `uv run --isolated --no-project --with-requirements` (CI, Makefile)
+# and `uv pip install -r` (Dockerfile docs-builder stage).
+agentex-sdk>=0.12.0
+mkdocs
+mkdocs-material
+mkdocs-macros-plugin
+mkdocstrings-python
+griffe-pydantic
+pymdown-extensions
+Pygments
