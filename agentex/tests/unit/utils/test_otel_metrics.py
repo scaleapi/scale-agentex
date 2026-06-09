@@ -15,8 +15,7 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from opentelemetry.sdk.resources import Resource
-from src.utils import otel_metrics
-from src.utils import cache_metrics
+from src.utils import cache_metrics, otel_metrics
 
 
 def _set_global_meter_provider(provider: object | None = None) -> None:
@@ -360,3 +359,91 @@ def test_shutdown_only_own_provider(monkeypatch):
 
     assert otel_metrics._initialized is False
     assert otel_metrics._meter_provider is None
+
+
+@pytest.mark.unit
+def test_instrument_fastapi_skips_when_disabled_by_default(monkeypatch):
+    from fastapi import FastAPI
+
+    monkeypatch.delenv("AGENTEX_OTEL_HTTP_METRICS_ENABLED", raising=False)
+
+    app = FastAPI()
+    assert otel_metrics.instrument_fastapi_http_metrics(app) is False
+
+
+@pytest.mark.unit
+def test_instrument_fastapi_skips_when_already_instrumented(monkeypatch):
+    from fastapi import FastAPI
+
+    monkeypatch.setenv("AGENTEX_OTEL_HTTP_METRICS_ENABLED", "true")
+
+    app = FastAPI()
+    app._is_instrumented_by_opentelemetry = True  # noqa: SLF001
+
+    assert otel_metrics.instrument_fastapi_http_metrics(app) is False
+
+
+@pytest.mark.unit
+def test_instrument_fastapi_skips_without_otel_config(monkeypatch):
+    from fastapi import FastAPI
+
+    monkeypatch.setenv("AGENTEX_OTEL_HTTP_METRICS_ENABLED", "true")
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", raising=False)
+
+    app = FastAPI()
+    assert otel_metrics.instrument_fastapi_http_metrics(app) is False
+
+
+@pytest.mark.unit
+def test_instrument_fastapi_applies_with_existing_provider(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("AGENTEX_OTEL_HTTP_METRICS_ENABLED", "true")
+    monkeypatch.setenv("OTEL_SEMCONV_STABILITY_OPT_IN", "http")
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(
+        resource=Resource.create({"service.name": "agentex"}),
+        metric_readers=[reader],
+    )
+    _set_global_meter_provider(provider)
+    otel_metrics.init_otel_metrics()
+
+    app = FastAPI()
+
+    @app.get("/probe")
+    def probe() -> dict[str, str]:
+        return {"ok": "true"}
+
+    assert otel_metrics.instrument_fastapi_http_metrics(app) is True
+    assert getattr(app, "_is_instrumented_by_opentelemetry", False) is True
+
+    with TestClient(app) as client:
+        response = client.get("/probe")
+        assert response.status_code == 200
+
+    data = reader.get_metrics_data()
+    assert data is not None
+    metric_names = {
+        metric.name
+        for resource_metrics in data.resource_metrics
+        for scope in resource_metrics.scope_metrics
+        for metric in scope.metrics
+    }
+    assert "http.server.request.duration" in metric_names
+
+
+@pytest.mark.unit
+def test_instrument_fastapi_is_idempotent(monkeypatch):
+    from fastapi import FastAPI
+
+    monkeypatch.setenv("AGENTEX_OTEL_HTTP_METRICS_ENABLED", "true")
+
+    _set_operator_provider()
+    otel_metrics.init_otel_metrics()
+    app = FastAPI()
+
+    assert otel_metrics.instrument_fastapi_http_metrics(app) is True
+    assert otel_metrics.instrument_fastapi_http_metrics(app) is False
