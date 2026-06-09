@@ -21,6 +21,7 @@ def test_principal_context_model_removes_api_key_from_base_object():
     principal = AgentexAuthPrincipalContext.model_validate(principal_context)
 
     assert not hasattr(principal, "api_key")
+    assert "api_key" not in (principal.model_extra or {})
     assert principal.model_dump(exclude_none=True) == {
         "user_id": "user-1",
         "account_id": "acct-1",
@@ -38,6 +39,8 @@ def test_principal_context_model_removes_api_key_name_variants():
         }
     )
 
+    assert not hasattr(principal, "apiKey")
+    assert principal.model_extra == {}
     assert principal.model_dump(exclude_none=True) == {"user_id": "user-1"}
 
 
@@ -80,6 +83,7 @@ async def test_verify_auth_gateway_stores_sanitized_principal_context():
 
     assert response is None
     assert isinstance(request.state.principal_context, AgentexAuthPrincipalContext)
+    assert not hasattr(request.state.principal_context, "api_key")
     assert request.state.principal_context.model_dump(exclude_none=True) == {
         "user_id": "user-1",
         "account_id": "acct-1",
