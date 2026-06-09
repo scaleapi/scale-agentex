@@ -68,8 +68,16 @@ class AgentsUseCase:
         a resource it never registered.
         """
         principal_context = self.authorization_service.principal_context
-        user_id = getattr(principal_context, "user_id", None)
-        service_account_id = getattr(principal_context, "service_account_id", None)
+        # principal_context is `Any` (a dict from /v1/authn), not a typed model,
+        # so attribute access via getattr always yields None and silently skips
+        # the Spark resource registration. Read from the dict (fall back to attr
+        # access for any object-shaped principal).
+        if isinstance(principal_context, dict):
+            user_id = principal_context.get("user_id")
+            service_account_id = principal_context.get("service_account_id")
+        else:
+            user_id = getattr(principal_context, "user_id", None)
+            service_account_id = getattr(principal_context, "service_account_id", None)
         if user_id is None and service_account_id is None:
             logger.warning(
                 "Skipping authorization registration for agent: no creator resolvable",
