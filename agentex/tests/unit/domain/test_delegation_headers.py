@@ -53,6 +53,31 @@ class TestBuildDelegationHeaders:
             "x-selected-account-id": "acct-2",
         }
 
+    def test_cookie_delegation_survives_messy_browser_header(self):
+        """Real browsers send long Cookie headers full of morsels that
+        http.cookies.SimpleCookie cannot parse (analytics cookies with spaces and
+        parentheses, '#' chars, base64 '=='). The parser must still extract the
+        allowlisted _identityJwt sitting among them — otherwise cookie delegation
+        silently drops to {} and agent pods get no acting credential (regression:
+        SimpleCookie.load() aborted on the first bad morsel and lost the rest)."""
+        cookie = (
+            "_fbp=fb.1.1757359049951.112906694371483372; "
+            "__utmzz=utmcsr=google|utmcmd=organic|utmccn=(not set)|utmctr=(not provided); "
+            "fs_uid=#25WP4#678b3617:a3955fc3::1#96c136b6##/1809111214; "
+            "_identityJwt=eyJhbGciOiJFUzI1NiJ9.payload.sig; "
+            "__q_state_bbwZsKT3=eyJ1dWlkIjoiZDc1NDhjMDQ9PQ==; "
+            "OptanonConsent=isGpcEnabled=0&groups=C0001%3A1%2CC0002%3A1&geolocation=US%3BOR; "
+            "_jwt=eyJhbGciOiJFUzI1NiJ9.payload2.sig2"
+        )
+        headers = build_delegation_headers(
+            _user_principal(),
+            {"Cookie": cookie, "x-selected-account-id": "acct-9"},
+        )
+        assert headers == {
+            HEADER_ACTING_USER_COOKIE: "_identityJwt=eyJhbGciOiJFUzI1NiJ9.payload.sig",
+            "x-selected-account-id": "acct-9",
+        }
+
     def test_cookie_delegation_respects_custom_names(
         self, monkeypatch: pytest.MonkeyPatch
     ):
