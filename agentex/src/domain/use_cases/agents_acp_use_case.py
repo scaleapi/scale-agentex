@@ -1,10 +1,18 @@
+import asyncio
 import json
+import random
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
 from fastapi import Depends
 
+from src.adapters.authentication.exceptions import (
+    AuthenticationServiceUnavailableError,
+)
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
+from src.api.schemas.authorization_types import (
+    AgentexResource,
+)
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
 from src.domain.entities.agents_rpc import (
     ACP_TYPE_TO_ALLOWED_RPC_METHODS,
@@ -228,6 +236,30 @@ class AgentsACPUseCase(TaskMessageMixin):
             await self.task_service.fail_task(task, str(e))
             raise e
 
+    async def grant_with_retry(self, task: TaskEntity, attempts: int = 0) -> None:
+        """Grant authorization for a task with retry"""
+        try:
+            await self.authorization_service.grant(
+                resource=AgentexResource.task(task.id),
+            )
+        except AuthenticationServiceUnavailableError as e:
+            if attempts < 3:
+                delay = 0.2 * (2**attempts) + random.uniform(0, 0.1)
+                logger.error(
+                    f"Authentication service unavailable: {e}. Retrying in {delay}s..."
+                )
+                await asyncio.sleep(delay)
+                return await self.grant_with_retry(task, attempts + 1)
+            else:
+                logger.error(
+                    f"Authentication service unavailable: {e}. Max retries reached."
+                )
+                raise e from e
+        except Exception as e:
+            logger.error(f"Error granting authorization for task {task.id}: {e}")
+            await self.task_service.fail_task(task, str(e))
+            raise e from e
+
     async def _get_or_create_task(
         self,
         *,
@@ -286,6 +318,7 @@ class AgentsACPUseCase(TaskMessageMixin):
             task_metadata=task_metadata,
         )
         logger.info(f"[agent_id={agent.id}] Created task {task.id}")
+        await self.grant_with_retry(task)
         return task
 
     async def _resolve_acp_url(
