@@ -50,6 +50,28 @@ logger = make_logger(__name__)
 router = APIRouter(prefix="/agents", tags=["Agents"])
 
 
+def _has_resolvable_creator(principal_context) -> bool:
+    """Whether a creator identity (user or service account) is present.
+
+    ``/agents/register`` is whitelisted, so deployed pods self-register on
+    startup with no principal context (``None``). The agent already exists and
+    is owned from build time (``register-build`` runs before deploy-time
+    register), so the create authorization check and ownership grant don't
+    apply on that path -- and forwarding a ``None`` principal to agentex-auth
+    raises 422, crash-looping the pod. Skip the check/grant when no creator is
+    resolvable; enforce normally for an authenticated caller.
+    """
+    if isinstance(principal_context, dict):
+        return bool(
+            principal_context.get("user_id")
+            or principal_context.get("service_account_id")
+        )
+    return bool(
+        getattr(principal_context, "user_id", None)
+        or getattr(principal_context, "service_account_id", None)
+    )
+
+
 @router.get(
     "/{agent_id}",
     summary="Get Agent by ID",
@@ -173,10 +195,14 @@ async def register_agent(
     If agent_id is not provided, the system will look for an existing agent by name and update it,
     or create a new one if it doesn't exist.
     """
-    await authorization_service.check(
-        AgentexResource.agent("*"),
-        AuthorizedOperationType.create,
+    enforce_ownership = _has_resolvable_creator(
+        authorization_service.principal_context
     )
+    if enforce_ownership:
+        await authorization_service.check(
+            AgentexResource.agent("*"),
+            AuthorizedOperationType.create,
+        )
     logger.info(f"Registering agent: {request}")
     try:
         agent_entity = await agents_use_case.register_agent(
@@ -188,9 +214,10 @@ async def register_agent(
             registration_metadata=request.registration_metadata,
             agent_input_type=request.agent_input_type,
         )
-        await authorization_service.grant(
-            AgentexResource.agent(agent_entity.id),
-        )
+        if enforce_ownership:
+            await authorization_service.grant(
+                AgentexResource.agent(agent_entity.id),
+            )
         response_fields = agent_entity.model_dump()
         existing_key = await api_keys_use_case.get_internal_api_key_by_agent_id(
             agent_id=agent_entity.id

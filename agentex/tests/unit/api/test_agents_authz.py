@@ -7,16 +7,21 @@ forwards the authorized-id set to the use case.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from src.adapters.authorization.exceptions import AuthorizationError
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
+from src.api.routes.agents import register_agent
+from src.api.schemas.agents import RegisterAgentRequest
 from src.api.schemas.authorization_types import (
     AgentexResource,
     AgentexResourceType,
     AuthorizedOperationType,
 )
+from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
 from src.utils.authorization_shortcuts import (
     DAuthorizedId,
     DAuthorizedName,
@@ -261,3 +266,86 @@ class TestListFiltering:
             order_by=None,
             order_direction="desc",
         )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestRegisterAgentOwnershipEnforcement:
+    """``/agents/register`` is whitelisted, so deployed pods self-register with
+    no principal. The create check / ownership grant must be skipped on that
+    path (the agent is already owned from build time), so a ``None`` principal
+    does not 422 and crash-loop the pod. An authenticated caller is enforced."""
+
+    @staticmethod
+    def _mocks(principal_context):
+        authorization = MagicMock()
+        authorization.principal_context = principal_context
+        authorization.check = AsyncMock(return_value=True)
+        authorization.grant = AsyncMock()
+
+        now = datetime.now(UTC)
+        agent = AgentEntity(
+            id="agent-1",
+            name="my-agent",
+            description="d",
+            acp_type=ACPType.ASYNC,
+            status=AgentStatus.READY,
+            acp_url="http://agent:5000",
+            created_at=now,
+            updated_at=now,
+        )
+        agents_use_case = MagicMock()
+        agents_use_case.register_agent = AsyncMock(return_value=agent)
+
+        api_keys_use_case = MagicMock()
+        existing_key = MagicMock()
+        existing_key.api_key = "internal-key"
+        api_keys_use_case.get_internal_api_key_by_agent_id = AsyncMock(
+            return_value=existing_key
+        )
+        return authorization, agents_use_case, api_keys_use_case
+
+    @staticmethod
+    def _request():
+        return RegisterAgentRequest(
+            name="my-agent",
+            description="d",
+            acp_url="http://agent:5000",
+            acp_type=ACPType.ASYNC,
+        )
+
+    @pytest.mark.parametrize("principal_context", [None, {}, {"account_id": "acct"}])
+    async def test_unresolvable_creator_skips_check_and_grant(self, principal_context):
+        # None (whitelisted self-reg), an empty dict, or a principal with no
+        # user_id/service_account_id all mean "no creator" -> skip, don't 422.
+        authz, use_case, api_keys = self._mocks(principal_context=principal_context)
+
+        resp = await register_agent(self._request(), use_case, authz, api_keys)
+
+        authz.check.assert_not_awaited()
+        authz.grant.assert_not_awaited()
+        use_case.register_agent.assert_awaited_once()
+        assert resp.agent_api_key == "internal-key"
+
+    async def test_dict_principal_enforces_check_and_grant(self):
+        authz, use_case, api_keys = self._mocks(
+            principal_context={"user_id": "u", "account_id": "acct"}
+        )
+
+        await register_agent(self._request(), use_case, authz, api_keys)
+
+        authz.check.assert_awaited_once()
+        authz.grant.assert_awaited_once()
+
+    async def test_object_principal_enforces_check_and_grant(self):
+        # Object-shaped principal exercises the getattr branch of the helper.
+        authz, use_case, api_keys = self._mocks(
+            principal_context=SimpleNamespace(
+                user_id="u", service_account_id=None, account_id="acct"
+            )
+        )
+
+        await register_agent(self._request(), use_case, authz, api_keys)
+
+        authz.check.assert_awaited_once()
+        authz.grant.assert_awaited_once()
