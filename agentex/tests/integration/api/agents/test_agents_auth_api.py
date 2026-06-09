@@ -188,7 +188,7 @@ class TestAgentsAuthAPIIntegration:
         "src.utils.http_request_handler.HttpRequestHandler.post_with_error_handling",
         side_effect=_mock_post_with_error_handling,
     )
-    async def test_agent_create_and_delete_gate_and_write_legacy_authz(
+    async def test_agent_register_skips_authz_and_delete_gates_legacy_authz(
         self,
         post_with_error_handling_mock,
         is_enabled_mock,
@@ -214,20 +214,13 @@ class TestAgentsAuthAPIIntegration:
         assert response.status_code == 200
         agent = response.json()
 
-        create_checks = _payloads("/v1/authz/check")
-        assert len(create_checks) == 1
-        assert create_checks[0]["resource"]["type"] == AgentexResourceType.agent.value
-        assert create_checks[0]["resource"]["selector"] == "*"
-        assert create_checks[0]["operation"] == "create"
-
-        agent_grants = [
-            payload
-            for payload in _payloads("/v1/authz/grant")
-            if payload["resource"]["type"] == AgentexResourceType.agent.value
-        ]
-        assert len(agent_grants) == 1
-        assert agent_grants[0]["resource"]["selector"] == agent["id"]
-        assert agent_grants[0]["operation"] == "create"
+        # /agents/register is whitelisted: deployed pods self-register on
+        # startup without a principal, so register does not gate on `create`
+        # or write an ownership grant -- the agent is already owned from build
+        # time (register-build runs first). Forwarding a None principal here
+        # previously 422'd and crash-looped the pod.
+        assert _payloads("/v1/authz/check") == []
+        assert _payloads("/v1/authz/grant") == []
 
         post_with_error_handling_mock.reset_mock()
         response = await isolated_client.delete("/agents/name/test-agent")

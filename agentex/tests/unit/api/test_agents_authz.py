@@ -7,19 +7,20 @@ forwards the authorized-id set to the use case.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from src.adapters.authorization.exceptions import AuthorizationError
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
+from src.api.routes.agents import register_agent
+from src.api.schemas.agents import RegisterAgentRequest
 from src.api.schemas.authorization_types import (
     AgentexResource,
     AgentexResourceType,
     AuthorizedOperationType,
 )
-from src.api.routes.agents import register_agent
-from src.api.schemas.agents import RegisterAgentRequest
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
 from src.utils.authorization_shortcuts import (
     DAuthorizedId,
@@ -282,7 +283,7 @@ class TestRegisterAgentOwnershipEnforcement:
         authorization.check = AsyncMock(return_value=True)
         authorization.grant = AsyncMock()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         agent = AgentEntity(
             id="agent-1",
             name="my-agent",
@@ -313,8 +314,11 @@ class TestRegisterAgentOwnershipEnforcement:
             acp_type=ACPType.ASYNC,
         )
 
-    async def test_no_principal_skips_check_and_grant(self):
-        authz, use_case, api_keys = self._mocks(principal_context=None)
+    @pytest.mark.parametrize("principal_context", [None, {}, {"account_id": "acct"}])
+    async def test_unresolvable_creator_skips_check_and_grant(self, principal_context):
+        # None (whitelisted self-reg), an empty dict, or a principal with no
+        # user_id/service_account_id all mean "no creator" -> skip, don't 422.
+        authz, use_case, api_keys = self._mocks(principal_context=principal_context)
 
         resp = await register_agent(self._request(), use_case, authz, api_keys)
 
@@ -323,9 +327,22 @@ class TestRegisterAgentOwnershipEnforcement:
         use_case.register_agent.assert_awaited_once()
         assert resp.agent_api_key == "internal-key"
 
-    async def test_authenticated_caller_enforces_check_and_grant(self):
+    async def test_dict_principal_enforces_check_and_grant(self):
         authz, use_case, api_keys = self._mocks(
             principal_context={"user_id": "u", "account_id": "acct"}
+        )
+
+        await register_agent(self._request(), use_case, authz, api_keys)
+
+        authz.check.assert_awaited_once()
+        authz.grant.assert_awaited_once()
+
+    async def test_object_principal_enforces_check_and_grant(self):
+        # Object-shaped principal exercises the getattr branch of the helper.
+        authz, use_case, api_keys = self._mocks(
+            principal_context=SimpleNamespace(
+                user_id="u", service_account_id=None, account_id="acct"
+            )
         )
 
         await register_agent(self._request(), use_case, authz, api_keys)
