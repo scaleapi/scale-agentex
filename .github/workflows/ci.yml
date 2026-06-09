@@ -149,10 +149,9 @@ jobs:
       working-directory: ./agentex
       run: |
         echo "📚 Building documentation..."
-        # Install docs dependencies
-        uv sync --group docs
-        # Build documentation
-        cd docs && uv run mkdocs build
+        # Build docs in an isolated env (deps from docs/requirements.txt),
+        # decoupled from the workspace lock so it never forces backend dep bumps.
+        cd docs && uv run --isolated --no-project --with-requirements requirements.txt mkdocs build
         echo "✅ Documentation built successfully"
 
     # Verify docs were built

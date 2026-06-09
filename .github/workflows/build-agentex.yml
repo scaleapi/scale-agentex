@@ -75,10 +75,9 @@ jobs:
       - name: Build documentation
         working-directory: ./agentex
         run: |
-          # Install docs dependencies
-          uv sync --group docs
-          # Build documentation
-          cd docs && uv run mkdocs build
+          # Build docs in an isolated env (deps from docs/requirements.txt),
+          # decoupled from the workspace lock so it never forces backend dep bumps.
+          cd docs && uv run --isolated --no-project --with-requirements requirements.txt mkdocs build
 
       # Build and push server image to GHCR
       - name: Build and push AgentEx server image to GHCR
