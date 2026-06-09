@@ -7,6 +7,7 @@ from src.domain.entities.task_retention import (
     TaskExportToUrlResultEntity,
     TaskSnapshotEntity,
 )
+from src.domain.repositories.task_repository import TaskRepository
 from src.domain.services.task_retention_service import DTaskRetentionService
 
 
@@ -19,6 +20,13 @@ class TaskRetentionUseCase:
 
     def __init__(self, retention_service: DTaskRetentionService):
         self.retention_service = retention_service
+
+    @property
+    def task_repository(self) -> TaskRepository:
+        """Stable accessor for the underlying task repository so callers (e.g. the
+        Temporal worker) can reuse the same instance without reaching through the
+        service's internals."""
+        return self.retention_service.task_repository
 
     async def export_task(self, task_id: str) -> TaskSnapshotEntity:
         return await self.retention_service.export_task(task_id)
@@ -45,6 +53,22 @@ class TaskRetentionUseCase:
         protect correctness, not policy).
         """
         return await self.retention_service.clean_task(
+            task_id=task_id,
+            enforce_idle_threshold=not force,
+            idle_days=idle_days,
+        )
+
+    async def preview_clean_task(
+        self,
+        task_id: str,
+        force: bool = False,
+        idle_days: int = 7,
+    ) -> TaskCleanupResultEntity:
+        """
+        Dry-run counterpart to clean_task: runs the same safety checks without
+        deleting content or setting cleaned_at.
+        """
+        return await self.retention_service.preview_clean_task(
             task_id=task_id,
             enforce_idle_threshold=not force,
             idle_days=idle_days,

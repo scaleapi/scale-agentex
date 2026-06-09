@@ -8,6 +8,7 @@ from src.adapters.temporal.adapter_temporal import DTemporalAdapter
 from src.adapters.temporal.exceptions import (
     TemporalWorkflowAlreadyExistsError,
 )
+from src.api.schemas.authorization_types import AgentexResource
 from src.config.environment_variables import EnvironmentVariables
 from src.domain.entities.agents import ACPType, AgentEntity, AgentInputType, AgentStatus
 from src.domain.entities.deployments import DeploymentEntity, DeploymentStatus
@@ -16,6 +17,7 @@ from src.domain.repositories.deployment_history_repository import (
     DDeploymentHistoryRepository,
 )
 from src.domain.repositories.deployment_repository import DDeploymentRepository
+from src.domain.services.authorization_service import DAuthorizationService
 from src.temporal.workflows.healthcheck_workflow import HealthCheckWorkflow
 from src.utils.ids import orm_id
 from src.utils.logging import make_logger
@@ -30,11 +32,54 @@ class AgentsUseCase:
         deployment_history_repository: DDeploymentHistoryRepository,
         deployment_repository: DDeploymentRepository,
         temporal_adapter: DTemporalAdapter,
+        authorization_service: DAuthorizationService,
     ):
         self.agent_repo = agent_repository
         self.deployment_history_repo = deployment_history_repository
         self.deployment_repo = deployment_repository
         self.temporal_adapter = temporal_adapter
+        self.authorization_service = authorization_service
+
+    async def _safe_deregister(self, agent_id: str) -> None:
+        """Best-effort removal of an agent from the authorization graph.
+
+        Swallows and logs any failure so a compensating/post-delete deregister
+        never masks the in-flight error (create) or fails a delete that already
+        succeeded.
+        """
+        try:
+            await self.authorization_service.deregister_resource(
+                AgentexResource.agent(agent_id)
+            )
+        except Exception:
+            logger.exception(
+                "authorization deregister failed for agent %s; swallowed", agent_id
+            )
+
+    async def _register_in_auth(self, agent_id: str) -> bool:
+        """Register a newly created agent in the authorization graph.
+
+        Called before the row is persisted so a failure aborts the create with no
+        orphaned row; the _safe_deregister compensation undoes it. Skipped with a
+        warning when no creator identity is resolvable on the principal context:
+        an agent has no parent edge, so the principal is the sole anchor for
+        ownership and there is nothing to attribute it to. Returns whether a
+        register call was actually made so compensation can avoid deregistering
+        a resource it never registered.
+        """
+        principal_context = self.authorization_service.principal_context
+        user_id = getattr(principal_context, "user_id", None)
+        service_account_id = getattr(principal_context, "service_account_id", None)
+        if user_id is None and service_account_id is None:
+            logger.warning(
+                "Skipping authorization registration for agent: no creator resolvable",
+                extra={"agent_id": agent_id},
+            )
+            return False
+        await self.authorization_service.register_resource(
+            AgentexResource.agent(agent_id)
+        )
+        return True
 
     async def register_agent(
         self,
@@ -148,6 +193,11 @@ class AgentsUseCase:
                 registered_at=datetime.now(UTC),
                 agent_input_type=agent_input_type,
             )
+            # Record ownership in the authorization graph before persisting; a
+            # failure here aborts the create with no orphaned row. Only the
+            # genuine-create path registers — the update paths above must not,
+            # or re-registering would rewrite the owner to the current caller.
+            registered_in_auth = await self._register_in_auth(agent.id)
             # This is a problem only if multiple pods spin up and then make a request all at the same time.
             # In that case, the first pod will create the agent and the rest should succeed silently
             try:
@@ -156,9 +206,16 @@ class AgentsUseCase:
                 logger.info(
                     f"Agent {name} was likely created in parallel, skipping creation"
                 )
-                # Re-fetch the actual persisted agent so downstream code
-                # (complete_deployment_registration) uses the correct agent_id
+                # Parallel writer already created it; undo our ownership
+                # registration and re-fetch the persisted agent so downstream
+                # code (complete_deployment_registration) uses the correct agent_id
+                if registered_in_auth:
+                    await self._safe_deregister(agent.id)
                 agent = await self.agent_repo.get(name=name)
+            except Exception:
+                if registered_in_auth:
+                    await self._safe_deregister(agent.id)
+                raise
         await self.complete_deployment_registration(
             agent, acp_url, registration_metadata
         )
@@ -205,6 +262,10 @@ class AgentsUseCase:
             registration_metadata=registration_metadata,
             agent_input_type=agent_input_type,
         )
+        # Record ownership before persisting, same as register_agent's genuine
+        # create branch. The early return above for an existing agent means we
+        # only ever register on a true first-time build create.
+        registered_in_auth = await self._register_in_auth(agent.id)
         # If multiple builds for the same new agent race, the first wins and the
         # rest re-fetch the persisted row instead of erroring.
         try:
@@ -213,7 +274,14 @@ class AgentsUseCase:
             logger.info(
                 f"Agent {name} was likely created in parallel, returning existing"
             )
+            # undo our ownership registration from _register_in_auth
+            if registered_in_auth:
+                await self._safe_deregister(agent.id)
             agent = await self.agent_repo.get(name=name)
+        except Exception:
+            if registered_in_auth:
+                await self._safe_deregister(agent.id)
+            raise
         return agent
 
     async def complete_deployment_registration(
@@ -308,6 +376,10 @@ class AgentsUseCase:
         agent.status = AgentStatus.DELETED
         agent.status_reason = "Agent deleted successfully"
         await self.agent_repo.update(agent)
+        # Best-effort: remove the agent from the authorization graph after the
+        # soft-delete. The route revokes ownership separately after delete
+        # succeeds.
+        await self._safe_deregister(agent.id)
         return agent
 
     async def list(

@@ -11,6 +11,7 @@ from src.domain.repositories.deployment_history_repository import (
 )
 from src.domain.repositories.deployment_repository import DeploymentRepository
 from src.domain.use_cases.agents_use_case import AgentsUseCase
+from tests.fixtures.services import make_noop_authorization_service
 
 
 @pytest.fixture
@@ -45,6 +46,7 @@ def agents_use_case(
         deployment_history_repository=deployment_history_repository,
         deployment_repository=deployment_repository,
         temporal_adapter=temporal_adapter,
+        authorization_service=make_noop_authorization_service(),
     )
 
 

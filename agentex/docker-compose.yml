@@ -170,6 +170,13 @@ services:
       - ALLOWED_ORIGINS=http://localhost:3000
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://agentex-otel-collector:4317
       - OTEL_SERVICE_NAME=agentex-api
+      - RETENTION_CLEANUP_ENABLED=${RETENTION_CLEANUP_ENABLED:-false}
+      - RETENTION_CLEANUP_AGENT_ALLOWLIST=${RETENTION_CLEANUP_AGENT_ALLOWLIST:-}
+      - RETENTION_CLEANUP_IDLE_DAYS=${RETENTION_CLEANUP_IDLE_DAYS:-7}
+      - RETENTION_CLEANUP_CRON=${RETENTION_CLEANUP_CRON:-0 4 * * *}
+      - RETENTION_CLEANUP_PAGE_SIZE=${RETENTION_CLEANUP_PAGE_SIZE:-200}
+      - RETENTION_CLEANUP_MAX_IN_FLIGHT=${RETENTION_CLEANUP_MAX_IN_FLIGHT:-20}
+      - RETENTION_CLEANUP_DRY_RUN=${RETENTION_CLEANUP_DRY_RUN:-true}
     ports:
       - "5003:5003"
     volumes:
@@ -200,6 +207,7 @@ services:
         alembic upgrade head &&
         popd &&
         python src/temporal/run_healthcheck_workflow.py &&
+        python src/temporal/run_retention_cleanup_schedule.py &&
         echo 'Starting API server...' &&
         uvicorn src.api.app:app --host 0.0.0.0 --port 5003 --reload --reload-dir /app/src --reload-include '*.py' --workers 1
       "
@@ -228,6 +236,12 @@ services:
       - MONGODB_URI=mongodb://agentex-mongodb:27017
       - MONGODB_DATABASE_NAME=agentex
       - AGENTEX_SERVER_TASK_QUEUE=agentex-server
+      - RETENTION_CLEANUP_ENABLED=${RETENTION_CLEANUP_ENABLED:-false}
+      - RETENTION_CLEANUP_AGENT_ALLOWLIST=${RETENTION_CLEANUP_AGENT_ALLOWLIST:-}
+      - RETENTION_CLEANUP_IDLE_DAYS=${RETENTION_CLEANUP_IDLE_DAYS:-7}
+      - RETENTION_CLEANUP_PAGE_SIZE=${RETENTION_CLEANUP_PAGE_SIZE:-200}
+      - RETENTION_CLEANUP_MAX_IN_FLIGHT=${RETENTION_CLEANUP_MAX_IN_FLIGHT:-20}
+      - RETENTION_CLEANUP_DRY_RUN=${RETENTION_CLEANUP_DRY_RUN:-true}
     volumes:
       - .:/app:cached
     depends_on:

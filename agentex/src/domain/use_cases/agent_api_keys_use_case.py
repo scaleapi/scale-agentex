@@ -112,14 +112,12 @@ class AgentAPIKeysUseCase:
         api_key_id: str,
         agent_id: str,
     ) -> None:
-        """Register a new agent_api_key with the auth service, including the
-        parent_agent edge so permissions cascade from the owning agent.
+        """Register a new agent_api_key in the authorization graph before persist.
 
-        Called BEFORE the Postgres write — a failure raises and prevents the
-        row from being persisted, so there is no compensating action. Skipped
-        with a warning when no usable creator identity is available on the
-        principal context (e.g. internal-key creation paths without an
-        authenticated user).
+        The api key is registered under its parent agent so permissions cascade
+        from the owning agent. Registering before the Postgres row is created
+        fails closed: a failure aborts the create rather than leaving a
+        persisted api key that cannot be authorized.
         """
         principal_context = self.authorization_service.principal_context
         user_id = getattr(principal_context, "user_id", None)
@@ -139,9 +137,8 @@ class AgentAPIKeysUseCase:
                 parent=AgentexResource.agent(agent_id),
             )
         except Exception as exc:
-            # Fail closed: log + re-raise so the Postgres row is never written.
             logger.exception(
-                "Auth register_resource failed for agent_api_key; aborting create",
+                "Auth registration failed for agent_api_key; aborting create",
                 extra={
                     "api_key_id": api_key_id,
                     "agent_id": agent_id,
@@ -151,21 +148,19 @@ class AgentAPIKeysUseCase:
             raise
 
     async def _deregister_api_key_from_auth(self, *, api_key_id: str) -> None:
-        """Best-effort deregistration of an api_key's auth tuples on delete.
+        """Best-effort removal of the api_key from the authorization graph.
 
-        ``deregister_resource`` removes the resource and all of its
-        relationships (owner, parent, grantees) atomically. Always invoked;
-        the authorization service decides how to route the call. Failures are
-        logged but do not block the delete.
+        Deletes treat Postgres as the source of truth for existence. Once the
+        row is gone, a deregister failure is logged but does not block the
+        delete response.
         """
         try:
             await self.authorization_service.deregister_resource(
                 resource=AgentexResource.api_key(api_key_id),
             )
         except Exception as exc:
-            # Best-effort: log and continue. Postgres row already deleted.
             logger.warning(
-                "Auth deregister failed for agent_api_key; tuple may be orphaned",
+                "Auth deregister failed for agent_api_key; entry may be orphaned",
                 extra={
                     "api_key_id": api_key_id,
                     "error_type": type(exc).__name__,
@@ -203,8 +198,8 @@ class AgentAPIKeysUseCase:
         )
 
     async def delete(self, id: str) -> None:
-        # Pre-fetch so we skip both the delete and the deregister when the row
-        # never existed — no DB round-trip, no auth round-trip for a no-op.
+        # Pre-fetch so we skip both the delete and auth cleanup when the row
+        # never existed: no DB round-trip, no auth round-trip for a no-op.
         try:
             await self.agent_api_key_repo.get(id=id)
         except ItemDoesNotExist:

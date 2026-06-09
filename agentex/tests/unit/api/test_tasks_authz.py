@@ -284,6 +284,48 @@ class TestUpdatePermissionRoutingForRewiredCallSites:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+class TestTaskDeleteAuthWrites:
+    async def test_delete_task_revokes_legacy_ownership_after_delete(self):
+        from src.api.routes.tasks import delete_task
+
+        task_use_case = MagicMock()
+        task_use_case.delete_task = AsyncMock(return_value=None)
+        authorization = MagicMock()
+        authorization.revoke = AsyncMock(return_value=None)
+
+        result = await delete_task(
+            task_id="task-1",
+            task_use_case=task_use_case,
+            authorization=authorization,
+        )
+
+        task_use_case.delete_task.assert_awaited_once_with(id="task-1")
+        authorization.revoke.assert_awaited_once_with(AgentexResource.task("task-1"))
+        assert result.id == "task-1"
+
+    async def test_delete_task_by_name_revokes_resolved_task_after_delete(self):
+        from src.api.routes.tasks import delete_task_by_name
+
+        task_use_case = MagicMock()
+        task_use_case.get_task = AsyncMock(return_value=MagicMock(id="task-2"))
+        task_use_case.delete_task = AsyncMock(return_value=None)
+        authorization = MagicMock()
+        authorization.revoke = AsyncMock(return_value=None)
+
+        result = await delete_task_by_name(
+            task_name="named-task",
+            task_use_case=task_use_case,
+            authorization=authorization,
+        )
+
+        task_use_case.get_task.assert_awaited_once_with(name="named-task")
+        task_use_case.delete_task.assert_awaited_once_with(name="named-task")
+        authorization.revoke.assert_awaited_once_with(AgentexResource.task("task-2"))
+        assert result.id == "task-2"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 class TestCheckTaskOrCollapseTo404:
     """The task-resource authz wrap collapses every denial to 404 so callers
     can't distinguish "present in another tenant" from "absent"."""

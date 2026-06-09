@@ -10,9 +10,7 @@ from src.adapters.authentication.exceptions import (
     AuthenticationServiceUnavailableError,
 )
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
-from src.api.schemas.authorization_types import (
-    AgentexResource,
-)
+from src.api.schemas.authorization_types import AgentexResource
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
 from src.domain.entities.agents_rpc import (
     ACP_TYPE_TO_ALLOWED_RPC_METHODS,
@@ -237,7 +235,7 @@ class AgentsACPUseCase(TaskMessageMixin):
             raise e
 
     async def grant_with_retry(self, task: TaskEntity, attempts: int = 0) -> None:
-        """Grant authorization for a task with retry"""
+        """Grant ownership for a newly created task."""
         try:
             await self.authorization_service.grant(
                 resource=AgentexResource.task(task.id),
@@ -250,11 +248,10 @@ class AgentsACPUseCase(TaskMessageMixin):
                 )
                 await asyncio.sleep(delay)
                 return await self.grant_with_retry(task, attempts + 1)
-            else:
-                logger.error(
-                    f"Authentication service unavailable: {e}. Max retries reached."
-                )
-                raise e from e
+            logger.error(
+                f"Authentication service unavailable: {e}. Max retries reached."
+            )
+            raise e from e
         except Exception as e:
             logger.error(f"Error granting authorization for task {task.id}: {e}")
             await self.task_service.fail_task(task, str(e))

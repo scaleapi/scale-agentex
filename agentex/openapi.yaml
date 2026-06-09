@@ -5221,12 +5221,6 @@ components:
         acp_type:
           $ref: '#/components/schemas/ACPType'
           description: The type of ACP to use for the agent.
-        principal_context:
-          anyOf:
-          - {}
-          - type: 'null'
-          title: Principal Context
-          description: Principal used for authorization
         registration_metadata:
           anyOf:
           - additionalProperties: true
@@ -5336,12 +5330,6 @@ components:
           type: string
           title: Description
           description: The description of the agent.
-        principal_context:
-          anyOf:
-          - {}
-          - type: 'null'
-          title: Principal Context
-          description: Principal used for authorization
         registration_metadata:
           anyOf:
           - additionalProperties: true
