@@ -146,7 +146,7 @@ Here's a complete example showing how to stream content in an Async Agent:
 
 ```python
 from agentex.lib import adk
-from agentex.lib.types.acp import SendEventParams
+from agentex.protocol.acp import SendEventParams
 from agentex.types.text_content import TextContent
 from agentex.types.task_message_delta import TextDelta
 from agentex.types.task_message_update import (

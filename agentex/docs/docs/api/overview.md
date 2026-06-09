@@ -62,7 +62,7 @@ Python library for use **WITHIN** your agent code. The ADK provides high-level a
 from agentex.types.task_message_content import TaskMessageContent
 from agentex.types.text_content import TextContent
 from agentex.types.message_author import MessageAuthor
-from agentex.lib.types.acp import SendMessageParams, CreateTaskParams, SendEventParams
+from agentex.protocol.acp import SendMessageParams, CreateTaskParams, SendEventParams
 from agentex.types.task import Task
 from agentex.types.event import Event
 ```

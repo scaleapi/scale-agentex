@@ -51,7 +51,7 @@ sequenceDiagram
 ```python
 from temporalio import workflow
 from agentex import adk
-from agentex.lib.types.acp import CreateTaskParams, SendEventParams
+from agentex.protocol.acp import CreateTaskParams, SendEventParams
 from agentex.core.temporal.workflows.workflow import BaseWorkflow
 from agentex.core.temporal.types.workflow import SignalName
 from agentex.types.message_author import MessageAuthor
@@ -159,7 +159,7 @@ if __name__ == "__main__":
 
 Used in `@workflow.run` (replaces `@acp.on_task_create`):
 
-::: agentex.lib.types.acp.CreateTaskParams
+::: agentex.protocol.acp.CreateTaskParams
     options:
       heading_level: 4
       show_root_heading: false
@@ -169,7 +169,7 @@ Used in `@workflow.run` (replaces `@acp.on_task_create`):
 
 Used in `@workflow.signal(name=SignalName.RECEIVE_EVENT)` (replaces `@acp.on_task_event_send`):
 
-::: agentex.lib.types.acp.SendEventParams
+::: agentex.protocol.acp.SendEventParams
     options:
       heading_level: 4
       show_root_heading: false
