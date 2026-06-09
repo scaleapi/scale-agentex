@@ -225,7 +225,7 @@ class AgentRPCRequestEntity(JSONRPCRequest):
                 content=content_entity,
             )
         else:
-            logger.error(f"Invalid method from request: {request}")
+            logger.error("Invalid agent RPC method: %s", request.method)
             raise ValueError(f"Invalid method: {request.method}")
 
         return cls(
