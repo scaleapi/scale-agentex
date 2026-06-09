@@ -145,7 +145,12 @@ def format_error_response(detail: str, status_code: int) -> JSONResponse:
 @fastapi_app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     exc_str = f"{exc}".replace("\n", " ").replace("   ", " ")
-    logger.error(f"{request}: {exc_str}")
+    logger.error(
+        "Request validation failed for %s %s: %s errors",
+        request.method,
+        request.url.path,
+        len(exc.errors()),
+    )
     content = {"status_code": 10422, "message": exc_str, "data": None}
     return JSONResponse(
         content=content, status_code=status.HTTP_422_UNPROCESSABLE_ENTITY
