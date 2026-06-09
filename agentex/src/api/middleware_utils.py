@@ -43,8 +43,12 @@ def is_whitelisted_route(
     path: str, whitelisted_routes: set[str] = WHITELISTED_ROUTES
 ) -> bool:
     """Check if a route path is whitelisted (bypasses authentication)."""
+    # Boundary-aware prefix match: a whitelisted route only matches the route
+    # itself or a sub-path under it (route + "/..."). Plain startswith() would
+    # let "/agents/register" whitelist "/agents/register-build" too, which must
+    # stay authenticated so it can carry the caller's principal (owner grant).
     return path in whitelisted_routes or any(
-        path.startswith(route) for route in whitelisted_routes
+        path == route or path.startswith(route + "/") for route in whitelisted_routes
     )
 
 

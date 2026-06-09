@@ -248,7 +248,7 @@ class TestEventsAuthzAPIIntegration:
         "src.domain.services.authorization_service.AuthorizationService.is_enabled",
         return_value=True,
     )
-    async def test_list_events_unauthorized_agent_returns_403(
+    async def test_list_events_unauthorized_agent_returns_404(
         self,
         is_enabled_authorization_mock,
         is_enabled_mock,
@@ -257,7 +257,7 @@ class TestEventsAuthzAPIIntegration:
         test_agent,
         test_task,
     ):
-        """Direct-resource denials surface as 403 (convention from #249/#255)."""
+        """Denied agent-route access collapses to 404 (convention from #271)."""
         with patch(
             "src.utils.http_request_handler.HttpRequestHandler.post_with_error_handling",
             side_effect=_mock_post_factory(deny_agent_ids={test_agent.id}),
@@ -265,4 +265,4 @@ class TestEventsAuthzAPIIntegration:
             response = await isolated_client.get(
                 f"/events?task_id={test_task.id}&agent_id={test_agent.id}"
             )
-        assert response.status_code == 403
+        assert response.status_code == 404

@@ -120,8 +120,14 @@ class AgentAPIKeysUseCase:
         persisted api key that cannot be authorized.
         """
         principal_context = self.authorization_service.principal_context
-        user_id = getattr(principal_context, "user_id", None)
-        service_account_id = getattr(principal_context, "service_account_id", None)
+        # principal_context is `Any` (a dict from /v1/authn), not a typed model,
+        # so getattr always yields None and silently skips the Spark register.
+        if isinstance(principal_context, dict):
+            user_id = principal_context.get("user_id")
+            service_account_id = principal_context.get("service_account_id")
+        else:
+            user_id = getattr(principal_context, "user_id", None)
+            service_account_id = getattr(principal_context, "service_account_id", None)
         if user_id is None and service_account_id is None:
             logger.warning(
                 "Skipping auth registration for api_key: no creator resolvable",
