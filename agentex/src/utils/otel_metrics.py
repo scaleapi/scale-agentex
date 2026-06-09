@@ -1,10 +1,15 @@
 """
 OpenTelemetry metrics configuration for Agentex.
 
-When auto-instrumentation (e.g. OTel Operator) has already installed a global
-MeterProvider, custom app metrics attach to it instead of replacing it.
-Otherwise this module creates its own provider with OTLP export when an endpoint
-is configured.
+The Python OTel SDK exposes a single global MeterProvider (set once). This module
+uses two deterministic paths:
+
+1. **Coexistence** — a real SDK MeterProvider is already global (e.g. from OTel
+   Operator auto-instrumentation). Custom app metrics attach via get_meter();
+   set_meter_provider() is never called.
+2. **Standalone** — global is still the SDK proxy and an OTLP endpoint is
+   configured. This module creates the first MeterProvider. Auto-instrumentation
+   and custom metrics then share that same global slot.
 
 Environment Variables:
     OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: Metrics OTLP endpoint (falls back to
@@ -23,7 +28,6 @@ import os
 from typing import TYPE_CHECKING
 
 from opentelemetry import metrics
-from opentelemetry.metrics import NoOpMeterProvider
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
     OTLPMetricExporter as OTLPGrpcMetricExporter,
 )
@@ -43,7 +47,7 @@ if TYPE_CHECKING:
 logger = make_logger(__name__)
 
 # Global state
-_meter_provider: MeterProvider | None = None # Set only when this module creates the provider
+_meter_provider: MeterProvider | None = None  # Set only when this module creates the provider
 _initialized: bool = False
 
 # Default configuration
@@ -55,6 +59,35 @@ def _global_meter_provider() -> MeterProvider | None:
     """Return the global MeterProvider if installed, else None (proxy is ignored)."""
     provider = metrics.get_meter_provider()
     return provider if isinstance(provider, MeterProvider) else None
+
+
+def _describe_global_provider() -> tuple[str, bool]:
+    provider = metrics.get_meter_provider()
+    return type(provider).__name__, isinstance(provider, MeterProvider)
+
+
+def _log_provider_state(
+    message: str,
+    *,
+    app_provider: MeterProvider | None = None,
+    mode: str | None = None,
+) -> None:
+    """Emit a single structured INFO log for operator/app coexistence debugging."""
+    global_type, global_is_sdk = _describe_global_provider()
+    global_provider = _global_meter_provider()
+    app_owns_global = (
+        app_provider is not None
+        and global_provider is not None
+        and global_provider is app_provider
+    )
+    parts = [
+        message,
+        f"mode={mode or 'unknown'}",
+        f"global_type={global_type}",
+        f"global_is_sdk_meter_provider={global_is_sdk}",
+        f"app_owns_global={app_owns_global}",
+    ]
+    logger.info(", ".join(parts))
 
 
 def _metrics_endpoint(explicit: str | None = None) -> str | None:
@@ -76,9 +109,21 @@ def _metrics_protocol() -> str:
     )
 
 
+def _http_metrics_export_url(endpoint: str) -> str:
+    """Return an OTLP HTTP metrics URL including the /v1/metrics path.
+
+    OTLPHttpMetricExporter only appends that path when it resolves the endpoint
+    from environment variables, not when an explicit endpoint argument is passed.
+    """
+    normalized = endpoint.rstrip("/")
+    if normalized.endswith("/v1/metrics"):
+        return normalized
+    return f"{normalized}/v1/metrics"
+
+
 def _create_metric_exporter(endpoint: str, protocol: str) -> MetricExporter:
     if protocol in {"http/protobuf", "http"}:
-        return OTLPHttpMetricExporter(endpoint=endpoint)
+        return OTLPHttpMetricExporter(endpoint=_http_metrics_export_url(endpoint))
 
     if protocol != "grpc":
         logger.warning("Unknown OTEL metrics protocol %r; using grpc", protocol)
@@ -102,8 +147,9 @@ def init_otel_metrics(
     Call once at application startup. Subsequent calls return the active provider
     without re-initializing.
 
-    If auto-instrumentation already installed a MeterProvider, custom metrics
-    attach to it. Otherwise, initializes only when an OTLP endpoint is configured.
+    If a real SDK MeterProvider is already global, custom metrics attach to it
+    and set_meter_provider() is never called. Otherwise, when an OTLP endpoint
+    is configured, this module installs the first global provider.
 
     Args:
         service_name: Service name for resource attributes
@@ -120,15 +166,23 @@ def init_otel_metrics(
     if _initialized:
         return _meter_provider or _global_meter_provider()
 
+    _log_provider_state("OpenTelemetry metrics init starting", mode="starting")
+
     if existing := _global_meter_provider():
         _initialized = True
-        logger.info("OpenTelemetry metrics using existing MeterProvider")
+        _log_provider_state(
+            "OpenTelemetry metrics using existing MeterProvider",
+            mode="coexistence",
+        )
         return existing
 
     endpoint = _metrics_endpoint(otlp_endpoint)
     if not endpoint:
         _initialized = True
-        logger.info("OpenTelemetry metrics disabled: no OTLP endpoint configured")
+        _log_provider_state(
+            "OpenTelemetry metrics disabled: no OTLP endpoint configured",
+            mode="disabled",
+        )
         return None
 
     protocol = _metrics_protocol()
@@ -164,14 +218,30 @@ def init_otel_metrics(
     except Exception:
         provider.shutdown()
         raise
-    _meter_provider = provider
+
+    global_provider = _global_meter_provider()
+    if global_provider is provider:
+        _meter_provider = provider
+        _initialized = True
+        _log_provider_state(
+            "OpenTelemetry metrics standalone init installed global MeterProvider: "
+            f"endpoint={endpoint}, protocol={protocol}, service={resolved_service_name}, "
+            f"interval={resolved_export_interval_ms}ms",
+            app_provider=provider,
+            mode="standalone",
+        )
+        return _meter_provider
+
+    # set_meter_provider() was rejected; shut down the orphan to avoid background export noise.
+    provider.shutdown()
     _initialized = True
-    logger.info(
-        f"OpenTelemetry metrics initialized: endpoint={endpoint}, "
-        f"protocol={protocol}, service={resolved_service_name}, "
-        f"interval={resolved_export_interval_ms}ms"
+    _log_provider_state(
+        "OpenTelemetry metrics standalone set_meter_provider rejected; "
+        "using existing global MeterProvider",
+        app_provider=provider,
+        mode="standalone_rejected",
     )
-    return _meter_provider
+    return global_provider
 
 
 def get_meter(name: str, version: str = "0.1.0") -> Meter | None:
@@ -209,11 +279,6 @@ def shutdown_otel_metrics() -> None:
     except Exception:
         logger.exception("OpenTelemetry metrics shutdown failed")
     finally:
-        if _meter_provider is not None:
-            try:
-                metrics.set_meter_provider(NoOpMeterProvider())
-            except Exception:
-                logger.exception("Failed to reset global MeterProvider after shutdown")
         _meter_provider = None
         _initialized = False
 
