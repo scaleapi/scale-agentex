@@ -94,11 +94,14 @@ def test_authentication_cache_assigns_distinct_names():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_auth_gateway_response_with_api_key_principal_is_not_cached():
+async def test_auth_gateway_response_with_api_key_principal_is_sanitized_before_cache():
     cache = AuthenticationCache()
     headers = {"x-api-key": "secret-key", "x-selected-account-id": "acct-1"}
     principal = {"user_id": "user-1", "account_id": "acct-1", "api_key": "secret-key"}
 
     await cache.set_auth_gateway_response(headers, principal)
 
-    assert await cache.get_auth_gateway_response(headers) is None
+    assert await cache.get_auth_gateway_response(headers) == {
+        "user_id": "user-1",
+        "account_id": "acct-1",
+    }

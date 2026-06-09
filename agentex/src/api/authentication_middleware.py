@@ -19,6 +19,7 @@ from src.api.middleware_utils import (
     verify_agent_identity,
     verify_auth_gateway,
 )
+from src.api.schemas.principal_context import remove_api_key_from_principal_context
 from src.config.dependencies import (
     DEnvironmentVariable,
     resolve_environment_variable_dependency,
@@ -142,7 +143,9 @@ class AgentexAuthMiddleware(BaseHTTPMiddleware):
             # Check cache first
             cached_principal = await auth_cache.get_auth_gateway_response(headers_dict)
             if cached_principal is not None:
-                request.state.principal_context = cached_principal
+                request.state.principal_context = remove_api_key_from_principal_context(
+                    cached_principal
+                )
                 logger.debug("Auth gateway response found in cache")
                 return await call_next(request)
 

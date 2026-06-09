@@ -7,6 +7,9 @@ import time
 from collections import OrderedDict
 from typing import Any
 
+from src.api.schemas.principal_context import (
+    remove_api_key_from_principal_context,
+)
 from src.utils.cache_metrics import record_cache_access, record_cache_eviction
 from src.utils.logging import make_logger
 
@@ -240,6 +243,7 @@ class AuthenticationCache:
         self, headers: dict[str, str], principal_context: Any
     ) -> None:
         """Cache auth gateway response."""
+        principal_context = remove_api_key_from_principal_context(principal_context)
         if self._contains_api_key(principal_context):
             logger.debug("Skipping auth gateway cache for API key principal")
             return
@@ -252,8 +256,24 @@ class AuthenticationCache:
         if principal_context is None:
             return False
         if isinstance(principal_context, dict):
-            return bool(principal_context.get("api_key"))
-        return bool(getattr(principal_context, "api_key", None))
+            return any(
+                (
+                    key.replace("_", "").replace("-", "").lower() == "apikey"
+                    if isinstance(key, str)
+                    else False
+                )
+                or AuthenticationCache._contains_api_key(value)
+                for key, value in principal_context.items()
+            )
+        if isinstance(principal_context, list | tuple):
+            return any(
+                AuthenticationCache._contains_api_key(value)
+                for value in principal_context
+            )
+        return bool(
+            getattr(principal_context, "api_key", None)
+            or getattr(principal_context, "apiKey", None)
+        )
 
     # Authorization Check Cache Methods (Async)
 

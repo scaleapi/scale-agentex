@@ -8,6 +8,7 @@ from src.adapters.authentication.adapter_agentex_authn_proxy import (
     AgentexAuthenticationProxy,
 )
 from src.adapters.orm import AgentAPIKeyORM, AgentORM
+from src.api.schemas.principal_context import remove_api_key_from_principal_context
 from src.config.dependencies import middleware_async_read_only_session_maker
 from src.utils.logging import make_logger
 
@@ -138,7 +139,9 @@ async def verify_auth_gateway(
     headers_dict = get_request_headers_to_forward(request)
 
     try:
-        principal_context = await auth_gateway.verify_headers(headers_dict)
+        principal_context = remove_api_key_from_principal_context(
+            await auth_gateway.verify_headers(headers_dict)
+        )
         request.state.principal_context = principal_context
 
         # Get route information
