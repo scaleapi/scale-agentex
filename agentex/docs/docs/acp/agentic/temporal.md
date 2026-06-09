@@ -48,7 +48,7 @@ Instead of ACP handlers, you implement standard Temporal workflows:
 ```python
 from temporalio import workflow
 from agentex import adk
-from agentex.lib.types.acp import CreateTaskParams, SendEventParams
+from agentex.protocol.acp import CreateTaskParams, SendEventParams
 from agentex.core.temporal.workflows.workflow import BaseWorkflow
 from agentex.core.temporal.types.workflow import SignalName
 from agentex.types.message_author import MessageAuthor

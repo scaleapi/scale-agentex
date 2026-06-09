@@ -146,7 +146,7 @@ The new streaming implementation uses Temporal's interceptor pattern to enable r
 # workflow.py
 from agents import Agent, Runner
 from agentex import adk
-from agentex.lib.types.acp import SendEventParams
+from agentex.protocol.acp import SendEventParams
 from agentex.lib.core.temporal.types.workflow import SignalName
 from agentex.types.text_content import TextContent
 from temporalio import workflow

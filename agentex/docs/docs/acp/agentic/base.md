@@ -157,7 +157,7 @@ async def process_workflow_step(params: SendEventParams):
 
 Used in `@acp.on_task_create` for task initialization:
 
-::: agentex.lib.types.acp.CreateTaskParams
+::: agentex.protocol.acp.CreateTaskParams
     options:
       heading_level: 4
       show_root_heading: false
@@ -167,7 +167,7 @@ Used in `@acp.on_task_create` for task initialization:
 
 Used in `@acp.on_task_event_send` for processing events:
 
-::: agentex.lib.types.acp.SendEventParams
+::: agentex.protocol.acp.SendEventParams
     options:
       heading_level: 4
       show_root_heading: false
@@ -177,7 +177,7 @@ Used in `@acp.on_task_event_send` for processing events:
 
 Used in `@acp.on_task_cancel` for cleanup:
 
-::: agentex.lib.types.acp.CancelTaskParams
+::: agentex.protocol.acp.CancelTaskParams
     options:
       heading_level: 4
       show_root_heading: false

@@ -42,7 +42,7 @@ Your ACP server defines how the agent responds to incoming messages. For sync ag
 
 ```python
 from agentex.lib.sdk.fastacp.fastacp import FastACP
-from agentex.lib.types.acp import SendMessageParams
+from agentex.protocol.acp import SendMessageParams
 from agentex.types.task_message_content import TaskMessageContent
 from agentex.types.text_content import TextContent
 
@@ -111,7 +111,7 @@ The base async ACP server gives you a starting point for custom async implementa
 ```python
 from agentex.lib.sdk.fastacp.fastacp import FastACP
 from agentex.lib.types.fastacp import AgenticBaseACPConfig
-from agentex.lib.types.acp import CreateTaskParams, SendEventParams, CancelTaskParams
+from agentex.protocol.acp import CreateTaskParams, SendEventParams, CancelTaskParams
 
 # Create a base agentic ACP server
 acp = FastACP.create(
@@ -216,7 +216,7 @@ Your workflow is where all the agent logic lives. It's a class that Temporal man
 import json
 from temporalio import workflow
 from agentex.lib import adk
-from agentex.lib.types.acp import CreateTaskParams, SendEventParams
+from agentex.protocol.acp import CreateTaskParams, SendEventParams
 from agentex.lib.core.temporal.workflows.workflow import BaseWorkflow
 from agentex.lib.core.temporal.types.workflow import SignalName
 from agentex.types.text_content import TextContent
