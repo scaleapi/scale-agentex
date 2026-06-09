@@ -38,7 +38,11 @@ from src.config.dependencies import (
 from src.config.environment_variables import EnvVarKeys
 from src.domain.exceptions import GenericException
 from src.utils.logging import make_logger
-from src.utils.otel_metrics import init_otel_metrics, shutdown_otel_metrics
+from src.utils.otel_metrics import (
+    init_otel_metrics,
+    instrument_fastapi_http_metrics,
+    shutdown_otel_metrics,
+)
 
 logger = make_logger(__name__)
 
@@ -75,6 +79,7 @@ class HTTPExceptionWithMessage(HTTPException):
 async def lifespan(_: FastAPI):
     # Initialize OpenTelemetry metrics first (before dependencies register instruments)
     init_otel_metrics()
+    instrument_fastapi_http_metrics(fastapi_app)
 
     await dependencies.startup_global_dependencies()
     configure_statsd()

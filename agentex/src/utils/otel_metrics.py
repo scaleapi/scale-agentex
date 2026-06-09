@@ -25,7 +25,7 @@ Environment Variables:
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
@@ -286,3 +286,51 @@ def shutdown_otel_metrics() -> None:
 def is_otel_configured() -> bool:
     """Check if metrics export is configured via environment."""
     return bool(_metrics_endpoint())
+
+
+def _http_metrics_enabled() -> bool:
+    """Return whether in-process FastAPI HTTP metrics should be installed."""
+    flag = os.environ.get("AGENTEX_OTEL_HTTP_METRICS_ENABLED", "false").strip().lower()
+    return flag not in {"0", "false", "no", "off"}
+
+
+def instrument_fastapi_http_metrics(app: Any) -> bool:
+    """
+    Install in-process FastAPI HTTP server metrics (http.server.request.duration).
+
+    Call after init_otel_metrics() so custom and HTTP metrics share the active
+    global MeterProvider (operator or standalone).
+
+    Safe with OTel Operator auto-instrumentation: FastAPIInstrumentor is
+    idempotent and no-ops when ``_is_instrumented_by_opentelemetry`` is already set.
+    Set OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=fastapi on the pod so the operator
+    does not also hook FastAPI. Beyla/eBPF metrics are independent and may still
+    appear under different label sets when attach succeeds.
+
+    Returns:
+        True when instrumentation was applied, False when skipped or disabled.
+    """
+    if not _http_metrics_enabled():
+        logger.info("FastAPI HTTP metrics disabled via AGENTEX_OTEL_HTTP_METRICS_ENABLED")
+        return False
+
+    if getattr(app, "_is_instrumented_by_opentelemetry", False):
+        logger.info(
+            "FastAPI already instrumented by OpenTelemetry; skipping in-process HTTP metrics"
+        )
+        return False
+
+    if not _initialized:
+        init_otel_metrics()
+
+    if _global_meter_provider() is None and not is_otel_configured():
+        logger.info(
+            "FastAPI HTTP metrics skipped: no MeterProvider and no OTLP endpoint configured"
+        )
+        return False
+
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+    FastAPIInstrumentor.instrument_app(app)
+    logger.info("FastAPI in-process HTTP metrics instrumentation enabled")
+    return True
