@@ -2,6 +2,8 @@ from typing import Annotated
 
 from fastapi import Depends, Path, Query, Request
 
+from src.adapters.authorization.exceptions import AuthorizationError
+from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.api.schemas.authorization_types import (
     AgentexResource,
     AgentexResourceType,
@@ -15,7 +17,10 @@ from src.domain.repositories.agent_task_tracker_repository import (
 from src.domain.repositories.task_message_repository import DTaskMessageRepository
 from src.domain.repositories.task_repository import DTaskRepository
 from src.domain.repositories.task_state_repository import DTaskStateRepository
-from src.domain.services.authorization_service import DAuthorizationService
+from src.domain.services.authorization_service import (
+    AuthorizationService,
+    DAuthorizationService,
+)
 from src.utils.agent_api_key_authorization import _check_api_key_or_collapse_to_404
 from src.utils.task_authorization import check_task_or_collapse_to_404
 
@@ -37,6 +42,29 @@ async def _get_parent_task_id(
     repository = registry[resource_type]
     resource = await repository.get(id=resource_id)
     return resource.task_id
+
+
+async def _check_agent_or_collapse_to_404(
+    authorization: AuthorizationService,
+    agent_id: str,
+    operation: AuthorizedOperationType,
+) -> None:
+    """Check an agent resource; collapse any denial to 404.
+
+    Collapsing a denied check into 404 stops callers from distinguishing 403
+    (exists, no access) from 404 (absent) and thereby probing whether an agent
+    exists in another tenant. Mirrors the task/api_key collapse helpers.
+
+    TODO: fold this into a single generic collapse helper, and restore the
+    403/404 split once agents carry tenant scope at the data layer.
+    """
+    try:
+        await authorization.check(
+            resource=AgentexResource.agent(agent_id),
+            operation=operation,
+        )
+    except AuthorizationError:
+        raise ItemDoesNotExist(f"Item with id '{agent_id}' does not exist.") from None
 
 
 def DAuthorizedId(
@@ -74,6 +102,9 @@ def DAuthorizedId(
             await _check_api_key_or_collapse_to_404(
                 authorization, resource_id, operation
             )
+        elif resource_type == AgentexResourceType.agent:
+            # Collapse agent denials to 404 for the same discoverability reason.
+            await _check_agent_or_collapse_to_404(authorization, resource_id, operation)
         else:
             await authorization.check(
                 resource=AgentexResource(type=resource_type, selector=resource_id),
@@ -116,6 +147,8 @@ def DAuthorizedQuery(
             await check_task_or_collapse_to_404(authorization, task_id, operation)
         elif resource_type == AgentexResourceType.task:
             await check_task_or_collapse_to_404(authorization, resource_id, operation)
+        elif resource_type == AgentexResourceType.agent:
+            await _check_agent_or_collapse_to_404(authorization, resource_id, operation)
         else:
             await authorization.check(
                 resource=AgentexResource(type=resource_type, selector=resource_id),
@@ -200,6 +233,9 @@ def DAuthorizedName(
             # "present in another tenant" from "absent" (tasks.name is globally
             # unique — any 403 leak here probes the whole system, not a tenant).
             await check_task_or_collapse_to_404(authorization, resource.id, operation)
+        elif resource_type == AgentexResourceType.agent:
+            # Agents: same collapse, on the id resolved from the name above.
+            await _check_agent_or_collapse_to_404(authorization, resource.id, operation)
         else:
             await authorization.check(
                 resource=AgentexResource(type=resource_type, selector=resource.id),
