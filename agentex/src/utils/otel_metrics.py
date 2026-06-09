@@ -20,6 +20,8 @@ Environment Variables:
     OTEL_EXPORTER_OTLP_HEADERS: Optional headers for authentication
     OTEL_SERVICE_NAME: Service name for metrics (default: agentex)
     OTEL_METRICS_EXPORT_INTERVAL_MS: Export interval in ms (default: 30000)
+    OTEL_RESOURCE_ATTRIBUTES: K8s and service resource attrs (injected by the OTel
+        Operator on cluster pods; read via OTELResourceDetector).
     AGENTEX_OTEL_HTTP_METRICS_ENABLED: Opt-in in-process FastAPI HTTP metrics
         (default: false). When true, also set
         OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=fastapi,system_metrics on the pod
@@ -44,7 +46,11 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
 )
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-from opentelemetry.sdk.resources import SERVICE_NAME, SERVICE_VERSION, Resource
+from opentelemetry.sdk.resources import (
+    OTELResourceDetector,
+    Resource,
+    get_aggregated_resources,
+)
 
 from src.utils.logging import make_logger
 
@@ -61,6 +67,11 @@ _initialized: bool = False
 # Default configuration
 DEFAULT_SERVICE_NAME = "agentex"
 DEFAULT_EXPORT_INTERVAL_MS = 30000  # 30 seconds
+
+
+def _build_resource() -> Resource:
+    """Build MeterProvider resource from standard OTEL_* env (operator-injected on k8s)."""
+    return get_aggregated_resources([OTELResourceDetector()])
 
 
 def _global_meter_provider() -> MeterProvider | None:
@@ -206,15 +217,12 @@ def init_otel_metrics(
             )
         )
     )
-    resource = Resource.create(
-        {
-            SERVICE_NAME: resolved_service_name,
-            SERVICE_VERSION: service_version
-            or os.environ.get("SERVICE_VERSION", "0.1.0"),
-            "deployment.environment": environment
-            or os.environ.get("ENVIRONMENT", "development"),
-        }
-    )
+    resource = _build_resource()
+    if not resource.attributes.get("k8s.pod.name"):
+        logger.warning(
+            "k8s.pod.name not set on MeterProvider resource; "
+            "ensure OTEL_RESOURCE_ATTRIBUTES is injected (OTel Operator)."
+        )
     reader = PeriodicExportingMetricReader(
         exporter=_create_metric_exporter(endpoint, protocol),
         export_interval_millis=resolved_export_interval_ms,

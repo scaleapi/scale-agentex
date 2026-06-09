@@ -136,6 +136,51 @@ def test_init_creates_meter_provider_when_none_configured(monkeypatch):
 
 
 @pytest.mark.unit
+def test_build_resource_parses_operator_injected_pod_env(monkeypatch):
+    """Regression: K8s expands $(OTEL_RESOURCE_ATTRIBUTES_*) before Python starts."""
+    pod_name = "agentex-ccc85c45b-s29zm"
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
+    monkeypatch.setenv(
+        "OTEL_RESOURCE_ATTRIBUTES",
+        "k8s.container.name=agentex,"
+        "k8s.deployment.name=agentex,"
+        "k8s.namespace.name=agentex,"
+        "k8s.node.name=ip-10-0-1-2.us-west-2.compute.internal,"
+        f"k8s.pod.name={pod_name},"
+        "k8s.replicaset.name=agentex-ccc85c45b,"
+        f"service.instance.id=agentex.{pod_name}.agentex,"
+        "service.namespace=agentex,"
+        "service.version=perf-agentex-drop-redundant-task-grant-b59b92e",
+    )
+
+    attrs = otel_metrics._build_resource().attributes
+    assert attrs.get("service.name") == "agentex"
+    assert attrs.get("k8s.pod.name") == pod_name
+    assert attrs.get("k8s.namespace.name") == "agentex"
+    assert attrs.get("k8s.deployment.name") == "agentex"
+    assert attrs.get("k8s.container.name") == "agentex"
+    assert attrs.get("service.instance.id") == f"agentex.{pod_name}.agentex"
+
+
+@pytest.mark.unit
+def test_build_resource_from_otel_env(monkeypatch):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
+    monkeypatch.setenv(
+        "OTEL_RESOURCE_ATTRIBUTES",
+        "k8s.pod.name=operator-pod,k8s.namespace.name=agentex,"
+        "k8s.deployment.name=agentex,service.instance.id=agentex.operator-pod.agentex",
+    )
+
+    resource = otel_metrics._build_resource()
+    attrs = resource.attributes
+    assert attrs.get("service.name") == "agentex"
+    assert attrs.get("k8s.pod.name") == "operator-pod"
+    assert attrs.get("k8s.namespace.name") == "agentex"
+    assert attrs.get("k8s.deployment.name") == "agentex"
+    assert attrs.get("service.instance.id") == "agentex.operator-pod.agentex"
+
+
+@pytest.mark.unit
 def test_init_coexists_without_set_meter_provider_when_operator_present(
     monkeypatch,
 ):
