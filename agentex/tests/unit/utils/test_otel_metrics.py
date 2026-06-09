@@ -12,8 +12,8 @@ from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
     OTLPMetricExporter as OTLPHttpMetricExporter,
 )
-from opentelemetry.sdk.metrics import MeterProvider
-from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+from opentelemetry.sdk.metrics import Counter, Histogram, MeterProvider, UpDownCounter
+from opentelemetry.sdk.metrics.export import AggregationTemporality, InMemoryMetricReader
 from opentelemetry.sdk.resources import Resource
 from src.utils import cache_metrics, otel_metrics
 
@@ -364,6 +364,23 @@ def test_create_http_metric_exporter_uses_v1_metrics_path():
 
     assert isinstance(exporter, OTLPHttpMetricExporter)
     assert exporter._endpoint == "http://collector:4318/v1/metrics"
+
+
+@pytest.mark.unit
+def test_create_metric_exporter_uses_cumulative_temporality():
+    """Regression: delta OTLP histogram export breaks Mimir histogram_count(rate(...))."""
+    grpc_exporter = otel_metrics._create_metric_exporter(
+        "http://localhost:4317", "grpc"
+    )
+    http_exporter = otel_metrics._create_metric_exporter(
+        "http://collector:4318", "http/protobuf"
+    )
+
+    for exporter in (grpc_exporter, http_exporter):
+        preferred = exporter._preferred_temporality
+        assert preferred[Counter] == AggregationTemporality.CUMULATIVE
+        assert preferred[Histogram] == AggregationTemporality.CUMULATIVE
+        assert preferred[UpDownCounter] == AggregationTemporality.CUMULATIVE
 
 
 @pytest.mark.unit
