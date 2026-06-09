@@ -10,7 +10,6 @@ Default name is _identityJwt. Override with AGENTEX_DELEGATION_SESSION_COOKIE_NA
 """
 
 import os
-from http.cookies import CookieError, SimpleCookie
 from typing import Any
 
 HEADER_ACTING_USER_API_KEY = "x-acting-user-api-key"
@@ -41,21 +40,30 @@ def session_cookie_names_to_forward() -> tuple[str, ...]:
 
 
 def _minimal_session_cookie(cookie_header: str, names: tuple[str, ...]) -> str | None:
+    """Extract only the allowlisted session cookies from an inbound Cookie header.
+
+    We parse the header by hand rather than via ``http.cookies.SimpleCookie``.
+    Real browsers send a long, messy Cookie header full of third-party/analytics
+    morsels that ``SimpleCookie`` cannot parse — e.g. ``__utmzz`` values containing
+    spaces and parentheses (``(not set)``), ``fs_uid`` containing ``#``, or base64
+    values ending in ``==``. When ``SimpleCookie.load()`` hits one of those it stops
+    and silently drops the remaining morsels, so a perfectly valid ``_identityJwt``
+    sitting later in the header is lost and cookie delegation breaks entirely (the
+    agent pod then gets no acting credential). Since we only ever forward exact
+    ``name=value`` pairs for a small allowlist, splitting on ``;`` is both more robust
+    and sufficient — and it never trusts/decodes the non-allowlisted cookies.
+    """
     if not names:
         return None
 
-    jar = SimpleCookie()
-    try:
-        jar.load(cookie_header)
-    except CookieError:
-        return None
+    jar: dict[str, str] = {}
+    for part in cookie_header.split(";"):
+        name, sep, value = part.strip().partition("=")
+        if sep:
+            # First occurrence wins, matching prior SimpleCookie behavior.
+            jar.setdefault(name.strip(), value.strip())
 
-    pairs: list[str] = []
-    for name in names:
-        morsel = jar.get(name)
-        if morsel is not None:
-            pairs.append(f"{name}={morsel.value}")
-
+    pairs = [f"{name}={jar[name]}" for name in names if name in jar]
     return "; ".join(pairs) if pairs else None
 
 
