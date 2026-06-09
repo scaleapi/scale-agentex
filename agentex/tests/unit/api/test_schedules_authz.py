@@ -190,7 +190,8 @@ class TestCreateParentAgentCheck:
     """``create_schedule`` is the only route where no schedule resource exists
     yet, so the authorization service cannot transitively gate on it. The
     route's ``agent_id`` guard MUST check ``agent.update`` on the parent, and a
-    denial propagates as 403 (no schedule whose existence could leak)."""
+    denial collapses to 404 — like every other agent check — so the schedules
+    endpoint can't be used to probe cross-tenant agent existence."""
 
     @staticmethod
     def _agent_id_dep():
@@ -215,16 +216,21 @@ class TestCreateParentAgentCheck:
         assert called_kwargs["resource"] == AgentexResource.agent("agent-1")
         assert called_kwargs["operation"] == AuthorizedOperationType.update
 
-    async def test_create_denied_propagates_403_not_collapsed(self):
+    async def test_create_denied_collapses_to_404(self):
         dep = self._agent_id_dep()
 
         authorization = MagicMock()
         authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
 
-        # Direct agent denial bubbles out as AuthorizationError (→ 403), NOT 404.
-        with pytest.raises(AuthorizationError):
+        # Parent-agent denial collapses to 404 so creating a schedule under an
+        # agent in another tenant can't reveal that the agent exists.
+        with pytest.raises(ItemDoesNotExist):
             await dep(
-                authorization, MagicMock(), MagicMock(), MagicMock(), resource_id="agent-1"
+                authorization,
+                MagicMock(),
+                MagicMock(),
+                MagicMock(),
+                resource_id="agent-1",
             )
 
 

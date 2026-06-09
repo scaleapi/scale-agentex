@@ -65,18 +65,14 @@ FROM base AS docs-builder
 ARG SOURCE_DIR=agentex
 ARG UV_INDEX_URL=
 
-# Install docs dependencies to system Python
-RUN if [ -n "${UV_INDEX_URL}" ]; then \
-        uv export --frozen --group docs --no-emit-project --package agentex-backend \
-            -o /tmp/requirements.txt && \
-        uv pip install --system --index-url "${UV_INDEX_URL}" \
-            -r /tmp/requirements.txt && \
-        rm /tmp/requirements.txt; \
-    else \
-        uv sync --frozen --group docs --package agentex-backend; \
-    fi
-
 COPY ${SOURCE_DIR}/docs/ docs/
+# Docs build is decoupled from the workspace lock: install the toolchain + latest
+# SDK from docs/requirements.txt so doc generation tracks SDK releases.
+RUN if [ -n "${UV_INDEX_URL}" ]; then \
+        uv pip install --system --index-url "${UV_INDEX_URL}" -r docs/requirements.txt; \
+    else \
+        uv pip install --system -r docs/requirements.txt; \
+    fi
 COPY ${SOURCE_DIR}/src/ src/
 RUN cd docs && mkdocs build
 
