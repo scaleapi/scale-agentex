@@ -64,11 +64,10 @@ class AgentTaskService:
         Returns:
             Task containing the created task info
         """
-        # Register in the authorization service before persisting: a registration
-        # failure aborts the request with no orphaned row. If the persist fails
-        # after a successful registration, the compensating deregister_resource
-        # below prevents a dangling authorization entry. Both calls are no-ops
-        # when the authorization service is disabled for this account.
+        # Register the task in the authorization graph before persisting: a
+        # registration failure aborts the request with no orphaned row. If the
+        # persist fails after a successful registration, the compensating
+        # deregister_resource below prevents a dangling authorization entry.
         task_entity = TaskEntity(
             id=orm_id(),
             name=task_name,

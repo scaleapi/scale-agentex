@@ -84,13 +84,12 @@ class ScheduleService:
             else None
         )
 
-        # Schedules have no Postgres row — Temporal is the store and the auth
+        # Schedules have no Postgres row: Temporal is the store and the auth
         # selector is the schedule id ({agent_id}--{schedule_name}). Register
-        # the auth tuple (with the parent_agent edge) BEFORE the Temporal write
-        # (fail-closed), and compensate if the Temporal create fails so we never
-        # leave an orphan tuple. The read-back below is intentionally OUTSIDE
-        # the compensation scope: a describe failure must not deregister a
-        # schedule that was actually created.
+        # before the Temporal write so an auth failure fails closed. If the
+        # Temporal create fails after registration, compensate with a deregister.
+        # The read-back below is intentionally outside the compensation scope
+        # because the schedule was already created.
         registered = await self._register_schedule_in_auth(
             schedule_id=schedule_id, agent_id=agent.id
         )
@@ -109,7 +108,7 @@ class ScheduleService:
                 paused=request.paused,
             )
         except Exception:
-            # Orphan-tuple guard: the tuple was written but the schedule never
+            # Orphan guard: the auth entry was written but the schedule never
             # landed in Temporal. Best-effort compensating deregister, then
             # re-raise the original error.
             if registered:
@@ -122,17 +121,15 @@ class ScheduleService:
     async def _register_schedule_in_auth(
         self, *, schedule_id: str, agent_id: str
     ) -> bool:
-        """Register a new agent_schedule with the auth service, including the
-        parent_agent edge so permissions cascade from the owning agent.
+        """Register the schedule in the authorization graph before creating it.
 
-        Called BEFORE the Temporal write — a failure raises and prevents the
-        schedule from being created. Skipped with a warning when no usable
-        creator identity is available on the principal context (e.g.
-        agent-bypass / internal paths without an authenticated user); this is
-        the interim behavior until on-behalf-of-user identity is threaded.
+        The schedule is registered under its parent agent so permissions
+        cascade from the owning agent. Registering before the Temporal create
+        fails closed: an auth failure aborts the create, and the caller
+        compensates with a deregister if the Temporal create later fails.
 
-        Returns True when a tuple was actually registered (so the caller knows
-        whether a compensating deregister is warranted), False when skipped.
+        Returns True when the schedule was registered, or False when no creator
+        identity is resolvable and registration is skipped.
         """
         principal_context = self.authorization_service.principal_context
         user_id = getattr(principal_context, "user_id", None)
@@ -149,9 +146,8 @@ class ScheduleService:
                 parent=AgentexResource.agent(agent_id),
             )
         except Exception as exc:
-            # Fail closed: log + re-raise so the schedule is never created.
             logger.exception(
-                "Auth register_resource failed for agent_schedule; aborting create",
+                "Auth registration failed for agent_schedule; aborting create",
                 extra={
                     "schedule_id": schedule_id,
                     "agent_id": agent_id,
@@ -162,12 +158,11 @@ class ScheduleService:
         return True
 
     async def _deregister_schedule_from_auth(self, *, schedule_id: str) -> None:
-        """Best-effort deregistration of a schedule's auth tuples.
+        """Best-effort removal of the schedule from the authorization graph.
 
-        ``deregister_resource`` removes the resource and all of its
-        relationships (owner, parent, grantees) atomically. Used both on delete
-        and as the compensating action when a Temporal create fails. Failures
-        are logged but never propagate.
+        Temporal is the source of truth for schedule existence. Once Temporal
+        delete succeeds, a deregister failure is logged but does not block the
+        delete response.
         """
         try:
             await self.authorization_service.deregister_resource(
@@ -175,7 +170,7 @@ class ScheduleService:
             )
         except Exception as exc:
             logger.warning(
-                "Auth deregister failed for agent_schedule; tuple may be orphaned",
+                "Auth deregister failed for agent_schedule; entry may be orphaned",
                 extra={
                     "schedule_id": schedule_id,
                     "error_type": type(exc).__name__,
@@ -392,7 +387,10 @@ class ScheduleService:
                             # Decode bytes to string if possible
                             try:
                                 import json
-                                workflow_params.append(json.loads(arg.data.decode("utf-8")))
+
+                                workflow_params.append(
+                                    json.loads(arg.data.decode("utf-8"))
+                                )
                             except (json.JSONDecodeError, UnicodeDecodeError):
                                 workflow_params.append(str(arg.data))
                         else:
@@ -430,7 +428,9 @@ class ScheduleService:
         if hasattr(info, "recent_actions") and info.recent_actions:
             # ScheduleActionResult has started_at (when action started) and scheduled_at (when it was scheduled)
             last_action = info.recent_actions[-1]
-            last_action_time = getattr(last_action, "started_at", None) or getattr(last_action, "scheduled_at", None)
+            last_action_time = getattr(last_action, "started_at", None) or getattr(
+                last_action, "scheduled_at", None
+            )
         created_at: datetime | None = (
             cast(datetime, info.create_time)
             if hasattr(info, "create_time") and info.create_time

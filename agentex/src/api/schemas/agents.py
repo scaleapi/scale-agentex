@@ -88,9 +88,6 @@ class RegisterAgentRequest(BaseModel):
         description="Optional agent ID if the agent already exists and needs to be updated.",
     )
     acp_type: ACPType = Field(..., description="The type of ACP to use for the agent.")
-    principal_context: Any | None = Field(
-        default=None, description="Principal used for authorization"
-    )
     registration_metadata: dict[str, Any] | None = Field(
         default=None,
         description="The metadata for the agent's registration.",
@@ -120,9 +117,6 @@ class RegisterBuildRequest(BaseModel):
         ..., pattern=r"^[a-z0-9-]+$", description="The unique name of the agent."
     )
     description: str = Field(..., description="The description of the agent.")
-    principal_context: Any | None = Field(
-        default=None, description="Principal used for authorization"
-    )
     registration_metadata: dict[str, Any] | None = Field(
         default=None,
         description="The metadata for the agent's build registration.",

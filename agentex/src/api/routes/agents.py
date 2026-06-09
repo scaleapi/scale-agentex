@@ -76,16 +76,9 @@ async def get_agent_by_name(
         AgentexResourceType.agent, AuthorizedOperationType.read
     ),
     agents_use_case: DAgentsUseCase,
-    authorization: DAuthorizationService,
 ):
     """Get an agent by its unique name."""
     agent_entity = await agents_use_case.get(name=agent_name)
-
-    await authorization.check(
-        resource=AgentexResource.agent(agent_entity.id),
-        operation=AuthorizedOperationType.read,
-    )
-
     return Agent.model_validate(agent_entity)
 
 
@@ -183,7 +176,6 @@ async def register_agent(
     await authorization_service.check(
         AgentexResource.agent("*"),
         AuthorizedOperationType.create,
-        principal_context=request.principal_context,
     )
     logger.info(f"Registering agent: {request}")
     try:
@@ -198,7 +190,6 @@ async def register_agent(
         )
         await authorization_service.grant(
             AgentexResource.agent(agent_entity.id),
-            principal_context=request.principal_context,
         )
         response_fields = agent_entity.model_dump()
         existing_key = await api_keys_use_case.get_internal_api_key_by_agent_id(
@@ -236,11 +227,10 @@ async def register_build(
     agents_use_case: DAgentsUseCase,
     authorization_service: DAuthorizationService,
 ) -> Agent:
-    """Create a build-only agent row and register its authz resource."""
+    """Create a build-only agent row after create authorization."""
     await authorization_service.check(
         AgentexResource.agent("*"),
         AuthorizedOperationType.create,
-        principal_context=request.principal_context,
     )
     logger.info(f"Registering build for agent: {request.name}")
     try:
@@ -252,9 +242,8 @@ async def register_build(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    await authorization_service.register_resource(
+    await authorization_service.grant(
         AgentexResource.agent(agent_entity.id),
-        principal_context=request.principal_context,
     )
     return Agent.model_validate(agent_entity)
 

@@ -1,27 +1,18 @@
-"""Integration tests for AgentAPIKeysUseCase dual-write to the authorization service.
+"""Integration tests for AgentAPIKeysUseCase authorization writes.
 
-scale-agentex calls ``register_resource`` / ``deregister_resource``
-unconditionally; per-account routing is owned by the authorization gateway,
-so scale-agentex does NOT couple to the authorization flag service.
+Agent API keys have no service layer, so the authorization-write sequencing is
+colocated in ``AgentAPIKeysUseCase`` with the Postgres write:
 
-- Create calls register_resource with parent=agent (the parent_agent edge
-  is load-bearing for the authorization cascade).
-- Delete calls deregister_resource after the Postgres row is gone.
-- Registration failure prevents row: when register_resource raises, the
-  api_key is NOT persisted.
-- Deregister failure does not block delete: when deregister_resource
-  raises, the DB delete still completes and the failure is logged.
-- No creator → no register: if neither user_id nor service_account_id is
-  resolvable, the dual-write is a no-op (logged) and the row still lands.
+- Create registers the api_key in the authorization graph under parent=agent,
+  before the api_key row is persisted.
+- Registration failure prevents row creation.
+- Delete removes the Postgres row first, then deregisters best-effort.
+- No creator identity means the registration is skipped and the row still lands.
 
 The tests intentionally mock the repository, authorization service, agent
-repository, and HTTP client. The behaviour under test is the call sequencing
-inside ``AgentAPIKeysUseCase`` — not the underlying persistence or authorization
-cluster itself.
-
-Note on structural divergence from the task dual-write: tasks live behind
-``AgentTaskService``; agent_api_keys have no service layer, so the dual-write
-logic is colocated in ``AgentAPIKeysUseCase``.
+repository, and HTTP client. The behavior under test is the call sequencing
+inside ``AgentAPIKeysUseCase``, not the underlying persistence or authorization
+service itself.
 """
 
 from __future__ import annotations
@@ -50,7 +41,7 @@ def _agent() -> AgentEntity:
     return AgentEntity(
         id=agent_id,
         name=f"agent-{agent_id[:8]}",
-        description="dual-write test agent",
+        description="authorization-write test agent",
         status=AgentStatus.READY,
         acp_type=ACPType.SYNC,
         acp_url="http://test-acp",
@@ -76,7 +67,7 @@ def _build_use_case(
     agent: AgentEntity | None = None,
     create_raises: Exception | None = None,
     monkeypatch: pytest.MonkeyPatch,
-) -> tuple[AgentAPIKeysUseCase, Mock, AsyncMock, AsyncMock]:
+) -> tuple[AgentAPIKeysUseCase, Mock, Mock]:
     sample_agent = agent or _agent()
 
     agent_repository = Mock()
@@ -123,12 +114,7 @@ def _build_use_case(
         client=Mock(),
         authorization_service=authorization_service,
     )
-    return (
-        use_case,
-        agent_api_key_repository,
-        authorization_service.register_resource,
-        authorization_service.deregister_resource,
-    )
+    return use_case, agent_api_key_repository, authorization_service
 
 
 @pytest.mark.asyncio
@@ -137,7 +123,7 @@ async def test_create_api_key_calls_register_resource_with_parent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     agent = _agent()
-    use_case, repo, register, _ = _build_use_case(
+    use_case, repo, authorization_service = _build_use_case(
         principal=_principal(user_id="user-A", account_id="acct-1"),
         agent=agent,
         monkeypatch=monkeypatch,
@@ -150,19 +136,21 @@ async def test_create_api_key_calls_register_resource_with_parent(
         api_key="secret",
     )
 
-    register.assert_awaited_once()
-    registered_resource: AgentexResource = register.await_args.kwargs["resource"]
+    authorization_service.register_resource.assert_awaited_once()
+    registered_resource: AgentexResource = (
+        authorization_service.register_resource.await_args.kwargs["resource"]
+    )
     assert registered_resource.type == AgentexResourceType.api_key
     assert registered_resource.selector == api_key.id
-    # parent_agent edge is load-bearing — without it the authorization cascade
-    # `read = ... & parent_agent->read & ...` fails closed for every reader.
-    registered_parent: AgentexResource = register.await_args.kwargs["parent"]
+    registered_parent: AgentexResource = (
+        authorization_service.register_resource.await_args.kwargs["parent"]
+    )
+    # parent_agent is load-bearing: without it the authorization cascade from
+    # the owning agent fails closed for readers.
     assert registered_parent is not None
     assert registered_parent.type == AgentexResourceType.agent
     assert registered_parent.selector == agent.id
     repo.create.assert_awaited_once()
-    # Sanity: the persisted entity itself; we don't persist creator audit
-    # columns in OSS scale-agentex (Harvey's review feedback on #248).
     assert api_key.id is not None
 
 
@@ -171,7 +159,7 @@ async def test_create_api_key_calls_register_resource_with_parent(
 async def test_delete_api_key_calls_deregister_resource(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    use_case, repo, _, deregister = _build_use_case(
+    use_case, repo, authorization_service = _build_use_case(
         principal=_principal(user_id="user-A", account_id="acct-1"),
         monkeypatch=monkeypatch,
     )
@@ -180,27 +168,29 @@ async def test_delete_api_key_calls_deregister_resource(
     await use_case.delete(id=api_key_id)
 
     repo.delete.assert_awaited_once_with(id=api_key_id)
-    deregister.assert_awaited_once()
-    deregistered_resource: AgentexResource = deregister.await_args.kwargs["resource"]
+    authorization_service.deregister_resource.assert_awaited_once()
+    deregistered_resource: AgentexResource = (
+        authorization_service.deregister_resource.await_args.kwargs["resource"]
+    )
     assert deregistered_resource.type == AgentexResourceType.api_key
     assert deregistered_resource.selector == api_key_id
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_create_api_key_grant_failure_prevents_db_row(
+async def test_create_api_key_register_failure_prevents_db_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    register_resource = AsyncMock(side_effect=RuntimeError("spark unavailable"))
+    register_resource = AsyncMock(side_effect=RuntimeError("authz unavailable"))
     agent = _agent()
-    use_case, repo, _, _ = _build_use_case(
+    use_case, repo, authorization_service = _build_use_case(
         principal=_principal(user_id="user-A", account_id="acct-1"),
         register_resource=register_resource,
         agent=agent,
         monkeypatch=monkeypatch,
     )
 
-    with pytest.raises(RuntimeError, match="spark unavailable"):
+    with pytest.raises(RuntimeError, match="authz unavailable"):
         await use_case.create(
             name="k1",
             agent_id=agent.id,
@@ -209,36 +199,36 @@ async def test_create_api_key_grant_failure_prevents_db_row(
         )
 
     repo.create.assert_not_awaited()
+    authorization_service.deregister_resource.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_delete_api_key_revoke_failure_does_not_block_delete(
+async def test_delete_api_key_deregister_failure_does_not_block_delete(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    deregister = AsyncMock(side_effect=RuntimeError("spark unavailable"))
-    use_case, repo, _, deregister_ref = _build_use_case(
+    deregister = AsyncMock(side_effect=RuntimeError("authz unavailable"))
+    use_case, repo, authorization_service = _build_use_case(
         principal=_principal(user_id="user-A", account_id="acct-1"),
         deregister_resource=deregister,
         monkeypatch=monkeypatch,
     )
 
-    # Should NOT raise.
     await use_case.delete(id=orm_id())
 
     repo.delete.assert_awaited_once()
-    deregister_ref.assert_awaited_once()
+    authorization_service.deregister_resource.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_create_api_key_skips_grant_when_no_creator_resolvable(
+async def test_create_api_key_skips_auth_writes_when_no_creator_resolvable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """If neither user_id nor service_account_id is available on the principal,
-    the dual-write is a no-op (logged) and the row still lands without a tuple."""
+    the registration is skipped and the row still lands."""
     agent = _agent()
-    use_case, repo, register, _ = _build_use_case(
+    use_case, repo, authorization_service = _build_use_case(
         principal=_principal(user_id=None, account_id="acct-1"),
         agent=agent,
         monkeypatch=monkeypatch,
@@ -251,20 +241,19 @@ async def test_create_api_key_skips_grant_when_no_creator_resolvable(
         api_key="secret",
     )
 
-    register.assert_not_called()
+    authorization_service.register_resource.assert_not_called()
     repo.create.assert_awaited_once()
-    # Sanity: the row landed even though we skipped the auth-side registration.
     assert api_key.id is not None
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_delete_by_agent_id_and_key_name_revokes_existing(
+async def test_delete_by_agent_id_and_key_name_removes_auth_entries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     agent = _agent()
     existing_id = orm_id()
-    use_case, repo, _, deregister = _build_use_case(
+    use_case, repo, authorization_service = _build_use_case(
         principal=_principal(user_id="user-A", account_id="acct-1"),
         agent=agent,
         monkeypatch=monkeypatch,
@@ -286,8 +275,10 @@ async def test_delete_by_agent_id_and_key_name_revokes_existing(
     )
 
     repo.delete_by_agent_id_and_key_name.assert_awaited_once()
-    deregister.assert_awaited_once()
-    deregistered_resource: AgentexResource = deregister.await_args.kwargs["resource"]
+    authorization_service.deregister_resource.assert_awaited_once()
+    deregistered_resource: AgentexResource = (
+        authorization_service.deregister_resource.await_args.kwargs["resource"]
+    )
     assert deregistered_resource.selector == existing_id
 
 
@@ -297,15 +288,14 @@ async def test_delete_api_key_skips_when_row_does_not_exist(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When the api_key id doesn't exist, the pre-fetch raises and we early-
-    return — no DB delete, no auth deregister. Avoids round-trips on a no-op."""
-    use_case, repo, _, deregister = _build_use_case(
+    return with no DB delete or auth cleanup."""
+    use_case, repo, authorization_service = _build_use_case(
         principal=_principal(user_id="user-A", account_id="acct-1"),
         monkeypatch=monkeypatch,
     )
-    # Override the default "row exists" sentinel.
     repo.get = AsyncMock(side_effect=ItemDoesNotExist("not found"))
 
     await use_case.delete(id=orm_id())
 
     repo.delete.assert_not_called()
-    deregister.assert_not_called()
+    authorization_service.deregister_resource.assert_not_called()
