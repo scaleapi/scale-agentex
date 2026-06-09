@@ -17,6 +17,7 @@ class AgentexAuthenticationProxy(AuthenticationGateway[AgentexAuthPrincipalConte
     async def verify_headers(
         self, headers: dict[str, str]
     ) -> AgentexAuthPrincipalContext:
-        return await HttpRequestHandler.post_with_error_handling(
+        response = await HttpRequestHandler.post_with_error_handling(
             self.agentex_auth_url, "/v1/authn", headers=headers
         )
+        return AgentexAuthPrincipalContext.model_validate(response)

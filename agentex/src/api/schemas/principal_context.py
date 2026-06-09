@@ -1,7 +1,9 @@
-from types import SimpleNamespace
+from collections.abc import Mapping
 from typing import Any
 
-AgentexAuthPrincipalContext = Any
+from pydantic import ConfigDict, model_validator
+
+from src.utils.model_utils import BaseModel
 
 
 def _is_api_key_field_name(field_name: Any) -> bool:
@@ -10,38 +12,44 @@ def _is_api_key_field_name(field_name: Any) -> bool:
     return field_name.replace("_", "").replace("-", "").lower() == "apikey"
 
 
-def remove_api_key_from_principal_context(
-    principal_context: AgentexAuthPrincipalContext,
-) -> AgentexAuthPrincipalContext:
-    """Return a principal context with API-key secret fields removed."""
-    if isinstance(principal_context, dict):
-        return {
-            key: remove_api_key_from_principal_context(value)
-            for key, value in principal_context.items()
-            if not _is_api_key_field_name(key)
-        }
+class AgentexAuthPrincipalContext(BaseModel):
+    """Principal context passed through Agentex authz.
 
-    if isinstance(principal_context, list):
-        return [
-            remove_api_key_from_principal_context(value) for value in principal_context
-        ]
+    The authn service can return the credential used to authenticate the caller,
+    but Agentex only needs the resolved principal identifiers. Keep the API key
+    out of the base object entirely so it cannot be logged or forwarded through
+    authz payloads.
+    """
 
-    if isinstance(principal_context, tuple):
-        return tuple(
-            remove_api_key_from_principal_context(value) for value in principal_context
-        )
+    model_config = ConfigDict(
+        extra="allow",
+        from_attributes=True,
+        populate_by_name=True,
+    )
 
-    model_dump = getattr(principal_context, "model_dump", None)
-    if callable(model_dump):
-        return remove_api_key_from_principal_context(model_dump())
+    user_id: str | None = None
+    service_account_id: str | None = None
+    account_id: str | None = None
+    agent_id: str | None = None
+    id: str | None = None
+    sub: str | None = None
+    email: str | None = None
 
-    if hasattr(principal_context, "__dict__"):
-        return SimpleNamespace(
-            **{
-                key: remove_api_key_from_principal_context(value)
-                for key, value in vars(principal_context).items()
+    @model_validator(mode="before")
+    @classmethod
+    def remove_api_key(cls, data: Any) -> Any:
+        if isinstance(data, Mapping):
+            return {
+                key: value
+                for key, value in data.items()
+                if not _is_api_key_field_name(key)
+            }
+
+        if hasattr(data, "__dict__"):
+            return {
+                key: value
+                for key, value in vars(data).items()
                 if not key.startswith("_") and not _is_api_key_field_name(key)
             }
-        )
 
-    return principal_context
+        return data

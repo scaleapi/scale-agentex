@@ -1,5 +1,5 @@
 from collections.abc import Iterable
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends
 from src.adapters.authorization.port import (
@@ -16,6 +16,16 @@ from src.config.environment_variables import EnvVarKeys
 from src.utils.http_request_handler import HttpRequestHandler
 
 
+def _principal_context_payload(
+    principal: AgentexAuthPrincipalContext | Any,
+) -> dict[str, Any] | None:
+    if principal is None:
+        return None
+    return AgentexAuthPrincipalContext.model_validate(principal).model_dump(
+        exclude_none=True
+    )
+
+
 class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext]):
     def __init__(
         self,
@@ -30,7 +40,7 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
         operation: AuthorizedOperationType,
     ) -> None:
         payload = {
-            "principal": principal,
+            "principal": _principal_context_payload(principal),
             "resource": resource.model_dump(),
             "operation": operation,
         }
@@ -45,7 +55,7 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
         operation: AuthorizedOperationType,
     ) -> None:
         payload = {
-            "principal": principal,
+            "principal": _principal_context_payload(principal),
             "resource": resource.model_dump(),
             "operation": operation,
         }
@@ -60,7 +70,7 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
         operation: AuthorizedOperationType,
     ) -> bool:
         payload = {
-            "principal": principal,
+            "principal": _principal_context_payload(principal),
             "resource": resource.model_dump(),
             "operation": operation,
         }
@@ -76,7 +86,7 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
         filter_operation: AuthorizedOperationType = AuthorizedOperationType.read,
     ) -> Iterable[str]:
         payload = {
-            "principal": principal,
+            "principal": _principal_context_payload(principal),
             "filter_resource": filter_resource,
             "filter_operation": filter_operation,
         }
@@ -92,7 +102,7 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
         parent: AgentexResource | None = None,
     ) -> None:
         payload = {
-            "principal": principal,
+            "principal": _principal_context_payload(principal),
             "resource": resource.model_dump(),
             "parent": parent.model_dump() if parent is not None else None,
         }
@@ -106,7 +116,7 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
         resource: AgentexResource,
     ) -> None:
         payload = {
-            "principal": principal,
+            "principal": _principal_context_payload(principal),
             "resource": resource.model_dump(),
         }
         await HttpRequestHandler.post_with_error_handling(

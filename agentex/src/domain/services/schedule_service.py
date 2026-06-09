@@ -132,8 +132,8 @@ class ScheduleService:
         identity is resolvable and registration is skipped.
         """
         principal_context = self.authorization_service.principal_context
-        # principal_context is `Any` (a dict from /v1/authn), not a typed model,
-        # so getattr always yields None and silently skips the Spark register.
+        # Keep dict support for legacy tests/mocks; runtime authn normalizes
+        # this to an AgentexAuthPrincipalContext object.
         if isinstance(principal_context, dict):
             user_id = principal_context.get("user_id")
             service_account_id = principal_context.get("service_account_id")

@@ -2,42 +2,59 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from src.adapters.authorization.adapter_agentex_authz_proxy import (
+    _principal_context_payload,
+)
 from src.api.middleware_utils import verify_auth_gateway
-from src.api.schemas.principal_context import remove_api_key_from_principal_context
+from src.api.schemas.principal_context import AgentexAuthPrincipalContext
 
 
 @pytest.mark.unit
-def test_remove_api_key_from_principal_context_removes_key_variants_recursively():
+def test_principal_context_model_removes_api_key_from_base_object():
     principal_context = {
         "user_id": "user-1",
         "account_id": "acct-1",
-        "api_key": "secret-1",
-        "nested": {
-            "apiKey": "secret-2",
-            "items": [{"api-key": "secret-3", "safe": "kept"}],
-        },
+        "api_key": "secret",
+        "workspace_id": "workspace-1",
     }
 
-    assert remove_api_key_from_principal_context(principal_context) == {
+    principal = AgentexAuthPrincipalContext.model_validate(principal_context)
+
+    assert not hasattr(principal, "api_key")
+    assert principal.model_dump(exclude_none=True) == {
         "user_id": "user-1",
         "account_id": "acct-1",
-        "nested": {"items": [{"safe": "kept"}]},
+        "workspace_id": "workspace-1",
     }
 
 
 @pytest.mark.unit
-def test_remove_api_key_from_principal_context_preserves_object_shape():
-    principal_context = SimpleNamespace(
-        user_id="user-1",
-        account_id="acct-1",
-        api_key="secret",
+def test_principal_context_model_removes_api_key_name_variants():
+    principal = AgentexAuthPrincipalContext.model_validate(
+        {
+            "user_id": "user-1",
+            "apiKey": "secret-1",
+            "api-key": "secret-2",
+        }
     )
 
-    sanitized = remove_api_key_from_principal_context(principal_context)
+    assert principal.model_dump(exclude_none=True) == {"user_id": "user-1"}
 
-    assert sanitized.user_id == "user-1"
-    assert sanitized.account_id == "acct-1"
-    assert not hasattr(sanitized, "api_key")
+
+@pytest.mark.unit
+def test_principal_context_payload_serializes_without_api_key():
+    payload = _principal_context_payload(
+        {
+            "user_id": "user-1",
+            "account_id": "acct-1",
+            "api_key": "secret-key",
+        }
+    )
+
+    assert payload == {
+        "user_id": "user-1",
+        "account_id": "acct-1",
+    }
 
 
 @pytest.mark.unit
@@ -62,7 +79,8 @@ async def test_verify_auth_gateway_stores_sanitized_principal_context():
     response = await verify_auth_gateway(request, auth_gateway)
 
     assert response is None
-    assert request.state.principal_context == {
+    assert isinstance(request.state.principal_context, AgentexAuthPrincipalContext)
+    assert request.state.principal_context.model_dump(exclude_none=True) == {
         "user_id": "user-1",
         "account_id": "acct-1",
     }

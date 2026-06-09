@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import pytest
 from src.api.authentication_cache import AsyncTTLCache, AuthenticationCache
+from src.api.schemas.principal_context import AgentexAuthPrincipalContext
 
 
 @pytest.mark.unit
@@ -101,7 +102,10 @@ async def test_auth_gateway_response_with_api_key_principal_is_sanitized_before_
 
     await cache.set_auth_gateway_response(headers, principal)
 
-    assert await cache.get_auth_gateway_response(headers) == {
+    cached_principal = await cache.get_auth_gateway_response(headers)
+
+    assert isinstance(cached_principal, AgentexAuthPrincipalContext)
+    assert cached_principal.model_dump(exclude_none=True) == {
         "user_id": "user-1",
         "account_id": "acct-1",
     }

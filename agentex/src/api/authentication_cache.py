@@ -7,9 +7,7 @@ import time
 from collections import OrderedDict
 from typing import Any
 
-from src.api.schemas.principal_context import (
-    remove_api_key_from_principal_context,
-)
+from src.api.schemas.principal_context import AgentexAuthPrincipalContext
 from src.utils.cache_metrics import record_cache_access, record_cache_eviction
 from src.utils.logging import make_logger
 
@@ -237,43 +235,19 @@ class AuthenticationCache:
         result = await self.auth_gateway_cache.get(f"gateway:{cache_key}")
         if result is not None:
             logger.debug("Cache hit for auth gateway")
-        return result
+            return AgentexAuthPrincipalContext.model_validate(result)
+        return None
 
     async def set_auth_gateway_response(
         self, headers: dict[str, str], principal_context: Any
     ) -> None:
         """Cache auth gateway response."""
-        principal_context = remove_api_key_from_principal_context(principal_context)
-        if self._contains_api_key(principal_context):
-            logger.debug("Skipping auth gateway cache for API key principal")
-            return
+        principal_context = AgentexAuthPrincipalContext.model_validate(
+            principal_context
+        )
         cache_key = self._create_headers_cache_key(headers)
         await self.auth_gateway_cache.set(f"gateway:{cache_key}", principal_context)
         logger.debug("Cached auth gateway response")
-
-    @staticmethod
-    def _contains_api_key(principal_context: Any) -> bool:
-        if principal_context is None:
-            return False
-        if isinstance(principal_context, dict):
-            return any(
-                (
-                    key.replace("_", "").replace("-", "").lower() == "apikey"
-                    if isinstance(key, str)
-                    else False
-                )
-                or AuthenticationCache._contains_api_key(value)
-                for key, value in principal_context.items()
-            )
-        if isinstance(principal_context, list | tuple):
-            return any(
-                AuthenticationCache._contains_api_key(value)
-                for value in principal_context
-            )
-        return bool(
-            getattr(principal_context, "api_key", None)
-            or getattr(principal_context, "apiKey", None)
-        )
 
     # Authorization Check Cache Methods (Async)
 
@@ -293,7 +267,10 @@ class AuthenticationCache:
         principal_key_data = {}
         if principal_context:
             # Handle different types of principal context
-            if hasattr(principal_context, "__dict__"):
+            model_dump = getattr(principal_context, "model_dump", None)
+            if callable(model_dump):
+                context_dict = model_dump(exclude_none=True)
+            elif hasattr(principal_context, "__dict__"):
                 # If it's an object with attributes
                 context_dict = principal_context.__dict__
             elif isinstance(principal_context, dict):
