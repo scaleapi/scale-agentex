@@ -20,6 +20,14 @@ Environment Variables:
     OTEL_EXPORTER_OTLP_HEADERS: Optional headers for authentication
     OTEL_SERVICE_NAME: Service name for metrics (default: agentex)
     OTEL_METRICS_EXPORT_INTERVAL_MS: Export interval in ms (default: 30000)
+    AGENTEX_OTEL_HTTP_METRICS_ENABLED: Opt-in in-process FastAPI HTTP metrics
+        (default: false). When true, also set
+        OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=fastapi,system_metrics on the pod
+        so the OTel Operator does not double-instrument FastAPI.
+    OTEL_PYTHON_DISABLED_INSTRUMENTATIONS: Pod env; must include ``fastapi`` when
+        using in-process HTTP metrics (see above).
+    DD_TRACE_FASTAPI_ENABLED: Set to ``false`` when using ddtrace-run so ddtrace
+        does not claim FastAPI before OpenTelemetry instrumentation.
 """
 
 from __future__ import annotations
@@ -298,14 +306,11 @@ def instrument_fastapi_http_metrics(app: Any) -> bool:
     """
     Install in-process FastAPI HTTP server metrics (http.server.request.duration).
 
-    Call after init_otel_metrics() so custom and HTTP metrics share the active
-    global MeterProvider (operator or standalone).
+    Prefer :func:`configure_app_metrics`. When called directly, invoke before the
+    ASGI server handles any messages (lifespan startup is too late).
 
-    Safe with OTel Operator auto-instrumentation: FastAPIInstrumentor is
-    idempotent and no-ops when ``_is_instrumented_by_opentelemetry`` is already set.
-    Set OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=fastapi on the pod so the operator
-    does not also hook FastAPI. Beyla/eBPF metrics are independent and may still
-    appear under different label sets when attach succeeds.
+    Requires ``AGENTEX_OTEL_HTTP_METRICS_ENABLED=true`` and
+    ``OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=fastapi,system_metrics`` on the pod.
 
     Returns:
         True when instrumentation was applied, False when skipped or disabled.
@@ -331,6 +336,29 @@ def instrument_fastapi_http_metrics(app: Any) -> bool:
 
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-    FastAPIInstrumentor.instrument_app(app)
+    meter_provider = _global_meter_provider()
+    FastAPIInstrumentor.instrument_app(app, meter_provider=meter_provider)
     logger.info("FastAPI in-process HTTP metrics instrumentation enabled")
     return True
+
+
+def configure_app_metrics(app: Any) -> None:
+    """
+    Initialize OTLP metrics and optional FastAPI HTTP instrumentation.
+
+    Call once at module import after the FastAPI app is fully configured (middleware,
+    routes, handlers) and before wrapping it or serving any ASGI messages.
+    Lifespan is too late: Starlette caches ``middleware_stack`` on the first ASGI
+    message (usually lifespan startup), before the lifespan handler runs.
+
+    HTTP metrics are opt-in via ``AGENTEX_OTEL_HTTP_METRICS_ENABLED`` (default false).
+    Beyla/eBPF HTTP metrics are independent and use different label sets when present.
+    """
+    init_otel_metrics()
+    if not _http_metrics_enabled():
+        return
+    if not instrument_fastapi_http_metrics(app):
+        logger.warning(
+            "FastAPI HTTP metrics were not applied despite "
+            "AGENTEX_OTEL_HTTP_METRICS_ENABLED; see prior log lines for the skip reason"
+        )

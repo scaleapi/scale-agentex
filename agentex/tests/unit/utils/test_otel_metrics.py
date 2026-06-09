@@ -436,6 +436,82 @@ def test_instrument_fastapi_applies_with_existing_provider(monkeypatch):
 
 
 @pytest.mark.unit
+def test_configure_app_metrics_before_first_request(monkeypatch):
+    """Instrument at import time, before the ASGI server builds middleware_stack."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("AGENTEX_OTEL_HTTP_METRICS_ENABLED", "true")
+    monkeypatch.setenv("OTEL_SEMCONV_STABILITY_OPT_IN", "http")
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(
+        resource=Resource.create({"service.name": "agentex"}),
+        metric_readers=[reader],
+    )
+    _set_global_meter_provider(provider)
+
+    app = FastAPI()
+
+    @app.post("/agents/{agent_id}/rpc")
+    def rpc(agent_id: str) -> dict[str, str]:
+        return {"ok": agent_id}
+
+    otel_metrics.configure_app_metrics(app)
+
+    with TestClient(app) as client:
+        response = client.post("/agents/test/rpc")
+        assert response.status_code == 200
+
+    data = reader.get_metrics_data()
+    assert data is not None
+    metric_names = {
+        metric.name
+        for resource_metrics in data.resource_metrics
+        for scope in resource_metrics.scope_metrics
+        for metric in scope.metrics
+    }
+    assert "http.server.request.duration" in metric_names
+
+
+@pytest.mark.unit
+def test_configure_app_metrics_in_lifespan_does_not_record_metrics(monkeypatch):
+    """Lifespan runs after Starlette caches middleware_stack on lifespan startup."""
+    from contextlib import asynccontextmanager
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("AGENTEX_OTEL_HTTP_METRICS_ENABLED", "true")
+    monkeypatch.setenv("OTEL_SEMCONV_STABILITY_OPT_IN", "http")
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(
+        resource=Resource.create({"service.name": "agentex"}),
+        metric_readers=[reader],
+    )
+    _set_global_meter_provider(provider)
+
+    app = FastAPI()
+
+    @app.post("/x")
+    def x() -> dict[str, str]:
+        return {"ok": "true"}
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        otel_metrics.configure_app_metrics(app)
+        yield
+
+    app.router.lifespan_context = lifespan
+
+    with TestClient(app) as client:
+        client.post("/x")
+
+    assert reader.get_metrics_data() is None
+
+
+@pytest.mark.unit
 def test_instrument_fastapi_is_idempotent(monkeypatch):
     from fastapi import FastAPI
 
