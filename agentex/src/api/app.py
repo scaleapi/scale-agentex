@@ -195,14 +195,21 @@ fastapi_app.include_router(schedules.router)
 fastapi_app.include_router(checkpoints.router)
 fastapi_app.include_router(task_retention.router)
 
-# Test-only seeding endpoint. Gated by env (must opt in AND not be prod) so
-# this code path is unreachable in production deployments by construction --
-# the router is not even mounted. Both conditions are required.
+# Test-only seeding endpoint. Gated by env (must opt in AND be on a known
+# non-prod environment) so this code path is unreachable in production
+# deployments by construction -- the router is not even mounted.
+#
+# Allow-list rather than deny-list: ENVIRONMENT is typed `str | None` and
+# populated raw from os.environ with no enum coercion, so a deny-list against
+# Environment.PROD would fail OPEN on unset, "prod", "Production", typos, or
+# any new environment name. Mount only when ENVIRONMENT is an explicitly
+# known non-prod value.
+_TEST_SEEDING_ALLOWED_ENVS = {Environment.DEV, Environment.STAGING}
 _test_seeding_env_vars = EnvironmentVariables.refresh()
 if (
     _test_seeding_env_vars is not None
     and _test_seeding_env_vars.ENABLE_TEST_SEEDING
-    and _test_seeding_env_vars.ENVIRONMENT != Environment.PROD
+    and _test_seeding_env_vars.ENVIRONMENT in _TEST_SEEDING_ALLOWED_ENVS
 ):
     from src.api.routes import test_seeding
 

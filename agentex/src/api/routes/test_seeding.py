@@ -3,7 +3,10 @@
 POST /test/seed lets e2e tests insert resource rows directly, bypassing the ACP
 runtime. The router is only mounted in app.py when both:
   - env_vars.ENABLE_TEST_SEEDING is true
-  - env_vars.ENVIRONMENT != Environment.PROD
+  - env_vars.ENVIRONMENT is an explicitly-allowed non-prod value
+    (Environment.DEV or Environment.STAGING). Unknown / typo'd / unset
+    environments fail closed because ENVIRONMENT is typed `str | None`
+    with no enum coercion.
 
 Per-request the endpoint also requires the X-Test-Seed-Token header to match
 env_vars.TEST_SEED_TOKEN (compared with hmac.compare_digest).
@@ -29,6 +32,11 @@ from src.config.environment_variables import Environment, EnvironmentVariables
 from src.domain.use_cases.test_seeding_use_case import DTestSeedingUseCase
 from src.utils.logging import make_logger
 from src.utils.model_utils import BaseModel
+
+# Allow-list of non-prod environment names for the seeding gate. Kept in sync
+# with the mount-time check in src/api/app.py — any new non-prod environment
+# must be added in both places.
+_ALLOWED_ENVS: frozenset[str] = frozenset({Environment.DEV, Environment.STAGING})
 
 
 def get_seeding_env_vars() -> EnvironmentVariables:
@@ -105,9 +113,12 @@ def _require_test_seeding_enabled(
         status_code=status.HTTP_404_NOT_FOUND, detail="Not Found"
     )
 
-    # Hard env gate, regardless of flag. Paranoia: prevents a flag-flip in prod
-    # from exposing seeding even momentarily.
-    if env_vars.ENVIRONMENT == Environment.PROD:
+    # Hard env gate, regardless of flag. Allow-list rather than deny-list:
+    # ENVIRONMENT is raw os.environ with no enum coercion, so a deny-list
+    # against PROD would fail OPEN on unset / "prod" / "Production" / typos /
+    # new env names. Fail closed on anything we don't explicitly recognize as
+    # non-prod.
+    if env_vars.ENVIRONMENT not in _ALLOWED_ENVS:
         raise not_found
 
     if not env_vars.ENABLE_TEST_SEEDING:

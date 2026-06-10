@@ -30,7 +30,7 @@ class _FakeEnvVars:
         self,
         *,
         enabled: bool = True,
-        environment: str = Environment.DEV,
+        environment: str | None = Environment.DEV,
         token: str | None = VALID_TOKEN,
     ) -> None:
         self.ENABLE_TEST_SEEDING = enabled
@@ -148,6 +148,42 @@ class TestTestSeedingGate:
             headers={"X-Test-Seed-Token": VALID_TOKEN},
         )
         assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "bad_env",
+        [
+            None,           # unset env var
+            "",             # empty string
+            "prod",         # short form (not Environment.PROD's "production")
+            "Production",   # case variant
+            "dev",          # short form (not Environment.DEV's "development")
+            "qa",           # unknown environment name
+        ],
+        ids=["unset", "empty", "prod_short", "prod_titlecase", "dev_short", "unknown"],
+    )
+    async def test_unknown_environment_returns_404(
+        self, seeding_client, seeded_agent_and_task, bad_env
+    ):
+        """Allow-list, not deny-list: ENVIRONMENT is raw os.environ with no enum
+        coercion, so any value the gate doesn't explicitly recognize as non-prod
+        must fail closed."""
+        client, _ = seeding_client
+        _override_env(_FakeEnvVars(enabled=True, environment=bad_env))
+        resp = await client.post(
+            "/test/seed",
+            json={
+                "resource_type": "event",
+                "payload": {
+                    "task_id": seeded_agent_and_task["task"].id,
+                    "agent_id": seeded_agent_and_task["agent"].id,
+                },
+            },
+            headers={"X-Test-Seed-Token": VALID_TOKEN},
+        )
+        assert resp.status_code == 404, (
+            f"environment={bad_env!r} should fail closed, got {resp.status_code}"
+        )
 
     @pytest.mark.asyncio
     async def test_wrong_token_returns_404(
