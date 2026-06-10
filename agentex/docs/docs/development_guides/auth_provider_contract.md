@@ -80,6 +80,14 @@ decide what happened. The body matters only where noted (`/v1/authn` principal,
 
 A network/timeout failure reaching the provider is treated as service-unavailable.
 
+> **`/v1/authn` collapses every failure to `401`.** The status-code distinctions
+> above (`502`/`503`/`5xx`) are preserved only for the **authz** endpoints, which
+> are called inside request handlers. Authentication runs in middleware that
+> catches *any* non-`200` from the provider — including `5xx` — and returns a flat
+> `401 Unauthorized` to the original caller. A `503` from your authn endpoint
+> during an outage will therefore reach clients as `401`, not as a retryable
+> service-unavailable error.
+
 ### The principal context (opaque round-trip)
 
 The **principal context** is a JSON object returned by `/v1/authn`. Agentex treats
