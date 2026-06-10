@@ -75,6 +75,7 @@ nav:
       - State Machines: development_guides/state_machines.md
       - Agent Task Tracker: development_guides/agent_task_tracker.md
       - Webhooks: development_guides/webhooks.md
+      - Auth Provider Contract: development_guides/auth_provider_contract.md
       - Enterprise Edition: development_guides/enterprise_edition.md
   - Temporal Development:
       - Overview: temporal_development/overview.md
