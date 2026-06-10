@@ -49,11 +49,10 @@ class AuthorizationService:
             return None
 
         logger.info(
-            "[authorization_service] Granting %s permission on %s:%s for principal %s",
+            "[authorization_service] Granting %s permission on %s:%s",
             AuthorizedOperationType.create,
             resource.type,
             resource.selector,
-            self.principal_context,
         )
         result = await self.gateway.grant(
             principal_context
@@ -72,11 +71,10 @@ class AuthorizationService:
             return None
 
         logger.info(
-            "[authorization_service] Revoking %s permission on %s:%s for principal %s",
+            "[authorization_service] Revoking %s permission on %s:%s",
             AuthorizedOperationType.delete,
             resource.type,
             resource.selector,
-            self.principal_context,
         )
 
         result = await self.gateway.revoke(
@@ -120,22 +118,20 @@ class AuthorizationService:
 
         if cached_result is not None:
             logger.info(
-                "[authorization_service] Using cached result for %s permission on %s:%s for principal %s: %s",
+                "[authorization_service] Using cached result for %s permission on %s:%s: %s",
                 operation,
                 resource.type,
                 resource.selector,
-                effective_principal,
                 "allowed" if cached_result else "denied",
             )
             return cached_result
 
         # Not in cache, perform actual check
         logger.info(
-            "[authorization_service] Checking %s permission on %s:%s for principal %s",
+            "[authorization_service] Checking %s permission on %s:%s",
             operation,
             resource.type,
             resource.selector,
-            effective_principal,
         )
         result = await self.gateway.check(
             effective_principal,
@@ -171,10 +167,9 @@ class AuthorizationService:
             return None
 
         logger.info(
-            "[authorization_service] Listing resources of type %s with %s permission for principal %s",
+            "[authorization_service] Listing resources of type %s with %s permission",
             filter_resource,
             filter_operation,
-            self.principal_context,
         )
         result = await self.gateway.list_resources(
             principal_context
@@ -213,10 +208,9 @@ class AuthorizationService:
             else self.principal_context
         )
         logger.info(
-            "[authorization_service] Registering %s:%s for principal %s (parent=%s)",
+            "[authorization_service] Registering %s:%s (parent=%s)",
             resource.type,
             resource.selector,
-            effective_principal,
             f"{parent.type}:{parent.selector}" if parent is not None else None,
         )
         await self.gateway.register_resource(effective_principal, resource, parent)
@@ -238,10 +232,9 @@ class AuthorizationService:
             else self.principal_context
         )
         logger.info(
-            "[authorization_service] Deregistering %s:%s for principal %s",
+            "[authorization_service] Deregistering %s:%s",
             resource.type,
             resource.selector,
-            effective_principal,
         )
         await self.gateway.deregister_resource(effective_principal, resource)
 

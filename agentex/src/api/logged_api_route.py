@@ -27,7 +27,7 @@ def log_request(
         extra={
             "method": request.method,
             "path": raw_path,
-            "query_params": request.query_params,
+            "query_params": strip_sensitive_items(request.query_params),
             "headers": strip_sensitive_items(request.headers),
             "body": request_dict,
             "request_id": request_id,
@@ -42,7 +42,7 @@ def log_response(request_id: str, request: Request, response: Response):
             "status_code": response.status_code,
             "method": request.method,
             "path": request.url.path,
-            "headers": response.headers,
+            "headers": strip_sensitive_items(response.headers),
             "request_id": request_id,
         },
     )
