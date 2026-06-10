@@ -3,6 +3,7 @@ from uuid import uuid4
 
 import pytest
 from src.adapters.temporal.adapter_temporal import TemporalAdapter
+from src.config.environment_variables import EnvironmentVariables
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
 from src.domain.entities.deployments import DeploymentEntity, DeploymentStatus
 from src.domain.repositories.agent_repository import AgentRepository
@@ -32,6 +33,15 @@ def deployment_history_repository(postgres_session_maker):
 @pytest.fixture
 def temporal_adapter():
     return AsyncMock(spec=TemporalAdapter)
+
+
+@pytest.fixture
+def enable_health_check_workflow(monkeypatch):
+    monkeypatch.setenv("ENABLE_HEALTH_CHECK_WORKFLOW", "true")
+    monkeypatch.setenv("AGENTEX_SERVER_TASK_QUEUE", "agentex-server")
+    EnvironmentVariables.clear_cache()
+    yield
+    EnvironmentVariables.clear_cache()
 
 
 @pytest.fixture
@@ -196,3 +206,46 @@ async def test_deployment_aware_register_on_legacy_agent_does_not_auto_promote(
     assert refreshed_agent.acp_url == "http://legacy.example.com"
     assert deployment.is_production is False
     assert deployment.acp_url == "http://preview.example.com"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize("register_by_id", [False, True])
+async def test_deployment_aware_register_uses_deployment_acp_url_for_healthcheck(
+    agents_use_case,
+    agent_repository,
+    deployment_repository,
+    temporal_adapter,
+    enable_health_check_workflow,
+    register_by_id,
+):
+    name = f"build-only-deployment-aware-{uuid4().hex[:8]}"
+    deployment_id = str(uuid4())
+    deployment_acp_url = "http://deployment.example.com"
+    build_only_agent = await agents_use_case.register_build(
+        name=name,
+        description="build-only agent",
+    )
+    temporal_adapter.start_workflow.reset_mock()
+
+    await agents_use_case.register_agent(
+        name=name,
+        description="build-only agent",
+        acp_url=deployment_acp_url,
+        agent_id=build_only_agent.id if register_by_id else None,
+        acp_type=ACPType.ASYNC,
+        registration_metadata={
+            "deployment_id": deployment_id,
+            "docker_image": "example:preview",
+        },
+    )
+
+    refreshed_agent = await agent_repository.get(id=build_only_agent.id)
+    deployment = await deployment_repository.get(id=deployment_id)
+
+    assert refreshed_agent.acp_url is None
+    assert deployment.acp_url == deployment_acp_url
+    temporal_adapter.start_workflow.assert_awaited_once()
+    assert temporal_adapter.start_workflow.await_args.kwargs["args"] == [
+        {"agent_id": build_only_agent.id, "acp_url": deployment_acp_url}
+    ]
