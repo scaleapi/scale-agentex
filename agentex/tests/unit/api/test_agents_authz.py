@@ -1,8 +1,8 @@
-"""Agent direct-route authorization: denied reads/deletes collapse to 404.
+"""Agent direct-route authorization preserves 403 for readable resources.
 
-Asserts the route layer issues the right ``check`` calls and collapses a denial
-to 404 (so callers can't probe cross-tenant existence), and that list filtering
-forwards the authorized-id set to the use case.
+Asserts the route layer issues the right ``check`` calls, collapses unreadable
+resources to 404 (so callers can't probe cross-tenant existence), and preserves
+403 for denied stronger operations on resources the caller can already read.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ def _dep_callable(annotation):
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestCheckAgentOrCollapseTo404:
-    """Helper collapses every denial to 404 (no cross-tenant existence leak)."""
+    """Helper collapses unreadable agents while preserving denied operations."""
 
     async def test_allowed_check_returns_normally(self):
         authorization = MagicMock()
@@ -55,7 +55,7 @@ class TestCheckAgentOrCollapseTo404:
         assert called_kwargs["resource"] == AgentexResource.agent("agent-1")
         assert called_kwargs["operation"] == AuthorizedOperationType.read
 
-    async def test_denied_collapses_to_not_found(self):
+    async def test_denied_read_collapses_to_not_found(self):
         authorization = MagicMock()
         authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
 
@@ -63,8 +63,44 @@ class TestCheckAgentOrCollapseTo404:
             await _check_agent_or_collapse_to_404(
                 authorization,
                 "agent-1",
-                AuthorizedOperationType.delete,
+                AuthorizedOperationType.read,
             )
+
+        authorization.check.assert_awaited_once()
+
+    async def test_denied_non_read_collapses_to_not_found_when_read_denied(self):
+        authorization = MagicMock()
+        authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
+
+        with pytest.raises(ItemDoesNotExist):
+            await _check_agent_or_collapse_to_404(
+                authorization,
+                "agent-1",
+                AuthorizedOperationType.execute,
+            )
+
+        assert authorization.check.await_count == 2
+        first_call, second_call = authorization.check.await_args_list
+        assert first_call.kwargs["operation"] == AuthorizedOperationType.execute
+        assert second_call.kwargs["operation"] == AuthorizedOperationType.read
+
+    async def test_denied_non_read_surfaces_authorization_error_when_read_allowed(self):
+        authorization = MagicMock()
+        operation_denied = AuthorizationError("denied")
+        authorization.check = AsyncMock(side_effect=[operation_denied, True])
+
+        with pytest.raises(AuthorizationError) as exc_info:
+            await _check_agent_or_collapse_to_404(
+                authorization,
+                "agent-1",
+                AuthorizedOperationType.execute,
+            )
+
+        assert exc_info.value is operation_denied
+        assert authorization.check.await_count == 2
+        first_call, second_call = authorization.check.await_args_list
+        assert first_call.kwargs["operation"] == AuthorizedOperationType.execute
+        assert second_call.kwargs["operation"] == AuthorizedOperationType.read
 
     async def test_operation_forwarded_verbatim(self):
         authorization = MagicMock()
@@ -83,7 +119,7 @@ class TestCheckAgentOrCollapseTo404:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestDAuthorizedIdAgentWrap:
-    """``DAuthorizedId(agent, ...)`` routes through the collapse wrap → 404 on denial."""
+    """``DAuthorizedId(agent, ...)`` routes through the agent authz wrapper."""
 
     async def test_agent_id_returns_resource_id_when_allowed(self):
         annotation = DAuthorizedId(
@@ -115,6 +151,31 @@ class TestDAuthorizedIdAgentWrap:
         with pytest.raises(ItemDoesNotExist):
             await dep(authorization, MagicMock(), MagicMock(), MagicMock(), "agent-7")
 
+    async def test_agent_execute_denied_when_readable_surfaces_authorization_error(
+        self,
+    ):
+        annotation = DAuthorizedId(
+            AgentexResourceType.agent, AuthorizedOperationType.execute
+        )
+        dep = _dep_callable(annotation)
+
+        authorization = MagicMock()
+        authorization.check = AsyncMock(
+            side_effect=[AuthorizationError("execute denied"), True]
+        )
+
+        with pytest.raises(AuthorizationError):
+            await dep(
+                authorization, MagicMock(), MagicMock(), MagicMock(), "agent-exec"
+            )
+
+        assert authorization.check.await_count == 2
+        first_call, second_call = authorization.check.await_args_list
+        assert first_call.kwargs["resource"] == AgentexResource.agent("agent-exec")
+        assert first_call.kwargs["operation"] == AuthorizedOperationType.execute
+        assert second_call.kwargs["resource"] == AgentexResource.agent("agent-exec")
+        assert second_call.kwargs["operation"] == AuthorizedOperationType.read
+
     async def test_agent_delete_op_propagated_to_check(self):
         annotation = DAuthorizedId(
             AgentexResourceType.agent, AuthorizedOperationType.delete
@@ -133,7 +194,7 @@ class TestDAuthorizedIdAgentWrap:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestDAuthorizedNameAgentWrap:
-    """``DAuthorizedName(agent, ...)``: lookup-then-collapse on the resolved id."""
+    """``DAuthorizedName(agent, ...)`` authorizes the resolved id."""
 
     async def test_present_but_denied_collapses_to_404(self):
         annotation = DAuthorizedName(
@@ -154,6 +215,31 @@ class TestDAuthorizedNameAgentWrap:
         agent_repository.get.assert_awaited_once_with(name="prod-agent")
         called_kwargs = authorization.check.await_args.kwargs
         assert called_kwargs["resource"] == AgentexResource.agent("agent-resolved")
+
+    async def test_execute_denied_when_readable_surfaces_authorization_error(self):
+        annotation = DAuthorizedName(
+            AgentexResourceType.agent, AuthorizedOperationType.execute
+        )
+        dep = _dep_callable(annotation)
+
+        agent_repository = MagicMock()
+        agent_repository.get = AsyncMock(return_value=MagicMock(id="agent-resolved"))
+        task_repository = MagicMock()
+        authorization = MagicMock()
+        authorization.check = AsyncMock(
+            side_effect=[AuthorizationError("execute denied"), True]
+        )
+
+        with pytest.raises(AuthorizationError):
+            await dep(authorization, agent_repository, task_repository, "prod-agent")
+
+        agent_repository.get.assert_awaited_once_with(name="prod-agent")
+        assert authorization.check.await_count == 2
+        first_call, second_call = authorization.check.await_args_list
+        assert first_call.kwargs["resource"] == AgentexResource.agent("agent-resolved")
+        assert first_call.kwargs["operation"] == AuthorizedOperationType.execute
+        assert second_call.kwargs["resource"] == AgentexResource.agent("agent-resolved")
+        assert second_call.kwargs["operation"] == AuthorizedOperationType.read
 
     async def test_absent_name_surfaces_native_404_without_checking(self):
         annotation = DAuthorizedName(
@@ -177,7 +263,7 @@ class TestDAuthorizedNameAgentWrap:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestDAuthorizedQueryAgentWrap:
-    """``DAuthorizedQuery(agent, ...)`` also collapses denied checks to 404."""
+    """``DAuthorizedQuery(agent, ...)`` routes through the agent authz wrapper."""
 
     async def test_agent_query_returns_resource_id_when_allowed(self):
         annotation = DAuthorizedQuery(

@@ -3,10 +3,10 @@
 Mirrors the structure of the agent_api_key and task route-authorization tests.
 Covers:
 
-  1. The ``_check_schedule_or_collapse_to_404`` helper (allow + denied-collapse).
+  1. The ``_check_schedule_or_collapse_to_404`` helper.
   2. ``DAuthorizedScheduleId`` builds the composite ``{agent_id}--{schedule_name}``
-     selector, returns the schedule name when allowed, and collapses denials to
-     404 (the no-existence-leak path).
+     selector, returns the schedule name when allowed, and preserves 403 for
+     denied operations on readable schedules.
   3. ``create_schedule`` enforces parent ``agent.update`` (the only route where
      no schedule resource exists yet, so the authorization service can't
      transitively gate it).
@@ -17,8 +17,7 @@ Cross-tenant and transitive-expansion checks belong in an end-to-end suite
 gated on a live authorization-service cluster (the ``agent_schedule.update``
 permission transitively requires ``parent_agent->update`` in the authorization
 policy, which this repo does not own). Here we only assert that the route layer
-issues the correct ``check`` call with the correct operation and surfaces
-denials as 404.
+issues the correct ``check`` call with the correct operation.
 """
 
 from __future__ import annotations
@@ -45,8 +44,7 @@ def _dep_callable(annotation):
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestCheckScheduleOrCollapseTo404:
-    """The schedule-resource authz wrap collapses every denial to 404 so callers
-    can't distinguish "present in another tenant" from "absent"."""
+    """The schedule-resource authz wrap hides unreadable schedules."""
 
     async def test_allowed_check_returns_normally(self):
         authorization = MagicMock()
@@ -63,10 +61,20 @@ class TestCheckScheduleOrCollapseTo404:
         assert called_kwargs["resource"] == AgentexResource.schedule("agent-1--nightly")
         assert called_kwargs["operation"] == AuthorizedOperationType.read
 
-    async def test_denied_collapses_to_not_found_regardless_of_existence(self):
-        """Both "denied + schedule exists" and "denied + schedule missing"
-        surface as ``ItemDoesNotExist`` (→ 404). The wrap doesn't consult
-        Temporal — collapsing avoids the cross-tenant existence leak."""
+    async def test_denied_read_collapses_to_not_found(self):
+        authorization = MagicMock()
+        authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
+
+        with pytest.raises(ItemDoesNotExist):
+            await _check_schedule_or_collapse_to_404(
+                authorization,
+                "agent-1--nightly",
+                AuthorizedOperationType.read,
+            )
+
+        authorization.check.assert_awaited_once()
+
+    async def test_denied_non_read_collapses_to_not_found_when_read_denied(self):
         authorization = MagicMock()
         authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
 
@@ -76,6 +84,25 @@ class TestCheckScheduleOrCollapseTo404:
                 "agent-1--nightly",
                 AuthorizedOperationType.delete,
             )
+
+        assert authorization.check.await_count == 2
+        first_call, second_call = authorization.check.await_args_list
+        assert first_call.kwargs["operation"] == AuthorizedOperationType.delete
+        assert second_call.kwargs["operation"] == AuthorizedOperationType.read
+
+    async def test_denied_non_read_surfaces_authorization_error_when_read_allowed(self):
+        authorization = MagicMock()
+        operation_denied = AuthorizationError("denied")
+        authorization.check = AsyncMock(side_effect=[operation_denied, True])
+
+        with pytest.raises(AuthorizationError) as exc_info:
+            await _check_schedule_or_collapse_to_404(
+                authorization,
+                "agent-1--nightly",
+                AuthorizedOperationType.delete,
+            )
+
+        assert exc_info.value is operation_denied
 
     async def test_forwards_operation_verbatim(self):
         """The transitive expansion for ``update``/``delete`` in the
@@ -99,7 +126,7 @@ class TestCheckScheduleOrCollapseTo404:
 class TestSingleResourceRouteAuthz:
     """The single-resource routes (get/pause/unpause/trigger/delete) check the
     schedule resource on the composite ``{agent_id}--{schedule_name}`` selector
-    inline, collapsing denials to 404 — mirroring the agent_api_key name routes.
+    inline, mirroring the agent_api_key name routes.
     Verifies per-route operation routing and that a denial skips the use case."""
 
     async def test_get_authorized_checks_read_and_calls_use_case(self):
@@ -178,10 +205,29 @@ class TestSingleResourceRouteAuthz:
                 authorization=authorization,
             )
         use_case.delete_schedule.assert_not_called()
-        assert (
-            authorization.check.await_args.kwargs["operation"]
-            == AuthorizedOperationType.delete
+        assert authorization.check.await_count == 2
+        first_call, second_call = authorization.check.await_args_list
+        assert first_call.kwargs["operation"] == AuthorizedOperationType.delete
+        assert second_call.kwargs["operation"] == AuthorizedOperationType.read
+
+    async def test_delete_denied_when_readable_surfaces_authorization_error(self):
+        from src.api.routes.schedules import delete_schedule
+
+        authorization = MagicMock()
+        authorization.check = AsyncMock(
+            side_effect=[AuthorizationError("delete denied"), True]
         )
+        use_case = MagicMock()
+        use_case.delete_schedule = AsyncMock()
+
+        with pytest.raises(AuthorizationError):
+            await delete_schedule(
+                agent_id="agent-1",
+                schedule_name="nightly",
+                schedules_use_case=use_case,
+                authorization=authorization,
+            )
+        use_case.delete_schedule.assert_not_called()
 
 
 @pytest.mark.unit
@@ -190,8 +236,8 @@ class TestCreateParentAgentCheck:
     """``create_schedule`` is the only route where no schedule resource exists
     yet, so the authorization service cannot transitively gate on it. The
     route's ``agent_id`` guard MUST check ``agent.update`` on the parent, and a
-    denial collapses to 404 — like every other agent check — so the schedules
-    endpoint can't be used to probe cross-tenant agent existence."""
+    denial collapses to 404 when the parent is unreadable. A caller who can
+    read the parent but not update it sees 403."""
 
     @staticmethod
     def _agent_id_dep():
@@ -225,6 +271,25 @@ class TestCreateParentAgentCheck:
         # Parent-agent denial collapses to 404 so creating a schedule under an
         # agent in another tenant can't reveal that the agent exists.
         with pytest.raises(ItemDoesNotExist):
+            await dep(
+                authorization,
+                MagicMock(),
+                MagicMock(),
+                MagicMock(),
+                resource_id="agent-1",
+            )
+
+    async def test_create_denied_when_parent_readable_surfaces_authorization_error(
+        self,
+    ):
+        dep = self._agent_id_dep()
+
+        authorization = MagicMock()
+        authorization.check = AsyncMock(
+            side_effect=[AuthorizationError("update denied"), True]
+        )
+
+        with pytest.raises(AuthorizationError):
             await dep(
                 authorization,
                 MagicMock(),
