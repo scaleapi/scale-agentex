@@ -9,17 +9,16 @@ AGENTEX_AUTH_URL=https://my-auth-provider.internal
 ```
 
 This document specifies the HTTP contract that service must satisfy. Anyone can
-implement it — there is no dependency on Scale's internal `agentex-auth`
-service. This makes the auth provider a **documented extension point**: a naive
-single-account implementation is a few dozen lines, while a full multi-tenant
-implementation can layer in fine-grained access control behind the same wire
-format.
+implement it from this spec alone. This makes the auth provider a **documented
+extension point**: a naive single-account implementation is a few dozen lines,
+while a full multi-tenant implementation can layer in fine-grained access control
+behind the same wire format.
 
 > **Scope.** This contract covers the endpoints a self-hosted / open-source
 > deployment needs: `/v1/authn` plus the authorization endpoints `grant`,
 > `revoke`, `check`, `search`, `register`, and `deregister`. Fine-grained access
-> control (FGAC), per-account routing, and dual-write rollouts are Scale-internal
-> concerns and are **not** part of this contract.
+> control (FGAC), per-account routing, and dual-write rollouts are out of scope
+> and are **not** part of this contract.
 
 ---
 
@@ -94,7 +93,7 @@ id, claims from a JWT, etc.) and it will be handed straight back to you on
 `grant` / `revoke` / `check` / `search` / `register` / `deregister`. Agentex is
 just a courier.
 
-Example (the shape Scale's reference provider happens to use — yours can differ):
+Example (one possible shape — yours can differ):
 
 ```json
 {
