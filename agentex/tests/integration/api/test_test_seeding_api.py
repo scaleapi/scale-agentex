@@ -85,6 +85,12 @@ async def seeding_client(isolated_integration_app, isolated_repositories):
             event_repository=isolated_repositories["event_repository"]
         )
 
+    # Snapshot overrides so teardown can restore — covers both the fixture's
+    # own injections AND any mid-test mutations from `_override_env`. Without
+    # this, entries leak into fastapi_app's global state and can bleed into
+    # other test modules sharing the same app instance.
+    original_overrides = fastapi_app.dependency_overrides.copy()
+
     fastapi_app.dependency_overrides[TestSeedingUseCase] = _make_use_case
 
     # Default to enabled + dev env + valid token.
@@ -92,10 +98,13 @@ async def seeding_client(isolated_integration_app, isolated_repositories):
 
     from src.api.app import app as wrapped_app
 
-    async with AsyncClient(
-        transport=ASGITransport(app=wrapped_app), base_url="http://test"
-    ) as client:
-        yield client, isolated_repositories
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=wrapped_app), base_url="http://test"
+        ) as client:
+            yield client, isolated_repositories
+    finally:
+        fastapi_app.dependency_overrides = original_overrides
 
 
 def _override_env(env_vars: _FakeEnvVars) -> None:
