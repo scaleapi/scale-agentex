@@ -35,7 +35,7 @@ from src.config.dependencies import (
     GlobalDependencies,
     resolve_environment_variable_dependency,
 )
-from src.config.environment_variables import EnvVarKeys
+from src.config.environment_variables import EnvironmentVariables, EnvVarKeys, Environment
 from src.domain.exceptions import GenericException
 from src.utils.logging import make_logger
 from src.utils.otel_metrics import init_otel_metrics, shutdown_otel_metrics
@@ -194,6 +194,24 @@ fastapi_app.include_router(deployments.router)
 fastapi_app.include_router(schedules.router)
 fastapi_app.include_router(checkpoints.router)
 fastapi_app.include_router(task_retention.router)
+
+# Test-only seeding endpoint. Gated by env (must opt in AND not be prod) so
+# this code path is unreachable in production deployments by construction --
+# the router is not even mounted. Both conditions are required.
+_test_seeding_env_vars = EnvironmentVariables.refresh()
+if (
+    _test_seeding_env_vars is not None
+    and _test_seeding_env_vars.ENABLE_TEST_SEEDING
+    and _test_seeding_env_vars.ENVIRONMENT != Environment.PROD
+):
+    from src.api.routes import test_seeding
+
+    fastapi_app.include_router(test_seeding.router)
+    logger.warning(
+        "Test seeding endpoint /test/seed is MOUNTED. "
+        "This must never happen in production.",
+        extra={"environment": _test_seeding_env_vars.ENVIRONMENT},
+    )
 
 # Wrap FastAPI app with health check interceptor for sub-millisecond K8s probe responses.
 # This must be the outermost layer to bypass all middleware.
