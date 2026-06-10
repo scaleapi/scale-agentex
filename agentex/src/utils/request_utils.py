@@ -3,11 +3,10 @@ import re
 from typing import Any
 from uuid import uuid4
 
-from starlette.datastructures import FormData, Headers, UploadFile
+from starlette.datastructures import FormData, Headers, QueryParams, UploadFile
 
 REQUEST_KEY_REGEXP_BLACKLIST = [
-    r"api_key",
-    r"api-key",
+    r"api[_-]?key",
     r"cookie",
     r"password",
     r"secret",
@@ -35,6 +34,8 @@ def strip_sensitive_items(value: Any) -> Any:
         return [strip_sensitive_items(e) for e in value]
     if isinstance(value, Headers):
         return Headers(strip_sensitive_items(dict(value)))
+    if isinstance(value, QueryParams):
+        return QueryParams(strip_sensitive_items(dict(value)))
     return value
 
 
@@ -42,7 +43,7 @@ def decode_request_body(request_body: bytes):
     try:
         request_dict = strip_sensitive_items(json.loads(request_body.decode("utf-8")))
     except json.JSONDecodeError:
-        request_dict = request_body.decode("utf-8")
+        request_dict = "[non-json request body omitted]"
     except UnicodeDecodeError:
         request_dict = {}
     return request_dict

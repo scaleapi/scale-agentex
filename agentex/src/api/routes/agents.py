@@ -195,15 +195,18 @@ async def register_agent(
     If agent_id is not provided, the system will look for an existing agent by name and update it,
     or create a new one if it doesn't exist.
     """
-    enforce_ownership = _has_resolvable_creator(
-        authorization_service.principal_context
-    )
+    enforce_ownership = _has_resolvable_creator(authorization_service.principal_context)
     if enforce_ownership:
         await authorization_service.check(
             AgentexResource.agent("*"),
             AuthorizedOperationType.create,
         )
-    logger.info(f"Registering agent: {request}")
+    logger.info(
+        "Registering agent name=%s agent_id=%s acp_type=%s",
+        request.name,
+        request.agent_id,
+        request.acp_type,
+    )
     try:
         agent_entity = await agents_use_case.register_agent(
             name=request.name,
@@ -493,8 +496,11 @@ async def _handle_agent_rpc(
         and request.params.stream
     )
 
-    logger.info(f"Is streaming request: {is_streaming_request}")
-    logger.info(f"Request: {request}")
+    logger.info(
+        "Handling agent RPC request method=%s is_streaming=%s",
+        request.method,
+        is_streaming_request,
+    )
 
     if is_streaming_request:
         return await _handle_streaming_rpc(
