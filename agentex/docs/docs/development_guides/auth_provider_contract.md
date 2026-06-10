@@ -209,8 +209,8 @@ the returned `items` to **scope list endpoints** — effectively a
 
 > ⚠️ **`items` is an inclusion filter, not a hint.** Returning `[]` hides *every*
 > resource of that type from the principal. There is no "all resources" sentinel
-> in the base contract — see [Allowing everything](#authorization-allow-everything)
-> for how a permissive provider should handle this.
+> in the base contract, so a provider that intends to grant broad access must
+> return the actual set of accessible ids.
 
 ### `POST /v1/authz/grant`
 
@@ -275,94 +275,3 @@ its relationships.
 | `POST /v1/authz/revoke` | Un-share a resource | `200` | `403` |
 | `POST /v1/authz/register` | Register created resource | `200` | `403` |
 | `POST /v1/authz/deregister` | Remove deleted resource | `200` | `403` |
-
----
-
-## Implementation notes
-
-The contract above is provider-agnostic. This section sketches two concrete
-implementations: authenticating against **Microsoft Entra ID**, and an
-**"allow everything"** authorization model for single-account deployments.
-
-### Authentication against Entra ID
-
-For a single-account deployment, `/v1/authn` can be as simple as: *take the
-caller's bearer token, validate it against Entra ID, and return a principal.*
-
-1. **Read the token.** Pull the access token from the `authorization: Bearer
-   <token>` header that Agentex forwarded.
-2. **Validate it.** Verify the JWT against your Entra ID tenant:
-   - Fetch the tenant's signing keys (JWKS) from the OIDC discovery document:
-     `https://login.microsoftonline.com/{tenant_id}/v2.0/.well-known/openid-configuration`
-     → `jwks_uri`. Cache the keys.
-   - Verify the signature, and validate `iss`, `aud` (your app/API client id),
-     and `exp`.
-3. **Build the principal.** Map standard claims into your principal shape, e.g.
-   `oid` (the stable user object id) → `user_id`, `tid` (tenant) → `account_id`.
-   Return it as the `200` body.
-4. **Reject on failure.** Any missing/expired/invalid token → `401`.
-
-```jsonc
-// 200 response from /v1/authn after validating an Entra ID token
-{
-  "user_id": "<oid claim>",
-  "account_id": "<tid claim>",
-  "metadata": { "upn": "<preferred_username claim>" }
-}
-```
-
-Because the principal is opaque to Agentex, you are free to carry whatever claims
-your authorization logic needs — they round-trip back to you on every authz call.
-
-> **Service accounts / agents.** If non-interactive callers use the OAuth2 client
-> credentials flow, the token will have no user `oid`. Detect that (e.g. an `idtyp`
-> / `app`-style claim) and populate a service-account identity instead of a user
-> identity.
-
-<a id="authorization-allow-everything"></a>
-### Authorization: "allow everything" (single account)
-
-If you assume a single account/tenant and don't need per-resource permissions,
-authorization collapses to "yes" almost everywhere. The endpoints split into two
-groups:
-
-**Endpoints you can no-op** — anything keyed on a status code can simply return
-`200`:
-
-| Endpoint | "Allow everything" behavior |
-| --- | --- |
-| `POST /v1/authz/check` | Always return `200` (never `403`) |
-| `POST /v1/authz/grant` | Return `200` (nothing to persist) |
-| `POST /v1/authz/revoke` | Return `200` (nothing to persist) |
-| `POST /v1/authz/register` | Return `200` (no ownership graph to maintain) |
-| `POST /v1/authz/deregister` | Return `200` (nothing to clean up) |
-
-**The one endpoint you can't no-op: `search`.** Its `items` array is applied as an
-inclusion filter, so it must reflect "everything." Returning `[]` would hide all
-resources — the opposite of "allow everything." You have three options:
-
-1. **Recommended — add a wildcard sentinel to the contract.** Have `search` signal
-   "no filter / everything" rather than enumerate. Agentex already has an internal
-   "no scoping" path: when authorization is disabled it represents "all resources"
-   as *no filter at all* rather than an explicit id list. The clean fix is to
-   surface that over the wire — e.g. `search` returns `{ "items": null }` (or an
-   explicit `{ "unscoped": true }`), and the Agentex authorization proxy maps that
-   sentinel to "no filter," reusing the existing unscoped code path instead of
-   building an `id IN (...)` clause. This keeps the permissive provider truly
-   stateless. *(This requires a small change in the Agentex proxy to recognize the
-   sentinel — it is not yet part of the shipped contract, but it is the
-   lowest-friction way to support permissive providers and is the recommended
-   addition.)*
-
-2. **Enumerate from Agentex's own data.** Have the provider (or a thin sidecar)
-   query Agentex's database / API for all resource ids of `filter_resource` in the
-   account and return them. Correct with no Agentex change, but couples the
-   provider to Agentex's storage and scales poorly on large accounts.
-
-3. **Don't use list endpoints.** If the deployment never relies on the scoped list
-   routes, the `items` filter is moot. Fragile — easy to regress — so only viable
-   for narrow, controlled deployments.
-
-Option 1 is the right long-term shape: it makes "allow everything" a genuinely
-stateless provider and formalizes a wildcard in the contract that any provider can
-use.
