@@ -84,3 +84,35 @@ class TaskStatusReasonRequest(BaseModel):
         None,
         title="Optional reason for the status change",
     )
+
+
+class SignalTaskRequest(BaseModel):
+    """Dispatch a Temporal signal to a running task's workflow.
+
+    The workflow must register a matching `@workflow.signal(name=...)`
+    handler for the supplied ``signal_name``. ``payload`` is forwarded as
+    the signal's single argument; the workflow is responsible for any
+    shape validation.
+
+    ``merge_params`` is an optional shallow-merge into the task's stored
+    ``params`` JSONB column. Used by live-config flows that want the
+    persisted task row to reflect the new config alongside the workflow
+    signal (e.g. ConfigModal Save).
+    """
+
+    signal_name: str = Field(
+        ...,
+        title="Name of the Temporal signal to dispatch",
+    )
+    payload: dict[str, Any] | None = Field(
+        None,
+        title="Optional JSON payload forwarded to the workflow's signal handler",
+    )
+    merge_params: dict[str, Any] | None = Field(
+        None,
+        title=(
+            "Optional shallow-merge patch applied to the task's params column "
+            "after the signal succeeds. Top-level keys overwrite; pass full "
+            "nested objects to change subfields."
+        ),
+    )

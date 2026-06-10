@@ -242,6 +242,16 @@ class AgentTaskService:
 
         return updated_task
 
+    async def merge_task_params(self, task_id: str, patch: dict) -> TaskEntity | None:
+        """Atomically merge ``patch`` into ``tasks.params``. Returns the
+        updated entity, or ``None`` if no task with ``task_id`` exists.
+
+        Used by live-config flows (e.g. ConfigModal Save → signal +
+        DB persistence) so the persisted task row reflects the new
+        agent config without waiting for the next task to be created.
+        """
+        return await self.task_repository.merge_params(task_id, patch)
+
     async def delete_task(self, id: str | None = None, name: str | None = None) -> None:
         """
         Delete a task from the repository.
