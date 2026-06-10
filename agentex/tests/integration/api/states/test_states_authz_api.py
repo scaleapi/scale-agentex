@@ -160,19 +160,21 @@ class TestStatesAuthzAPIIntegration:
                 },
             )
 
-        # Denied parent-task checks collapse to 404 so task ids cannot be
-        # probed through the states API.
-        assert response.status_code == 404
+        # The task is readable, so a denied stronger operation should surface
+        # as 403 rather than pretending the visible task does not exist.
+        assert response.status_code == 403
         check_calls = [
             call
             for call in post_with_error_handling_mock.call_args_list
             if call[0][1] == "/v1/authz/check"
         ]
-        assert len(check_calls) == 1
-        authz_data = check_calls[0][1]["json"]
-        assert authz_data["resource"]["type"] == AgentexResourceType.task.value
-        assert authz_data["resource"]["selector"] == test_task.id
-        assert authz_data["operation"] == "update"
+        assert len(check_calls) == 2
+        operations = [call[1]["json"]["operation"] for call in check_calls]
+        assert operations == ["update", "read"]
+        for call in check_calls:
+            authz_data = call[1]["json"]
+            assert authz_data["resource"]["type"] == AgentexResourceType.task.value
+            assert authz_data["resource"]["selector"] == test_task.id
 
     @pytest.mark.asyncio
     @patch(
@@ -323,17 +325,19 @@ class TestStatesAuthzAPIIntegration:
                 },
             )
 
-        assert response.status_code == 404
+        assert response.status_code == 403
         check_calls = [
             call
             for call in post_with_error_handling_mock.call_args_list
             if call[0][1] == "/v1/authz/check"
         ]
-        assert len(check_calls) == 1
-        authz_data = check_calls[0][1]["json"]
-        assert authz_data["resource"]["type"] == AgentexResourceType.task.value
-        assert authz_data["resource"]["selector"] == test_task.id
-        assert authz_data["operation"] == "update"
+        assert len(check_calls) == 2
+        operations = [call[1]["json"]["operation"] for call in check_calls]
+        assert operations == ["update", "read"]
+        for call in check_calls:
+            authz_data = call[1]["json"]
+            assert authz_data["resource"]["type"] == AgentexResourceType.task.value
+            assert authz_data["resource"]["selector"] == test_task.id
 
     @pytest.mark.asyncio
     @patch(
@@ -361,17 +365,19 @@ class TestStatesAuthzAPIIntegration:
         ) as post_with_error_handling_mock:
             response = await isolated_client.delete(f"/states/{test_state.id}")
 
-        assert response.status_code == 404
+        assert response.status_code == 403
         check_calls = [
             call
             for call in post_with_error_handling_mock.call_args_list
             if call[0][1] == "/v1/authz/check"
         ]
-        assert len(check_calls) == 1
-        authz_data = check_calls[0][1]["json"]
-        assert authz_data["resource"]["type"] == AgentexResourceType.task.value
-        assert authz_data["resource"]["selector"] == test_task.id
-        assert authz_data["operation"] == "delete"
+        assert len(check_calls) == 2
+        operations = [call[1]["json"]["operation"] for call in check_calls]
+        assert operations == ["delete", "read"]
+        for call in check_calls:
+            authz_data = call[1]["json"]
+            assert authz_data["resource"]["type"] == AgentexResourceType.task.value
+            assert authz_data["resource"]["selector"] == test_task.id
 
     @pytest.mark.asyncio
     @patch(
