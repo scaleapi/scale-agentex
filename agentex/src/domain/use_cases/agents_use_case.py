@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import Depends
+from temporalio.common import WorkflowIDReusePolicy
 
 from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
 from src.adapters.temporal.adapter_temporal import DTemporalAdapter
@@ -111,7 +112,7 @@ class AgentsUseCase:
                 await self.complete_deployment_registration(
                     agent, acp_url, registration_metadata
                 )
-                await self.ensure_healthcheck_workflow(agent)
+                await self.ensure_healthcheck_workflow(agent, acp_url_override=acp_url)
                 return agent
 
             # Legacy flow: update the agent directly
@@ -145,7 +146,9 @@ class AgentsUseCase:
                     await self.complete_deployment_registration(
                         agent, acp_url, registration_metadata
                     )
-                    await self.ensure_healthcheck_workflow(agent)
+                    await self.ensure_healthcheck_workflow(
+                        agent, acp_url_override=acp_url
+                    )
                     return agent
 
                 # Legacy flow: update the agent directly
@@ -244,8 +247,8 @@ class AgentsUseCase:
 
         Unlike register_agent, this does NOT populate acp_url (there is no
         running pod yet) and leaves the agent in BUILD_ONLY status so it can be
-        permissioned/shared prior to deploy. Deploy-time registration later
-        flips the agent to READY and sets the acp_url.
+        permissioned/shared prior to deploy. Deployment-scoped registration
+        later records the acp_url on the deployment, not the parent agent.
 
         Idempotent: if an agent with the same name already exists, it is
         returned unchanged so that re-building an existing agent never clobbers
@@ -334,6 +337,7 @@ class AgentsUseCase:
     async def ensure_healthcheck_workflow(
         self,
         agent: AgentEntity,
+        acp_url_override: str | None = None,
     ) -> None:
         # Checking EnvironmentVariables here to allow turning this on and off without restarting the service
         environment_variables = EnvironmentVariables.refresh()
@@ -341,12 +345,16 @@ class AgentsUseCase:
             logger.info(f"Health check workflow is not enabled for {agent.id}")
             return
         try:
+            acp_url = (
+                acp_url_override if acp_url_override is not None else agent.acp_url
+            )
             # Start new health check workflow for this agent
             await self.temporal_adapter.start_workflow(
                 workflow_id=f"healthcheck_workflow_{agent.id}",
                 workflow=HealthCheckWorkflow,
-                args=[{"agent_id": agent.id, "acp_url": agent.acp_url}],
+                args=[{"agent_id": agent.id, "acp_url": acp_url}],
                 task_queue=environment_variables.AGENTEX_SERVER_TASK_QUEUE,
+                id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
             )
             logger.info(f"Started new health check workflow for agent {agent.id}")
         except TemporalWorkflowAlreadyExistsError:
