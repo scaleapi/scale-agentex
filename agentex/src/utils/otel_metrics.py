@@ -21,7 +21,9 @@ Environment Variables:
     OTEL_SERVICE_NAME: Service name for metrics (default: agentex)
     OTEL_METRICS_EXPORT_INTERVAL_MS: Export interval in ms (default: 30000)
     OTEL_RESOURCE_ATTRIBUTES: K8s and service resource attrs (injected by the OTel
-        Operator on cluster pods; read via OTELResourceDetector).
+        Operator on cluster pods; read via OTELResourceDetector). Per-process
+        service.instance.id is applied via Resource.merge when this module creates
+        the MeterProvider; env is not modified.
     AGENTEX_OTEL_HTTP_METRICS_ENABLED: Opt-in in-process FastAPI HTTP metrics
         (default: false). When true, also set
         OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=fastapi,system_metrics on the pod
@@ -80,9 +82,30 @@ _PREFERRED_OTLP_TEMPORALITY = {
 }
 
 
+def _per_process_instance_id(resource: Resource) -> str:
+    """Return a worker-unique service.instance.id from detected resource attrs."""
+    pid = os.getpid()
+    existing = resource.attributes.get("service.instance.id")
+    if existing:
+        existing = str(existing)
+        pid_token = f".{pid}"
+        if existing.endswith(pid_token) or f"{pid_token}." in existing:
+            return existing
+        return f"{existing}.{pid}"
+    service = (
+        resource.attributes.get("service.name")
+        or os.environ.get("OTEL_SERVICE_NAME")
+        or "unknown"
+    )
+    pod = resource.attributes.get("k8s.pod.name") or "unknown"
+    return f"{service}.{pod}.{pid}"
+
+
 def _build_resource() -> Resource:
-    """Build MeterProvider resource from standard OTEL_* env (operator-injected on k8s)."""
-    return get_aggregated_resources([OTELResourceDetector()])
+    """Detect operator/k8s attrs from env; set a per-process service.instance.id."""
+    resource = get_aggregated_resources([OTELResourceDetector()])
+    service_instance_id = _per_process_instance_id(resource)
+    return resource.merge(Resource.create({"service.instance.id": service_instance_id}))
 
 
 def _global_meter_provider() -> MeterProvider | None:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import os
+
 import pytest
 from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
@@ -14,7 +16,7 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
 )
 from opentelemetry.sdk.metrics import Counter, Histogram, MeterProvider, UpDownCounter
 from opentelemetry.sdk.metrics.export import AggregationTemporality, InMemoryMetricReader
-from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.resources import OTELResourceDetector, Resource, get_aggregated_resources
 from src.utils import cache_metrics, otel_metrics
 
 
@@ -136,6 +138,52 @@ def test_init_creates_meter_provider_when_none_configured(monkeypatch):
 
 
 @pytest.mark.unit
+def test_per_process_instance_id_extends_operator_value(monkeypatch):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
+    monkeypatch.setenv(
+        "OTEL_RESOURCE_ATTRIBUTES",
+        "k8s.pod.name=my-pod,service.instance.id=agentex.my-pod.agentex",
+    )
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 42)
+    base = get_aggregated_resources([OTELResourceDetector()])
+    assert otel_metrics._per_process_instance_id(base) == "agentex.my-pod.agentex.42"
+
+
+@pytest.mark.unit
+def test_per_process_instance_id_builds_when_missing(monkeypatch):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
+    monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "k8s.pod.name=my-pod")
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 42)
+    base = get_aggregated_resources([OTELResourceDetector()])
+    assert otel_metrics._per_process_instance_id(base) == "agentex.my-pod.42"
+
+
+@pytest.mark.unit
+def test_build_resource_does_not_mutate_otel_resource_attributes_env(monkeypatch):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
+    original = "k8s.pod.name=my-pod,service.instance.id=agentex.my-pod.agentex"
+    monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", original)
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 42)
+    otel_metrics._build_resource()
+    assert os.environ["OTEL_RESOURCE_ATTRIBUTES"] == original
+
+
+@pytest.mark.unit
+def test_per_process_instance_id_works_for_other_services(monkeypatch):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "payments-api")
+    monkeypatch.setenv(
+        "OTEL_RESOURCE_ATTRIBUTES",
+        "k8s.pod.name=payments-abc,service.instance.id=payments-api.payments-abc.prod",
+    )
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 7)
+    base = get_aggregated_resources([OTELResourceDetector()])
+    assert (
+        otel_metrics._per_process_instance_id(base)
+        == "payments-api.payments-abc.prod.7"
+    )
+
+
+@pytest.mark.unit
 def test_build_resource_parses_operator_injected_pod_env(monkeypatch):
     """Regression: K8s expands $(OTEL_RESOURCE_ATTRIBUTES_*) before Python starts."""
     pod_name = "agentex-ccc85c45b-s29zm"
@@ -152,6 +200,7 @@ def test_build_resource_parses_operator_injected_pod_env(monkeypatch):
         "service.namespace=agentex,"
         "service.version=perf-agentex-drop-redundant-task-grant-b59b92e",
     )
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 12345)
 
     attrs = otel_metrics._build_resource().attributes
     assert attrs.get("service.name") == "agentex"
@@ -159,7 +208,7 @@ def test_build_resource_parses_operator_injected_pod_env(monkeypatch):
     assert attrs.get("k8s.namespace.name") == "agentex"
     assert attrs.get("k8s.deployment.name") == "agentex"
     assert attrs.get("k8s.container.name") == "agentex"
-    assert attrs.get("service.instance.id") == f"agentex.{pod_name}.agentex"
+    assert attrs.get("service.instance.id") == f"agentex.{pod_name}.agentex.12345"
 
 
 @pytest.mark.unit
@@ -170,6 +219,7 @@ def test_build_resource_from_otel_env(monkeypatch):
         "k8s.pod.name=operator-pod,k8s.namespace.name=agentex,"
         "k8s.deployment.name=agentex,service.instance.id=agentex.operator-pod.agentex",
     )
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 6789)
 
     resource = otel_metrics._build_resource()
     attrs = resource.attributes
@@ -177,7 +227,7 @@ def test_build_resource_from_otel_env(monkeypatch):
     assert attrs.get("k8s.pod.name") == "operator-pod"
     assert attrs.get("k8s.namespace.name") == "agentex"
     assert attrs.get("k8s.deployment.name") == "agentex"
-    assert attrs.get("service.instance.id") == "agentex.operator-pod.agentex"
+    assert attrs.get("service.instance.id") == "agentex.operator-pod.agentex.6789"
 
 
 @pytest.mark.unit
