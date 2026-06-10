@@ -29,7 +29,7 @@ behind the same wire format.
   checks are bypassed (every request is treated as fully authorized). This is the
   default local-development behavior — you only run an auth provider when you set
   the variable.
-- **Authentication is middleware.** On every non-whitelisted request, Agentex
+- **Authentication is middleware.** On every non-allowlisted request, Agentex
   forwards the incoming request headers to `POST {AGENTEX_AUTH_URL}/v1/authn`. A
   `200` returns a **principal context** that Agentex attaches to the request; any
   failure becomes a `401` to the original caller.
@@ -40,7 +40,7 @@ behind the same wire format.
   the forwarded headers. Provider responses should therefore be a pure function of
   the request headers.
 
-### Whitelisted (unauthenticated) routes
+### Allowlisted (unauthenticated) routes
 
 These routes bypass the provider entirely and are never sent to `/v1/authn`:
 
