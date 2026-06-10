@@ -9,7 +9,6 @@ from src.api.schemas.agent_api_keys import (
     CreateAPIKeyResponse,
 )
 from src.api.schemas.authorization_types import (
-    AgentexResource,
     AgentexResourceType,
     AuthorizedOperationType,
 )
@@ -24,6 +23,7 @@ from src.utils.agent_api_key_authorization import (
 from src.utils.authorization_shortcuts import (
     DAuthorizedId,
     DAuthorizedResourceIds,
+    _check_agent_or_collapse_to_404,
 )
 from src.utils.logging import make_logger
 
@@ -57,11 +57,12 @@ async def create_api_key(
         )
     agent = await agent_use_case.get(id=request.agent_id, name=request.agent_name)
 
-    # No api_key resource exists yet, so the authorization service can't gate
-    # transitively — gate on parent ``agent.update`` directly.
-    await authorization_service.check(
-        resource=AgentexResource.agent(agent.id),
-        operation=AuthorizedOperationType.update,
+    # No api_key resource exists yet, so gate on the parent agent while keeping
+    # hidden-vs-visible denied semantics consistent with other agent checks.
+    await _check_agent_or_collapse_to_404(
+        authorization_service,
+        agent.id,
+        AuthorizedOperationType.update,
     )
 
     # Check if external agent API key already exists for this name and agent ID

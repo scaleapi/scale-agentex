@@ -435,8 +435,7 @@ class TestCreateParentAgentCheck:
         assert called_kwargs["resource"] == AgentexResource.agent("agent-1")
         assert called_kwargs["operation"] == AuthorizedOperationType.update
 
-    async def test_create_denied_on_parent_agent_propagates_403(self):
-        """Create denial surfaces as 403 — no api_key exists yet, no leak possible."""
+    async def test_create_denied_on_parent_agent_collapses_when_read_denied(self):
         from src.api.routes.agent_api_keys import create_api_key
         from src.api.schemas.agent_api_keys import CreateAPIKeyRequest
         from src.domain.entities.agent_api_keys import AgentAPIKeyType
@@ -444,9 +443,15 @@ class TestCreateParentAgentCheck:
         agent_use_case = MagicMock()
         agent_use_case.get = AsyncMock(return_value=MagicMock(id="agent-1"))
         api_key_use_case = MagicMock()
+        api_key_use_case.get_by_agent_id_and_name = AsyncMock()
         api_key_use_case.create = AsyncMock()
         authorization = MagicMock()
-        authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
+        authorization.check = AsyncMock(
+            side_effect=[
+                AuthorizationError("update denied"),
+                AuthorizationError("read denied"),
+            ]
+        )
 
         request = CreateAPIKeyRequest(
             agent_id="agent-1",
@@ -456,12 +461,53 @@ class TestCreateParentAgentCheck:
             api_key="x",
         )
 
-        with pytest.raises(AuthorizationError):
+        with pytest.raises(ItemDoesNotExist):
             await create_api_key(
                 request=request,
                 agent_api_key_use_case=api_key_use_case,
                 agent_use_case=agent_use_case,
                 authorization_service=authorization,
             )
-        # Create is NOT invoked when parent check fails.
+        assert authorization.check.await_count == 2
+        first_call, second_call = authorization.check.await_args_list
+        assert first_call.kwargs["operation"] == AuthorizedOperationType.update
+        assert second_call.kwargs["operation"] == AuthorizedOperationType.read
+        api_key_use_case.get_by_agent_id_and_name.assert_not_called()
+        api_key_use_case.create.assert_not_called()
+
+    async def test_create_denied_on_readable_parent_agent_propagates_403(self):
+        from src.api.routes.agent_api_keys import create_api_key
+        from src.api.schemas.agent_api_keys import CreateAPIKeyRequest
+        from src.domain.entities.agent_api_keys import AgentAPIKeyType
+
+        agent_use_case = MagicMock()
+        agent_use_case.get = AsyncMock(return_value=MagicMock(id="agent-1"))
+        api_key_use_case = MagicMock()
+        api_key_use_case.get_by_agent_id_and_name = AsyncMock()
+        api_key_use_case.create = AsyncMock()
+        authorization = MagicMock()
+        operation_denied = AuthorizationError("update denied")
+        authorization.check = AsyncMock(side_effect=[operation_denied, True])
+
+        request = CreateAPIKeyRequest(
+            agent_id="agent-1",
+            agent_name=None,
+            name="prod-key",
+            api_key_type=AgentAPIKeyType.EXTERNAL,
+            api_key="x",
+        )
+
+        with pytest.raises(AuthorizationError) as exc_info:
+            await create_api_key(
+                request=request,
+                agent_api_key_use_case=api_key_use_case,
+                agent_use_case=agent_use_case,
+                authorization_service=authorization,
+            )
+        assert exc_info.value is operation_denied
+        assert authorization.check.await_count == 2
+        first_call, second_call = authorization.check.await_args_list
+        assert first_call.kwargs["operation"] == AuthorizedOperationType.update
+        assert second_call.kwargs["operation"] == AuthorizedOperationType.read
+        api_key_use_case.get_by_agent_id_and_name.assert_not_called()
         api_key_use_case.create.assert_not_called()
