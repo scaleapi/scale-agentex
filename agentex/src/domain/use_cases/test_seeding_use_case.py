@@ -32,7 +32,6 @@ logger = make_logger(__name__)
 
 
 class TestSeedingUseCase:  # noqa: PT001 — not a pytest class; "Test" prefix is the use-case domain name
-    __test__ = False  # tell pytest not to collect this as a test class
     """Test-only resource seeding.
 
     Each `seed_<resource>` method writes a row directly via the matching
@@ -46,6 +45,11 @@ class TestSeedingUseCase:  # noqa: PT001 — not a pytest class; "Test" prefix i
     also call authorization_service.register_resource(...) before persisting,
     mirroring the pattern in agent_api_keys_use_case._register_api_key_in_auth.
     """
+
+    # Tell pytest not to collect this as a test class. Must come AFTER the
+    # docstring — Python only treats a string literal as __doc__ when it's
+    # the FIRST statement in the class body.
+    __test__ = False
 
     def __init__(self, event_repository: DEventRepository) -> None:
         self.event_repository = event_repository
