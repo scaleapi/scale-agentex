@@ -1,8 +1,8 @@
 """Tests for agent_api_keys route authorization.
 
 Asserts the route layer issues correct ``check`` calls and collapses denials
-to 404. Two-factor expansion is owned by the authorization service;
-not tested here.
+to 404 only when the api_key is unreadable. Two-factor expansion is owned by
+the authorization service; not tested here.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ def _dep_callable(annotation):
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestCheckApiKeyOrCollapseTo404:
-    """Helper collapses every denial to 404 (no cross-tenant existence leak)."""
+    """Helper collapses unreadable api_keys while preserving denied operations."""
 
     async def test_allowed_check_returns_normally(self):
         authorization = MagicMock()
@@ -46,8 +46,20 @@ class TestCheckApiKeyOrCollapseTo404:
         assert called_kwargs["resource"] == AgentexResource.api_key("api-key-1")
         assert called_kwargs["operation"] == AuthorizedOperationType.read
 
-    async def test_denied_collapses_to_not_found_regardless_of_existence(self):
-        """Denial surfaces as 404 regardless of existence."""
+    async def test_denied_read_collapses_to_not_found(self):
+        authorization = MagicMock()
+        authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
+
+        with pytest.raises(ItemDoesNotExist):
+            await _check_api_key_or_collapse_to_404(
+                authorization,
+                "api-key-1",
+                AuthorizedOperationType.read,
+            )
+
+        authorization.check.assert_awaited_once()
+
+    async def test_denied_non_read_collapses_to_not_found_when_read_denied(self):
         authorization = MagicMock()
         authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
 
@@ -57,6 +69,25 @@ class TestCheckApiKeyOrCollapseTo404:
                 "api-key-1",
                 AuthorizedOperationType.delete,
             )
+
+        assert authorization.check.await_count == 2
+        first_call, second_call = authorization.check.await_args_list
+        assert first_call.kwargs["operation"] == AuthorizedOperationType.delete
+        assert second_call.kwargs["operation"] == AuthorizedOperationType.read
+
+    async def test_denied_non_read_surfaces_authorization_error_when_read_allowed(self):
+        authorization = MagicMock()
+        operation_denied = AuthorizationError("denied")
+        authorization.check = AsyncMock(side_effect=[operation_denied, True])
+
+        with pytest.raises(AuthorizationError) as exc_info:
+            await _check_api_key_or_collapse_to_404(
+                authorization,
+                "api-key-1",
+                AuthorizedOperationType.delete,
+            )
+
+        assert exc_info.value is operation_denied
 
     async def test_uses_delete_operation_on_delete_routes(self):
         """Helper forwards the operation verbatim."""
@@ -76,7 +107,7 @@ class TestCheckApiKeyOrCollapseTo404:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestDAuthorizedIdApiKeyWrap:
-    """``DAuthorizedId(api_key, ...)`` routes through the collapse wrap → 404 on denial."""
+    """``DAuthorizedId(api_key, ...)`` routes through the api_key authz wrapper."""
 
     async def test_api_key_id_routes_through_wrap_on_denial(self):
         annotation = DAuthorizedId(
@@ -137,11 +168,35 @@ class TestDAuthorizedIdApiKeyWrap:
         called_kwargs = authorization.check.await_args.kwargs
         assert called_kwargs["operation"] == AuthorizedOperationType.delete
 
+    async def test_api_key_delete_denied_when_readable_surfaces_authorization_error(
+        self,
+    ):
+        annotation = DAuthorizedId(
+            AgentexResourceType.api_key,
+            AuthorizedOperationType.delete,
+            param_name="id",
+        )
+        dep = _dep_callable(annotation)
+
+        authorization = MagicMock()
+        authorization.check = AsyncMock(
+            side_effect=[AuthorizationError("delete denied"), True]
+        )
+
+        with pytest.raises(AuthorizationError):
+            await dep(
+                authorization,
+                MagicMock(),
+                MagicMock(),
+                MagicMock(),
+                "api-key-readable",
+            )
+
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestNameRouteCollapse:
-    """Name-route handlers call the collapse helper inline → 404 on denial."""
+    """Name-route handlers call the api_key visibility helper inline."""
 
     async def test_get_by_name_handler_collapses_denial_to_404(self):
         from src.api.routes.agent_api_keys import get_agent_api_key_by_name
@@ -198,8 +253,38 @@ class TestNameRouteCollapse:
 
         # Crucially: the delete is NOT invoked when the check fails.
         api_key_use_case.delete_by_agent_id_and_key_name.assert_not_called()
-        called_kwargs = authorization.check.await_args.kwargs
-        assert called_kwargs["operation"] == AuthorizedOperationType.delete
+        assert authorization.check.await_count == 2
+        first_call, second_call = authorization.check.await_args_list
+        assert first_call.kwargs["operation"] == AuthorizedOperationType.delete
+        assert second_call.kwargs["operation"] == AuthorizedOperationType.read
+
+    async def test_delete_by_name_handler_surfaces_403_when_readable(self):
+        from src.api.routes.agent_api_keys import delete_agent_api_key_by_name
+
+        agent_use_case = MagicMock()
+        agent_use_case.get = AsyncMock(return_value=MagicMock(id="agent-1"))
+        api_key_use_case = MagicMock()
+        api_key_use_case.get_by_agent_id_and_name = AsyncMock(
+            return_value=MagicMock(id="api-key-named")
+        )
+        api_key_use_case.delete_by_agent_id_and_key_name = AsyncMock()
+        authorization = MagicMock()
+        authorization.check = AsyncMock(
+            side_effect=[AuthorizationError("delete denied"), True]
+        )
+        authorization.principal_context = MagicMock(account_id="acct-1")
+
+        with pytest.raises(AuthorizationError):
+            await delete_agent_api_key_by_name(
+                api_key_name="prod-key",
+                agent_api_key_use_case=api_key_use_case,
+                agent_use_case=agent_use_case,
+                authorization_service=authorization,
+                agent_id="agent-1",
+                agent_name=None,
+            )
+
+        api_key_use_case.delete_by_agent_id_and_key_name.assert_not_called()
 
     async def test_absent_and_denied_404_bodies_are_identical(self):
         """Absent-row and denied-row 404 bodies must be byte-for-byte identical."""

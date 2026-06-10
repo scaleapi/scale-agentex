@@ -2,8 +2,6 @@ from typing import Annotated
 
 from fastapi import Depends, Path, Query, Request
 
-from src.adapters.authorization.exceptions import AuthorizationError
-from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.api.schemas.authorization_types import (
     AgentexResource,
     AgentexResourceType,
@@ -23,6 +21,9 @@ from src.domain.services.authorization_service import (
 )
 from src.utils.agent_api_key_authorization import _check_api_key_or_collapse_to_404
 from src.utils.task_authorization import check_task_or_collapse_to_404
+from src.utils.visibility_authorization import (
+    check_resource_or_collapse_unreadable_to_404,
+)
 
 
 async def _get_parent_task_id(
@@ -49,22 +50,17 @@ async def _check_agent_or_collapse_to_404(
     agent_id: str,
     operation: AuthorizedOperationType,
 ) -> None:
-    """Check an agent resource; collapse any denial to 404.
+    """Check an agent resource while hiding unreadable agents.
 
-    Collapsing a denied check into 404 stops callers from distinguishing 403
-    (exists, no access) from 404 (absent) and thereby probing whether an agent
-    exists in another tenant. Mirrors the task/api_key collapse helpers.
-
-    TODO: fold this into a single generic collapse helper, and restore the
-    403/404 split once agents carry tenant scope at the data layer.
+    Denied reads collapse to 404. Denied stronger operations preserve 403 when
+    the caller can still read the agent, and collapse to 404 otherwise.
     """
-    try:
-        await authorization.check(
-            resource=AgentexResource.agent(agent_id),
-            operation=operation,
-        )
-    except AuthorizationError:
-        raise ItemDoesNotExist(f"Item with id '{agent_id}' does not exist.") from None
+    await check_resource_or_collapse_unreadable_to_404(
+        authorization=authorization,
+        resource=AgentexResource.agent(agent_id),
+        operation=operation,
+        not_found_message=f"Item with id '{agent_id}' does not exist.",
+    )
 
 
 def DAuthorizedId(
@@ -97,13 +93,10 @@ def DAuthorizedId(
         elif resource_type == AgentexResourceType.task:
             await check_task_or_collapse_to_404(authorization, resource_id, operation)
         elif resource_type == AgentexResourceType.api_key:
-            # Collapse api_key denials to 404 so name/id probes can't
-            # distinguish "present in another tenant" from "absent".
             await _check_api_key_or_collapse_to_404(
                 authorization, resource_id, operation
             )
         elif resource_type == AgentexResourceType.agent:
-            # Collapse agent denials to 404 for the same discoverability reason.
             await _check_agent_or_collapse_to_404(authorization, resource_id, operation)
         else:
             await authorization.check(
@@ -176,6 +169,19 @@ def DAuthorizedBodyId(
 
         if resource_type == AgentexResourceType.task:
             await check_task_or_collapse_to_404(authorization, field_value, operation)
+        elif resource_type == AgentexResourceType.agent:
+            await _check_agent_or_collapse_to_404(authorization, field_value, operation)
+        elif resource_type == AgentexResourceType.api_key:
+            await _check_api_key_or_collapse_to_404(
+                authorization, field_value, operation
+            )
+        elif resource_type == AgentexResourceType.schedule:
+            await check_resource_or_collapse_unreadable_to_404(
+                authorization=authorization,
+                resource=AgentexResource.schedule(field_value),
+                operation=operation,
+                not_found_message=f"Item with id '{field_value}' does not exist.",
+            )
         else:
             await authorization.check(
                 resource=AgentexResource(type=resource_type, selector=field_value),

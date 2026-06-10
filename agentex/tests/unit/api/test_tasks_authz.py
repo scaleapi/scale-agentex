@@ -1,10 +1,10 @@
-"""Tests for per-RPC operation routing and 404/403 authorization wrap on task routes.
+"""Tests for per-RPC operation routing and task visibility authorization.
 
 Covers:
   1. Per-RPC operation routing: MESSAGE_SEND/EVENT_SEND map to ``update``,
      TASK_CANCEL maps to ``cancel``, TASK_CREATE stays ``create``.
-  2. 404 collapse on authorization denials (callers cannot probe cross-tenant
-     task existence via 403 vs 404 response codes).
+  2. Visibility-aware authorization: denied reads collapse to 404, while
+     denied stronger operations preserve 403 when the task remains readable.
 
 End-to-end tests (cross-tenant isolation, cancel-owner-only enforcement,
 list filtering) belong in a separate integration suite that requires a live
@@ -266,11 +266,9 @@ class TestUpdatePermissionRoutingForRewiredCallSites:
         assert call_kwargs["resource"] == AgentexResource.task("task-msg")
         assert call_kwargs["operation"] == AuthorizedOperationType.update
 
-    async def test_update_check_denial_collapses_to_404(self):
-        """For the rewired call sites, an ``AuthorizationError`` on
-        ``update`` must still collapse to 404 — the same envelope that
-        ``execute`` had — so the rewire doesn't accidentally narrow the
-        error surface."""
+    async def test_update_check_denial_collapses_to_404_when_read_denied(self):
+        """If ``update`` and the follow-up ``read`` are both denied, the
+        helper still returns the non-enumerating 404 envelope."""
         authorization = MagicMock()
         authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
 
@@ -280,6 +278,25 @@ class TestUpdatePermissionRoutingForRewiredCallSites:
                 "task-msg",
                 AuthorizedOperationType.update,
             )
+
+        assert authorization.check.await_count == 2
+        first_call, second_call = authorization.check.await_args_list
+        assert first_call.kwargs["operation"] == AuthorizedOperationType.update
+        assert second_call.kwargs["operation"] == AuthorizedOperationType.read
+
+    async def test_update_check_denial_surfaces_403_when_read_allowed(self):
+        authorization = MagicMock()
+        operation_denied = AuthorizationError("denied")
+        authorization.check = AsyncMock(side_effect=[operation_denied, True])
+
+        with pytest.raises(AuthorizationError) as exc_info:
+            await check_task_or_collapse_to_404(
+                authorization,
+                "task-msg",
+                AuthorizedOperationType.update,
+            )
+
+        assert exc_info.value is operation_denied
 
 
 @pytest.mark.unit
@@ -327,8 +344,7 @@ class TestTaskDeleteAuthWrites:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestCheckTaskOrCollapseTo404:
-    """The task-resource authz wrap collapses every denial to 404 so callers
-    can't distinguish "present in another tenant" from "absent"."""
+    """The task-resource authz wrap hides unreadable tasks."""
 
     async def test_allowed_check_returns_normally(self):
         authorization = MagicMock()
@@ -342,10 +358,20 @@ class TestCheckTaskOrCollapseTo404:
 
         authorization.check.assert_awaited_once()
 
-    async def test_denied_collapses_to_not_found_regardless_of_existence(self):
-        """Both "denied + task exists" and "denied + task missing" surface as
-        ``ItemDoesNotExist`` (→ 404). The wrap doesn't consult any repository
-        — collapsing avoids the cross-tenant existence leak."""
+    async def test_denied_read_collapses_to_not_found(self):
+        authorization = MagicMock()
+        authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
+
+        with pytest.raises(ItemDoesNotExist):
+            await check_task_or_collapse_to_404(
+                authorization,
+                "task-1",
+                AuthorizedOperationType.read,
+            )
+
+        authorization.check.assert_awaited_once()
+
+    async def test_denied_non_read_collapses_to_not_found_when_read_denied(self):
         authorization = MagicMock()
         authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
 
@@ -356,13 +382,31 @@ class TestCheckTaskOrCollapseTo404:
                 AuthorizedOperationType.update,
             )
 
+        assert authorization.check.await_count == 2
+        first_call, second_call = authorization.check.await_args_list
+        assert first_call.kwargs["operation"] == AuthorizedOperationType.update
+        assert second_call.kwargs["operation"] == AuthorizedOperationType.read
+
+    async def test_denied_non_read_surfaces_authorization_error_when_read_allowed(self):
+        authorization = MagicMock()
+        operation_denied = AuthorizationError("denied")
+        authorization.check = AsyncMock(side_effect=[operation_denied, True])
+
+        with pytest.raises(AuthorizationError) as exc_info:
+            await check_task_or_collapse_to_404(
+                authorization,
+                "task-1",
+                AuthorizedOperationType.update,
+            )
+
+        assert exc_info.value is operation_denied
+
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestDAuthorizedBodyIdTaskWrap:
     """``DAuthorizedBodyId`` must route task-resource body-id checks through
-    the task-collapse wrap so denied body-id calls return 404 instead of 403 —
-    matching the path/query variants."""
+    the task visibility wrapper, matching the path/query variants."""
 
     @staticmethod
     def _make_request(task_id: str) -> MagicMock:
@@ -371,8 +415,6 @@ class TestDAuthorizedBodyIdTaskWrap:
         return request
 
     async def test_task_body_id_routes_through_wrap_on_denial(self):
-        """The body-id wrap goes through the task-collapse helper, which
-        collapses any denial to 404 — including for tasks that exist."""
         annotation = DAuthorizedBodyId(
             AgentexResourceType.task, AuthorizedOperationType.update
         )
@@ -382,6 +424,24 @@ class TestDAuthorizedBodyIdTaskWrap:
         authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
 
         with pytest.raises(ItemDoesNotExist):
+            await dep(self._make_request("task-7"), authorization)
+
+        assert authorization.check.await_count == 2
+
+    async def test_task_body_id_update_denied_when_readable_surfaces_authorization_error(
+        self,
+    ):
+        annotation = DAuthorizedBodyId(
+            AgentexResourceType.task, AuthorizedOperationType.update
+        )
+        dep = _dep_callable(annotation)
+
+        authorization = MagicMock()
+        authorization.check = AsyncMock(
+            side_effect=[AuthorizationError("update denied"), True]
+        )
+
+        with pytest.raises(AuthorizationError):
             await dep(self._make_request("task-7"), authorization)
 
     async def test_task_body_id_returns_field_value_when_allowed(self):
@@ -397,7 +457,7 @@ class TestDAuthorizedBodyIdTaskWrap:
 
         assert result == "task-9"
 
-    async def test_non_task_body_id_skips_wrap(self):
+    async def test_agent_body_id_uses_visibility_wrap(self):
         annotation = DAuthorizedBodyId(
             AgentexResourceType.agent, AuthorizedOperationType.read
         )
@@ -411,12 +471,9 @@ class TestDAuthorizedBodyIdTaskWrap:
         result = await dep(request, authorization)
 
         assert result == "agent-1"
-        # Non-task resources go straight to authorization.check, never to the wrap.
         authorization.check.assert_awaited_once()
         called_kwargs = authorization.check.await_args.kwargs
-        assert called_kwargs["resource"] == AgentexResource(
-            type=AgentexResourceType.agent, selector="agent-1"
-        )
+        assert called_kwargs["resource"] == AgentexResource.agent("agent-1")
 
 
 @pytest.mark.unit
@@ -429,9 +486,6 @@ class TestDAuthorizedNameTaskWrap:
     cross-tenant existence leak the other surfaces eliminate."""
 
     async def test_task_name_routes_through_wrap_on_denial(self):
-        """Present-but-denied tasks (looked up by name) surface as
-        ``ItemDoesNotExist`` (→ 404), same as absent. The lookup itself
-        succeeds — the wrap intercepts the subsequent authz check."""
         annotation = DAuthorizedName(
             AgentexResourceType.task, AuthorizedOperationType.update
         )
@@ -449,7 +503,26 @@ class TestDAuthorizedNameTaskWrap:
         # The wrap fires AFTER the lookup — the repo is consulted to resolve
         # name → id; the leak is only on the authz response, not the lookup.
         task_repository.get.assert_awaited_once_with(name="task-name-x")
-        authorization.check.assert_awaited_once()
+        assert authorization.check.await_count == 2
+
+    async def test_task_name_update_denied_when_readable_surfaces_authorization_error(
+        self,
+    ):
+        annotation = DAuthorizedName(
+            AgentexResourceType.task, AuthorizedOperationType.update
+        )
+        dep = _dep_callable(annotation)
+
+        authorization = MagicMock()
+        authorization.check = AsyncMock(
+            side_effect=[AuthorizationError("update denied"), True]
+        )
+        agent_repository = MagicMock()
+        task_repository = MagicMock()
+        task_repository.get = AsyncMock(return_value=MagicMock(id="task-resolved"))
+
+        with pytest.raises(AuthorizationError):
+            await dep(authorization, agent_repository, task_repository, "task-name-x")
 
     async def test_task_name_returns_resource_name_when_allowed(self):
         annotation = DAuthorizedName(
