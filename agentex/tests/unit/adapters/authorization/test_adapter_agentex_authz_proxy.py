@@ -68,12 +68,27 @@ class TestListResourcesSentinel:
         assert result == []
 
     async def test_truthy_non_boolean_unscoped_is_not_a_sentinel(self):
+        # 1 is truthy but `1 is True` is False, so the strict identity check must
+        # not treat it as the sentinel; only the JSON boolean `true` qualifies.
         with patch(
             PROXY_TARGET,
-            new=AsyncMock(return_value={"unscoped": "false", "items": []}),
+            new=AsyncMock(return_value={"unscoped": 1, "items": []}),
         ):
             result = await _proxy().list_resources(
                 principal={"user_id": "u"},
                 filter_resource=AgentexResourceType.task,
             )
         assert result == []
+
+    async def test_missing_unscoped_and_items_fails_closed(self):
+        # A malformed response with neither field must raise rather than silently
+        # return [] or None — the guard against a provider accidentally failing open.
+        with patch(
+            PROXY_TARGET,
+            new=AsyncMock(return_value={"unexpected_key": "val"}),
+        ):
+            with pytest.raises(KeyError):
+                await _proxy().list_resources(
+                    principal={"user_id": "u"},
+                    filter_resource=AgentexResourceType.task,
+                )
