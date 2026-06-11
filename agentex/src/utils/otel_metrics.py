@@ -46,11 +46,8 @@ from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
     OTLPMetricExporter as OTLPHttpMetricExporter,
 )
-from opentelemetry.sdk.metrics import Counter, Histogram, MeterProvider, UpDownCounter
-from opentelemetry.sdk.metrics.export import (
-    AggregationTemporality,
-    PeriodicExportingMetricReader,
-)
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import (
     OTELResourceDetector,
     Resource,
@@ -72,14 +69,6 @@ _initialized: bool = False
 # Default configuration
 DEFAULT_SERVICE_NAME = "agentex"
 DEFAULT_EXPORT_INTERVAL_MS = 30000  # 30 seconds
-
-# Cumulative export is required for Prometheus/Mimir rate()/increase() on OTLP histograms.
-# Delta temporality produces inflated or ramping RPS when queried via histogram_count(rate(...)).
-_PREFERRED_OTLP_TEMPORALITY = {
-    Counter: AggregationTemporality.CUMULATIVE,
-    Histogram: AggregationTemporality.CUMULATIVE,
-    UpDownCounter: AggregationTemporality.CUMULATIVE,
-}
 
 
 def _per_process_instance_id(resource: Resource) -> str:
@@ -176,10 +165,7 @@ def _http_metrics_export_url(endpoint: str) -> str:
 
 def _create_metric_exporter(endpoint: str, protocol: str) -> MetricExporter:
     if protocol in {"http/protobuf", "http"}:
-        return OTLPHttpMetricExporter(
-            endpoint=_http_metrics_export_url(endpoint),
-            preferred_temporality=_PREFERRED_OTLP_TEMPORALITY,
-        )
+        return OTLPHttpMetricExporter(endpoint=_http_metrics_export_url(endpoint))
 
     if protocol != "grpc":
         logger.warning("Unknown OTEL metrics protocol %r; using grpc", protocol)
@@ -187,7 +173,6 @@ def _create_metric_exporter(endpoint: str, protocol: str) -> MetricExporter:
     return OTLPGrpcMetricExporter(
         endpoint=endpoint,
         insecure=endpoint.startswith("http://"),
-        preferred_temporality=_PREFERRED_OTLP_TEMPORALITY,
     )
 
 
