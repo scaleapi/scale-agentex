@@ -70,7 +70,7 @@ decide what happened. The body matters only where noted (`/v1/authn` principal,
 
 | Status | Meaning to Agentex | Resulting behavior |
 | --- | --- | --- |
-| `200` | Success | Proceed. For `check`, the principal is authorized. For `search`, read `items`. |
+| `200` | Success | Proceed. For `check`, the principal is authorized. For `search`, read `items` or the `unscoped` sentinel. |
 | `401` | Unauthenticated — missing/invalid credentials | Request rejected as `401 Unauthorized` |
 | `403` | Authenticated but not permitted | Treated as a permission denial (e.g. `check` failed) |
 | `502` | Provider acted as a bad gateway | Surfaced as a gateway error |

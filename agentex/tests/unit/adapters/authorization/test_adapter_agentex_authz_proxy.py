@@ -66,3 +66,14 @@ class TestListResourcesSentinel:
                 filter_resource=AgentexResourceType.task,
             )
         assert result == []
+
+    async def test_truthy_non_boolean_unscoped_is_not_a_sentinel(self):
+        with patch(
+            PROXY_TARGET,
+            new=AsyncMock(return_value={"unscoped": "false", "items": []}),
+        ):
+            result = await _proxy().list_resources(
+                principal={"user_id": "u"},
+                filter_resource=AgentexResourceType.task,
+            )
+        assert result == []

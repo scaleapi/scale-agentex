@@ -84,12 +84,12 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
             self.agentex_auth_url, "/v1/authz/search", json=payload
         )
         # Wildcard sentinel: a provider signals "all resources of this type" with
-        # {"unscoped": true} rather than enumerating ids. Map it onto the existing
-        # unscoped path (None == no id filter) so permissive providers stay
-        # stateless. We index response["items"] in the normal case (rather than
-        # .get) so a malformed response missing both fields raises instead of
-        # silently failing open.
-        if response.get("unscoped"):
+        # {"unscoped": true} rather than enumerating ids. Map only the exact JSON
+        # boolean sentinel onto the existing unscoped path (None == no id filter)
+        # so malformed truthy values do not broaden access. We index
+        # response["items"] in the normal case (rather than .get) so a malformed
+        # response missing both fields raises instead of silently failing open.
+        if response.get("unscoped") is True:
             return None
         return response["items"]
 
