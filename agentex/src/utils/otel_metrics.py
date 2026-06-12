@@ -49,15 +49,39 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
+from opentelemetry import metrics
+from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
+    OTLPMetricExporter as OTLPGrpcMetricExporter,
+)
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
+    OTLPMetricExporter as OTLPHttpMetricExporter,
+)
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import (
     OTELResourceDetector,
     Resource,
+    SERVICE_NAME,
+    SERVICE_VERSION,
     get_aggregated_resources,
 )
 
-_auto_instrumentation_bootstrapped = False
+from src.utils.logging import make_logger
+
+if TYPE_CHECKING:
+    from opentelemetry.metrics import Meter
+    from opentelemetry.sdk.metrics.export import MetricExporter
 
 _bootstrap_log = logging.getLogger(__name__)
+logger = make_logger(__name__)
+
+_auto_instrumentation_bootstrapped = False
+
+_meter_provider: MeterProvider | None = None  # Set only when this module creates the provider
+_initialized: bool = False
+
+DEFAULT_SERVICE_NAME = "agentex"
+DEFAULT_EXPORT_INTERVAL_MS = 30000  # 30 seconds
 
 
 def _unique_instance_id(resource: Resource) -> str:
@@ -146,33 +170,6 @@ def bootstrap_auto_instrumentation() -> bool:
 
 
 bootstrap_auto_instrumentation()
-
-from opentelemetry import metrics
-from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
-    OTLPMetricExporter as OTLPGrpcMetricExporter,
-)
-from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
-    OTLPMetricExporter as OTLPHttpMetricExporter,
-)
-from opentelemetry.sdk.metrics import MeterProvider
-from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-from opentelemetry.sdk.resources import SERVICE_NAME, SERVICE_VERSION
-
-from src.utils.logging import make_logger
-
-if TYPE_CHECKING:
-    from opentelemetry.metrics import Meter
-    from opentelemetry.sdk.metrics.export import MetricExporter
-
-logger = make_logger(__name__)
-
-# Global state
-_meter_provider: MeterProvider | None = None # Set only when this module creates the provider
-_initialized: bool = False
-
-# Default configuration
-DEFAULT_SERVICE_NAME = "agentex"
-DEFAULT_EXPORT_INTERVAL_MS = 30000  # 30 seconds
 
 
 def _global_meter_provider() -> MeterProvider | None:
