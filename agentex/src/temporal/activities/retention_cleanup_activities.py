@@ -73,6 +73,7 @@ class RetentionCleanupActivities:
             "page_size": env.RETENTION_CLEANUP_PAGE_SIZE,
             "max_in_flight": env.RETENTION_CLEANUP_MAX_IN_FLIGHT,
             "dry_run": env.RETENTION_CLEANUP_DRY_RUN,
+            "stale_running_days": env.RETENTION_CLEANUP_STALE_RUNNING_DAYS,
         }
 
     @activity.defn(name=FIND_CLEANUP_CANDIDATES_ACTIVITY)
@@ -129,7 +130,11 @@ class RetentionCleanupActivities:
 
     @activity.defn(name=CLEAN_TASK_ACTIVITY)
     async def clean_task(
-        self, task_id: str, idle_days: int, dry_run: bool = True
+        self,
+        task_id: str,
+        idle_days: int,
+        dry_run: bool = True,
+        stale_running_days: int = 0,
     ) -> CleanTaskOutcome:
         """
         Delete the stored content (messages, states, events) for a single task.
@@ -139,6 +144,8 @@ class RetentionCleanupActivities:
             idle_days: Passed through to the use case for policy checks.
             dry_run: When omitted, preview only. Operators must pass False to
                 enable writes.
+            stale_running_days: When > 0, RUNNING tasks idle at least this many
+                days are treated as abandoned and cleaned instead of skipped.
 
         Returns:
             CleanTaskOutcome with ``status`` set to ``"cleaned"`` when content was
@@ -149,7 +156,10 @@ class RetentionCleanupActivities:
         try:
             if dry_run:
                 result = await self.use_case.preview_clean_task(
-                    task_id=task_id, force=False, idle_days=idle_days
+                    task_id=task_id,
+                    force=False,
+                    idle_days=idle_days,
+                    stale_running_days=stale_running_days,
                 )
                 logger.info(
                     "task_cleanup_dry_run",
@@ -164,7 +174,10 @@ class RetentionCleanupActivities:
                     "events_deleted": 0,
                 }
             result = await self.use_case.clean_task(
-                task_id=task_id, force=False, idle_days=idle_days
+                task_id=task_id,
+                force=False,
+                idle_days=idle_days,
+                stale_running_days=stale_running_days,
             )
             return {
                 "task_id": result.task_id,

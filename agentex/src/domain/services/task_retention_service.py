@@ -177,6 +177,7 @@ class TaskRetentionService:
         *,
         enforce_idle_threshold: bool = True,
         idle_days: int = 7,
+        stale_running_days: int = 0,
     ) -> TaskCleanupResultEntity:
         """
         Delete content-bearing rows for a stale task. Idempotent: re-running on a
@@ -189,9 +190,18 @@ class TaskRetentionService:
                 scheduled Temporal sweep always sets True. The admin endpoint
                 accepts a force=true flag that flips this to False.
             idle_days: Idle threshold in days (when enforce_idle_threshold=True).
+            stale_running_days: When > 0, a task whose status is RUNNING but
+                whose last interaction is at least this many days old is treated
+                as abandoned and may be cleaned. 0 (default) keeps the strict
+                behavior: RUNNING tasks are never cleaned. Tasks that hang in
+                RUNNING forever (agent crashed mid-run, workflow never reached a
+                terminal state) would otherwise be exempt from retention
+                indefinitely, defeating the policy for exactly the data most
+                likely to be forgotten.
 
         Refuses (raises) if:
-        - task is currently active (status == RUNNING).
+        - task is currently active (status == RUNNING) and not stale per
+          stale_running_days.
         - enforce_idle_threshold=True and the task is not idle long enough.
         - unprocessed events exist past agent_task_tracker cursors.
 
@@ -236,10 +246,7 @@ class TaskRetentionService:
             )
 
         # 2. Status + idle threshold guards.
-        if task.status == TaskStatus.RUNNING:
-            raise ClientError(
-                f"Cannot clean task {task_id}: status is RUNNING (active)"
-            )
+        await self._check_running_guard(task, stale_running_days)
         if enforce_idle_threshold and not await self._is_task_idle(task, idle_days):
             raise ClientError(
                 f"Cannot clean task {task_id}: not idle for {idle_days} days "
@@ -293,6 +300,7 @@ class TaskRetentionService:
         *,
         enforce_idle_threshold: bool = True,
         idle_days: int = 7,
+        stale_running_days: int = 0,
     ) -> TaskCleanupResultEntity:
         """
         Run the same safety checks as clean_task without deleting or updating data.
@@ -306,10 +314,7 @@ class TaskRetentionService:
         if task.cleaned_at is not None:
             cleaned_at = task.cleaned_at
         else:
-            if task.status == TaskStatus.RUNNING:
-                raise ClientError(
-                    f"Cannot clean task {task_id}: status is RUNNING (active)"
-                )
+            await self._check_running_guard(task, stale_running_days)
             if enforce_idle_threshold and not await self._is_task_idle(task, idle_days):
                 raise ClientError(
                     f"Cannot clean task {task_id}: not idle for {idle_days} days "
@@ -451,6 +456,29 @@ class TaskRetentionService:
         )
 
     # ---- internal helpers ----
+
+    async def _check_running_guard(self, task, stale_running_days: int) -> None:
+        """
+        Raise ClientError if `task` is RUNNING, unless the stale-RUNNING override
+        applies: stale_running_days > 0 and the task has had no interaction for
+        at least that many days (same last-interaction definition as
+        _is_task_idle). Overrides are logged at WARNING for forensics — cleaning
+        a RUNNING task means we are declaring its workflow abandoned.
+        """
+        if task.status != TaskStatus.RUNNING:
+            return
+        if stale_running_days > 0 and await self._is_task_idle(
+            task, stale_running_days
+        ):
+            logger.warning(
+                "task_cleanup_stale_running_override",
+                extra={
+                    "task_id": task.id,
+                    "stale_running_days": stale_running_days,
+                },
+            )
+            return
+        raise ClientError(f"Cannot clean task {task.id}: status is RUNNING (active)")
 
     async def _is_task_idle(self, task, idle_days: int) -> bool:
         """
