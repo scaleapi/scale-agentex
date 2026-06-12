@@ -165,15 +165,18 @@ class TestAgentsAuthAPIIntegration:
         assert authz_data["operation"] == "read"
         assert authz_data["principal"] == MOCK_PRINCIPAL_CONTEXT
 
-        # Second call will use auth cache and not make a request to the authn service
+        # Second call still uses the authn cache, but authorization checks go
+        # directly to Spark so share/revoke changes are visible immediately.
         post_with_error_handling_mock.reset_mock()
         response = await isolated_client.get("/agents/name/test-authorized-agent")
         assert response.status_code == 200
         agent = response.json()
         assert agent["id"] == test_authorized_agent.id
 
-        # No request to the authz service thanks to auth cache
-        assert post_with_error_handling_mock.call_count == 0
+        assert post_with_error_handling_mock.call_count == 1
+        assert (
+            post_with_error_handling_mock.call_args_list[0][0][1] == "/v1/authz/check"
+        )
 
     @pytest.mark.asyncio
     @patch(
