@@ -104,30 +104,40 @@ def bootstrap_auto_instrumentation() -> bool:
     must be the first import so bootstrap runs in each uvicorn spawn worker.
 
     Runs when: contrib packages are installed (no ``ImportError``).
-    Skips when: already bootstrapped in this process, or packages absent.
+    Skips when: bootstrap already succeeded in this process.
+    On ``ImportError`` or ``initialize()`` failure, returns False and leaves
+    the flag unset so a later call can retry.
 
     Export config, ``OTEL_SDK_DISABLED``, and disabled instrumentations are
     handled inside ``initialize()`` — not gated here. Custom app metrics use
     ``init_otel_metrics()`` separately.
 
     Returns:
-        True if ``initialize()`` ran; False if skipped.
+        True if ``initialize()`` completed; False if skipped or failed.
     """
     global _auto_instrumentation_bootstrapped
 
     if _auto_instrumentation_bootstrapped:
         return False
-    _auto_instrumentation_bootstrapped = True
 
     try:
         from opentelemetry.instrumentation.auto_instrumentation import initialize
     except ImportError:
         return False
 
-    _sync_instance_id_to_env(
-        _unique_instance_id(get_aggregated_resources([OTELResourceDetector()]))
-    )
-    initialize()
+    try:
+        _sync_instance_id_to_env(
+            _unique_instance_id(get_aggregated_resources([OTELResourceDetector()]))
+        )
+        initialize()
+    except Exception:
+        _bootstrap_log.warning(
+            "OpenTelemetry auto-instrumentation bootstrap failed; continuing without it",
+            exc_info=True,
+        )
+        return False
+
+    _auto_instrumentation_bootstrapped = True
     _bootstrap_log.debug(
         "OpenTelemetry auto-instrumentation bootstrapped (pid=%s)",
         os.getpid(),

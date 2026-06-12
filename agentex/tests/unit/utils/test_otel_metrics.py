@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import builtins
 import os
+from types import ModuleType
+from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
@@ -34,6 +37,23 @@ def _set_global_meter_provider(provider: object | None = None) -> None:
         pytest.skip(f"OpenTelemetry SDK internals changed: {exc}")
 
 
+def _fake_auto_instrumentation_import(
+    initialize: MagicMock | None = None,
+) -> tuple[MagicMock, patch]:
+    """Inject a fake auto_instrumentation module (no contrib deps required)."""
+    mock_initialize = initialize or MagicMock()
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "opentelemetry.instrumentation.auto_instrumentation":
+            mod = ModuleType(name)
+            mod.initialize = mock_initialize
+            return mod
+        return real_import(name, globals, locals, fromlist, level)
+
+    return mock_initialize, patch.object(builtins, "__import__", side_effect=fake_import)
+
+
 @pytest.fixture(autouse=True)
 def reset_otel_metrics_state():
     """Reset module and global OTel state between tests."""
@@ -54,8 +74,6 @@ def reset_otel_metrics_state():
 def test_bootstrap_skips_when_auto_instrumentation_not_installed(monkeypatch):
     monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
 
-    import builtins
-
     real_import = builtins.__import__
 
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
@@ -64,6 +82,8 @@ def test_bootstrap_skips_when_auto_instrumentation_not_installed(monkeypatch):
         return real_import(name, globals, locals, fromlist, level)
 
     with patch.object(builtins, "__import__", side_effect=fake_import):
+        assert otel_metrics.bootstrap_auto_instrumentation() is False
+        assert otel_metrics._auto_instrumentation_bootstrapped is False
         assert otel_metrics.bootstrap_auto_instrumentation() is False
 
 
@@ -74,27 +94,38 @@ def test_bootstrap_runs_without_otlp_env(monkeypatch):
             monkeypatch.delenv(key, raising=False)
     monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
 
-    with patch(
-        "opentelemetry.instrumentation.auto_instrumentation.initialize"
-    ) as initialize:
+    mock_initialize, import_patch = _fake_auto_instrumentation_import()
+    with import_patch:
         assert otel_metrics.bootstrap_auto_instrumentation() is True
-        initialize.assert_called_once()
+        mock_initialize.assert_called_once()
 
 
 @pytest.mark.unit
 def test_bootstrap_calls_initialize_when_packages_available(monkeypatch):
     monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
 
+    mock_initialize, import_patch = _fake_auto_instrumentation_import()
     with (
+        import_patch,
         patch.object(otel_metrics, "_sync_instance_id_to_env") as sync_env,
-        patch(
-            "opentelemetry.instrumentation.auto_instrumentation.initialize"
-        ) as initialize,
     ):
         assert otel_metrics.bootstrap_auto_instrumentation() is True
         sync_env.assert_called_once()
-        initialize.assert_called_once()
+        mock_initialize.assert_called_once()
         assert otel_metrics.bootstrap_auto_instrumentation() is False
+
+
+@pytest.mark.unit
+def test_bootstrap_initialize_failure_returns_false(monkeypatch):
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+
+    mock_initialize = MagicMock(side_effect=RuntimeError("boom"))
+    _, import_patch = _fake_auto_instrumentation_import(mock_initialize)
+    with import_patch:
+        assert otel_metrics.bootstrap_auto_instrumentation() is False
+        assert otel_metrics._auto_instrumentation_bootstrapped is False
+        assert otel_metrics.bootstrap_auto_instrumentation() is False
+        assert mock_initialize.call_count == 2
 
 
 @pytest.mark.unit
