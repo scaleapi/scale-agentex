@@ -21,6 +21,17 @@ and HTTP OTel metrics/traces are not emitted. Helm avoids this by using
 are required, set ``DD_TRACE_FASTAPI_ENABLED=false`` and
 ``DD_TRACE_STARLETTE_ENABLED=false`` so OTel owns HTTP instrumentation.
 
+**Per-worker ``service.instance.id``:** Uvicorn spawn workers share pod-level
+``OTEL_RESOURCE_ATTRIBUTES``, so auto-instrumentation would otherwise emit all
+workers on the same metric timeseries (see `OTel #4390
+<https://github.com/open-telemetry/opentelemetry-python/issues/4390>`_).
+``bootstrap_auto_instrumentation()`` appends ``.<pid>`` to ``service.instance.id``
+in ``OTEL_RESOURCE_ATTRIBUTES`` before ``initialize()``; standalone
+``init_otel_metrics()`` applies the same via ``Resource.merge``. With
+``--workers 1``, operator ``sitecustomize`` may have already called
+``initialize()``; bootstrap calls it again (OTel providers and instrumentors
+are set-once; duplicate calls only produce log warnings).
+
 Environment variables (custom metrics / standalone mode):
     OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: Metrics endpoint (falls back to
         OTEL_EXPORTER_OTLP_ENDPOINT)
@@ -38,9 +49,51 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
+from opentelemetry.sdk.resources import (
+    OTELResourceDetector,
+    Resource,
+    get_aggregated_resources,
+)
+
 _auto_instrumentation_bootstrapped = False
 
 _bootstrap_log = logging.getLogger(__name__)
+
+
+def _unique_instance_id(resource: Resource) -> str:
+    """Worker-unique service.instance.id (OTel #4390)."""
+    pid = os.getpid()
+    existing = resource.attributes.get("service.instance.id")
+    if existing:
+        existing = str(existing)
+        suffix = f".{pid}"
+        return existing if existing.endswith(suffix) else f"{existing}{suffix}"
+    service = (
+        resource.attributes.get("service.name")
+        or os.environ.get("OTEL_SERVICE_NAME")
+        or "unknown"
+    )
+    pod = resource.attributes.get("k8s.pod.name") or "unknown"
+    return f"{service}.{pod}.{pid}"
+
+
+def _resource_with_unique_instance_id() -> Resource:
+    resource = get_aggregated_resources([OTELResourceDetector()])
+    return resource.merge(
+        Resource.create({"service.instance.id": _unique_instance_id(resource)})
+    )
+
+
+def _sync_instance_id_to_env(instance_id: str) -> None:
+    """Write service.instance.id into OTEL_RESOURCE_ATTRIBUTES for auto-instrumentation."""
+    key = "service.instance.id"
+    parts = [
+        part.strip()
+        for part in os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "").split(",")
+        if part.strip() and not part.strip().startswith(f"{key}=")
+    ]
+    parts.append(f"{key}={instance_id}")
+    os.environ["OTEL_RESOURCE_ATTRIBUTES"] = ",".join(parts)
 
 
 def bootstrap_auto_instrumentation() -> bool:
@@ -71,6 +124,9 @@ def bootstrap_auto_instrumentation() -> bool:
     except ImportError:
         return False
 
+    _sync_instance_id_to_env(
+        _unique_instance_id(get_aggregated_resources([OTELResourceDetector()]))
+    )
     initialize()
     _bootstrap_log.debug(
         "OpenTelemetry auto-instrumentation bootstrapped (pid=%s)",
@@ -91,7 +147,7 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
 )
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-from opentelemetry.sdk.resources import SERVICE_NAME, SERVICE_VERSION, Resource
+from opentelemetry.sdk.resources import SERVICE_NAME, SERVICE_VERSION
 
 from src.utils.logging import make_logger
 
@@ -203,14 +259,16 @@ def init_otel_metrics(
             )
         )
     )
-    resource = Resource.create(
-        {
-            SERVICE_NAME: resolved_service_name,
-            SERVICE_VERSION: service_version
-            or os.environ.get("SERVICE_VERSION", "0.1.0"),
-            "deployment.environment": environment
-            or os.environ.get("ENVIRONMENT", "development"),
-        }
+    resource = _resource_with_unique_instance_id().merge(
+        Resource.create(
+            {
+                SERVICE_NAME: resolved_service_name,
+                SERVICE_VERSION: service_version
+                or os.environ.get("SERVICE_VERSION", "0.1.0"),
+                "deployment.environment": environment
+                or os.environ.get("ENVIRONMENT", "development"),
+            }
+        )
     )
     reader = PeriodicExportingMetricReader(
         exporter=_create_metric_exporter(endpoint, protocol),
