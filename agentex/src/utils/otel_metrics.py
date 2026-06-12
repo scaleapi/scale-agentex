@@ -13,6 +13,14 @@ Two responsibilities:
    ``MeterProvider`` from bootstrap/operator when present; otherwise creates a
    standalone OTLP pipeline when an endpoint is configured.
 
+**Datadog ``ddtrace-run`` coexistence:** Neither OTel nor ddtrace detects the other's
+FastAPI patches. If both run in one process, ddtrace wraps the middleware stack
+first; OTel skips ``OpenTelemetryMiddleware`` with "unexpected middleware stack"
+and HTTP OTel metrics/traces are not emitted. Helm avoids this by using
+``ddtrace-run`` only when ``datadog.env`` is set (OTel-only otherwise). If both
+are required, set ``DD_TRACE_FASTAPI_ENABLED=false`` and
+``DD_TRACE_STARLETTE_ENABLED=false`` so OTel owns HTTP instrumentation.
+
 Environment variables (custom metrics / standalone mode):
     OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: Metrics endpoint (falls back to
         OTEL_EXPORTER_OTLP_ENDPOINT)
