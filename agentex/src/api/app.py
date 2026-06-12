@@ -1,6 +1,14 @@
-# Importing this module runs OTel auto-instrumentation bootstrap at load time
-# (before FastAPI and other instrumented libraries are imported below).
-from src.utils.otel_metrics import init_otel_metrics, shutdown_otel_metrics
+# ruff: noqa: E402
+# E402 suppressed: bootstrap_auto_instrumentation() must run before imports of
+# auto-instrumented libraries (FastAPI, httpx, SQLAlchemy, etc.).
+
+from src.utils.otel_metrics import (
+    bootstrap_auto_instrumentation,
+    init_otel_metrics,
+    shutdown_otel_metrics,
+)
+
+bootstrap_auto_instrumentation()
 
 import os
 from contextlib import asynccontextmanager

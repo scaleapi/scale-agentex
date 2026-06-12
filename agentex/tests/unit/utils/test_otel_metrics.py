@@ -7,8 +7,7 @@ import os
 from contextlib import AbstractContextManager
 from types import ModuleType
 from typing import Any
-from unittest.mock import MagicMock
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from opentelemetry import metrics
@@ -20,9 +19,12 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
 )
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
-from opentelemetry.sdk.resources import OTELResourceDetector, Resource, get_aggregated_resources
-from src.utils import otel_metrics
-from src.utils import cache_metrics
+from opentelemetry.sdk.resources import (
+    OTELResourceDetector,
+    Resource,
+    get_aggregated_resources,
+)
+from src.utils import cache_metrics, otel_metrics
 
 
 def _set_global_meter_provider(provider: object | None = None) -> None:
@@ -157,16 +159,6 @@ def test_unique_instance_id_builds_when_missing(monkeypatch):
 
 
 @pytest.mark.unit
-def test_resource_with_unique_instance_id_does_not_mutate_env(monkeypatch):
-    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
-    original = "k8s.pod.name=my-pod,service.instance.id=agentex.my-pod.agentex"
-    monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", original)
-    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 42)
-    otel_metrics._resource_with_unique_instance_id()
-    assert os.environ["OTEL_RESOURCE_ATTRIBUTES"] == original
-
-
-@pytest.mark.unit
 def test_sync_instance_id_to_env_updates_env(monkeypatch):
     monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
     monkeypatch.setenv(
@@ -183,20 +175,24 @@ def test_sync_instance_id_to_env_updates_env(monkeypatch):
 
 
 @pytest.mark.unit
-def test_resource_with_unique_instance_id_from_otel_env(monkeypatch):
+def test_init_otel_metrics_standalone_resource_has_pid_suffixed_instance_id(
+    monkeypatch,
+):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
     monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
-    monkeypatch.setenv(
-        "OTEL_RESOURCE_ATTRIBUTES",
+    original = (
         "k8s.pod.name=operator-pod,k8s.namespace.name=agentex,"
-        "k8s.deployment.name=agentex,service.instance.id=agentex.operator-pod.agentex",
+        "k8s.deployment.name=agentex,service.instance.id=agentex.operator-pod.agentex"
     )
+    monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", original)
     monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 6789)
 
-    resource = otel_metrics._resource_with_unique_instance_id()
-    attrs = resource.attributes
+    provider = otel_metrics.init_otel_metrics()
+    assert provider is not None
+    attrs = provider._sdk_config.resource.attributes
     assert attrs.get("service.name") == "agentex"
-    assert attrs.get("k8s.pod.name") == "operator-pod"
     assert attrs.get("service.instance.id") == "agentex.operator-pod.agentex.6789"
+    assert os.environ["OTEL_RESOURCE_ATTRIBUTES"] == original
 
 
 def _set_operator_provider() -> MeterProvider:

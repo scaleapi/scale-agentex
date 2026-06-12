@@ -3,10 +3,10 @@ OpenTelemetry bootstrap and custom metrics for Agentex.
 
 Two responsibilities:
 
-1. **Auto-instrumentation** — ``bootstrap_auto_instrumentation()`` runs at import
-   (keep ``otel_metrics`` first in ``app.py``, before any auto-instrumented
-   library) so ``initialize()`` executes in each uvicorn spawn worker when
-   contrib packages are installed.
+1. **Auto-instrumentation** — call ``bootstrap_auto_instrumentation()`` from
+   ``app.py`` before importing FastAPI or other auto-instrumented libraries so
+   ``initialize()`` runs in each uvicorn spawn worker when contrib packages
+   are installed.
 
 2. **Custom app metrics** — ``init_otel_metrics()`` registers Agentex instruments
    (``auth_cache_*``, ``db_*``, etc.). Attaches to an existing global
@@ -58,10 +58,10 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import (
-    OTELResourceDetector,
-    Resource,
     SERVICE_NAME,
     SERVICE_VERSION,
+    OTELResourceDetector,
+    Resource,
     get_aggregated_resources,
 )
 
@@ -87,9 +87,6 @@ def _detected_resource() -> Resource:
     return get_aggregated_resources([OTELResourceDetector()])
 
 
-# --- Resource identity (shared by bootstrap and standalone metrics) ---
-
-
 def _unique_instance_id(resource: Resource) -> str:
     """Worker-unique service.instance.id (OTel #4390)."""
     pid = os.getpid()
@@ -105,13 +102,6 @@ def _unique_instance_id(resource: Resource) -> str:
     )
     pod = resource.attributes.get("k8s.pod.name") or "unknown"
     return f"{service}.{pod}.{pid}"
-
-
-def _resource_with_unique_instance_id() -> Resource:
-    resource = _detected_resource()
-    return resource.merge(
-        Resource.create({"service.instance.id": _unique_instance_id(resource)})
-    )
 
 
 def _sync_instance_id_to_env(instance_id: str) -> None:
@@ -132,9 +122,9 @@ def _sync_instance_id_to_env(instance_id: str) -> None:
 def bootstrap_auto_instrumentation() -> bool:
     """Call ``initialize()`` once per process when auto-instrumentation is available.
 
-    Import ``otel_metrics`` before any auto-instrumented library (FastAPI, httpx,
-    SQLAlchemy, etc.) — instrumentors patch at import time. In ``app.py`` this
-    must be the first import so bootstrap runs in each uvicorn spawn worker.
+    Call from ``app.py`` before any auto-instrumented library (FastAPI, httpx,
+    SQLAlchemy, etc.) — instrumentors patch at import time. Each uvicorn spawn
+    worker imports ``app.py`` fresh, so one call per worker is enough.
 
     Runs when: contrib packages are installed (no ``ImportError``).
     Skips when: bootstrap already succeeded in this process.
@@ -174,10 +164,6 @@ def bootstrap_auto_instrumentation() -> bool:
         os.getpid(),
     )
     return True
-
-
-# Runs at import time so uvicorn spawn workers bootstrap before instrumented libs load.
-bootstrap_auto_instrumentation()
 
 
 # --- Custom application metrics ---
@@ -276,15 +262,17 @@ def init_otel_metrics(
             )
         )
     )
-    resource = _resource_with_unique_instance_id().merge(
+    resource = Resource.create(
+        {
+            SERVICE_NAME: resolved_service_name,
+            SERVICE_VERSION: service_version
+            or os.environ.get("SERVICE_VERSION", "0.1.0"),
+            "deployment.environment": environment
+            or os.environ.get("ENVIRONMENT", "development"),
+        }
+    ).merge(
         Resource.create(
-            {
-                SERVICE_NAME: resolved_service_name,
-                SERVICE_VERSION: service_version
-                or os.environ.get("SERVICE_VERSION", "0.1.0"),
-                "deployment.environment": environment
-                or os.environ.get("ENVIRONMENT", "development"),
-            }
+            {"service.instance.id": _unique_instance_id(_detected_resource())}
         )
     )
     reader = PeriodicExportingMetricReader(
