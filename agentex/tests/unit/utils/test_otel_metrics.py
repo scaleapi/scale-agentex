@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import builtins
 import os
+from contextlib import AbstractContextManager
 from types import ModuleType
+from typing import Any
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
@@ -39,7 +41,7 @@ def _set_global_meter_provider(provider: object | None = None) -> None:
 
 def _fake_auto_instrumentation_import(
     initialize: MagicMock | None = None,
-) -> tuple[MagicMock, patch]:
+) -> tuple[MagicMock, AbstractContextManager[Any]]:
     """Inject a fake auto_instrumentation module (no contrib deps required)."""
     mock_initialize = initialize or MagicMock()
     real_import = builtins.__import__
@@ -52,6 +54,18 @@ def _fake_auto_instrumentation_import(
         return real_import(name, globals, locals, fromlist, level)
 
     return mock_initialize, patch.object(builtins, "__import__", side_effect=fake_import)
+
+
+def _block_auto_instrumentation_import() -> AbstractContextManager[Any]:
+    """Simulate missing opentelemetry-instrumentation contrib packages."""
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "opentelemetry.instrumentation.auto_instrumentation":
+            raise ImportError(name)
+        return real_import(name, globals, locals, fromlist, level)
+
+    return patch.object(builtins, "__import__", side_effect=fake_import)
 
 
 @pytest.fixture(autouse=True)
@@ -74,14 +88,7 @@ def reset_otel_metrics_state():
 def test_bootstrap_skips_when_auto_instrumentation_not_installed(monkeypatch):
     monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
 
-    real_import = builtins.__import__
-
-    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "opentelemetry.instrumentation.auto_instrumentation":
-            raise ImportError(name)
-        return real_import(name, globals, locals, fromlist, level)
-
-    with patch.object(builtins, "__import__", side_effect=fake_import):
+    with _block_auto_instrumentation_import():
         assert otel_metrics.bootstrap_auto_instrumentation() is False
         assert otel_metrics._auto_instrumentation_bootstrapped is False
         assert otel_metrics.bootstrap_auto_instrumentation() is False

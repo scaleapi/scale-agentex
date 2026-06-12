@@ -1,4 +1,5 @@
-# First import: bootstrap auto-instrumentation before any instrumented library.
+# Importing this module runs OTel auto-instrumentation bootstrap at load time
+# (before FastAPI and other instrumented libraries are imported below).
 from src.utils.otel_metrics import init_otel_metrics, shutdown_otel_metrics
 
 import os

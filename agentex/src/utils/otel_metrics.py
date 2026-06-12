@@ -45,7 +45,6 @@ Environment variables (custom metrics / standalone mode):
 
 from __future__ import annotations
 
-import logging
 import os
 from typing import TYPE_CHECKING
 
@@ -72,16 +71,23 @@ if TYPE_CHECKING:
     from opentelemetry.metrics import Meter
     from opentelemetry.sdk.metrics.export import MetricExporter
 
-_bootstrap_log = logging.getLogger(__name__)
 logger = make_logger(__name__)
 
+# Module state
 _auto_instrumentation_bootstrapped = False
-
 _meter_provider: MeterProvider | None = None  # Set only when this module creates the provider
 _initialized: bool = False
 
 DEFAULT_SERVICE_NAME = "agentex"
 DEFAULT_EXPORT_INTERVAL_MS = 30000  # 30 seconds
+
+
+def _detected_resource() -> Resource:
+    """Resource attributes from OTEL_* env (operator-injected or local)."""
+    return get_aggregated_resources([OTELResourceDetector()])
+
+
+# --- Resource identity (shared by bootstrap and standalone metrics) ---
 
 
 def _unique_instance_id(resource: Resource) -> str:
@@ -102,7 +108,7 @@ def _unique_instance_id(resource: Resource) -> str:
 
 
 def _resource_with_unique_instance_id() -> Resource:
-    resource = get_aggregated_resources([OTELResourceDetector()])
+    resource = _detected_resource()
     return resource.merge(
         Resource.create({"service.instance.id": _unique_instance_id(resource)})
     )
@@ -118,6 +124,9 @@ def _sync_instance_id_to_env(instance_id: str) -> None:
     ]
     parts.append(f"{key}={instance_id}")
     os.environ["OTEL_RESOURCE_ATTRIBUTES"] = ",".join(parts)
+
+
+# --- Auto-instrumentation bootstrap ---
 
 
 def bootstrap_auto_instrumentation() -> bool:
@@ -150,26 +159,28 @@ def bootstrap_auto_instrumentation() -> bool:
         return False
 
     try:
-        _sync_instance_id_to_env(
-            _unique_instance_id(get_aggregated_resources([OTELResourceDetector()]))
-        )
+        _sync_instance_id_to_env(_unique_instance_id(_detected_resource()))
         initialize()
     except Exception:
-        _bootstrap_log.warning(
+        logger.warning(
             "OpenTelemetry auto-instrumentation bootstrap failed; continuing without it",
             exc_info=True,
         )
         return False
 
     _auto_instrumentation_bootstrapped = True
-    _bootstrap_log.debug(
+    logger.debug(
         "OpenTelemetry auto-instrumentation bootstrapped (pid=%s)",
         os.getpid(),
     )
     return True
 
 
+# Runs at import time so uvicorn spawn workers bootstrap before instrumented libs load.
 bootstrap_auto_instrumentation()
+
+
+# --- Custom application metrics ---
 
 
 def _global_meter_provider() -> MeterProvider | None:
@@ -290,9 +301,11 @@ def init_otel_metrics(
     _meter_provider = provider
     _initialized = True
     logger.info(
-        f"OpenTelemetry metrics initialized: endpoint={endpoint}, "
-        f"protocol={protocol}, service={resolved_service_name}, "
-        f"interval={resolved_export_interval_ms}ms"
+        "OpenTelemetry metrics initialized: endpoint=%s, protocol=%s, service=%s, interval=%sms",
+        endpoint,
+        protocol,
+        resolved_service_name,
+        resolved_export_interval_ms,
     )
     return _meter_provider
 
