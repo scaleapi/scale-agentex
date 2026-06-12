@@ -138,7 +138,6 @@ def bootstrap_auto_instrumentation() -> bool:
 bootstrap_auto_instrumentation()
 
 from opentelemetry import metrics
-from opentelemetry.metrics import NoOpMeterProvider
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
     OTLPMetricExporter as OTLPGrpcMetricExporter,
 )
@@ -326,11 +325,6 @@ def shutdown_otel_metrics() -> None:
     except Exception:
         logger.exception("OpenTelemetry metrics shutdown failed")
     finally:
-        if _meter_provider is not None:
-            try:
-                metrics.set_meter_provider(NoOpMeterProvider())
-            except Exception:
-                logger.exception("Failed to reset global MeterProvider after shutdown")
         _meter_provider = None
         _initialized = False
 

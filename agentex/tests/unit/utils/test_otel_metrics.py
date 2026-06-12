@@ -353,12 +353,30 @@ def test_init_after_shutdown_in_standalone_mode(monkeypatch):
 
     first = otel_metrics.init_otel_metrics()
     assert first is not None
+    assert otel_metrics._meter_provider is first
+
     otel_metrics.shutdown_otel_metrics()
+    assert otel_metrics._initialized is False
+    assert otel_metrics._meter_provider is None
 
     second = otel_metrics.init_otel_metrics()
     assert second is not None
-    assert second is not first
+    assert otel_metrics._initialized is True
     assert otel_metrics.get_meter("agentex.test") is not None
+
+
+@pytest.mark.unit
+def test_shutdown_does_not_replace_global_meter_provider(monkeypatch):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+    provider = otel_metrics.init_otel_metrics()
+    assert provider is not None
+    global_before = metrics.get_meter_provider()
+
+    with patch.object(metrics, "set_meter_provider") as set_provider:
+        otel_metrics.shutdown_otel_metrics()
+
+    set_provider.assert_not_called()
+    assert metrics.get_meter_provider() is global_before
 
 
 @pytest.mark.unit
