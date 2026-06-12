@@ -1,26 +1,77 @@
 """
-OpenTelemetry metrics configuration for Agentex.
+OpenTelemetry bootstrap and custom metrics for Agentex.
 
-When auto-instrumentation (e.g. OTel Operator) has already installed a global
-MeterProvider, custom app metrics attach to it instead of replacing it.
-Otherwise this module creates its own provider with OTLP export when an endpoint
-is configured.
+Two responsibilities:
 
-Environment Variables:
-    OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: Metrics OTLP endpoint (falls back to
+1. **Auto-instrumentation** — ``bootstrap_auto_instrumentation()`` runs at import
+   (keep ``otel_metrics`` first in ``app.py``, before any auto-instrumented
+   library) so ``initialize()`` executes in each uvicorn spawn worker when
+   contrib packages are installed.
+
+2. **Custom app metrics** — ``init_otel_metrics()`` registers Agentex instruments
+   (``auth_cache_*``, ``db_*``, etc.). Attaches to an existing global
+   ``MeterProvider`` from bootstrap/operator when present; otherwise creates a
+   standalone OTLP pipeline when an endpoint is configured.
+
+Environment variables (custom metrics / standalone mode):
+    OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: Metrics endpoint (falls back to
         OTEL_EXPORTER_OTLP_ENDPOINT)
-    OTEL_EXPORTER_OTLP_METRICS_PROTOCOL: Metrics export protocol (falls back to
+    OTEL_EXPORTER_OTLP_METRICS_PROTOCOL: Export protocol (falls back to
         OTEL_EXPORTER_OTLP_PROTOCOL; default: grpc)
     OTEL_EXPORTER_OTLP_ENDPOINT: General OTLP endpoint URL
-    OTEL_EXPORTER_OTLP_HEADERS: Optional headers for authentication
-    OTEL_SERVICE_NAME: Service name for metrics (default: agentex)
+    OTEL_EXPORTER_OTLP_HEADERS: Passed through by OTLP exporters when set
+    OTEL_SERVICE_NAME: Service name (default: agentex)
     OTEL_METRICS_EXPORT_INTERVAL_MS: Export interval in ms (default: 30000)
 """
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import TYPE_CHECKING
+
+_auto_instrumentation_bootstrapped = False
+
+_bootstrap_log = logging.getLogger(__name__)
+
+
+def bootstrap_auto_instrumentation() -> bool:
+    """Call ``initialize()`` once per process when auto-instrumentation is available.
+
+    Import ``otel_metrics`` before any auto-instrumented library (FastAPI, httpx,
+    SQLAlchemy, etc.) — instrumentors patch at import time. In ``app.py`` this
+    must be the first import so bootstrap runs in each uvicorn spawn worker.
+
+    Runs when: contrib packages are installed (no ``ImportError``).
+    Skips when: already bootstrapped in this process, or packages absent.
+
+    Export config, ``OTEL_SDK_DISABLED``, and disabled instrumentations are
+    handled inside ``initialize()`` — not gated here. Custom app metrics use
+    ``init_otel_metrics()`` separately.
+
+    Returns:
+        True if ``initialize()`` ran; False if skipped.
+    """
+    global _auto_instrumentation_bootstrapped
+
+    if _auto_instrumentation_bootstrapped:
+        return False
+    _auto_instrumentation_bootstrapped = True
+
+    try:
+        from opentelemetry.instrumentation.auto_instrumentation import initialize
+    except ImportError:
+        return False
+
+    initialize()
+    _bootstrap_log.debug(
+        "OpenTelemetry auto-instrumentation bootstrapped (pid=%s)",
+        os.getpid(),
+    )
+    return True
+
+
+bootstrap_auto_instrumentation()
 
 from opentelemetry import metrics
 from opentelemetry.metrics import NoOpMeterProvider

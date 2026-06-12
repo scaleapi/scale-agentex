@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
 
 import pytest
@@ -37,13 +38,59 @@ def _set_global_meter_provider(provider: object | None = None) -> None:
 def reset_otel_metrics_state():
     """Reset module and global OTel state between tests."""
     saved_provider = metrics.get_meter_provider()
+    saved_bootstrap = otel_metrics._auto_instrumentation_bootstrapped
     otel_metrics.shutdown_otel_metrics()
+    otel_metrics._auto_instrumentation_bootstrapped = False
     _set_global_meter_provider()
 
     yield
 
     otel_metrics.shutdown_otel_metrics()
+    otel_metrics._auto_instrumentation_bootstrapped = saved_bootstrap
     _set_global_meter_provider(saved_provider)
+
+
+@pytest.mark.unit
+def test_bootstrap_skips_when_auto_instrumentation_not_installed(monkeypatch):
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "opentelemetry.instrumentation.auto_instrumentation":
+            raise ImportError(name)
+        return real_import(name, globals, locals, fromlist, level)
+
+    with patch.object(builtins, "__import__", side_effect=fake_import):
+        assert otel_metrics.bootstrap_auto_instrumentation() is False
+
+
+@pytest.mark.unit
+def test_bootstrap_runs_without_otlp_env(monkeypatch):
+    for key in list(os.environ):
+        if key.startswith("OTEL_EXPORTER_OTLP") and key.endswith("_ENDPOINT"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+
+    with patch(
+        "opentelemetry.instrumentation.auto_instrumentation.initialize"
+    ) as initialize:
+        assert otel_metrics.bootstrap_auto_instrumentation() is True
+        initialize.assert_called_once()
+
+
+@pytest.mark.unit
+def test_bootstrap_calls_initialize_when_packages_available(monkeypatch):
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+
+    with patch(
+        "opentelemetry.instrumentation.auto_instrumentation.initialize"
+    ) as initialize:
+        assert otel_metrics.bootstrap_auto_instrumentation() is True
+        initialize.assert_called_once()
+        assert otel_metrics.bootstrap_auto_instrumentation() is False
 
 
 def _set_operator_provider() -> MeterProvider:

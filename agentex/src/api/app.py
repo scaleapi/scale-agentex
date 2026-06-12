@@ -1,3 +1,6 @@
+# First import: bootstrap auto-instrumentation before any instrumented library.
+from src.utils.otel_metrics import init_otel_metrics, shutdown_otel_metrics
+
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -38,7 +41,6 @@ from src.config.dependencies import (
 from src.config.environment_variables import EnvVarKeys
 from src.domain.exceptions import GenericException
 from src.utils.logging import make_logger
-from src.utils.otel_metrics import init_otel_metrics, shutdown_otel_metrics
 
 logger = make_logger(__name__)
 
