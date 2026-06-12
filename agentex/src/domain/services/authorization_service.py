@@ -6,7 +6,6 @@ from fastapi import Depends, Request
 from src.adapters.authorization.adapter_agentex_authz_proxy import (
     DAgentexAuthorization,
 )
-from src.api.authentication_cache import get_auth_cache
 from src.api.authentication_middleware import DAuthorizationEnabled
 from src.api.schemas.authorization_types import (
     AgentexResource,
@@ -107,26 +106,6 @@ class AuthorizationService:
             else self.principal_context
         )
 
-        # Try to get cached result first
-        auth_cache = await get_auth_cache()
-        cached_result = await auth_cache.get_authorization_check(
-            resource_type=str(resource.type),
-            resource_selector=resource.selector,
-            operation=str(operation),
-            principal_context=effective_principal,
-        )
-
-        if cached_result is not None:
-            logger.info(
-                "[authorization_service] Using cached result for %s permission on %s:%s: %s",
-                operation,
-                resource.type,
-                resource.selector,
-                "allowed" if cached_result else "denied",
-            )
-            return cached_result
-
-        # Not in cache, perform actual check
         logger.info(
             "[authorization_service] Checking %s permission on %s:%s",
             operation,
@@ -137,15 +116,6 @@ class AuthorizationService:
             effective_principal,
             resource,
             operation,
-        )
-
-        # Cache the result
-        await auth_cache.set_authorization_check(
-            resource_type=str(resource.type),
-            resource_selector=resource.selector,
-            operation=str(operation),
-            principal_context=effective_principal,
-            allowed=result,
         )
 
         logger.info(
