@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import os
+
 import pytest
 from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
@@ -14,9 +16,8 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
 )
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
-from opentelemetry.sdk.resources import Resource
-from src.utils import otel_metrics
-from src.utils import cache_metrics
+from opentelemetry.sdk.resources import OTELResourceDetector, Resource, get_aggregated_resources
+from src.utils import cache_metrics, otel_metrics
 
 
 def _set_global_meter_provider(provider: object | None = None) -> None:
@@ -26,9 +27,12 @@ def _set_global_meter_provider(provider: object | None = None) -> None:
     install the no-op proxy (unset state).
     """
     try:
+        from opentelemetry.util._once import Once
+
         if provider is None:
             provider = metrics._internal._ProxyMeterProvider()
         metrics._internal._METER_PROVIDER = provider
+        metrics._internal._METER_PROVIDER_SET_ONCE = Once()
     except AttributeError as exc:
         pytest.skip(f"OpenTelemetry SDK internals changed: {exc}")
 
@@ -50,6 +54,14 @@ def _set_operator_provider() -> MeterProvider:
     provider = MeterProvider(resource=Resource.create({}))
     _set_global_meter_provider(provider)
     return provider
+
+
+def _enable_auto_instrumentation_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTEL_METRICS_EXPORTER", "otlp")
+    monkeypatch.setenv(
+        "PYTHONPATH",
+        "/otel-auto-instrumentation-python/opentelemetry/instrumentation/auto_instrumentation",
+    )
 
 
 @pytest.mark.unit
@@ -99,6 +111,21 @@ def test_init_after_shutdown_in_shared_mode():
 
 
 @pytest.mark.unit
+def test_init_creates_standalone_when_operator_env_but_proxy_global(monkeypatch):
+    """Operator injection env must not block first-setter standalone on proxy."""
+    _enable_auto_instrumentation_env(monkeypatch)
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+
+    result = otel_metrics.init_otel_metrics()
+
+    assert isinstance(result, MeterProvider)
+    assert otel_metrics._meter_provider is result
+    assert metrics.get_meter_provider() is result
+    assert otel_metrics.get_meter("agentex.test") is not None
+
+
+@pytest.mark.unit
 def test_init_creates_meter_provider_when_none_configured(monkeypatch):
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
 
@@ -107,6 +134,138 @@ def test_init_creates_meter_provider_when_none_configured(monkeypatch):
     assert isinstance(result, MeterProvider)
     assert otel_metrics._meter_provider is result
     assert otel_metrics._initialized is True
+    assert otel_metrics.get_meter("agentex.test") is not None
+
+
+@pytest.mark.unit
+def test_per_process_instance_id_extends_operator_value(monkeypatch):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
+    monkeypatch.setenv(
+        "OTEL_RESOURCE_ATTRIBUTES",
+        "k8s.pod.name=my-pod,service.instance.id=agentex.my-pod.agentex",
+    )
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 42)
+    base = get_aggregated_resources([OTELResourceDetector()])
+    assert otel_metrics._per_process_instance_id(base) == "agentex.my-pod.agentex.42"
+
+
+@pytest.mark.unit
+def test_per_process_instance_id_builds_when_missing(monkeypatch):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
+    monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "k8s.pod.name=my-pod")
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 42)
+    base = get_aggregated_resources([OTELResourceDetector()])
+    assert otel_metrics._per_process_instance_id(base) == "agentex.my-pod.42"
+
+
+@pytest.mark.unit
+def test_build_resource_does_not_mutate_otel_resource_attributes_env(monkeypatch):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
+    original = "k8s.pod.name=my-pod,service.instance.id=agentex.my-pod.agentex"
+    monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", original)
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 42)
+    otel_metrics._build_resource()
+    assert os.environ["OTEL_RESOURCE_ATTRIBUTES"] == original
+
+
+@pytest.mark.unit
+def test_per_process_instance_id_works_for_other_services(monkeypatch):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "payments-api")
+    monkeypatch.setenv(
+        "OTEL_RESOURCE_ATTRIBUTES",
+        "k8s.pod.name=payments-abc,service.instance.id=payments-api.payments-abc.prod",
+    )
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 7)
+    base = get_aggregated_resources([OTELResourceDetector()])
+    assert (
+        otel_metrics._per_process_instance_id(base)
+        == "payments-api.payments-abc.prod.7"
+    )
+
+
+@pytest.mark.unit
+def test_build_resource_parses_operator_injected_pod_env(monkeypatch):
+    """Regression: K8s expands $(OTEL_RESOURCE_ATTRIBUTES_*) before Python starts."""
+    pod_name = "agentex-ccc85c45b-s29zm"
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
+    monkeypatch.setenv(
+        "OTEL_RESOURCE_ATTRIBUTES",
+        "k8s.container.name=agentex,"
+        "k8s.deployment.name=agentex,"
+        "k8s.namespace.name=agentex,"
+        "k8s.node.name=ip-10-0-1-2.us-west-2.compute.internal,"
+        f"k8s.pod.name={pod_name},"
+        "k8s.replicaset.name=agentex-ccc85c45b,"
+        f"service.instance.id=agentex.{pod_name}.agentex,"
+        "service.namespace=agentex,"
+        "service.version=perf-agentex-drop-redundant-task-grant-b59b92e",
+    )
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 12345)
+
+    attrs = otel_metrics._build_resource().attributes
+    assert attrs.get("service.name") == "agentex"
+    assert attrs.get("k8s.pod.name") == pod_name
+    assert attrs.get("k8s.namespace.name") == "agentex"
+    assert attrs.get("k8s.deployment.name") == "agentex"
+    assert attrs.get("k8s.container.name") == "agentex"
+    assert attrs.get("service.instance.id") == f"agentex.{pod_name}.agentex.12345"
+
+
+@pytest.mark.unit
+def test_build_resource_from_otel_env(monkeypatch):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
+    monkeypatch.setenv(
+        "OTEL_RESOURCE_ATTRIBUTES",
+        "k8s.pod.name=operator-pod,k8s.namespace.name=agentex,"
+        "k8s.deployment.name=agentex,service.instance.id=agentex.operator-pod.agentex",
+    )
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 6789)
+
+    resource = otel_metrics._build_resource()
+    attrs = resource.attributes
+    assert attrs.get("service.name") == "agentex"
+    assert attrs.get("k8s.pod.name") == "operator-pod"
+    assert attrs.get("k8s.namespace.name") == "agentex"
+    assert attrs.get("k8s.deployment.name") == "agentex"
+    assert attrs.get("service.instance.id") == "agentex.operator-pod.agentex.6789"
+
+
+@pytest.mark.unit
+def test_init_coexists_without_set_meter_provider_when_operator_present(
+    monkeypatch,
+):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+    operator_provider = _set_operator_provider()
+
+    with patch.object(metrics, "set_meter_provider") as mock_set:
+        result = otel_metrics.init_otel_metrics()
+
+    mock_set.assert_not_called()
+    assert result is operator_provider
+    assert metrics.get_meter_provider() is operator_provider
+    assert otel_metrics._meter_provider is None
+    assert otel_metrics.get_meter("agentex.test") is not None
+
+
+@pytest.mark.unit
+def test_standalone_shuts_down_orphan_when_set_meter_provider_rejected(
+    monkeypatch,
+):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+    preexisting = MeterProvider(resource=Resource.create({}))
+    real_set = metrics.set_meter_provider
+
+    def racing_set(provider: MeterProvider) -> None:
+        if not isinstance(metrics.get_meter_provider(), MeterProvider):
+            real_set(preexisting)
+        real_set(provider)
+
+    with patch.object(metrics, "set_meter_provider", side_effect=racing_set):
+        result = otel_metrics.init_otel_metrics()
+
+    assert result is preexisting
+    assert metrics.get_meter_provider() is preexisting
+    assert otel_metrics._meter_provider is None
     assert otel_metrics.get_meter("agentex.test") is not None
 
 
@@ -233,6 +392,31 @@ def test_custom_metrics_preserve_instrument_attributes_in_shared_mode():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("input_endpoint", "expected_url"),
+    [
+        ("http://collector:4318", "http://collector:4318/v1/metrics"),
+        (
+            "http://collector:4318/v1/metrics",
+            "http://collector:4318/v1/metrics",
+        ),
+    ],
+)
+def test_http_metrics_export_url(input_endpoint: str, expected_url: str):
+    assert otel_metrics._http_metrics_export_url(input_endpoint) == expected_url
+
+
+@pytest.mark.unit
+def test_create_http_metric_exporter_uses_v1_metrics_path():
+    exporter = otel_metrics._create_metric_exporter(
+        "http://collector:4318", "http/protobuf"
+    )
+
+    assert isinstance(exporter, OTLPHttpMetricExporter)
+    assert exporter._endpoint == "http://collector:4318/v1/metrics"
+
+
+@pytest.mark.unit
 def test_init_after_shutdown_in_standalone_mode(monkeypatch):
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
 
@@ -242,7 +426,7 @@ def test_init_after_shutdown_in_standalone_mode(monkeypatch):
 
     second = otel_metrics.init_otel_metrics()
     assert second is not None
-    assert second is not first
+    assert second is first
     assert otel_metrics.get_meter("agentex.test") is not None
 
 
@@ -270,3 +454,167 @@ def test_shutdown_only_own_provider(monkeypatch):
 
     assert otel_metrics._initialized is False
     assert otel_metrics._meter_provider is None
+
+
+@pytest.mark.unit
+def test_instrument_fastapi_skips_when_disabled_by_default(monkeypatch):
+    from fastapi import FastAPI
+
+    monkeypatch.delenv("AGENTEX_OTEL_HTTP_METRICS_ENABLED", raising=False)
+
+    app = FastAPI()
+    assert otel_metrics.instrument_fastapi_http_metrics(app) is False
+
+
+@pytest.mark.unit
+def test_instrument_fastapi_skips_when_already_instrumented(monkeypatch):
+    from fastapi import FastAPI
+
+    monkeypatch.setenv("AGENTEX_OTEL_HTTP_METRICS_ENABLED", "true")
+
+    app = FastAPI()
+    app._is_instrumented_by_opentelemetry = True  # noqa: SLF001
+
+    assert otel_metrics.instrument_fastapi_http_metrics(app) is False
+
+
+@pytest.mark.unit
+def test_instrument_fastapi_skips_without_otel_config(monkeypatch):
+    from fastapi import FastAPI
+
+    monkeypatch.setenv("AGENTEX_OTEL_HTTP_METRICS_ENABLED", "true")
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", raising=False)
+
+    app = FastAPI()
+    assert otel_metrics.instrument_fastapi_http_metrics(app) is False
+
+
+@pytest.mark.unit
+def test_instrument_fastapi_applies_with_existing_provider(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("AGENTEX_OTEL_HTTP_METRICS_ENABLED", "true")
+    monkeypatch.setenv("OTEL_SEMCONV_STABILITY_OPT_IN", "http")
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(
+        resource=Resource.create({"service.name": "agentex"}),
+        metric_readers=[reader],
+    )
+    _set_global_meter_provider(provider)
+    otel_metrics.init_otel_metrics()
+
+    app = FastAPI()
+
+    @app.get("/probe")
+    def probe() -> dict[str, str]:
+        return {"ok": "true"}
+
+    assert otel_metrics.instrument_fastapi_http_metrics(app) is True
+    assert getattr(app, "_is_instrumented_by_opentelemetry", False) is True
+
+    with TestClient(app) as client:
+        response = client.get("/probe")
+        assert response.status_code == 200
+
+    data = reader.get_metrics_data()
+    assert data is not None
+    metric_names = {
+        metric.name
+        for resource_metrics in data.resource_metrics
+        for scope in resource_metrics.scope_metrics
+        for metric in scope.metrics
+    }
+    assert "http.server.request.duration" in metric_names
+
+
+@pytest.mark.unit
+def test_configure_app_metrics_before_first_request(monkeypatch):
+    """Instrument at import time, before the ASGI server builds middleware_stack."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("AGENTEX_OTEL_HTTP_METRICS_ENABLED", "true")
+    monkeypatch.setenv("OTEL_SEMCONV_STABILITY_OPT_IN", "http")
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(
+        resource=Resource.create({"service.name": "agentex"}),
+        metric_readers=[reader],
+    )
+    _set_global_meter_provider(provider)
+
+    app = FastAPI()
+
+    @app.post("/agents/{agent_id}/rpc")
+    def rpc(agent_id: str) -> dict[str, str]:
+        return {"ok": agent_id}
+
+    otel_metrics.configure_app_metrics(app)
+
+    with TestClient(app) as client:
+        response = client.post("/agents/test/rpc")
+        assert response.status_code == 200
+
+    data = reader.get_metrics_data()
+    assert data is not None
+    metric_names = {
+        metric.name
+        for resource_metrics in data.resource_metrics
+        for scope in resource_metrics.scope_metrics
+        for metric in scope.metrics
+    }
+    assert "http.server.request.duration" in metric_names
+
+
+@pytest.mark.unit
+def test_configure_app_metrics_in_lifespan_does_not_record_metrics(monkeypatch):
+    """Lifespan runs after Starlette caches middleware_stack on lifespan startup."""
+    from contextlib import asynccontextmanager
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("AGENTEX_OTEL_HTTP_METRICS_ENABLED", "true")
+    monkeypatch.setenv("OTEL_SEMCONV_STABILITY_OPT_IN", "http")
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(
+        resource=Resource.create({"service.name": "agentex"}),
+        metric_readers=[reader],
+    )
+    _set_global_meter_provider(provider)
+
+    app = FastAPI()
+
+    @app.post("/x")
+    def x() -> dict[str, str]:
+        return {"ok": "true"}
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        otel_metrics.configure_app_metrics(app)
+        yield
+
+    app.router.lifespan_context = lifespan
+
+    with TestClient(app) as client:
+        client.post("/x")
+
+    assert reader.get_metrics_data() is None
+
+
+@pytest.mark.unit
+def test_instrument_fastapi_is_idempotent(monkeypatch):
+    from fastapi import FastAPI
+
+    monkeypatch.setenv("AGENTEX_OTEL_HTTP_METRICS_ENABLED", "true")
+
+    _set_operator_provider()
+    otel_metrics.init_otel_metrics()
+    app = FastAPI()
+
+    assert otel_metrics.instrument_fastapi_http_metrics(app) is True
+    assert otel_metrics.instrument_fastapi_http_metrics(app) is False

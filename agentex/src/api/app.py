@@ -38,7 +38,7 @@ from src.config.dependencies import (
 from src.config.environment_variables import EnvVarKeys
 from src.domain.exceptions import GenericException
 from src.utils.logging import make_logger
-from src.utils.otel_metrics import init_otel_metrics, shutdown_otel_metrics
+from src.utils.otel_metrics import configure_app_metrics, shutdown_otel_metrics
 
 logger = make_logger(__name__)
 
@@ -73,9 +73,6 @@ class HTTPExceptionWithMessage(HTTPException):
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # Initialize OpenTelemetry metrics first (before dependencies register instruments)
-    init_otel_metrics()
-
     await dependencies.startup_global_dependencies()
     configure_statsd()
 
@@ -194,6 +191,9 @@ fastapi_app.include_router(deployments.router)
 fastapi_app.include_router(schedules.router)
 fastapi_app.include_router(checkpoints.router)
 fastapi_app.include_router(task_retention.router)
+
+# Instrument before the first ASGI message; lifespan startup is too late.
+configure_app_metrics(fastapi_app)
 
 # Wrap FastAPI app with health check interceptor for sub-millisecond K8s probe responses.
 # This must be the outermost layer to bypass all middleware.
