@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+import builtins
+import os
+from contextlib import AbstractContextManager
+from types import ModuleType
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 from opentelemetry import metrics
@@ -14,9 +19,12 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
 )
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
-from opentelemetry.sdk.resources import Resource
-from src.utils import otel_metrics
-from src.utils import cache_metrics
+from opentelemetry.sdk.resources import (
+    OTELResourceDetector,
+    Resource,
+    get_aggregated_resources,
+)
+from src.utils import cache_metrics, otel_metrics
 
 
 def _set_global_meter_provider(provider: object | None = None) -> None:
@@ -33,17 +41,158 @@ def _set_global_meter_provider(provider: object | None = None) -> None:
         pytest.skip(f"OpenTelemetry SDK internals changed: {exc}")
 
 
+def _fake_auto_instrumentation_import(
+    initialize: MagicMock | None = None,
+) -> tuple[MagicMock, AbstractContextManager[Any]]:
+    """Inject a fake auto_instrumentation module (no contrib deps required)."""
+    mock_initialize = initialize or MagicMock()
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "opentelemetry.instrumentation.auto_instrumentation":
+            mod = ModuleType(name)
+            mod.initialize = mock_initialize
+            return mod
+        return real_import(name, globals, locals, fromlist, level)
+
+    return mock_initialize, patch.object(builtins, "__import__", side_effect=fake_import)
+
+
+def _block_auto_instrumentation_import() -> AbstractContextManager[Any]:
+    """Simulate missing opentelemetry-instrumentation contrib packages."""
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "opentelemetry.instrumentation.auto_instrumentation":
+            raise ImportError(name)
+        return real_import(name, globals, locals, fromlist, level)
+
+    return patch.object(builtins, "__import__", side_effect=fake_import)
+
+
 @pytest.fixture(autouse=True)
 def reset_otel_metrics_state():
     """Reset module and global OTel state between tests."""
     saved_provider = metrics.get_meter_provider()
+    saved_bootstrap = otel_metrics._auto_instrumentation_bootstrapped
     otel_metrics.shutdown_otel_metrics()
+    otel_metrics._auto_instrumentation_bootstrapped = False
     _set_global_meter_provider()
 
     yield
 
     otel_metrics.shutdown_otel_metrics()
+    otel_metrics._auto_instrumentation_bootstrapped = saved_bootstrap
     _set_global_meter_provider(saved_provider)
+
+
+@pytest.mark.unit
+def test_bootstrap_skips_when_auto_instrumentation_not_installed(monkeypatch):
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+
+    with _block_auto_instrumentation_import():
+        assert otel_metrics.bootstrap_auto_instrumentation() is False
+        assert otel_metrics._auto_instrumentation_bootstrapped is False
+        assert otel_metrics.bootstrap_auto_instrumentation() is False
+
+
+@pytest.mark.unit
+def test_bootstrap_runs_without_otlp_env(monkeypatch):
+    for key in list(os.environ):
+        if key.startswith("OTEL_EXPORTER_OTLP") and key.endswith("_ENDPOINT"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+
+    mock_initialize, import_patch = _fake_auto_instrumentation_import()
+    with import_patch:
+        assert otel_metrics.bootstrap_auto_instrumentation() is True
+        mock_initialize.assert_called_once()
+
+
+@pytest.mark.unit
+def test_bootstrap_calls_initialize_when_packages_available(monkeypatch):
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+
+    mock_initialize, import_patch = _fake_auto_instrumentation_import()
+    with (
+        import_patch,
+        patch.object(otel_metrics, "_sync_instance_id_to_env") as sync_env,
+    ):
+        assert otel_metrics.bootstrap_auto_instrumentation() is True
+        sync_env.assert_called_once()
+        mock_initialize.assert_called_once()
+        assert otel_metrics.bootstrap_auto_instrumentation() is False
+
+
+@pytest.mark.unit
+def test_bootstrap_initialize_failure_returns_false(monkeypatch):
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+
+    mock_initialize = MagicMock(side_effect=RuntimeError("boom"))
+    _, import_patch = _fake_auto_instrumentation_import(mock_initialize)
+    with import_patch:
+        assert otel_metrics.bootstrap_auto_instrumentation() is False
+        assert otel_metrics._auto_instrumentation_bootstrapped is False
+        assert otel_metrics.bootstrap_auto_instrumentation() is False
+        assert mock_initialize.call_count == 2
+
+
+@pytest.mark.unit
+def test_unique_instance_id_extends_operator_value(monkeypatch):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
+    monkeypatch.setenv(
+        "OTEL_RESOURCE_ATTRIBUTES",
+        "k8s.pod.name=my-pod,service.instance.id=agentex.my-pod.agentex",
+    )
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 42)
+    base = get_aggregated_resources([OTELResourceDetector()])
+    assert otel_metrics._unique_instance_id(base) == "agentex.my-pod.agentex.42"
+
+
+@pytest.mark.unit
+def test_unique_instance_id_builds_when_missing(monkeypatch):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
+    monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "k8s.pod.name=my-pod")
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 42)
+    base = get_aggregated_resources([OTELResourceDetector()])
+    assert otel_metrics._unique_instance_id(base) == "agentex.my-pod.42"
+
+
+@pytest.mark.unit
+def test_sync_instance_id_to_env_updates_env(monkeypatch):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
+    monkeypatch.setenv(
+        "OTEL_RESOURCE_ATTRIBUTES",
+        "k8s.pod.name=operator-pod,service.instance.id=agentex.operator-pod.agentex",
+    )
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 6789)
+
+    otel_metrics._sync_instance_id_to_env("agentex.operator-pod.agentex.6789")
+
+    env = os.environ["OTEL_RESOURCE_ATTRIBUTES"]
+    assert "service.instance.id=agentex.operator-pod.agentex.6789" in env
+    assert "k8s.pod.name=operator-pod" in env
+
+
+@pytest.mark.unit
+def test_init_otel_metrics_standalone_resource_has_pid_suffixed_instance_id(
+    monkeypatch,
+):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
+    original = (
+        "k8s.pod.name=operator-pod,k8s.namespace.name=agentex,"
+        "k8s.deployment.name=agentex,service.instance.id=agentex.operator-pod.agentex"
+    )
+    monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", original)
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 6789)
+
+    provider = otel_metrics.init_otel_metrics()
+    assert provider is not None
+    attrs = provider._sdk_config.resource.attributes
+    assert attrs.get("service.name") == "agentex"
+    assert attrs.get("service.instance.id") == "agentex.operator-pod.agentex.6789"
+    assert os.environ["OTEL_RESOURCE_ATTRIBUTES"] == original
 
 
 def _set_operator_provider() -> MeterProvider:
@@ -238,12 +387,30 @@ def test_init_after_shutdown_in_standalone_mode(monkeypatch):
 
     first = otel_metrics.init_otel_metrics()
     assert first is not None
+    assert otel_metrics._meter_provider is first
+
     otel_metrics.shutdown_otel_metrics()
+    assert otel_metrics._initialized is False
+    assert otel_metrics._meter_provider is None
 
     second = otel_metrics.init_otel_metrics()
     assert second is not None
-    assert second is not first
+    assert otel_metrics._initialized is True
     assert otel_metrics.get_meter("agentex.test") is not None
+
+
+@pytest.mark.unit
+def test_shutdown_does_not_replace_global_meter_provider(monkeypatch):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+    provider = otel_metrics.init_otel_metrics()
+    assert provider is not None
+    global_before = metrics.get_meter_provider()
+
+    with patch.object(metrics, "set_meter_provider") as set_provider:
+        otel_metrics.shutdown_otel_metrics()
+
+    set_provider.assert_not_called()
+    assert metrics.get_meter_provider() is global_before
 
 
 @pytest.mark.unit
