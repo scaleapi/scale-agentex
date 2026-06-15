@@ -209,6 +209,35 @@ class TestPerRpcOperationRouting:
             await _authorize_rpc_request(request, authorization, task_service)
 
 
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestRestCancelRouteRequiresOwner:
+    """The REST ``POST /tasks/{id}/cancel`` route authorizes the owner-only
+    ``cancel`` action — matching the RPC task/cancel path, and distinct from the
+    editor-allowed ``update`` used by the sibling lifecycle routes
+    (complete/fail/terminate/timeout)."""
+
+    async def test_rest_cancel_route_checks_cancel_operation(self):
+        import inspect
+
+        from src.api.routes.tasks import cancel_task
+
+        annotation = inspect.signature(cancel_task).parameters["task_id"].annotation
+        dep = _dep_callable(annotation)
+
+        authorization = MagicMock()
+        authorization.check = AsyncMock(return_value=True)
+        repos = (MagicMock(), MagicMock(), MagicMock())
+
+        result = await dep(authorization, *repos, "task-c")
+
+        assert result == "task-c"
+        assert (
+            authorization.check.await_args.kwargs["operation"]
+            == AuthorizedOperationType.cancel
+        )
+
+
 def test_cancel_operation_wire_format_matches_agentex_auth_contract():
     """Cross-repo enum contract: the literal string ``"cancel"`` is the wire
     format shared with agentex-auth's mirror enum. Diverging strings would
