@@ -1,3 +1,15 @@
+# ruff: noqa: E402
+# E402 suppressed: bootstrap_auto_instrumentation() must run before imports of
+# auto-instrumented libraries (FastAPI, httpx, SQLAlchemy, etc.).
+
+from src.utils.otel_metrics import (
+    bootstrap_auto_instrumentation,
+    init_otel_metrics,
+    shutdown_otel_metrics,
+)
+
+bootstrap_auto_instrumentation()
+
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -38,7 +50,6 @@ from src.config.dependencies import (
 from src.config.environment_variables import EnvVarKeys
 from src.domain.exceptions import GenericException
 from src.utils.logging import make_logger
-from src.utils.otel_metrics import init_otel_metrics, shutdown_otel_metrics
 
 logger = make_logger(__name__)
 
