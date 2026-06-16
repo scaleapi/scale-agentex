@@ -5,6 +5,7 @@ import { forwardRef } from 'react';
 import { ArrowRight } from 'lucide-react';
 
 import { useAgentexClient } from '@/components/providers';
+import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 import { cn } from '@/lib/utils';
 
 type InvestigateTracesButtonProps = {
@@ -18,7 +19,16 @@ export const InvestigateTracesButton = forwardRef<
   InvestigateTracesButtonProps
 >(({ className, disabled = false, traceId, ...props }, ref) => {
   const { sgpAppURL } = useAgentexClient();
-  const sgpTracesURL = `${sgpAppURL}/beta/monitor?trace_id=${traceId}&tt-trace-id=${traceId}`;
+  const { sgpAccountID } = useSafeSearchParams();
+
+  const params = new URLSearchParams({
+    trace_id: traceId,
+    'tt-trace-id': traceId,
+  });
+  if (sgpAccountID) {
+    params.set('account_id', sgpAccountID);
+  }
+  const sgpTracesURL = `${sgpAppURL}/monitor?${params.toString()}`;
 
   if (!sgpAppURL) {
     return null;
