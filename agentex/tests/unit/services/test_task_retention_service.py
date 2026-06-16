@@ -200,3 +200,33 @@ async def test_clean_task_unprocessed_events_not_relaxed_when_not_stale_enough()
 
     with pytest.raises(ClientError):
         await service.clean_task(task_id="t1", idle_days=7, stale_running_days=30)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_preview_does_not_emit_override_forensics(caplog):
+    # Dry-run audits must not produce the forensic WARNING a real cleanup does,
+    # or alerting keyed on the event name false-positives on every preview.
+    service = _make_service(_running_task(idle_for_days=90))
+    _wire_unprocessed_events(service)
+
+    with caplog.at_level("WARNING"):
+        await service.preview_clean_task(
+            task_id="t1", idle_days=7, stale_running_days=30
+        )
+
+    assert "task_cleanup_stale_running_override" not in caplog.text
+    assert "task_cleanup_unprocessed_events_override" not in caplog.text
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_clean_emits_override_forensics(caplog):
+    service = _make_service(_running_task(idle_for_days=90))
+    _wire_unprocessed_events(service)
+
+    with caplog.at_level("WARNING"):
+        await service.clean_task(task_id="t1", idle_days=7, stale_running_days=30)
+
+    assert "task_cleanup_stale_running_override" in caplog.text
+    assert "task_cleanup_unprocessed_events_override" in caplog.text

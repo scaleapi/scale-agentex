@@ -245,20 +245,29 @@ class TaskRetentionService:
                 events_deleted=0,
             )
 
-        # Abandoned signal, computed once: relaxes both the RUNNING guard and
-        # the unprocessed-events guard below.
-        is_stale_idle = await self._is_stale_idle(task, stale_running_days)
+        # Last interaction fetched once; both the stale-idle signal and the
+        # idle-threshold guard compare against it (no per-threshold re-query).
+        # is_stale_idle is the "abandoned" signal that relaxes both the RUNNING
+        # and unprocessed-events guards below.
+        last_interaction = await self._last_interaction_at(task)
+        is_stale_idle = stale_running_days > 0 and self._is_idle_since(
+            last_interaction, stale_running_days
+        )
 
         # 2. Status + idle threshold guards.
-        self._check_running_guard(task, is_stale_idle)
-        if enforce_idle_threshold and not await self._is_task_idle(task, idle_days):
+        self._check_running_guard(task, is_stale_idle, emit_forensics=True)
+        if enforce_idle_threshold and not self._is_idle_since(
+            last_interaction, idle_days
+        ):
             raise ClientError(
                 f"Cannot clean task {task_id}: not idle for {idle_days} days "
                 f"(use force=true to override)"
             )
 
         # 3. Unprocessed-events guard.
-        await self._check_unprocessed_events_guard(task_id, is_stale_idle)
+        await self._check_unprocessed_events_guard(
+            task_id, is_stale_idle, emit_forensics=True
+        )
 
         # 4-5. Mongo deletes.
         messages_deleted = await self.task_message_service.delete_all_messages(task_id)
@@ -317,14 +326,23 @@ class TaskRetentionService:
         if task.cleaned_at is not None:
             cleaned_at = task.cleaned_at
         else:
-            is_stale_idle = await self._is_stale_idle(task, stale_running_days)
-            self._check_running_guard(task, is_stale_idle)
-            if enforce_idle_threshold and not await self._is_task_idle(task, idle_days):
+            last_interaction = await self._last_interaction_at(task)
+            is_stale_idle = stale_running_days > 0 and self._is_idle_since(
+                last_interaction, stale_running_days
+            )
+            # Preview is a non-mutating audit, so it does not emit the forensic
+            # WARNING that a real cleanup does (keeps dry-run logs clean).
+            self._check_running_guard(task, is_stale_idle, emit_forensics=False)
+            if enforce_idle_threshold and not self._is_idle_since(
+                last_interaction, idle_days
+            ):
                 raise ClientError(
                     f"Cannot clean task {task_id}: not idle for {idle_days} days "
                     f"(use force=true to override)"
                 )
-            await self._check_unprocessed_events_guard(task_id, is_stale_idle)
+            await self._check_unprocessed_events_guard(
+                task_id, is_stale_idle, emit_forensics=False
+            )
             cleaned_at = datetime.now(UTC)
 
         result = TaskCleanupResultEntity(
@@ -458,70 +476,60 @@ class TaskRetentionService:
 
     # ---- internal helpers ----
 
-    async def _is_stale_idle(self, task, stale_running_days: int) -> bool:
-        """
-        True iff stale_running_days > 0 and the task has had no interaction for
-        at least that many days. This is the "abandoned" signal: a task idle
-        past the stale window whose workflow never reached a terminal state and
-        never advanced its event cursor. Relaxes both the RUNNING guard and the
-        unprocessed-events guard, since for such a task neither the workflow nor
-        the trailing events will ever make progress.
-
-        Conversational, signal-driven agents (e.g. One Edge) stay RUNNING for
-        the life of the chat and consume events via Temporal signals rather than
-        the agent_task_tracker cursor, so without this both guards would skip
-        100% of their tasks forever.
-        """
-        return stale_running_days > 0 and await self._is_task_idle(
-            task, stale_running_days
-        )
-
-    def _check_running_guard(self, task, is_stale_idle: bool) -> None:
+    def _check_running_guard(
+        self, task, is_stale_idle: bool, emit_forensics: bool
+    ) -> None:
         """
         Raise ClientError if `task` is RUNNING, unless it is stale-idle
-        (abandoned). Overrides are logged at WARNING for forensics — cleaning a
-        RUNNING task means we are declaring its workflow abandoned.
+        (abandoned). A real cleanup logs the override at WARNING for forensics
+        (cleaning a RUNNING task declares its workflow abandoned); previews pass
+        emit_forensics=False so a dry-run audit does not produce log entries
+        indistinguishable from a live deletion.
         """
         if task.status != TaskStatus.RUNNING:
             return
         if is_stale_idle:
-            logger.warning(
-                "task_cleanup_stale_running_override",
-                extra={"task_id": task.id},
-            )
+            if emit_forensics:
+                logger.warning(
+                    "task_cleanup_stale_running_override",
+                    extra={"task_id": task.id},
+                )
             return
         raise ClientError(f"Cannot clean task {task.id}: status is RUNNING (active)")
 
     async def _check_unprocessed_events_guard(
-        self, task_id: str, is_stale_idle: bool
+        self, task_id: str, is_stale_idle: bool, emit_forensics: bool
     ) -> None:
         """
         Raise ClientError if events exist past the agent_task_tracker cursor,
         unless the task is stale-idle (abandoned). For an abandoned task those
         events will never be processed, so they should not block cleanup; they
-        get deleted with the rest and the override is logged for forensics. The
-        cursor is advanced explicitly by the agent, and signal-driven agents
-        never advance it, so for them this guard would otherwise always trip.
+        get deleted with the rest. The cursor is advanced explicitly by the
+        agent, and signal-driven agents never advance it, so for them this guard
+        would otherwise always trip. Forensics on real cleanups only (see
+        _check_running_guard).
         """
         if not await self._has_unprocessed_events(task_id):
             return
         if is_stale_idle:
-            logger.warning(
-                "task_cleanup_unprocessed_events_override",
-                extra={"task_id": task_id},
-            )
+            if emit_forensics:
+                logger.warning(
+                    "task_cleanup_unprocessed_events_override",
+                    extra={"task_id": task_id},
+                )
             return
         raise ClientError(f"Cannot clean task {task_id}: unprocessed events remain")
 
-    async def _is_task_idle(self, task, idle_days: int) -> bool:
+    async def _last_interaction_at(self, task) -> datetime | None:
         """
-        True iff the task has no interaction within the idle window.
+        Most recent interaction timestamp for the task, or None if never.
 
         Last-interaction = max(task.updated_at, latest message created_at).
-        `task.updated_at` alone would miss tasks where the only recent
-        activity is Mongo message writes (which don't bump the Postgres row).
+        `task.updated_at` alone would miss tasks where the only recent activity
+        is Mongo message writes (which don't bump the Postgres row). Issues one
+        Mongo message-fetch; callers compute idle-ness against any threshold
+        from the returned value rather than re-querying per threshold.
         """
-        cutoff = datetime.now(UTC) - timedelta(days=idle_days)
         last_interaction = task.updated_at
 
         latest_messages = await self.task_message_service.get_messages(
@@ -540,9 +548,14 @@ class TaskRetentionService:
             if last_interaction is None or latest_at > last_interaction:
                 last_interaction = latest_at
 
+        return last_interaction
+
+    @staticmethod
+    def _is_idle_since(last_interaction: datetime | None, idle_days: int) -> bool:
+        """Pure idle check against a precomputed last-interaction timestamp."""
         if last_interaction is None:
             return True
-        return last_interaction < cutoff
+        return last_interaction < datetime.now(UTC) - timedelta(days=idle_days)
 
     async def _has_unprocessed_events(self, task_id: str) -> bool:
         """
