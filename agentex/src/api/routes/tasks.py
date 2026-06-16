@@ -258,7 +258,10 @@ async def fail_task(
     description="Mark a running task as canceled.",
 )
 async def cancel_task(
-    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.update),
+    # Cancel is owner-only — unlike the editor-allowed lifecycle transitions
+    # (complete/fail/terminate/timeout) which authorize ``update`` — so it
+    # checks the ``cancel`` action, matching the RPC task/cancel path.
+    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.cancel),
     task_use_case: DTaskUseCase,
     request: TaskStatusReasonRequest | None = None,
 ) -> Task:
