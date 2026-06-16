@@ -47,8 +47,12 @@ class AuthorizationGateway(Generic[PrincipalT], ABC):
         principal: PrincipalT,
         filter_resource: AgentexResourceType,
         filter_operation: AuthorizedOperationType = AuthorizedOperationType.read,
-    ) -> Iterable[str]:
-        """List resource_ids for a given principal"""
+    ) -> Iterable[str] | None:
+        """List resource_ids for a given principal.
+
+        Return ``None`` to signal *unscoped* access (all resources of the type,
+        i.e. no id filter) rather than an enumerated id list.
+        """
 
     @abstractmethod
     async def register_resource(
