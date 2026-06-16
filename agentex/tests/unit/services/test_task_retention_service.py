@@ -177,6 +177,20 @@ async def test_clean_task_refuses_unprocessed_events_by_default():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_clean_task_terminal_stale_task_keeps_strict_unprocessed_guard():
+    # TERMINAL + idle 90d + trailing unprocessed events, even with the stale
+    # override enabled: the unprocessed-events relaxation is scoped to the
+    # stuck-RUNNING case, so a terminal task with a lagging cursor must still
+    # refuse rather than delete genuinely pending events.
+    service = _make_service(_completed_task(idle_for_days=90))
+    _wire_unprocessed_events(service)
+
+    with pytest.raises(ClientError, match="unprocessed events"):
+        await service.clean_task(task_id="t1", idle_days=7, stale_running_days=30)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_clean_task_cleans_stale_idle_task_with_unprocessed_events():
     # RUNNING + idle 90d + trailing unprocessed events: with the stale
     # override both guards relax and the task is cleaned (the One Edge case).

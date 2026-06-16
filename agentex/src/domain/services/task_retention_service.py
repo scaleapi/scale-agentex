@@ -255,7 +255,9 @@ class TaskRetentionService:
         )
 
         # 2. Status + idle threshold guards.
-        self._check_running_guard(task, is_stale_idle, emit_forensics=True)
+        running_override = self._check_running_guard(
+            task, is_stale_idle, emit_forensics=True
+        )
         if enforce_idle_threshold and not self._is_idle_since(
             last_interaction, idle_days
         ):
@@ -264,9 +266,9 @@ class TaskRetentionService:
                 f"(use force=true to override)"
             )
 
-        # 3. Unprocessed-events guard.
+        # 3. Unprocessed-events guard (relaxed only for the stale-RUNNING case).
         await self._check_unprocessed_events_guard(
-            task_id, is_stale_idle, emit_forensics=True
+            task_id, relax=running_override, emit_forensics=True
         )
 
         # 4-5. Mongo deletes.
@@ -332,7 +334,9 @@ class TaskRetentionService:
             )
             # Preview is a non-mutating audit, so it does not emit the forensic
             # WARNING that a real cleanup does (keeps dry-run logs clean).
-            self._check_running_guard(task, is_stale_idle, emit_forensics=False)
+            running_override = self._check_running_guard(
+                task, is_stale_idle, emit_forensics=False
+            )
             if enforce_idle_threshold and not self._is_idle_since(
                 last_interaction, idle_days
             ):
@@ -341,7 +345,7 @@ class TaskRetentionService:
                     f"(use force=true to override)"
                 )
             await self._check_unprocessed_events_guard(
-                task_id, is_stale_idle, emit_forensics=False
+                task_id, relax=running_override, emit_forensics=False
             )
             cleaned_at = datetime.now(UTC)
 
@@ -478,40 +482,46 @@ class TaskRetentionService:
 
     def _check_running_guard(
         self, task, is_stale_idle: bool, emit_forensics: bool
-    ) -> None:
+    ) -> bool:
         """
         Raise ClientError if `task` is RUNNING, unless it is stale-idle
         (abandoned). A real cleanup logs the override at WARNING for forensics
         (cleaning a RUNNING task declares its workflow abandoned); previews pass
         emit_forensics=False so a dry-run audit does not produce log entries
         indistinguishable from a live deletion.
+
+        Returns True iff the stale-RUNNING override fired (task was RUNNING and
+        abandoned). The caller uses this to decide whether to also relax the
+        unprocessed-events guard, scoping that relaxation to exactly the
+        stuck-RUNNING case this feature targets.
         """
         if task.status != TaskStatus.RUNNING:
-            return
+            return False
         if is_stale_idle:
             if emit_forensics:
                 logger.warning(
                     "task_cleanup_stale_running_override",
                     extra={"task_id": task.id},
                 )
-            return
+            return True
         raise ClientError(f"Cannot clean task {task.id}: status is RUNNING (active)")
 
     async def _check_unprocessed_events_guard(
-        self, task_id: str, is_stale_idle: bool, emit_forensics: bool
+        self, task_id: str, relax: bool, emit_forensics: bool
     ) -> None:
         """
         Raise ClientError if events exist past the agent_task_tracker cursor,
-        unless the task is stale-idle (abandoned). For an abandoned task those
-        events will never be processed, so they should not block cleanup; they
-        get deleted with the rest. The cursor is advanced explicitly by the
-        agent, and signal-driven agents never advance it, so for them this guard
-        would otherwise always trip. Forensics on real cleanups only (see
-        _check_running_guard).
+        unless `relax` (set only when the stale-RUNNING override fired). A task
+        stuck RUNNING and abandoned will never process those events, and
+        signal-driven agents never advance the cursor in the first place, so for
+        that case the events are deleted with the rest. Scoped to stale-RUNNING
+        on purpose: a terminal task with a lagging cursor keeps the strict guard
+        so the sweep never deletes genuinely pending events. Forensics on real
+        cleanups only (see _check_running_guard).
         """
         if not await self._has_unprocessed_events(task_id):
             return
-        if is_stale_idle:
+        if relax:
             if emit_forensics:
                 logger.warning(
                     "task_cleanup_unprocessed_events_override",
