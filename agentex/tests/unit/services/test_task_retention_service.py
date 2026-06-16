@@ -140,3 +140,63 @@ async def test_preview_clean_task_applies_stale_running_override():
     assert result.task_id == "t1"
     service.task_message_service.delete_all_messages.assert_not_awaited()
     service.task_repository.update.assert_not_awaited()
+
+
+def _completed_task(idle_for_days: int):
+    return SimpleNamespace(
+        id="t1",
+        cleaned_at=None,
+        status=TaskStatus.COMPLETED,
+        updated_at=datetime.now(UTC) - timedelta(days=idle_for_days),
+    )
+
+
+def _wire_unprocessed_events(service):
+    # One tracker with a stalled (NULL) cursor and an event past it: the
+    # shape signal-driven agents (e.g. One Edge) leave behind, since they
+    # never advance the agent_task_tracker cursor.
+    service.agent_task_tracker_repository.find_by_field.return_value = [
+        SimpleNamespace(agent_id="a1", last_processed_event_id=None)
+    ]
+    service.event_repository.list_events_after_last_processed.return_value = [
+        SimpleNamespace(id="e1")
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_clean_task_refuses_unprocessed_events_by_default():
+    # Idle, terminal task (passes running + idle guards) but with events past
+    # the cursor and no stale override: must still refuse.
+    service = _make_service(_completed_task(idle_for_days=90))
+    _wire_unprocessed_events(service)
+
+    with pytest.raises(ClientError, match="unprocessed events"):
+        await service.clean_task(task_id="t1", idle_days=7)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_clean_task_cleans_stale_idle_task_with_unprocessed_events():
+    # RUNNING + idle 90d + trailing unprocessed events: with the stale
+    # override both guards relax and the task is cleaned (the One Edge case).
+    service = _make_service(_running_task(idle_for_days=90))
+    _wire_unprocessed_events(service)
+
+    result = await service.clean_task(task_id="t1", idle_days=7, stale_running_days=30)
+
+    assert result.task_id == "t1"
+    service.task_message_service.delete_all_messages.assert_awaited_once_with("t1")
+    service.task_repository.update.assert_awaited_once()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_clean_task_unprocessed_events_not_relaxed_when_not_stale_enough():
+    # RUNNING + idle 10d, stale threshold 30d: not abandoned yet, so the
+    # RUNNING guard fires first (and unprocessed would too). Must refuse.
+    service = _make_service(_running_task(idle_for_days=10))
+    _wire_unprocessed_events(service)
+
+    with pytest.raises(ClientError):
+        await service.clean_task(task_id="t1", idle_days=7, stale_running_days=30)
