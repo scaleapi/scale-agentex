@@ -28,7 +28,7 @@ export const InvestigateTracesButton = forwardRef<
   if (sgpAccountID) {
     params.set('account_id', sgpAccountID);
   }
-  const sgpTracesURL = `${sgpAppURL}/beta/monitor?${params.toString()}`;
+  const sgpTracesURL = `${sgpAppURL}/monitor?${params.toString()}`;
 
   if (!sgpAppURL) {
     return null;
