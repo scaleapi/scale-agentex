@@ -43,6 +43,7 @@ from src.api.routes import (
     task_retention,
     tasks,
 )
+from src.api.version_header_middleware import VersionHeaderMiddleware
 from src.config import dependencies
 from src.config.dependencies import (
     GlobalDependencies,
@@ -139,6 +140,7 @@ fastapi_app.add_middleware(
 # Add Authentication middleware
 fastapi_app.add_middleware(AgentexAuthMiddleware)
 fastapi_app.add_middleware(RequestLoggingMiddleware)
+fastapi_app.add_middleware(VersionHeaderMiddleware)
 
 # Mount the MkDocs site
 docs_path = Path(__file__).parent.parent.parent / "docs" / "site"
