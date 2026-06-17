@@ -21,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from src._version import __version__
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.adapters.http.adapter_httpx import HttpxGateway
 from src.api.authentication_middleware import AgentexAuthMiddleware
@@ -108,6 +109,7 @@ async def lifespan(_: FastAPI):
 
 fastapi_app = FastAPI(
     title="Agentex API",
+    version=__version__,
     openapi_url="/openapi.json",
     docs_url="/swagger",
     redoc_url="/api",
