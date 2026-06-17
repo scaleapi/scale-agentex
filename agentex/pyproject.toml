@@ -7,7 +7,7 @@ requires-python = ">=3.12,<3.13"
 readme = "README.md"
 dependencies = [
     "fastapi>=0.115.0",
-    "litellm>=1.83.7,<2",
+    "litellm>=1.84.0,<2",  # >=1.84.0 clears CVE-2026-49468 (CRITICAL auth bypass)
     "python-dotenv>=1.2.2,<2",
     "temporalio>=1.18.0,<2",
     "uvicorn[standard]>=0.35.0,<0.36",
