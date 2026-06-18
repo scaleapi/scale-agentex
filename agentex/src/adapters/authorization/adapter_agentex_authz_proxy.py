@@ -74,7 +74,7 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
         principal: AgentexAuthPrincipalContext,
         filter_resource: AgentexResourceType,
         filter_operation: AuthorizedOperationType = AuthorizedOperationType.read,
-    ) -> Iterable[str]:
+    ) -> Iterable[str] | None:
         payload = {
             "principal": principal,
             "filter_resource": filter_resource,
@@ -83,6 +83,14 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
         response = await HttpRequestHandler.post_with_error_handling(
             self.agentex_auth_url, "/v1/authz/search", json=payload
         )
+        # Wildcard sentinel: a provider signals "all resources of this type" with
+        # {"unscoped": true} rather than enumerating ids. Map only the exact JSON
+        # boolean sentinel onto the existing unscoped path (None == no id filter)
+        # so malformed truthy values do not broaden access. We index
+        # response["items"] in the normal case (rather than .get) so a malformed
+        # response missing both fields raises instead of silently failing open.
+        if response.get("unscoped") is True:
+            return None
         return response["items"]
 
     async def register_resource(
