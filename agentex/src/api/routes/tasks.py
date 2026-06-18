@@ -12,7 +12,6 @@ from src.api.schemas.authorization_types import (
 )
 from src.api.schemas.delete_response import DeleteResponse
 from src.api.schemas.tasks import (
-    SignalTaskRequest,
     Task,
     TaskRelationships,
     TaskResponse,
@@ -304,32 +303,6 @@ async def timeout_task(
 ) -> Task:
     updated = await task_use_case.timeout_task(
         id=task_id, reason=request.reason if request else None
-    )
-    return Task.model_validate(updated)
-
-
-@router.post(
-    "/{task_id}/signal",
-    response_model=Task,
-    summary="Signal Task",
-    description=(
-        "Dispatch a Temporal signal to the task's workflow. The workflow "
-        "must have a `@workflow.signal(name=...)` handler registered for "
-        "the supplied `signal_name`; the optional `payload` is forwarded "
-        "as the signal's single argument. Returns 4xx if the task isn't "
-        "currently RUNNING."
-    ),
-)
-async def signal_task(
-    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.update),
-    request: SignalTaskRequest,
-    task_use_case: DTaskUseCase,
-) -> Task:
-    updated = await task_use_case.signal_task(
-        id=task_id,
-        signal_name=request.signal_name,
-        payload=request.payload,
-        merge_params=request.merge_params,
     )
     return Task.model_validate(updated)
 

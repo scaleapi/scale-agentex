@@ -824,42 +824,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /tasks/{task_id}/signal:
-    post:
-      tags:
-      - Tasks
-      summary: Signal Task
-      description: Dispatch a Temporal signal to the task's workflow. The workflow
-        must have a `@workflow.signal(name=...)` handler registered for the supplied
-        `signal_name`; the optional `payload` is forwarded as the signal's single
-        argument. Returns 4xx if the task isn't currently RUNNING.
-      operationId: signal_task_tasks__task_id__signal_post
-      parameters:
-      - name: task_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Task Id
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SignalTaskRequest'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Task'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
   /tasks/{task_id}/stream:
     get:
       tags:
@@ -5680,48 +5644,6 @@ components:
       required:
       - content
       title: SendMessageRequest
-    SignalTaskRequest:
-      properties:
-        signal_name:
-          type: string
-          title: Name of the Temporal signal to dispatch
-        payload:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Optional JSON payload forwarded to the workflow's signal handler
-        merge_params:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Optional shallow-merge patch applied to the task's params column
-            after the signal succeeds. Top-level keys overwrite; pass full nested
-            objects to change subfields.
-      type: object
-      required:
-      - signal_name
-      title: SignalTaskRequest
-      description: 'Dispatch a Temporal signal to a running task''s workflow.
-
-
-        The workflow must register a matching `@workflow.signal(name=...)`
-
-        handler for the supplied ``signal_name``. ``payload`` is forwarded as
-
-        the signal''s single argument; the workflow is responsible for any
-
-        shape validation.
-
-
-        ``merge_params`` is an optional shallow-merge into the task''s stored
-
-        ``params`` JSONB column. Used by live-config flows that want the
-
-        persisted task row to reflect the new config alongside the workflow
-
-        signal (e.g. ConfigModal Save).'
     Span:
       properties:
         id:

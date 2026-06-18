@@ -3,7 +3,6 @@ from typing import Annotated, Any
 from fastapi import Depends
 
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
-from src.adapters.temporal.adapter_temporal import DTemporalAdapter
 from src.domain.entities.tasks import TaskEntity, TaskRelationships, TaskStatus
 from src.domain.exceptions import ClientError
 from src.domain.services.task_service import DAgentTaskService
@@ -20,10 +19,8 @@ class TasksUseCase:
     def __init__(
         self,
         task_service: DAgentTaskService,
-        temporal_adapter: DTemporalAdapter,
     ):
         self.task_service = task_service
-        self.temporal_adapter = temporal_adapter
 
     async def get_task(
         self,
@@ -208,49 +205,6 @@ class TasksUseCase:
         return await self._transition_to_terminal(
             TaskStatus.TIMED_OUT, id=id, name=name, reason=reason
         )
-
-    async def signal_task(
-        self,
-        id: str,
-        signal_name: str,
-        payload: dict[str, Any] | None = None,
-        merge_params: dict[str, Any] | None = None,
-    ) -> TaskEntity:
-        """Dispatch a Temporal signal to a running task's workflow.
-
-        Validates that the task is currently RUNNING before signaling —
-        Temporal will raise its own ``WorkflowNotFoundError`` for closed
-        workflows, but returning a 4xx-mapped ``ClientError`` upfront is
-        friendlier than the bare-exception round-trip. The signal name +
-        payload are forwarded as-is; the workflow's registered
-        ``@workflow.signal`` handler owns shape validation.
-
-        ``workflow_id`` matches the task id in this codebase (see
-        TasksService.create_task — Temporal workflows are started with
-        ``workflow_id=task.id``).
-
-        Optional ``merge_params``: if supplied, shallow-merges into the
-        task's ``params`` JSONB column after the signal dispatch
-        succeeds. Used by live-config flows so the persisted task row
-        reflects the new agent config without waiting for the next task
-        to be created. Returns the task entity post-merge (or pre-merge
-        if no patch was given).
-        """
-        task = await self.task_service.get_task(id=id)
-        if task.status != TaskStatus.RUNNING:
-            raise ClientError(
-                f"Task {id} is not running (status={task.status}); cannot signal."
-            )
-        await self.temporal_adapter.signal_workflow(
-            workflow_id=id,
-            signal=signal_name,
-            arg=payload,
-        )
-        if merge_params:
-            merged = await self.task_service.merge_task_params(id, merge_params)
-            if merged is not None:
-                return merged
-        return task
 
 
 DTaskUseCase = Annotated[TasksUseCase, Depends(TasksUseCase)]

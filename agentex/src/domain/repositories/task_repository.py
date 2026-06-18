@@ -227,7 +227,8 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
 
         Intended for surfaces that need ``tasks.params`` to reflect the
         latest agent config after a live edit (see
-        ``TasksUseCase.signal_task``); not a general-purpose updater.
+        ``TasksUseCase.update_mutable_fields_on_task``); not a
+        general-purpose updater.
         """
 
         async with (
