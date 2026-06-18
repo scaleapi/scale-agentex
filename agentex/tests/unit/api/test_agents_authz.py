@@ -392,12 +392,13 @@ class TestRegisterAgentOwnershipEnforcement:
         return authorization, agents_use_case, api_keys_use_case
 
     @staticmethod
-    def _request():
+    def _request(principal_context=None):
         return RegisterAgentRequest(
             name="my-agent",
             description="d",
             acp_url="http://agent:5000",
             acp_type=ACPType.ASYNC,
+            principal_context=principal_context,
         )
 
     @pytest.mark.parametrize("principal_context", [None, {}, {"account_id": "acct"}])
@@ -412,6 +413,21 @@ class TestRegisterAgentOwnershipEnforcement:
         authz.grant.assert_not_awaited()
         use_case.register_agent.assert_awaited_once()
         assert resp.agent_api_key == "internal-key"
+
+    async def test_body_principal_enforces_check_and_grant(self):
+        # Legacy deployed pods send the deploy principal in the body because
+        # /agents/register is whitelisted and has no request-state principal.
+        body_principal = {"user_id": "u", "account_id": "acct"}
+        authz, use_case, api_keys = self._mocks(principal_context=None)
+
+        await register_agent(
+            self._request(principal_context=body_principal), use_case, authz, api_keys
+        )
+
+        authz.check.assert_awaited_once()
+        assert authz.check.await_args.kwargs["principal_context"] == body_principal
+        authz.grant.assert_awaited_once()
+        assert authz.grant.await_args.kwargs["principal_context"] == body_principal
 
     async def test_dict_principal_enforces_check_and_grant(self):
         authz, use_case, api_keys = self._mocks(
