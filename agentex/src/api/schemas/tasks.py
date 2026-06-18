@@ -82,8 +82,7 @@ class UpdateTaskRequest(BaseModel):
         title=(
             "Optional shallow-merge patch applied to the task's params column. "
             "Top-level keys overwrite; pass full nested objects to change "
-            "subfields. The worker is expected to re-read task.params at turn "
-            "boundaries to pick up the new values."
+            "subfields."
         ),
     )
 
