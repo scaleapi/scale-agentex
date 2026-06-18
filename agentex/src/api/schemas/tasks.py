@@ -77,6 +77,15 @@ class UpdateTaskRequest(BaseModel):
         None,
         title="If provided, replaces task_metadata with this value",
     )
+    merge_params: dict[str, Any] | None = Field(
+        None,
+        title=(
+            "Optional shallow-merge patch applied to the task's params column. "
+            "Top-level keys overwrite; pass full nested objects to change "
+            "subfields. The worker is expected to re-read task.params at turn "
+            "boundaries to pick up the new values."
+        ),
+    )
 
 
 class TaskStatusReasonRequest(BaseModel):
