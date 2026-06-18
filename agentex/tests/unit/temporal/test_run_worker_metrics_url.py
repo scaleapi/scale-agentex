@@ -21,3 +21,29 @@ def test_hostname_and_ipv4_are_not_bracketed(host):
 )
 def test_ipv6_literal_is_bracketed(host, expected):
     assert build_metrics_url(host) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "host,expected",
+    [
+        ("datadog-agent:4317", "http://datadog-agent:4317"),
+        ("10.0.0.5:4317", "http://10.0.0.5:4317"),
+        ("datadog-agent:5555", "http://datadog-agent:5555"),
+    ],
+)
+def test_hostname_with_explicit_port_is_not_bracketed(host, expected):
+    assert build_metrics_url(host) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "host,expected",
+    [
+        ("[::1]", "http://[::1]:4317"),
+        ("[fe80::1]", "http://[fe80::1]:4317"),
+        ("[::1]:5555", "http://[::1]:5555"),
+    ],
+)
+def test_already_bracketed_ipv6_literal(host, expected):
+    assert build_metrics_url(host) == expected
