@@ -364,6 +364,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /channels/webhook/{route_id}:
+    post:
+      tags:
+      - Channels
+      summary: Generic webhook channel
+      description: 'Authenticated webhook ingress: verifies a per-route secret/HMAC
+        and drives an agent turn. Auth is whitelisted at the middleware; the channel
+        verifies the route secret instead.'
+      operationId: handle_webhook_channels_webhook__route_id__post
+      parameters:
+      - name: route_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Route Id
+      - name: wait
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: 'If true, wait for the agent''s reply and return it (for synchronous
+            callers). Default false: return immediately with the task_id.'
+          default: false
+          title: Wait
+        description: 'If true, wait for the agent''s reply and return it (for synchronous
+          callers). Default false: return immediately with the task_id.'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Handle Webhook Channels Webhook  Route Id  Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /tasks/{task_id}:
     get:
       tags:

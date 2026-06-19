@@ -28,6 +28,9 @@ WHITELISTED_ROUTES: set[str] = {
     "/readyz",
     "/ping",
     "/echo",
+    # Channels (webhook, …) bypass agentex API-key auth and verify a per-route
+    # shared secret / HMAC inside the channel instead.
+    "/channels/webhook",
 }
 
 DROP_HEADERS: set[str] = {

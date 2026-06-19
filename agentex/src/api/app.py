@@ -31,6 +31,7 @@ from src.api.routes import (
     agent_api_keys,
     agent_task_tracker,
     agents,
+    channels,
     checkpoints,
     deployment_history,
     deployments,
@@ -193,6 +194,7 @@ async def handle_unexpected(request, exc):
 
 # Include all routers
 fastapi_app.include_router(agents.router)
+fastapi_app.include_router(channels.router)
 fastapi_app.include_router(tasks.router)
 fastapi_app.include_router(messages.router)
 fastapi_app.include_router(spans.router)
