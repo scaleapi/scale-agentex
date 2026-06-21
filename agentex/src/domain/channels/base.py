@@ -43,15 +43,31 @@ class InboundMessage:
 class ChannelBinding:
     """A route's binding to one agent.
 
+    A binding provides the turn's task params one of two ways:
+
+    - **inline** (`params` set): the params are given directly — a one-off with no
+      remote lookup.
+    - **remote** (`params_source` set): a URL the channel GETs at dispatch time to
+      obtain the params (see `domain.channels.params_source`). The source endpoint
+      owns whatever produces those params; the channel layer just forwards the result
+      and never interprets it.
+
     `params` is an OPAQUE dict forwarded verbatim as the task/create params — the
     agentex platform does not interpret it. Whatever a given agent expects there
-    (e.g. golden-agent's system_prompt / mcps / harness / model) is that agent's
-    concern, not the channel layer's. Later this can be sourced from a saved config.
+    (system prompt, tools, model, …) is that agent's concern, not the channel layer's.
     """
 
     secret: str
     agent_name: str
+    # Which channel implementation handles this route (registry key, e.g. "webhook",
+    # "github_pr", "slack"). Defaults to the generic webhook channel.
+    channel: str = "webhook"
     params: dict[str, Any] = field(default_factory=dict)
+    # When set, `params` is fetched from this URL at dispatch time (the source owns
+    # what they contain; the channel layer just forwards them).
+    params_source: str | None = None
+    # Extra metadata to stamp on the task (e.g. returned alongside remote params).
+    extra_task_metadata: dict[str, str] = field(default_factory=dict)
     # Headers the router forwards to the agent (auth/delegation). Empty for local/open.
     forward_headers: dict[str, str] = field(default_factory=dict)
 

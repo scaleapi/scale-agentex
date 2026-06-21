@@ -62,17 +62,24 @@ class ChannelRouter:
         session_key = inbound.session_key(binding.agent_name)
         headers = binding.forward_headers or None
 
+        task_metadata: dict[str, str] = {
+            "channel": inbound.channel,
+            "route_id": inbound.route_id,
+            "peer_id": inbound.peer_id,
+            "sender_id": inbound.sender_id,
+        }
+        # Any extra metadata the binding carries (e.g. returned by a remote params
+        # source) is stamped for traceability — but never overrides the canonical
+        # channel/route_id/peer_id/sender_id fields (setdefault, not update).
+        for key, value in binding.extra_task_metadata.items():
+            task_metadata.setdefault(key, value)
+
         task = await self._acp.handle_rpc_request(
             method=AgentRPCMethod.TASK_CREATE,
             params=CreateTaskRequestEntity(
                 name=session_key,
                 params=binding.params,
-                task_metadata={
-                    "channel": inbound.channel,
-                    "route_id": inbound.route_id,
-                    "peer_id": inbound.peer_id,
-                    "sender_id": inbound.sender_id,
-                },
+                task_metadata=task_metadata,
             ),
             agent_name=binding.agent_name,
             request_headers=headers,
