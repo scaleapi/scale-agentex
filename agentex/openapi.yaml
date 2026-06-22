@@ -1213,19 +1213,25 @@ paths:
             : {\n          \"anyOf\": [\n            {},\n            {\n        \
             \      \"type\": \"null\"\n            }\n          ],\n          \"default\"\
             : null,\n          \"description\": \"The result of the tool.\",\n   \
-            \       \"title\": \"Content\"\n        }\n      },\n      \"title\":\
-            \ \"ToolResponseContentEntityOptional\",\n      \"type\": \"object\"\n\
-            \    }\n  },\n  \"description\": \"Filter model for TaskMessage - all\
-            \ fields optional for flexible filtering.\\n\\nThe `exclude` field determines\
-            \ whether this filter is inclusionary or exclusionary.\\nWhen multiple\
-            \ filters are provided:\\n- Inclusionary filters (exclude=False) are OR'd\
-            \ together\\n- Exclusionary filters (exclude=True) are OR'd together and\
-            \ negated with $nor\\n- The two groups are AND'd: (include1 OR include2)\
-            \ AND NOT (exclude1 OR exclude2)\",\n  \"properties\": {\n    \"content\"\
-            : {\n      \"anyOf\": [\n        {\n          \"$ref\": \"#/$defs/ToolRequestContentEntityOptional\"\
-            \n        },\n        {\n          \"$ref\": \"#/$defs/DataContentEntityOptional\"\
-            \n        },\n        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\
-            \n        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
+            \       \"title\": \"Content\"\n        },\n        \"is_error\": {\n\
+            \          \"anyOf\": [\n            {\n              \"type\": \"boolean\"\
+            \n            },\n            {\n              \"type\": \"null\"\n  \
+            \          }\n          ],\n          \"default\": null,\n          \"\
+            description\": \"Whether the tool call resulted in an error. `None` when\
+            \ the harness does not report a status.\",\n          \"title\": \"Is\
+            \ Error\"\n        }\n      },\n      \"title\": \"ToolResponseContentEntityOptional\"\
+            ,\n      \"type\": \"object\"\n    }\n  },\n  \"description\": \"Filter\
+            \ model for TaskMessage - all fields optional for flexible filtering.\\\
+            n\\nThe `exclude` field determines whether this filter is inclusionary\
+            \ or exclusionary.\\nWhen multiple filters are provided:\\n- Inclusionary\
+            \ filters (exclude=False) are OR'd together\\n- Exclusionary filters (exclude=True)\
+            \ are OR'd together and negated with $nor\\n- The two groups are AND'd:\
+            \ (include1 OR include2) AND NOT (exclude1 OR exclude2)\",\n  \"properties\"\
+            : {\n    \"content\": {\n      \"anyOf\": [\n        {\n          \"$ref\"\
+            : \"#/$defs/ToolRequestContentEntityOptional\"\n        },\n        {\n\
+            \          \"$ref\": \"#/$defs/DataContentEntityOptional\"\n        },\n\
+            \        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\n\
+            \        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
             \n        },\n        {\n          \"$ref\": \"#/$defs/ReasoningContentEntityOptional\"\
             \n        },\n        {\n          \"type\": \"null\"\n        }\n   \
             \   ],\n      \"default\": null,\n      \"description\": \"Filter by message\
@@ -1416,19 +1422,24 @@ paths:
           \            {},\n            {\n              \"type\": \"null\"\n    \
           \        }\n          ],\n          \"default\": null,\n          \"description\"\
           : \"The result of the tool.\",\n          \"title\": \"Content\"\n     \
-          \   }\n      },\n      \"title\": \"ToolResponseContentEntityOptional\"\
-          ,\n      \"type\": \"object\"\n    }\n  },\n  \"description\": \"Filter\
-          \ model for TaskMessage - all fields optional for flexible filtering.\\\
-          n\\nThe `exclude` field determines whether this filter is inclusionary or\
-          \ exclusionary.\\nWhen multiple filters are provided:\\n- Inclusionary filters\
-          \ (exclude=False) are OR'd together\\n- Exclusionary filters (exclude=True)\
-          \ are OR'd together and negated with $nor\\n- The two groups are AND'd:\
-          \ (include1 OR include2) AND NOT (exclude1 OR exclude2)\",\n  \"properties\"\
-          : {\n    \"content\": {\n      \"anyOf\": [\n        {\n          \"$ref\"\
-          : \"#/$defs/ToolRequestContentEntityOptional\"\n        },\n        {\n\
-          \          \"$ref\": \"#/$defs/DataContentEntityOptional\"\n        },\n\
-          \        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\n\
-          \        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
+          \   },\n        \"is_error\": {\n          \"anyOf\": [\n            {\n\
+          \              \"type\": \"boolean\"\n            },\n            {\n  \
+          \            \"type\": \"null\"\n            }\n          ],\n         \
+          \ \"default\": null,\n          \"description\": \"Whether the tool call\
+          \ resulted in an error. `None` when the harness does not report a status.\"\
+          ,\n          \"title\": \"Is Error\"\n        }\n      },\n      \"title\"\
+          : \"ToolResponseContentEntityOptional\",\n      \"type\": \"object\"\n \
+          \   }\n  },\n  \"description\": \"Filter model for TaskMessage - all fields\
+          \ optional for flexible filtering.\\n\\nThe `exclude` field determines whether\
+          \ this filter is inclusionary or exclusionary.\\nWhen multiple filters are\
+          \ provided:\\n- Inclusionary filters (exclude=False) are OR'd together\\\
+          n- Exclusionary filters (exclude=True) are OR'd together and negated with\
+          \ $nor\\n- The two groups are AND'd: (include1 OR include2) AND NOT (exclude1\
+          \ OR exclude2)\",\n  \"properties\": {\n    \"content\": {\n      \"anyOf\"\
+          : [\n        {\n          \"$ref\": \"#/$defs/ToolRequestContentEntityOptional\"\
+          \n        },\n        {\n          \"$ref\": \"#/$defs/DataContentEntityOptional\"\
+          \n        },\n        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\
+          \n        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
           \n        },\n        {\n          \"$ref\": \"#/$defs/ReasoningContentEntityOptional\"\
           \n        },\n        {\n          \"type\": \"null\"\n        }\n     \
           \ ],\n      \"default\": null,\n      \"description\": \"Filter by message\
@@ -1769,19 +1780,25 @@ paths:
             : {\n          \"anyOf\": [\n            {},\n            {\n        \
             \      \"type\": \"null\"\n            }\n          ],\n          \"default\"\
             : null,\n          \"description\": \"The result of the tool.\",\n   \
-            \       \"title\": \"Content\"\n        }\n      },\n      \"title\":\
-            \ \"ToolResponseContentEntityOptional\",\n      \"type\": \"object\"\n\
-            \    }\n  },\n  \"description\": \"Filter model for TaskMessage - all\
-            \ fields optional for flexible filtering.\\n\\nThe `exclude` field determines\
-            \ whether this filter is inclusionary or exclusionary.\\nWhen multiple\
-            \ filters are provided:\\n- Inclusionary filters (exclude=False) are OR'd\
-            \ together\\n- Exclusionary filters (exclude=True) are OR'd together and\
-            \ negated with $nor\\n- The two groups are AND'd: (include1 OR include2)\
-            \ AND NOT (exclude1 OR exclude2)\",\n  \"properties\": {\n    \"content\"\
-            : {\n      \"anyOf\": [\n        {\n          \"$ref\": \"#/$defs/ToolRequestContentEntityOptional\"\
-            \n        },\n        {\n          \"$ref\": \"#/$defs/DataContentEntityOptional\"\
-            \n        },\n        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\
-            \n        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
+            \       \"title\": \"Content\"\n        },\n        \"is_error\": {\n\
+            \          \"anyOf\": [\n            {\n              \"type\": \"boolean\"\
+            \n            },\n            {\n              \"type\": \"null\"\n  \
+            \          }\n          ],\n          \"default\": null,\n          \"\
+            description\": \"Whether the tool call resulted in an error. `None` when\
+            \ the harness does not report a status.\",\n          \"title\": \"Is\
+            \ Error\"\n        }\n      },\n      \"title\": \"ToolResponseContentEntityOptional\"\
+            ,\n      \"type\": \"object\"\n    }\n  },\n  \"description\": \"Filter\
+            \ model for TaskMessage - all fields optional for flexible filtering.\\\
+            n\\nThe `exclude` field determines whether this filter is inclusionary\
+            \ or exclusionary.\\nWhen multiple filters are provided:\\n- Inclusionary\
+            \ filters (exclude=False) are OR'd together\\n- Exclusionary filters (exclude=True)\
+            \ are OR'd together and negated with $nor\\n- The two groups are AND'd:\
+            \ (include1 OR include2) AND NOT (exclude1 OR exclude2)\",\n  \"properties\"\
+            : {\n    \"content\": {\n      \"anyOf\": [\n        {\n          \"$ref\"\
+            : \"#/$defs/ToolRequestContentEntityOptional\"\n        },\n        {\n\
+            \          \"$ref\": \"#/$defs/DataContentEntityOptional\"\n        },\n\
+            \        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\n\
+            \        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
             \n        },\n        {\n          \"$ref\": \"#/$defs/ReasoningContentEntityOptional\"\
             \n        },\n        {\n          \"type\": \"null\"\n        }\n   \
             \   ],\n      \"default\": null,\n      \"description\": \"Filter by message\
@@ -1972,19 +1989,24 @@ paths:
           \            {},\n            {\n              \"type\": \"null\"\n    \
           \        }\n          ],\n          \"default\": null,\n          \"description\"\
           : \"The result of the tool.\",\n          \"title\": \"Content\"\n     \
-          \   }\n      },\n      \"title\": \"ToolResponseContentEntityOptional\"\
-          ,\n      \"type\": \"object\"\n    }\n  },\n  \"description\": \"Filter\
-          \ model for TaskMessage - all fields optional for flexible filtering.\\\
-          n\\nThe `exclude` field determines whether this filter is inclusionary or\
-          \ exclusionary.\\nWhen multiple filters are provided:\\n- Inclusionary filters\
-          \ (exclude=False) are OR'd together\\n- Exclusionary filters (exclude=True)\
-          \ are OR'd together and negated with $nor\\n- The two groups are AND'd:\
-          \ (include1 OR include2) AND NOT (exclude1 OR exclude2)\",\n  \"properties\"\
-          : {\n    \"content\": {\n      \"anyOf\": [\n        {\n          \"$ref\"\
-          : \"#/$defs/ToolRequestContentEntityOptional\"\n        },\n        {\n\
-          \          \"$ref\": \"#/$defs/DataContentEntityOptional\"\n        },\n\
-          \        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\n\
-          \        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
+          \   },\n        \"is_error\": {\n          \"anyOf\": [\n            {\n\
+          \              \"type\": \"boolean\"\n            },\n            {\n  \
+          \            \"type\": \"null\"\n            }\n          ],\n         \
+          \ \"default\": null,\n          \"description\": \"Whether the tool call\
+          \ resulted in an error. `None` when the harness does not report a status.\"\
+          ,\n          \"title\": \"Is Error\"\n        }\n      },\n      \"title\"\
+          : \"ToolResponseContentEntityOptional\",\n      \"type\": \"object\"\n \
+          \   }\n  },\n  \"description\": \"Filter model for TaskMessage - all fields\
+          \ optional for flexible filtering.\\n\\nThe `exclude` field determines whether\
+          \ this filter is inclusionary or exclusionary.\\nWhen multiple filters are\
+          \ provided:\\n- Inclusionary filters (exclude=False) are OR'd together\\\
+          n- Exclusionary filters (exclude=True) are OR'd together and negated with\
+          \ $nor\\n- The two groups are AND'd: (include1 OR include2) AND NOT (exclude1\
+          \ OR exclude2)\",\n  \"properties\": {\n    \"content\": {\n      \"anyOf\"\
+          : [\n        {\n          \"$ref\": \"#/$defs/ToolRequestContentEntityOptional\"\
+          \n        },\n        {\n          \"$ref\": \"#/$defs/DataContentEntityOptional\"\
+          \n        },\n        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\
+          \n        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
           \n        },\n        {\n          \"$ref\": \"#/$defs/ReasoningContentEntityOptional\"\
           \n        },\n        {\n          \"type\": \"null\"\n        }\n     \
           \ ],\n      \"default\": null,\n      \"description\": \"Filter by message\
@@ -6445,6 +6467,13 @@ components:
         content:
           title: Content
           description: The result of the tool.
+        is_error:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Error
+          description: Whether the tool call resulted in an error. `None` when the
+            harness does not report a status.
       type: object
       required:
       - author
@@ -6480,6 +6509,13 @@ components:
         content:
           title: Content
           description: The result of the tool.
+        is_error:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Error
+          description: Whether the tool call resulted in an error. `None` when the
+            harness does not report a status.
       type: object
       required:
       - author

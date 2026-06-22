@@ -108,6 +108,10 @@ class ToolResponseContent(BaseTaskMessageContent):
         ..., description="The name of the tool that is being responded to."
     )
     content: Any = Field(..., description="The result of the tool.")
+    is_error: bool | None = Field(
+        default=None,
+        description="Whether the tool call resulted in an error. `None` when the harness does not report a status.",
+    )
 
 
 class DataContent(BaseTaskMessageContent):
