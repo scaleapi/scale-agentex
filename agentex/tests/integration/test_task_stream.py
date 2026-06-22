@@ -563,6 +563,54 @@ class TestTaskEventStream:
                 pass
             repo.read_messages = original_read_messages
 
+    async def test_event_xadded_after_connected_is_delivered(
+        self, test_agent_and_task, streams_use_case
+    ):
+        """
+        Regression for the SSE entry-gap drop bug: a delta XADDed right after
+        "connected" must still be delivered.
+
+        We step the generator manually so the XADD lands while it's suspended
+        at the "connected" yield. If the cursor is snapshotted after that yield
+        the delta is lost; snapshotting before it (the fix) delivers it.
+        """
+        from src.utils.stream_topics import get_task_event_stream_topic
+
+        _agent, task = test_agent_and_task
+        stream_topic = get_task_event_stream_topic(task_id=task.id)
+        repo = streams_use_case.stream_repository
+
+        gen = streams_use_case.stream_task_events(task_id=task.id)
+        try:
+            # First yielded event is "connected"; generator is now suspended here.
+            first = await asyncio.wait_for(gen.__anext__(), timeout=5)
+            assert "connected" in first, f"expected connected event first, got: {first}"
+
+            # Emit a delta while the generator is suspended at the yield.
+            sentinel = "after-connected-sentinel"
+            await repo.send_data(
+                stream_topic, {"type": "error", "message": sentinel}
+            )
+
+            # The delta must be delivered; a silent stream means it was dropped.
+            received = False
+            for _ in range(10):
+                try:
+                    evt = await asyncio.wait_for(gen.__anext__(), timeout=4)
+                except (TimeoutError, asyncio.TimeoutError):
+                    break  # stream went silent — sentinel was dropped
+                if evt.startswith("data: ") and sentinel in evt:
+                    received = True
+                    break
+
+            assert received, (
+                "A delta XADDed after 'connected' was not delivered. The read "
+                "cursor was snapshotted after signaling connected, so the entry "
+                "landed behind the tail and was lost (the SSE entry-gap bug)."
+            )
+        finally:
+            await gen.aclose()
+
     async def test_stream_sends_keepalive_pings_during_idle_periods(
         self, test_agent_and_task, streams_use_case
     ):
