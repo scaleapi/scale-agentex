@@ -294,11 +294,7 @@ const TextInput = ({
       onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         // Enter sends; Shift+Enter inserts a newline. Ignore Enter while an
         // IME composition is active so it can commit the candidate normally.
-        if (
-          e.key === 'Enter' &&
-          !e.shiftKey &&
-          !e.nativeEvent.isComposing
-        ) {
+        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
           e.preventDefault();
           if (!isDisabled && prompt.trim()) {
             handleSendPrompt();
