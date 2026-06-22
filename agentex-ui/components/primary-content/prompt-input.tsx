@@ -59,7 +59,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
   const sendMessageMutation = useSendMessage({ agentexClient });
   const { data: task } = useTask({ agentexClient, taskId: taskID ?? '' });
 
-  const textInputRef = useRef<HTMLInputElement>(null);
+  const textInputRef = useRef<HTMLTextAreaElement>(null);
   const codeMirrorViewRef = useRef<EditorView | null>(null);
 
   const isTaskTerminal = useMemo(() => {
@@ -200,7 +200,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
         </div>
       )}
       <div
-        className={`border-input dark:bg-input ${isDisabled ? 'bg-muted scale-90 cursor-not-allowed' : 'scale-100'} flex w-full items-center justify-between rounded-4xl border py-2 pr-2 pl-6 shadow-sm transition-transform duration-300 disabled:cursor-not-allowed`}
+        className={`border-input dark:bg-input ${isDisabled ? 'bg-muted scale-90 cursor-not-allowed' : 'scale-100'} flex w-full items-end justify-between rounded-4xl border py-2 pr-2 pl-6 shadow-sm transition-transform duration-300 disabled:cursor-not-allowed`}
       >
         {isSendingJSON ? (
           <DataInput
@@ -247,6 +247,11 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
   );
 }
 
+// Cap the auto-grow height of the plain-text prompt textarea. Matches the
+// JSON / CodeMirror branch's `maxHeight="200px"` so both variants feel
+// consistent when authoring longer prompts.
+const TEXT_INPUT_MAX_HEIGHT_PX = 200;
+
 const TextInput = ({
   prompt,
   setPrompt,
@@ -262,20 +267,42 @@ const TextInput = ({
   isTaskTerminal: boolean;
   taskStatus: string | null | undefined;
   handleSendPrompt: () => void;
-  inputRef: React.RefObject<HTMLInputElement | null>;
+  inputRef: React.RefObject<HTMLTextAreaElement | null>;
 }) => {
+  // Auto-resize the textarea height to fit content up to the max, then scroll
+  // internally. Reset to 'auto' first so the height can shrink when the user
+  // deletes lines, not just grow.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const next = Math.min(el.scrollHeight, TEXT_INPUT_MAX_HEIGHT_PX);
+    el.style.height = `${next}px`;
+    el.style.overflowY =
+      el.scrollHeight > TEXT_INPUT_MAX_HEIGHT_PX ? 'auto' : 'hidden';
+  }, [prompt, inputRef]);
+
   return (
-    <input
+    <textarea
       ref={inputRef}
       id="prompt-text-input"
-      type="text"
+      rows={1}
       value={prompt}
-      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
         setPrompt(e.target.value)
       }
-      onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Enter' && !isDisabled && prompt.trim()) {
-          handleSendPrompt();
+      onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        // Enter sends; Shift+Enter inserts a newline. Ignore Enter while an
+        // IME composition is active so it can commit the candidate normally.
+        if (
+          e.key === 'Enter' &&
+          !e.shiftKey &&
+          !e.nativeEvent.isComposing
+        ) {
+          e.preventDefault();
+          if (!isDisabled && prompt.trim()) {
+            handleSendPrompt();
+          }
         }
       }}
       disabled={isDisabled}
@@ -286,10 +313,11 @@ const TextInput = ({
             ? 'Select an agent to start'
             : 'Enter your prompt'
       }
-      className="mr-2 flex-1 outline-none focus:ring-0 focus:outline-none"
+      className="mr-2 flex-1 resize-none py-2 leading-6 outline-none focus:ring-0 focus:outline-none"
       style={{
         backgroundColor: 'inherit',
         cursor: 'inherit',
+        maxHeight: `${TEXT_INPUT_MAX_HEIGHT_PX}px`,
       }}
     />
   );
