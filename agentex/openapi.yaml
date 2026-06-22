@@ -2722,6 +2722,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /agent_api_keys/webhook-trigger:
+    post:
+      tags:
+      - Agent APIKeys
+      summary: Create Webhook Trigger
+      description: 'Wire a webhook trigger in one call.
+
+
+        Registers the source''s signature-verification key (github/slack) for the
+        agent and
+
+        returns the ready-to-paste forward webhook URL plus the signing secret (shown
+        once).
+
+        The webhook then flows through the existing /agents/forward ingress, which
+        verifies
+
+        the signature against this key. Bundles the existing key-create + URL composition
+        so
+
+        a UI (or a curl) can set up a trigger without two steps.'
+      operationId: create_webhook_trigger_agent_api_keys_webhook_trigger_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWebhookTriggerRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateWebhookTriggerResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /agent_api_keys/name/{name}:
     get:
       tags:
@@ -4549,6 +4590,91 @@ components:
             to the agent inside the ACP payload for backward compatibility.
       type: object
       title: CreateTaskRequest
+    CreateWebhookTriggerRequest:
+      properties:
+        agent_name:
+          type: string
+          title: Agent Name
+          description: The agent the webhook drives.
+        source:
+          $ref: '#/components/schemas/AgentAPIKeyType'
+          description: Webhook source whose signature is verified (github or slack).
+          default: github
+        name:
+          type: string
+          title: Name
+          description: 'Signature-lookup key: the repo full_name (github) or api_app_id
+            (slack) that the forward ingress matches the incoming webhook against.'
+        forward_path:
+          type: string
+          title: Forward Path
+          description: Subpath the agent's own route handles, e.g. 'github-pr/<config-id>'.
+            Appended to /agents/forward/name/{agent_name}/ to form the webhook URL.
+        secret:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Secret
+          description: Optional signing secret; if unset, one is generated and returned.
+        base_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Base Url
+          description: Optional public agentex base URL for the returned webhook_url;
+            defaults to the AGENTEX_PUBLIC_URL env var.
+      type: object
+      required:
+      - agent_name
+      - name
+      - forward_path
+      title: CreateWebhookTriggerRequest
+      description: 'One-call setup for a webhook trigger: register the source''s signature
+        key and
+
+        get back the ready-to-paste forward webhook URL.'
+    CreateWebhookTriggerResponse:
+      properties:
+        key_id:
+          type: string
+          title: Key Id
+          description: The created agent API key id.
+        agent_name:
+          type: string
+          title: Agent Name
+          description: The agent the webhook drives.
+        source:
+          $ref: '#/components/schemas/AgentAPIKeyType'
+          description: Webhook source (github or slack).
+        name:
+          type: string
+          title: Name
+          description: Signature-lookup key (repo full_name / api_app_id).
+        secret:
+          type: string
+          title: Secret
+          description: The signing secret — shown once; paste into the source's webhook
+            config.
+        webhook_path:
+          type: string
+          title: Webhook Path
+          description: The forward path to POST webhooks to.
+        webhook_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Webhook Url
+          description: Full webhook URL to paste into the source (None if no base
+            URL configured).
+      type: object
+      required:
+      - key_id
+      - agent_name
+      - source
+      - name
+      - secret
+      - webhook_path
+      title: CreateWebhookTriggerResponse
     DataContent:
       properties:
         type:

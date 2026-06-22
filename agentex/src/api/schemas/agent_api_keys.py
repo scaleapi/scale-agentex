@@ -53,3 +53,53 @@ class CreateAPIKeyResponse(BaseModel):
         ...,
         description="The value of the newly created API key.",
     )
+
+
+class CreateWebhookTriggerRequest(BaseModel):
+    """One-call setup for a webhook trigger: register the source's signature key and
+    get back the ready-to-paste forward webhook URL."""
+
+    agent_name: str = Field(..., description="The agent the webhook drives.")
+    source: AgentAPIKeyType = Field(
+        AgentAPIKeyType.GITHUB,
+        description="Webhook source whose signature is verified (github or slack).",
+    )
+    name: str = Field(
+        ...,
+        description="Signature-lookup key: the repo full_name (github) or api_app_id "
+        "(slack) that the forward ingress matches the incoming webhook against.",
+    )
+    forward_path: str = Field(
+        ...,
+        description="Subpath the agent's own route handles, e.g. 'github-pr/<config-id>'. "
+        "Appended to /agents/forward/name/{agent_name}/ to form the webhook URL.",
+    )
+    secret: str | None = Field(
+        None,
+        description="Optional signing secret; if unset, one is generated and returned.",
+    )
+    base_url: str | None = Field(
+        None,
+        description="Optional public agentex base URL for the returned webhook_url; "
+        "defaults to the AGENTEX_PUBLIC_URL env var.",
+    )
+
+
+class CreateWebhookTriggerResponse(BaseModel):
+    key_id: str = Field(..., description="The created agent API key id.")
+    agent_name: str = Field(..., description="The agent the webhook drives.")
+    source: AgentAPIKeyType = Field(
+        ..., description="Webhook source (github or slack)."
+    )
+    name: str = Field(
+        ..., description="Signature-lookup key (repo full_name / api_app_id)."
+    )
+    secret: str = Field(
+        ...,
+        description="The signing secret — shown once; paste into the source's webhook config.",
+    )
+    webhook_path: str = Field(..., description="The forward path to POST webhooks to.")
+    webhook_url: str | None = Field(
+        None,
+        description="Full webhook URL to paste into the source (None if no base URL configured).",
+    )
