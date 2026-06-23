@@ -3214,9 +3214,10 @@ paths:
     post:
       tags:
       - Schedules
-      summary: Create Schedule
-      description: Create a new schedule for recurring workflow execution for an agent.
-      operationId: create_schedule_agents__agent_id__schedules_post
+      summary: Create Run Schedule
+      description: Create a recurring schedule that starts a fresh agent run on each
+        fire.
+      operationId: create_run_schedule_agents__agent_id__schedules_post
       parameters:
       - name: agent_id
         in: path
@@ -3229,14 +3230,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateScheduleRequest'
+              $ref: '#/components/schemas/CreateAgentRunScheduleRequest'
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ScheduleResponse'
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
         '422':
           description: Validation Error
           content:
@@ -3246,9 +3247,9 @@ paths:
     get:
       tags:
       - Schedules
-      summary: List Agent Schedules
-      description: List all schedules for an agent.
-      operationId: list_schedules_agents__agent_id__schedules_get
+      summary: List Run Schedules
+      description: List run schedules for an agent.
+      operationId: list_run_schedules_agents__agent_id__schedules_get
       parameters:
       - name: agent_id
         in: path
@@ -3256,7 +3257,7 @@ paths:
         schema:
           type: string
           title: Agent Id
-      - name: page_size
+      - name: limit
         in: query
         required: false
         schema:
@@ -3264,27 +3265,27 @@ paths:
           maximum: 1000
           minimum: 1
           default: 100
-          title: Page Size
+          title: Limit
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ScheduleListResponse'
+                $ref: '#/components/schemas/AgentRunScheduleListResponse'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /agents/{agent_id}/schedules/{schedule_name}:
+  /agents/{agent_id}/schedules/{name}:
     get:
       tags:
       - Schedules
-      summary: Get Schedule
-      description: Get details of a schedule by its name.
-      operationId: get_schedule_agents__agent_id__schedules__schedule_name__get
+      summary: Get Run Schedule
+      description: Get a run schedule by its name.
+      operationId: get_run_schedule_agents__agent_id__schedules__name__get
       parameters:
       - name: agent_id
         in: path
@@ -3292,19 +3293,19 @@ paths:
         schema:
           type: string
           title: Agent Id
-      - name: schedule_name
+      - name: name
         in: path
         required: true
         schema:
           type: string
-          title: Schedule Name
+          title: Name
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ScheduleResponse'
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
         '422':
           description: Validation Error
           content:
@@ -3314,9 +3315,9 @@ paths:
     delete:
       tags:
       - Schedules
-      summary: Delete Schedule
-      description: Delete a schedule permanently.
-      operationId: delete_schedule_agents__agent_id__schedules__schedule_name__delete
+      summary: Delete Run Schedule
+      description: Delete a run schedule permanently.
+      operationId: delete_run_schedule_agents__agent_id__schedules__name__delete
       parameters:
       - name: agent_id
         in: path
@@ -3324,12 +3325,12 @@ paths:
         schema:
           type: string
           title: Agent Id
-      - name: schedule_name
+      - name: name
         in: path
         required: true
         schema:
           type: string
-          title: Schedule Name
+          title: Name
       responses:
         '200':
           description: Successful Response
@@ -3343,13 +3344,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /agents/{agent_id}/schedules/{schedule_name}/pause:
+  /agents/{agent_id}/schedules/{name}/pause:
     post:
       tags:
       - Schedules
-      summary: Pause Schedule
-      description: Pause a schedule to stop it from executing.
-      operationId: pause_schedule_agents__agent_id__schedules__schedule_name__pause_post
+      summary: Pause Run Schedule
+      description: Pause a run schedule so it stops firing.
+      operationId: pause_run_schedule_agents__agent_id__schedules__name__pause_post
       parameters:
       - name: agent_id
         in: path
@@ -3357,18 +3358,18 @@ paths:
         schema:
           type: string
           title: Agent Id
-      - name: schedule_name
+      - name: name
         in: path
         required: true
         schema:
           type: string
-          title: Schedule Name
+          title: Name
       requestBody:
         content:
           application/json:
             schema:
               anyOf:
-              - $ref: '#/components/schemas/PauseScheduleRequest'
+              - $ref: '#/components/schemas/PauseRunScheduleRequest'
               - type: 'null'
               title: Request
       responses:
@@ -3377,20 +3378,20 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ScheduleResponse'
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /agents/{agent_id}/schedules/{schedule_name}/unpause:
+  /agents/{agent_id}/schedules/{name}/resume:
     post:
       tags:
       - Schedules
-      summary: Unpause Schedule
-      description: Unpause/resume a schedule to allow it to execute again.
-      operationId: unpause_schedule_agents__agent_id__schedules__schedule_name__unpause_post
+      summary: Resume Run Schedule
+      description: Resume a paused run schedule so it fires again.
+      operationId: resume_run_schedule_agents__agent_id__schedules__name__resume_post
       parameters:
       - name: agent_id
         in: path
@@ -3398,18 +3399,18 @@ paths:
         schema:
           type: string
           title: Agent Id
-      - name: schedule_name
+      - name: name
         in: path
         required: true
         schema:
           type: string
-          title: Schedule Name
+          title: Name
       requestBody:
         content:
           application/json:
             schema:
               anyOf:
-              - $ref: '#/components/schemas/UnpauseScheduleRequest'
+              - $ref: '#/components/schemas/ResumeRunScheduleRequest'
               - type: 'null'
               title: Request
       responses:
@@ -3418,41 +3419,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ScheduleResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /agents/{agent_id}/schedules/{schedule_name}/trigger:
-    post:
-      tags:
-      - Schedules
-      summary: Trigger Schedule
-      description: Trigger a schedule to run immediately, regardless of its regular
-        schedule.
-      operationId: trigger_schedule_agents__agent_id__schedules__schedule_name__trigger_post
-      parameters:
-      - name: agent_id
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Agent Id
-      - name: schedule_name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Schedule Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ScheduleResponse'
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
         '422':
           description: Validation Error
           content:
@@ -3935,6 +3902,153 @@ components:
       - $ref: '#/components/schemas/Event'
       - type: 'null'
       title: AgentRPCResult
+    AgentRunScheduleListResponse:
+      properties:
+        run_schedules:
+          items:
+            $ref: '#/components/schemas/AgentRunScheduleResponse'
+          type: array
+          title: Run Schedules
+          description: The list of run schedules.
+        total:
+          type: integer
+          title: Total
+          description: The number of run schedules returned.
+      type: object
+      required:
+      - run_schedules
+      - total
+      title: AgentRunScheduleListResponse
+      description: Response model for listing run schedules.
+    AgentRunScheduleResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: The unique identifier of the run schedule.
+        agent_id:
+          type: string
+          title: Agent Id
+          description: The agent this schedule belongs to.
+        name:
+          type: string
+          title: Name
+          description: Schedule name, unique per agent.
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+          description: Optional description.
+        cron_expression:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cron Expression
+          description: Cron cadence, if cron-based.
+        interval_seconds:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Interval Seconds
+          description: Interval cadence in seconds, if interval-based.
+        timezone:
+          type: string
+          title: Timezone
+          description: Timezone the cron expression is evaluated in.
+          default: UTC
+        start_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Start At
+          description: Schedule activation time.
+        end_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: End At
+          description: Schedule deactivation time.
+        paused:
+          type: boolean
+          title: Paused
+          description: Whether the schedule is paused.
+          default: false
+        task_params:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task Params
+          description: Task params at fire time.
+        task_metadata:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task Metadata
+          description: Task metadata at fire time.
+        initial_input:
+          $ref: '#/components/schemas/ScheduleInitialInput'
+          description: The initial input.
+        initial_input_method:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Initial Input Method
+          description: Effective delivery method (inferred from the agent's ACP type).
+        creator_principal:
+          anyOf:
+          - $ref: '#/components/schemas/ScheduleCreatorPrincipal'
+          - type: 'null'
+          description: Credential-free creator identity.
+        created_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Created At
+          description: When the schedule was created.
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+          description: When the schedule was updated.
+        state:
+          $ref: '#/components/schemas/RunScheduleState'
+          description: Live schedule state from Temporal.
+          default: ACTIVE
+        next_action_times:
+          items:
+            type: string
+            format: date-time
+          type: array
+          title: Next Action Times
+          description: Upcoming scheduled fire times.
+        last_action_time:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Action Time
+          description: When the schedule last fired.
+        num_actions_taken:
+          type: integer
+          title: Num Actions Taken
+          description: Number of times the schedule has fired.
+          default: 0
+      type: object
+      required:
+      - id
+      - agent_id
+      - name
+      - initial_input
+      title: AgentRunScheduleResponse
+      description: Response model describing a scheduled agent run.
     AgentStatus:
       type: string
       enum:
@@ -4286,6 +4400,82 @@ components:
       - api_key_type
       - api_key
       title: CreateAPIKeyResponse
+    CreateAgentRunScheduleRequest:
+      properties:
+        name:
+          type: string
+          maxLength: 64
+          minLength: 1
+          pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$
+          title: Schedule Name
+          description: Human-readable name, unique per agent (e.g. 'daily-granola-summary').
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+          description: Optional description of what this schedule does.
+        cron_expression:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cron Expression
+          description: Cron expression for the cadence (e.g. '0 17 * * MON-FRI').
+            Mutually exclusive with interval_seconds.
+        interval_seconds:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Interval Seconds
+          description: Interval cadence in seconds. Mutually exclusive with cron_expression.
+        timezone:
+          type: string
+          title: Timezone
+          description: IANA timezone the cron expression is evaluated in (e.g. 'America/New_York').
+          default: UTC
+        start_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Start At
+          description: When the schedule should start being active.
+        end_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: End At
+          description: When the schedule should stop being active.
+        paused:
+          type: boolean
+          title: Paused
+          description: Whether to create the schedule in a paused state.
+          default: false
+        task_params:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task Params
+          description: Resolved config forwarded as task `params` at fire time.
+        task_metadata:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task Metadata
+          description: Metadata copied onto each created task at fire time.
+        initial_input:
+          $ref: '#/components/schemas/ScheduleInitialInput'
+          description: The first input delivered to each created task.
+      type: object
+      required:
+      - name
+      - initial_input
+      title: CreateAgentRunScheduleRequest
+      description: Request body for creating a scheduled agent run.
     CreateDeploymentRequest:
       properties:
         docker_image:
@@ -4316,78 +4506,6 @@ components:
       required:
       - docker_image
       title: CreateDeploymentRequest
-    CreateScheduleRequest:
-      properties:
-        name:
-          type: string
-          maxLength: 64
-          minLength: 1
-          pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$
-          title: Schedule Name
-          description: Human-readable name for the schedule (e.g., 'weekly-profiling').
-            Will be combined with agent_id to form the full schedule_id.
-        workflow_name:
-          type: string
-          title: Workflow Name
-          description: Name of the Temporal workflow to execute (e.g., 'sae-orchestrator')
-        task_queue:
-          type: string
-          title: Task Queue
-          description: Temporal task queue where the agent's worker is listening
-        workflow_params:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Workflow Parameters
-          description: Parameters to pass to the workflow
-        cron_expression:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Cron Expression
-          description: Cron expression for scheduling (e.g., '0 0 * * 0' for weekly
-            on Sunday)
-        interval_seconds:
-          anyOf:
-          - type: integer
-            minimum: 1.0
-          - type: 'null'
-          title: Interval Seconds
-          description: Alternative to cron - run every N seconds
-        execution_timeout_seconds:
-          anyOf:
-          - type: integer
-            minimum: 1.0
-          - type: 'null'
-          title: Execution Timeout
-          description: Maximum time in seconds for each workflow execution
-        start_at:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: Start At
-          description: When the schedule should start being active
-        end_at:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: End At
-          description: When the schedule should stop being active
-        paused:
-          type: boolean
-          title: Paused
-          description: Whether to create the schedule in a paused state
-          default: false
-      type: object
-      required:
-      - name
-      - workflow_name
-      - task_queue
-      title: CreateScheduleRequest
-      description: Request model for creating a new schedule for an agent
     CreateSpanRequest:
       properties:
         id:
@@ -5013,17 +5131,16 @@ components:
       - data
       title: PaginatedMessagesResponse
       description: Response with cursor pagination metadata.
-    PauseScheduleRequest:
+    PauseRunScheduleRequest:
       properties:
         note:
           anyOf:
           - type: string
           - type: 'null'
           title: Note
-          description: Optional note explaining why the schedule was paused
+          description: Optional note explaining the pause.
       type: object
-      title: PauseScheduleRequest
-      description: Request model for pausing a schedule
+      title: PauseRunScheduleRequest
     PutCheckpointRequest:
       properties:
         thread_id:
@@ -5423,195 +5540,78 @@ components:
         snapshot → clean → rehydrate round-trips cleanly without serialization
 
         changes.'
-    ScheduleActionInfo:
+    ResumeRunScheduleRequest:
       properties:
-        workflow_name:
-          type: string
-          title: Workflow Name
-          description: Name of the workflow being executed
-        workflow_id_prefix:
-          type: string
-          title: Workflow ID Prefix
-          description: Prefix for workflow execution IDs
-        task_queue:
-          type: string
-          title: Task Queue
-          description: Task queue for the workflow
-        workflow_params:
+        note:
           anyOf:
-          - items: {}
-            type: array
+          - type: string
           - type: 'null'
-          title: Workflow Parameters
-          description: Parameters passed to the workflow
+          title: Note
+          description: Optional note explaining the resume.
       type: object
-      required:
-      - workflow_name
-      - workflow_id_prefix
-      - task_queue
-      title: ScheduleActionInfo
-      description: Information about the scheduled action
-    ScheduleListItem:
-      properties:
-        schedule_id:
-          type: string
-          title: Schedule ID
-          description: Unique identifier for the schedule
-        name:
-          type: string
-          title: Schedule Name
-          description: Human-readable name for the schedule
-        agent_id:
-          type: string
-          title: Agent ID
-          description: ID of the agent this schedule belongs to
-        state:
-          $ref: '#/components/schemas/ScheduleState'
-          title: State
-          description: Current state of the schedule
-        workflow_name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Workflow Name
-          description: Name of the scheduled workflow
-        next_action_time:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: Next Action Time
-          description: Next scheduled execution time
-      type: object
-      required:
-      - schedule_id
-      - name
-      - agent_id
-      - state
-      title: ScheduleListItem
-      description: Abbreviated schedule info for list responses
-    ScheduleListResponse:
-      properties:
-        schedules:
-          items:
-            $ref: '#/components/schemas/ScheduleListItem'
-          type: array
-          title: Schedules
-          description: List of schedules
-        total:
-          type: integer
-          title: Total
-          description: Total number of schedules
-      type: object
-      required:
-      - schedules
-      - total
-      title: ScheduleListResponse
-      description: Response model for listing schedules
-    ScheduleResponse:
-      properties:
-        schedule_id:
-          type: string
-          title: Schedule ID
-          description: Unique identifier for the schedule
-        name:
-          type: string
-          title: Schedule Name
-          description: Human-readable name for the schedule
-        agent_id:
-          type: string
-          title: Agent ID
-          description: ID of the agent this schedule belongs to
-        state:
-          $ref: '#/components/schemas/ScheduleState'
-          title: State
-          description: Current state of the schedule
-        action:
-          $ref: '#/components/schemas/ScheduleActionInfo'
-          title: Action
-        spec:
-          $ref: '#/components/schemas/ScheduleSpecInfo'
-          title: Spec
-          description: Schedule specification
-        num_actions_taken:
-          type: integer
-          title: Number of Actions Taken
-          description: Number of times the schedule has executed
-          default: 0
-        num_actions_missed:
-          type: integer
-          title: Number of Actions Missed
-          description: Number of scheduled executions that were missed
-          default: 0
-        next_action_times:
-          items:
-            type: string
-            format: date-time
-          type: array
-          title: Next Action Times
-          description: Upcoming scheduled execution times
-        last_action_time:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: Last Action Time
-          description: When the schedule last executed
-        created_at:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: Created At
-          description: When the schedule was created
-      type: object
-      required:
-      - schedule_id
-      - name
-      - agent_id
-      - state
-      - action
-      - spec
-      title: ScheduleResponse
-      description: Response model for schedule operations
-    ScheduleSpecInfo:
-      properties:
-        cron_expressions:
-          items:
-            type: string
-          type: array
-          title: Cron Expressions
-          description: Cron expressions for the schedule
-        intervals_seconds:
-          items:
-            type: integer
-          type: array
-          title: Interval Seconds
-          description: Interval specifications in seconds
-        start_at:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: Start At
-          description: When the schedule starts being active
-        end_at:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: End At
-          description: When the schedule stops being active
-      type: object
-      title: ScheduleSpecInfo
-      description: Information about the schedule specification
-    ScheduleState:
+      title: ResumeRunScheduleRequest
+    RunScheduleState:
       type: string
       enum:
       - ACTIVE
       - PAUSED
-      title: ScheduleState
-      description: Schedule state enum
+      title: RunScheduleState
+      description: Live state of a run schedule, derived from Temporal.
+    ScheduleCreatorPrincipal:
+      properties:
+        principal_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Principal Type
+          description: e.g. 'user' or 'service_account'.
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+          description: Creator user id, if a user principal.
+        service_account_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Service Account Id
+          description: Creator service-account id, if a service principal.
+        account_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Account Id
+          description: Account/workspace id of the creator.
+      type: object
+      title: ScheduleCreatorPrincipal
+      description: 'Credential-free creator identity stored with the schedule.
+
+
+        Never carries cookies, JWTs, API keys, OAuth tokens, or request headers —
+        it
+
+        is creator *context* used only for AuthZ and ownership at fire time (D5/D6).'
+    ScheduleInitialInput:
+      properties:
+        type:
+          type: string
+          title: Type
+          description: Input content type. Only 'text' in v1.
+          default: text
+        author:
+          $ref: '#/components/schemas/MessageAuthor'
+          description: The author attributed to the initial input.
+          default: user
+        content:
+          type: string
+          title: Content
+          description: The initial prompt delivered to the task.
+      type: object
+      required:
+      - content
+      title: ScheduleInitialInput
+      description: The first input delivered to each freshly created scheduled task.
     SendEventRequest:
       properties:
         task_id:
@@ -6548,17 +6548,6 @@ components:
       - name
       title: ToolResponseDelta
       description: Delta for tool response updates
-    UnpauseScheduleRequest:
-      properties:
-        note:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Note
-          description: Optional note explaining why the schedule was unpaused
-      type: object
-      title: UnpauseScheduleRequest
-      description: Request model for unpausing a schedule
     UpdateAgentTaskTrackerRequest:
       properties:
         last_processed_event_id:

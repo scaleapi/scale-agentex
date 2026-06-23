@@ -10,6 +10,8 @@ from temporalio.client import (
     ScheduleDescription,
     ScheduleHandle,
     ScheduleIntervalSpec,
+    ScheduleOverlapPolicy,
+    SchedulePolicy,
     ScheduleSpec,
     ScheduleState,
     WorkflowExecution,
@@ -362,9 +364,20 @@ class TemporalAdapter(TemporalGateway):
         start_at: Any | None = None,
         end_at: Any | None = None,
         paused: bool = False,
+        time_zone_name: str | None = None,
+        overlap_policy: str | None = None,
     ) -> ScheduleHandle:
         """
         Create a new schedule for recurring workflow execution.
+
+        ``time_zone_name`` is an optional IANA timezone (e.g. ``America/New_York``)
+        the cron expression is evaluated in; when omitted, cron is evaluated in
+        UTC. Ignored for interval-based schedules.
+
+        ``overlap_policy`` is an optional ScheduleOverlapPolicy name (e.g.
+        ``"skip"``, ``"buffer_one"``) controlling what happens when a fire is due
+        while a prior run is still executing. When omitted, Temporal's default
+        (SKIP) applies.
         """
         if not self.client:
             raise TemporalConnectionError("Temporal client is not connected")
@@ -377,6 +390,9 @@ class TemporalAdapter(TemporalGateway):
 
         try:
             # Build schedule spec
+            spec_kwargs: dict[str, Any] = {}
+            if time_zone_name:
+                spec_kwargs["time_zone_name"] = time_zone_name
             spec = ScheduleSpec(
                 cron_expressions=cron_expressions or [],
                 intervals=[
@@ -386,6 +402,7 @@ class TemporalAdapter(TemporalGateway):
                 else [],
                 start_at=start_at,
                 end_at=end_at,
+                **spec_kwargs,
             )
 
             # Build workflow action
@@ -408,6 +425,13 @@ class TemporalAdapter(TemporalGateway):
                 paused=paused,
             )
 
+            # Build schedule policies (overlap), when requested
+            schedule_kwargs: dict[str, Any] = {}
+            if overlap_policy:
+                schedule_kwargs["policy"] = SchedulePolicy(
+                    overlap=ScheduleOverlapPolicy[overlap_policy.upper()]
+                )
+
             # Create the schedule
             handle = await self.client.create_schedule(
                 schedule_id,
@@ -415,6 +439,7 @@ class TemporalAdapter(TemporalGateway):
                     action=action,
                     spec=spec,
                     state=state,
+                    **schedule_kwargs,
                 ),
             )
 

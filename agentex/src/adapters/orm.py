@@ -197,6 +197,43 @@ class AgentAPIKeyORM(BaseORM):
     )
 
 
+class AgentRunScheduleORM(BaseORM):
+    __tablename__ = "agent_run_schedules"
+    id = Column(String, primary_key=True, default=orm_id)
+    agent_id = Column(String(64), ForeignKey("agents.id"), nullable=False)
+    name = Column(String(256), nullable=False)
+    description = Column(Text, nullable=True)
+    cron_expression = Column(String, nullable=True)
+    interval_seconds = Column(Integer, nullable=True)
+    timezone = Column(String, nullable=False, server_default="UTC")
+    start_at = Column(DateTime(timezone=True), nullable=True)
+    end_at = Column(DateTime(timezone=True), nullable=True)
+    paused = Column(Boolean, nullable=False, server_default="false")
+    # Credential-free creator context (see ScheduleCreatorPrincipal): no cookies,
+    # JWTs, API keys, OAuth tokens, or request headers are ever stored here.
+    creator_principal = Column(JSON, nullable=False)
+    task_params = Column(JSON, nullable=True)
+    task_metadata = Column(JSON, nullable=True)
+    initial_input = Column(JSON, nullable=False)
+    initial_input_method = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        # Schedule names are unique per agent (the get/pause/resume/delete
+        # endpoints address a schedule by agent_id + name).
+        Index(
+            "uq_agent_run_schedules_agent_name",
+            "agent_id",
+            "name",
+            unique=True,
+        ),
+        Index("idx_agent_run_schedules_agent", "agent_id"),
+    )
+
+
 class DeploymentHistoryORM(BaseORM):
     __tablename__ = "deployment_history"
 
