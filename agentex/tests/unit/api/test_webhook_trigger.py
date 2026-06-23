@@ -104,15 +104,30 @@ class TestCreateWebhookTrigger:
         assert resp.webhook_url == f"https://sgp.example.com{resp.webhook_path}"
 
     async def test_forward_path_control_chars_rejected(self, monkeypatch):
+        monkeypatch.setattr(mod, "_check_agent_or_collapse_to_404", AsyncMock())
+
         req = CreateWebhookTriggerRequest(
             agent_name="a",
             source=AgentAPIKeyType.GITHUB,
             name="o/r",
             forward_path="github-pr/cfg-9\nnext",
         )
+        agent_use_case = MagicMock()
+        agent_use_case.get = AsyncMock(return_value=MagicMock(id="agent-1"))
+
+        akuc = MagicMock()
+        akuc.get_by_agent_id_and_name = AsyncMock(return_value=None)
+        akuc.create = AsyncMock()
+
         with pytest.raises(HTTPException) as exc:
-            await self._call(monkeypatch, req)
+            await create_webhook_trigger(
+                request=req,
+                agent_api_key_use_case=akuc,
+                agent_use_case=agent_use_case,
+                authorization_service=MagicMock(),
+            )
         assert exc.value.status_code == 400
+        akuc.create.assert_not_awaited()
 
     async def test_conflict_when_key_exists(self, monkeypatch):
         req = CreateWebhookTriggerRequest(

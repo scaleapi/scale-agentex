@@ -160,6 +160,13 @@ async def create_webhook_trigger(
             ),
         )
 
+    forward_path = request.forward_path.lstrip("/")
+    if _has_control_chars(forward_path):
+        raise HTTPException(
+            status_code=400,
+            detail="forward_path must not contain control characters.",
+        )
+
     secret = request.secret if request.secret is not None else secrets.token_hex(32)
     agent_api_key_entity = await agent_api_key_use_case.create(
         agent_id=agent.id,
@@ -168,12 +175,6 @@ async def create_webhook_trigger(
         api_key_type=request.source,
     )
 
-    forward_path = request.forward_path.lstrip("/")
-    if _has_control_chars(forward_path):
-        raise HTTPException(
-            status_code=400,
-            detail="forward_path must not contain control characters.",
-        )
     encoded_agent_name = quote(request.agent_name, safe="")
     encoded_forward_path = quote(forward_path, safe="/")
     webhook_path = f"/agents/forward/name/{encoded_agent_name}/{encoded_forward_path}"
