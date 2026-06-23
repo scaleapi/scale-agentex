@@ -49,6 +49,8 @@ class GlobalDependencies(metaclass=Singleton):
         self.redis_pool: redis.ConnectionPool | None = None
         self.database_async_read_only_engine: AsyncEngine | None = None
         self.postgres_metrics_collector: PostgresMetricsCollector | None = None
+        self._mongodb_refresh_task: asyncio.Task | None = None
+        self._mongodb_close_tasks: set[asyncio.Task] = set()
         self._loaded = False
 
     async def create_temporal_client(self):
@@ -122,17 +124,7 @@ class GlobalDependencies(metaclass=Singleton):
 
             logger.info("Connecting to MongoDB")
 
-            self.mongodb_client = AsyncMongoClient(
-                mongodb_uri,
-                serverSelectionTimeoutMS=20000,
-                connectTimeoutMS=20000,
-                socketTimeoutMS=20000,
-                retryWrites=False,  # Disable retryable writes for AWS DocumentDB compatibility
-                maxPoolSize=self.environment_variables.MONGODB_MAX_POOL_SIZE,
-                minPoolSize=self.environment_variables.MONGODB_MIN_POOL_SIZE,
-                maxIdleTimeMS=30000,  # Close connections after 30 seconds of inactivity
-                waitQueueTimeoutMS=5000,  # Wait up to 5 seconds for a connection from pool
-            )
+            self.mongodb_client = self._build_mongodb_client(mongodb_uri)
             self.mongodb_database = self.mongodb_client[mongodb_database_name]
 
             # Ping the database to verify connection
@@ -226,10 +218,126 @@ class GlobalDependencies(metaclass=Singleton):
                 service_name=service_name,
             )
 
+        self._start_mongodb_oidc_refresh_loop()
+
         self._loaded = True
+
+    def _build_mongodb_client(self, mongodb_uri: str) -> AsyncMongoClient:
+        """Construct an AsyncMongoClient with the shared pool/timeout settings.
+
+        Used both at startup and by the OIDC refresh, so the two paths can never
+        drift apart.
+        """
+        return AsyncMongoClient(
+            mongodb_uri,
+            serverSelectionTimeoutMS=20000,
+            connectTimeoutMS=20000,
+            socketTimeoutMS=20000,
+            retryWrites=False,  # Disable retryable writes for AWS DocumentDB compatibility
+            maxPoolSize=self.environment_variables.MONGODB_MAX_POOL_SIZE,
+            minPoolSize=self.environment_variables.MONGODB_MIN_POOL_SIZE,
+            maxIdleTimeMS=30000,  # Close connections after 30 seconds of inactivity
+            waitQueueTimeoutMS=5000,  # Wait up to 5 seconds for a connection from pool
+        )
+
+    def _mongodb_uses_oidc(self) -> bool:
+        """True only when the Mongo URI authenticates via MONGODB-OIDC.
+
+        Gates the refresh loop so standard-auth / AWS DocumentDB deployments are
+        never churned — only GCP OIDC tokens expire out from under a live client.
+        """
+        uri = self.environment_variables.MONGODB_URI or ""
+        return "MONGODB-OIDC" in uri.upper()
+
+    async def refresh_mongodb_client(self) -> None:
+        """Rebuild the Mongo client to renew the cached GCP OIDC token.
+
+        pymongo's built-in GCP OIDC provider caches the access token for the life
+        of the client and only refreshes it reactively (on a server reauth
+        challenge). GCP tokens expire after ~1h, so a long-lived client eventually
+        fails auth. A new client authenticates fresh, picking up a new token.
+
+        The new client is built and pinged (which forces fresh auth) before the
+        swap, and the old client is closed only after a drain delay, so no in-flight
+        operation is ever dropped and we never swap to a broken client.
+        """
+        mongodb_uri = self.environment_variables.MONGODB_URI
+        if not mongodb_uri or not self._mongodb_uses_oidc():
+            return
+
+        new_client = self._build_mongodb_client(mongodb_uri)
+        # Force fresh OIDC auth and validate the new client before trusting it.
+        # If this raises, we keep using the existing (working) client.
+        await new_client.admin.command("ping")
+
+        old_client = self.mongodb_client
+        self.mongodb_client = new_client
+        self.mongodb_database = new_client[
+            self.environment_variables.MONGODB_DATABASE_NAME
+        ]
+        logger.info("Refreshed MongoDB client to renew OIDC credentials")
+
+        if old_client is not None and old_client is not new_client:
+            task = asyncio.create_task(
+                self._close_mongodb_client_after_delay(old_client)
+            )
+            # Keep a strong reference until done so the task is not GC'd mid-flight.
+            self._mongodb_close_tasks.add(task)
+            task.add_done_callback(self._mongodb_close_tasks.discard)
+
+    async def _close_mongodb_client_after_delay(
+        self, client: AsyncMongoClient, delay: float = 60.0
+    ) -> None:
+        """Close a superseded Mongo client after letting in-flight ops drain."""
+        try:
+            await asyncio.sleep(delay)
+            await client.close()
+        except asyncio.CancelledError:
+            await client.close()
+            raise
+        except Exception as e:
+            logger.warning(f"Error closing superseded MongoDB client: {e}")
+
+    def _start_mongodb_oidc_refresh_loop(self) -> None:
+        interval = self.environment_variables.MONGODB_OIDC_REFRESH_INTERVAL_SECONDS
+        if (
+            self.mongodb_client is None
+            or not self._mongodb_uses_oidc()
+            or interval <= 0
+            or self._mongodb_refresh_task is not None
+        ):
+            return
+        self._mongodb_refresh_task = asyncio.create_task(
+            self._mongodb_oidc_refresh_loop(interval)
+        )
+        logger.info(f"Started MongoDB OIDC refresh loop (interval={interval}s)")
+
+    async def _mongodb_oidc_refresh_loop(self, interval: int) -> None:
+        while True:
+            try:
+                await asyncio.sleep(interval)
+                await self.refresh_mongodb_client()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(
+                    f"MongoDB OIDC refresh failed; retrying next interval: {e}"
+                )
+
+    async def _stop_mongodb_oidc_refresh_loop(self) -> None:
+        if self._mongodb_refresh_task is not None:
+            self._mongodb_refresh_task.cancel()
+            try:
+                await self._mongodb_refresh_task
+            except asyncio.CancelledError:
+                pass
+            self._mongodb_refresh_task = None
 
     async def force_reload(self):
         """Force reload all dependencies with fresh environment variables"""
+        # Stop the MongoDB OIDC refresh loop before tearing down the client
+        await self._stop_mongodb_oidc_refresh_loop()
+
         # Stop metrics collection
         if self.postgres_metrics_collector:
             await self.postgres_metrics_collector.stop_collection()
@@ -271,6 +379,9 @@ def shutdown():
 
 async def async_shutdown():
     global_dependencies = GlobalDependencies()
+
+    # Stop the MongoDB OIDC refresh loop
+    await global_dependencies._stop_mongodb_oidc_refresh_loop()
 
     # Stop PostgreSQL metrics collection
     if global_dependencies.postgres_metrics_collector:

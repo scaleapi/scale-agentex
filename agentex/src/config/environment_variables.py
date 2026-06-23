@@ -37,6 +37,7 @@ class EnvVarKeys(str, Enum):
     MONGODB_DATABASE_NAME = "MONGODB_DATABASE_NAME"
     MONGODB_MAX_POOL_SIZE = "MONGODB_MAX_POOL_SIZE"
     MONGODB_MIN_POOL_SIZE = "MONGODB_MIN_POOL_SIZE"
+    MONGODB_OIDC_REFRESH_INTERVAL_SECONDS = "MONGODB_OIDC_REFRESH_INTERVAL_SECONDS"
     REDIS_MAX_CONNECTIONS = "REDIS_MAX_CONNECTIONS"
     REDIS_CONNECTION_TIMEOUT = "REDIS_CONNECTION_TIMEOUT"
     REDIS_SOCKET_TIMEOUT = "REDIS_SOCKET_TIMEOUT"
@@ -96,6 +97,11 @@ class EnvironmentVariables(BaseModel):
     MONGODB_DATABASE_NAME: str | None = "agentex"
     MONGODB_MAX_POOL_SIZE: int = 50
     MONGODB_MIN_POOL_SIZE: int = 5
+    # Rebuild the Mongo client on this interval to renew GCP OIDC credentials.
+    # pymongo caches the OIDC token for the life of the client and never refreshes
+    # it proactively, so a long-lived client fails auth once the ~1h GCP token
+    # expires. Only applied to MONGODB-OIDC URIs; 0 disables. Default 45 min.
+    MONGODB_OIDC_REFRESH_INTERVAL_SECONDS: int = 2700
     REDIS_MAX_CONNECTIONS: int = 50  # Increased for SSE streaming
     REDIS_CONNECTION_TIMEOUT: int = 60  # Connection timeout in seconds
     REDIS_SOCKET_TIMEOUT: int = 30  # Socket timeout in seconds
@@ -162,6 +168,9 @@ class EnvironmentVariables(BaseModel):
             ),
             MONGODB_MIN_POOL_SIZE=int(
                 os.environ.get(EnvVarKeys.MONGODB_MIN_POOL_SIZE, "5")
+            ),
+            MONGODB_OIDC_REFRESH_INTERVAL_SECONDS=int(
+                os.environ.get(EnvVarKeys.MONGODB_OIDC_REFRESH_INTERVAL_SECONDS, "2700")
             ),
             REDIS_MAX_CONNECTIONS=int(
                 os.environ.get(EnvVarKeys.REDIS_MAX_CONNECTIONS, "100")
