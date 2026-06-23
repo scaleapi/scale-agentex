@@ -6696,6 +6696,13 @@ components:
             type: object
           - type: 'null'
           title: If provided, replaces task_metadata with this value
+        merge_params:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Optional shallow-merge patch applied to the task's params column.
+            Top-level keys overwrite; pass full nested objects to change subfields.
       type: object
       title: UpdateTaskRequest
     ValidationError:
