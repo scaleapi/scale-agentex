@@ -911,6 +911,87 @@ class TestTasksAPIIntegration:
         assert response_data["task_metadata"]["configuration"]["version"] == "2.0.0"
         assert response_data["task_metadata"]["metrics"]["complexity_score"] == 75
 
+    async def test_update_task_by_name_forwards_merge_params(
+        self, isolated_client, isolated_repositories
+    ):
+        """PUT /tasks/name/{task_name} must forward merge_params, not drop it."""
+        # Given - a task with existing params
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="merge-params-by-name-agent",
+            description="Agent for merge_params by name testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="task-for-merge-params-by-name",
+            status=TaskStatus.RUNNING,
+            status_reason="Test task for merge_params by name endpoint",
+            params={"model": "gpt-4", "temperature": 0.2},
+        )
+        created_task = await task_repo.create(agent_id=agent.id, task=task)
+
+        # When - update by name supplying only merge_params
+        update_payload = {"merge_params": {"temperature": 0.9, "max_tokens": 1024}}
+        response = await isolated_client.put(
+            f"/tasks/name/{created_task.name}", json=update_payload
+        )
+
+        # Then - the patch is shallow-merged into the existing params
+        assert response.status_code == 200
+        response_data = response.json()
+        assert response_data["params"] == {
+            "model": "gpt-4",
+            "temperature": 0.9,
+            "max_tokens": 1024,
+        }
+
+    async def test_update_task_metadata_and_merge_params_together(
+        self, isolated_client, isolated_repositories
+    ):
+        """Supplying both task_metadata and merge_params must persist both."""
+        # Given - a task with existing params and metadata
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="merge-params-and-metadata-agent",
+            description="Agent for combined update testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="task-for-combined-update",
+            status=TaskStatus.RUNNING,
+            status_reason="Test task for combined update endpoint",
+            params={"model": "gpt-4"},
+            task_metadata={"initial": "metadata"},
+        )
+        created_task = await task_repo.create(agent_id=agent.id, task=task)
+
+        # When - update by id supplying both fields at once
+        update_payload = {
+            "task_metadata": {"stage": "tuned"},
+            "merge_params": {"temperature": 0.7},
+        }
+        response = await isolated_client.put(
+            f"/tasks/{created_task.id}", json=update_payload
+        )
+
+        # Then - neither field is silently discarded
+        assert response.status_code == 200
+        response_data = response.json()
+        assert response_data["task_metadata"] == {"stage": "tuned"}
+        assert response_data["params"] == {"model": "gpt-4", "temperature": 0.7}
+
     async def test_list_tasks_includes_task_metadata_field(
         self, isolated_client, isolated_repositories
     ):
