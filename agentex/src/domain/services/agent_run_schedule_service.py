@@ -60,7 +60,7 @@ class AgentRunScheduleService:
 
     The Postgres row is the source of truth for the schedule definition; the
     Temporal Schedule is only the recurring clock and is given nothing but the
-    schedule row id as its workflow argument (AGX1-368, D4).
+    schedule row id as its workflow argument.
     """
 
     def __init__(

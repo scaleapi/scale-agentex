@@ -4,8 +4,8 @@ Revision ID: 3b1c9d2e4f6a
 Revises: c7a1b2d3e4f5
 Create Date: 2026-06-22 12:00:00.000000
 
-Creates the agent_run_schedules table backing the scheduled-agent-runs feature
-(AGX1-368). Schema-only and idempotent: the table and its indexes are created
+Creates the agent_run_schedules table backing the scheduled-agent-runs feature.
+Schema-only and idempotent: the table and its indexes are created
 with IF NOT EXISTS-style guards (Alembic create_table on a fresh table), and the
 indexes target the just-created table so they are non-blocking by construction.
 """

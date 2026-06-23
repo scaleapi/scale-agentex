@@ -29,7 +29,7 @@ class ScheduleCreatorPrincipal(BaseModel):
     """Credential-free creator identity stored with the schedule.
 
     Never carries cookies, JWTs, API keys, OAuth tokens, or request headers — it
-    is creator *context* used only for AuthZ and ownership at fire time (D5/D6).
+    is creator *context* used only for AuthZ and ownership at fire time.
     """
 
     principal_type: str | None = Field(

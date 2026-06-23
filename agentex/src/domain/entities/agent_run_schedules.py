@@ -23,7 +23,7 @@ def infer_initial_input_method(acp_type: ACPType) -> InitialInputMethod:
     """Map an agent's ACP type to the delivery method for the initial input.
 
     async / agentic agents receive the first input as an ``event/send``; sync
-    agents receive it as a ``message/send`` (AGX1-368, D2 / Open Q5).
+    agents receive it as a ``message/send``.
     """
     if acp_type == ACPType.SYNC:
         return InitialInputMethod.MESSAGE_SEND
@@ -35,7 +35,7 @@ class AgentRunScheduleEntity(BaseModel):
 
     The Postgres row is the source of truth for what each future fire should do;
     the Temporal Schedule is only the recurring clock and carries nothing but the
-    schedule id (AGX1-368, D4).
+    schedule id.
 
     JSON-backed fields (``creator_principal``, ``task_params``, ``task_metadata``,
     ``initial_input``) are stored as plain dicts so they round-trip cleanly through
@@ -68,7 +68,7 @@ class AgentRunScheduleEntity(BaseModel):
     )
     paused: bool = Field(False, description="Whether the schedule is currently paused.")
     # Credential-free creator context: principal_type / user_id / service_account_id /
-    # account_id only. Never cookies, JWTs, API keys, OAuth tokens, or headers (D5/D6).
+    # account_id only. Never cookies, JWTs, API keys, OAuth tokens, or headers.
     creator_principal: dict[str, Any] = Field(
         ...,
         description="Credential-free creator identity used for AuthZ at fire time.",

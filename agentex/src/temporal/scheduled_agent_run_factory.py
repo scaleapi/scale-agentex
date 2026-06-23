@@ -4,7 +4,7 @@ Depends DI, for use inside the Temporal worker. Mirrors the manual-wiring patter
 in task_retention_factory.py.
 
 Each scheduled fire creates a fresh Agentex task and delivers the schedule's
-configured initial input under the *stored creator principal* (AGX1-368, D5) —
+configured initial input under the *stored creator principal* —
 not as an agent identity. So the AgentsACPUseCase is rebuilt per fire with an
 AuthorizationService whose principal_context is that fire's creator principal and
 whose agent_identity is None, attributing task ownership and AuthZ checks to the
@@ -51,7 +51,7 @@ class _ScheduledRunRequest:
     Carries the stored creator principal as ``state.principal_context`` with no
     ``agent_identity`` (so AuthZ attributes ownership to the creator, not a
     service) and no headers (so no live user credentials — cookies, API keys —
-    are forwarded downstream; D5/D6). ``build_delegation_headers`` returns an
+    are forwarded downstream). ``build_delegation_headers`` returns an
     empty mapping when there are no inbound credential headers, which is exactly
     the intended behavior here.
     """

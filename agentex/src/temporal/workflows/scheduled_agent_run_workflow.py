@@ -1,5 +1,5 @@
 """
-Scheduled agent run workflow (AGX1-368).
+Scheduled agent run workflow.
 
 Started by a Temporal Schedule on each cron / interval fire. The workflow is
 deliberately thin: it passes only the schedule id and a per-fire token to a

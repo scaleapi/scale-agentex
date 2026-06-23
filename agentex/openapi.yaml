@@ -5591,7 +5591,7 @@ components:
         Never carries cookies, JWTs, API keys, OAuth tokens, or request headers —
         it
 
-        is creator *context* used only for AuthZ and ownership at fire time (D5/D6).'
+        is creator *context* used only for AuthZ and ownership at fire time.'
     ScheduleInitialInput:
       properties:
         type:

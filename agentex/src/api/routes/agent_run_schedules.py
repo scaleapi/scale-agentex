@@ -30,7 +30,7 @@ logger = make_logger(__name__)
 
 # The canonical agent scheduling API. Schedules an agent *run* on each fire
 # (creates a fresh task + delivers the configured initial input), hiding the
-# underlying Temporal workflow/task-queue details (AGX1-368, D1). It replaced the
+# underlying Temporal workflow/task-queue details. It replaced the
 # earlier bare-workflow scheduler that previously owned this path.
 router = APIRouter(
     prefix="/agents/{agent_id}/schedules",
@@ -49,7 +49,7 @@ def _extract_creator_principal(principal_context: Any) -> dict[str, Any]:
     """Capture the credential-free creator subset from the request principal.
 
     Stores only identity selectors (principal_type / user_id / service_account_id
-    / account_id). Never cookies, JWTs, API keys, OAuth tokens, or headers (D5/D6).
+    / account_id). Never cookies, JWTs, API keys, OAuth tokens, or headers.
     Returns an empty dict under authz bypass / when no principal is present.
     """
     if principal_context is None:

@@ -1,5 +1,5 @@
 """
-Temporal activity for scheduled agent runs (AGX1-368).
+Temporal activity for scheduled agent runs.
 
 ``launch_scheduled_agent_run`` is the single activity each scheduled fire runs.
 It loads the persisted schedule, creates a fresh Agentex task with a deterministic
@@ -180,7 +180,7 @@ class ScheduledAgentRunActivities:
 
         # Re-check the stored creator principal's permission at fire time, mirroring
         # the JSON-RPC route's authorization order: agent.execute (the RPC endpoint
-        # gate) then task.create (implements AGX1-368 D5's `check`). A revoked
+        # gate) then task.create (re-checks the creator's permission at fire time). A revoked
         # creator stops future fires instead of running under stale ownership.
         # AuthorizationError (403) is a permanent denial → skip cleanly; transient
         # authz errors propagate so Temporal retries. Under authz bypass (local /
