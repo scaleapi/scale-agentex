@@ -2,6 +2,7 @@ import asyncio
 import json
 import random
 from collections.abc import AsyncIterator, Callable
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import Depends
@@ -832,6 +833,29 @@ class AgentsACPUseCase(TaskMessageMixin):
         task = await self.task_service.get_task(
             id=params.task_id, name=params.task_name
         )
+
+        # Persist user-authored event payloads as a TaskMessage on the
+        # platform side BEFORE forwarding the event to the agent. Without
+        # this, the agent runtime is the one that materializes the user's
+        # TaskMessage when it processes the forwarded event, which races
+        # against any messages the agent emits from its task-create handler
+        # (e.g. a startup "creating sandbox..." data row). BSON Date is
+        # millisecond-precision, so two writes inside the same millisecond
+        # have no defined order — and even when the writes happen in order,
+        # the agent's startup row can land first if event_send takes any
+        # round-trip time to reach the agent. Writing here closes both
+        # windows: the user row exists in the DB before the agent gets the
+        # event, and its created_at is clamped strictly after every
+        # already-existing message so the row sorts deterministically when
+        # paginated by (created_at, _id).
+        if (
+            params.content is not None
+            and params.content.author == MessageAuthor.USER
+        ):
+            await self._append_user_event_message(
+                task_id=task.id, content=params.content
+            )
+
         # Create the event in the DB
         event_entity = await self.task_service.create_event_and_forward_to_acp(
             agent=agent,
@@ -841,6 +865,42 @@ class AgentsACPUseCase(TaskMessageMixin):
             request_headers=request_headers,
         )
         return event_entity
+
+    async def _append_user_event_message(
+        self,
+        task_id: str,
+        content: TaskMessageContentEntity,
+    ) -> TaskMessageEntity:
+        """
+        Persist a user-authored event payload as a TaskMessage with a
+        created_at that is strictly greater than every existing message's
+        created_at for this task.
+
+        The clamp is `max(datetime.now(UTC), latest_existing + 1ms)`. The
+        1ms bump matches the staggering used by ``append_messages`` so the
+        stored ordering is durable against BSON Date's millisecond
+        precision: two writes that would otherwise collide on the same
+        millisecond now sort deterministically.
+        """
+        latest = await self.task_message_service.get_messages(
+            task_id=task_id,
+            limit=1,
+            page_number=1,
+            order_by="created_at",
+            order_direction="desc",
+        )
+        now = datetime.now(UTC)
+        if latest and latest[0].created_at is not None:
+            candidate = latest[0].created_at + timedelta(milliseconds=1)
+            clamped_created_at = max(now, candidate)
+        else:
+            clamped_created_at = now
+
+        return await self.task_message_service.append_message(
+            task_id=task_id,
+            content=content,
+            created_at=clamped_created_at,
+        )
 
 
 DAgentsACPUseCase = Annotated[AgentsACPUseCase, Depends(AgentsACPUseCase)]
