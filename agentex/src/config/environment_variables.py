@@ -57,6 +57,7 @@ class EnvVarKeys(str, Enum):
     SSE_KEEPALIVE_PING_INTERVAL = "SSE_KEEPALIVE_PING_INTERVAL"
     AGENTEX_SERVER_TASK_QUEUE = "AGENTEX_SERVER_TASK_QUEUE"
     ENABLE_HEALTH_CHECK_WORKFLOW = "ENABLE_HEALTH_CHECK_WORKFLOW"
+    ENABLE_AGENT_RUN_SCHEDULES = "ENABLE_AGENT_RUN_SCHEDULES"
     WEBHOOK_REQUEST_TIMEOUT = "WEBHOOK_REQUEST_TIMEOUT"
     RETENTION_CLEANUP_ENABLED = "RETENTION_CLEANUP_ENABLED"
     RETENTION_CLEANUP_AGENT_ALLOWLIST = "RETENTION_CLEANUP_AGENT_ALLOWLIST"
@@ -120,6 +121,8 @@ class EnvironmentVariables(BaseModel):
     SSE_KEEPALIVE_PING_INTERVAL: int = 15  # SSE keepalive ping interval in seconds
     AGENTEX_SERVER_TASK_QUEUE: str | None = None
     ENABLE_HEALTH_CHECK_WORKFLOW: bool = False
+    # Gates the agent run schedules API. Off by default; enabled in development.
+    ENABLE_AGENT_RUN_SCHEDULES: bool = False
     WEBHOOK_REQUEST_TIMEOUT: float = 15.0  # Webhook request timeout in seconds
     RETENTION_CLEANUP_ENABLED: bool = False
     RETENTION_CLEANUP_AGENT_ALLOWLIST: list[str] = []
@@ -213,6 +216,9 @@ class EnvironmentVariables(BaseModel):
             ENABLE_HEALTH_CHECK_WORKFLOW=(
                 os.environ.get(EnvVarKeys.ENABLE_HEALTH_CHECK_WORKFLOW, "false")
                 == "true"
+            ),
+            ENABLE_AGENT_RUN_SCHEDULES=(
+                os.environ.get(EnvVarKeys.ENABLE_AGENT_RUN_SCHEDULES, "false") == "true"
             ),
             WEBHOOK_REQUEST_TIMEOUT=float(
                 os.environ.get(EnvVarKeys.WEBHOOK_REQUEST_TIMEOUT, "15.0")

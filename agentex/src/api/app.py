@@ -204,7 +204,11 @@ fastapi_app.include_router(agent_task_tracker.router)
 fastapi_app.include_router(agent_api_keys.router)
 fastapi_app.include_router(deployment_history.router)
 fastapi_app.include_router(deployments.router)
-fastapi_app.include_router(agent_run_schedules.router)
+# Agent run schedules are feature-flagged (off by default, enabled in development).
+# When disabled the routes are not registered, so the API surface is absent
+# entirely in environments that haven't opted in.
+if resolve_environment_variable_dependency(EnvVarKeys.ENABLE_AGENT_RUN_SCHEDULES):
+    fastapi_app.include_router(agent_run_schedules.router)
 fastapi_app.include_router(checkpoints.router)
 fastapi_app.include_router(task_retention.router)
 

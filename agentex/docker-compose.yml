@@ -166,6 +166,8 @@ services:
       - MONGODB_DATABASE_NAME=agentex
       - WATCHFILES_FORCE_POLLING=true
       - ENABLE_HEALTH_CHECK_WORKFLOW=true
+      # Disabled by default; enable when testing, e.g. `ENABLE_AGENT_RUN_SCHEDULES=true ./dev.sh`.
+      - ENABLE_AGENT_RUN_SCHEDULES=${ENABLE_AGENT_RUN_SCHEDULES:-false}
       - AGENTEX_SERVER_TASK_QUEUE=agentex-server
       - ALLOWED_ORIGINS=http://localhost:3000
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://agentex-otel-collector:4317
