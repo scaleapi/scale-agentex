@@ -113,13 +113,12 @@ class TasksUseCase:
         if task_metadata is None and merge_params is None:
             return task_entity
 
-        if task_metadata is not None:
-            task_entity.task_metadata = task_metadata
-
         # `merge_params` is a separate atomic JSONB shallow-merge so concurrent
         # callers don't overwrite each other's fields (vs reading→mutating→writing
-        # the whole params dict on task_entity). Falls through to a normal save
-        # only when task_metadata also changed.
+        # the whole params dict on task_entity). Run it first so the refreshed
+        # entity it returns becomes the base we apply `task_metadata` on top of;
+        # otherwise the `task_entity = merged` reassignment would discard an
+        # in-memory metadata change made before the merge.
         if merge_params:
             merged = await self.task_service.merge_task_params(
                 task_entity.id, merge_params
@@ -128,6 +127,7 @@ class TasksUseCase:
                 task_entity = merged
 
         if task_metadata is not None:
+            task_entity.task_metadata = task_metadata
             task_entity = await self.task_service.update_task(task=task_entity)
 
         return task_entity
