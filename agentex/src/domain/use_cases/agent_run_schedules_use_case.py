@@ -6,6 +6,7 @@ from src.api.schemas.agent_run_schedules import (
     AgentRunScheduleListResponse,
     AgentRunScheduleResponse,
     CreateAgentRunScheduleRequest,
+    UpdateAgentRunScheduleRequest,
 )
 from src.domain.entities.agents import AgentEntity
 from src.domain.exceptions import ClientError
@@ -68,6 +69,20 @@ class AgentRunSchedulesUseCase:
         return await self.run_schedule_service.resume_schedule(
             agent_id, name, note=note
         )
+
+    async def update_schedule(
+        self, agent_id: str, name: str, request: UpdateAgentRunScheduleRequest
+    ) -> AgentRunScheduleResponse:
+        if request.cron_expression and request.interval_seconds:
+            raise ClientError(
+                "Provide only one of cron_expression or interval_seconds, not both"
+            )
+        return await self.run_schedule_service.update_schedule(agent_id, name, request)
+
+    async def trigger_schedule(
+        self, agent_id: str, name: str
+    ) -> AgentRunScheduleResponse:
+        return await self.run_schedule_service.trigger_schedule(agent_id, name)
 
     async def delete_schedule(self, agent_id: str, name: str) -> str:
         return await self.run_schedule_service.delete_schedule(agent_id, name)

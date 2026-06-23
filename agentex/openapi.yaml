@@ -3312,6 +3312,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Schedules
+      summary: Update Run Schedule
+      description: Partially update a run schedule's definition (cadence, window,
+        input, etc.).
+      operationId: update_run_schedule_agents__agent_id__schedules__name__patch
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAgentRunScheduleRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     delete:
       tags:
       - Schedules
@@ -3338,6 +3377,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/schedules/{name}/trigger:
+    post:
+      tags:
+      - Schedules
+      summary: Trigger Run Schedule
+      description: Trigger an immediate, out-of-band run of the schedule (in addition
+        to its cadence).
+      operationId: trigger_run_schedule_agents__agent_id__schedules__name__trigger_post
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
         '422':
           description: Validation Error
           content:
@@ -6548,6 +6621,83 @@ components:
       - name
       title: ToolResponseDelta
       description: Delta for tool response updates
+    UpdateAgentRunScheduleRequest:
+      properties:
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+          description: Optional description of what this schedule does.
+        cron_expression:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cron Expression
+          description: New cron cadence. Mutually exclusive with interval_seconds.
+        interval_seconds:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Interval Seconds
+          description: New interval cadence in seconds. Mutually exclusive with cron_expression.
+        timezone:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Timezone
+          description: IANA timezone the cron expression is evaluated in.
+        start_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Start At
+          description: When the schedule should start being active.
+        end_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: End At
+          description: When the schedule should stop being active.
+        paused:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Paused
+          description: Pause/resume the schedule as part of the update.
+        task_params:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task Params
+          description: Resolved config forwarded as task `params` at fire time.
+        task_metadata:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task Metadata
+          description: Metadata copied onto each created task at fire time.
+        initial_input:
+          anyOf:
+          - $ref: '#/components/schemas/ScheduleInitialInput'
+          - type: 'null'
+          description: Replacement initial input delivered to each created task.
+      type: object
+      title: UpdateAgentRunScheduleRequest
+      description: 'Partial update for a scheduled agent run.
+
+
+        Only fields present in the request body are changed; the schedule ``name``
+        is
+
+        immutable (it is the natural key). Setting ``cron_expression`` clears
+
+        ``interval_seconds`` and vice versa; providing both is rejected.'
     UpdateAgentTaskTrackerRequest:
       properties:
         last_processed_event_id:

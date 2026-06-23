@@ -6,6 +6,7 @@ from temporalio.client import ScheduleDescription
 
 from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
 from src.adapters.temporal.adapter_temporal import DTemporalAdapter
+from src.adapters.temporal.exceptions import TemporalScheduleNotFoundError
 from src.api.schemas.agent_run_schedules import (
     AgentRunScheduleListResponse,
     AgentRunScheduleResponse,
@@ -13,6 +14,7 @@ from src.api.schemas.agent_run_schedules import (
     RunScheduleState,
     ScheduleCreatorPrincipal,
     ScheduleInitialInput,
+    UpdateAgentRunScheduleRequest,
 )
 from src.api.schemas.authorization_types import AgentexResource
 from src.domain.entities.agent_run_schedules import (
@@ -173,8 +175,14 @@ class AgentRunScheduleService:
             if authorized is not None and selector not in authorized:
                 continue
             temporal_id = build_run_schedule_temporal_id(row.id)
+            # Serve the list from Postgres only — no per-row Temporal describe.
+            # Fanning out one RPC per row (up to the route's limit of 1000) makes
+            # list latency scale with Temporal round-trips; live fields are
+            # available on the single-schedule GET instead.
             items.append(
-                await self._to_response(row, agent=agent, temporal_id=temporal_id)
+                await self._to_response(
+                    row, agent=agent, temporal_id=temporal_id, include_live=False
+                )
             )
         return AgentRunScheduleListResponse(run_schedules=items, total=len(items))
 
@@ -203,13 +211,106 @@ class AgentRunScheduleService:
         )
         temporal_id = build_run_schedule_temporal_id(row.id)
         # Temporal is the recurring clock; delete it first so no further fires can
-        # occur, then drop the row and the auth entry (both best-effort after).
-        await self.temporal_adapter.delete_schedule(temporal_id)
+        # occur, then drop the row and the auth entry. A missing Temporal schedule
+        # is treated as success (the clock is already gone) so a prior partial
+        # delete — Temporal removed but the row write failed — can still be cleaned
+        # up through this path rather than being stranded forever.
+        try:
+            await self.temporal_adapter.delete_schedule(temporal_id)
+        except TemporalScheduleNotFoundError:
+            logger.warning(
+                "run_schedule_temporal_already_absent_on_delete",
+                extra={"temporal_id": temporal_id, "schedule_id": row.id},
+            )
         await self.schedule_repository.delete(id=row.id)
         await self._deregister_schedule_from_auth(
             authz_selector=build_run_schedule_authz_selector(agent_id, row.name)
         )
         return row.id
+
+    async def update_schedule(
+        self, agent_id: str, name: str, request: UpdateAgentRunScheduleRequest
+    ) -> AgentRunScheduleResponse:
+        """Apply a partial update to a schedule's definition and Temporal spec.
+
+        Only fields present in the request are changed. Setting one of
+        cron_expression / interval_seconds clears the other; the merged result
+        must still have exactly one cadence.
+        """
+        row = await self.schedule_repository.get_by_agent_id_and_name_or_raise(
+            agent_id, name
+        )
+        provided = request.model_dump(exclude_unset=True)
+        if "description" in provided:
+            row.description = request.description
+        if "cron_expression" in provided:
+            row.cron_expression = request.cron_expression
+            if request.cron_expression is not None:
+                row.interval_seconds = None
+        if "interval_seconds" in provided:
+            row.interval_seconds = request.interval_seconds
+            if request.interval_seconds is not None:
+                row.cron_expression = None
+        if "timezone" in provided and request.timezone is not None:
+            row.timezone = request.timezone
+        if "start_at" in provided:
+            row.start_at = request.start_at
+        if "end_at" in provided:
+            row.end_at = request.end_at
+        if "paused" in provided and request.paused is not None:
+            row.paused = request.paused
+        if "task_params" in provided:
+            row.task_params = request.task_params
+        if "task_metadata" in provided:
+            row.task_metadata = request.task_metadata
+        if "initial_input" in provided and request.initial_input is not None:
+            row.initial_input = request.initial_input.to_dict(mode="json")
+
+        if not row.cron_expression and not row.interval_seconds:
+            raise ClientError(
+                "Schedule must have exactly one of cron_expression or interval_seconds"
+            )
+        if row.cron_expression and row.interval_seconds:
+            raise ClientError(
+                "Provide only one of cron_expression or interval_seconds, not both"
+            )
+
+        updated = await self.schedule_repository.update(row)
+        temporal_id = build_run_schedule_temporal_id(updated.id)
+        # Push the merged cadence/window/paused state to the Temporal clock. A
+        # missing schedule is logged rather than raised so the persisted row stays
+        # the source of truth (mirrors the describe/delete tolerance).
+        try:
+            await self.temporal_adapter.update_schedule(
+                schedule_id=temporal_id,
+                cron_expressions=(
+                    [updated.cron_expression] if updated.cron_expression else None
+                ),
+                interval_seconds=updated.interval_seconds,
+                start_at=updated.start_at,
+                end_at=updated.end_at,
+                time_zone_name=updated.timezone if updated.cron_expression else None,
+                paused=updated.paused,
+            )
+        except TemporalScheduleNotFoundError:
+            logger.warning(
+                "run_schedule_temporal_missing_on_update",
+                extra={"temporal_id": temporal_id, "schedule_id": updated.id},
+            )
+        agent = await self.agent_repository.get(id=agent_id)
+        return await self._to_response(updated, agent=agent, temporal_id=temporal_id)
+
+    async def trigger_schedule(
+        self, agent_id: str, name: str
+    ) -> AgentRunScheduleResponse:
+        """Trigger an immediate, out-of-band fire of the schedule."""
+        row = await self.schedule_repository.get_by_agent_id_and_name_or_raise(
+            agent_id, name
+        )
+        temporal_id = build_run_schedule_temporal_id(row.id)
+        await self.temporal_adapter.trigger_schedule(temporal_id)
+        agent = await self.agent_repository.get(id=agent_id)
+        return await self._to_response(row, agent=agent, temporal_id=temporal_id)
 
     # -- internals ---------------------------------------------------------
 
@@ -220,10 +321,23 @@ class AgentRunScheduleService:
             agent_id, name
         )
         temporal_id = build_run_schedule_temporal_id(row.id)
-        if paused:
-            await self.temporal_adapter.pause_schedule(temporal_id, note=note)
-        else:
-            await self.temporal_adapter.unpause_schedule(temporal_id, note=note)
+        # A missing Temporal schedule is logged rather than raised: the persisted
+        # ``paused`` flag is authoritative and the activity honors it defensively,
+        # so a missing clock can't strand the row in an un-toggleable state.
+        try:
+            if paused:
+                await self.temporal_adapter.pause_schedule(temporal_id, note=note)
+            else:
+                await self.temporal_adapter.unpause_schedule(temporal_id, note=note)
+        except TemporalScheduleNotFoundError:
+            logger.warning(
+                "run_schedule_temporal_missing_on_pause_toggle",
+                extra={
+                    "temporal_id": temporal_id,
+                    "schedule_id": row.id,
+                    "paused": paused,
+                },
+            )
         row.paused = paused
         updated = await self.schedule_repository.update(row)
         agent = await self.agent_repository.get(id=agent_id)
@@ -241,6 +355,7 @@ class AgentRunScheduleService:
         entity: AgentRunScheduleEntity,
         agent: AgentEntity,
         temporal_id: str,
+        include_live: bool = True,
     ) -> AgentRunScheduleResponse:
         effective_method = (
             entity.initial_input_method
@@ -252,21 +367,27 @@ class AgentRunScheduleService:
         last_action_time: datetime | None = None
         num_actions_taken = 0
 
-        # Live Temporal fields are best-effort: a describe failure (e.g. right
-        # after creation, or a transient Temporal error) must not break the
-        # response, which is fully serviceable from the persisted row.
-        try:
-            description = await self.temporal_adapter.describe_schedule(temporal_id)
-            live = self._extract_live_fields(description)
-            state = live["state"]
-            next_action_times = live["next_action_times"]
-            last_action_time = live["last_action_time"]
-            num_actions_taken = live["num_actions_taken"]
-        except Exception as exc:
-            logger.warning(
-                "run_schedule_describe_failed",
-                extra={"temporal_id": temporal_id, "error_type": type(exc).__name__},
-            )
+        # Live Temporal fields are best-effort and opt-in. ``include_live=False``
+        # (list path) skips the describe RPC entirely and serves state from the
+        # persisted ``paused`` flag. When enabled (single GET), a describe failure
+        # (e.g. right after creation, or a transient Temporal error) must not break
+        # the response, which is fully serviceable from the persisted row.
+        if include_live:
+            try:
+                description = await self.temporal_adapter.describe_schedule(temporal_id)
+                live = self._extract_live_fields(description)
+                state = live["state"]
+                next_action_times = live["next_action_times"]
+                last_action_time = live["last_action_time"]
+                num_actions_taken = live["num_actions_taken"]
+            except Exception as exc:
+                logger.warning(
+                    "run_schedule_describe_failed",
+                    extra={
+                        "temporal_id": temporal_id,
+                        "error_type": type(exc).__name__,
+                    },
+                )
 
         return AgentRunScheduleResponse(
             id=entity.id,

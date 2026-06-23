@@ -20,6 +20,7 @@ Boundary types are JSON-native (the backend data converter does not serialize
 Pydantic models), so args and the return value are plain str / dict.
 """
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -59,6 +60,30 @@ logger = make_logger(__name__)
 LAUNCH_SCHEDULED_AGENT_RUN_ACTIVITY = "launch_scheduled_agent_run_activity"
 
 _INPUT_DELIVERED_MARKER = "scheduled_input_delivered"
+
+# Temporal suffixes a scheduled workflow id with the nominal fire time
+# (e.g. ``...-run-2026-06-23T15:19:00Z``). Matching the trailing ISO-8601 lets
+# the display label use the *scheduled* time, which is stable across activity
+# retries, rather than wall-clock now() (which drifts on a delayed retry).
+_NOMINAL_FIRE_TIME_RE = re.compile(
+    r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)$"
+)
+
+
+def _format_fire_time(fire_id: str) -> str:
+    """Format the schedule's nominal fire time for the task display name.
+
+    Falls back to the current time when ``fire_id`` carries no recognizable
+    timestamp suffix (e.g. a manually triggered fire).
+    """
+    match = _NOMINAL_FIRE_TIME_RE.search(fire_id)
+    if match:
+        try:
+            parsed = datetime.fromisoformat(match.group(1).replace("Z", "+00:00"))
+            return parsed.strftime("%Y-%m-%d %H:%M UTC")
+        except ValueError:
+            pass
+    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
 def _build_initial_content(initial_input: dict[str, Any]) -> TaskMessageContentEntity:
@@ -204,7 +229,7 @@ class ScheduledAgentRunActivities:
         # task_metadata.display_name, never the deterministic `name` above).
         # Templated per fire so runs are distinguishable; placed first so a
         # caller-supplied display_name in schedule.task_metadata overrides it.
-        fire_time = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+        fire_time = _format_fire_time(fire_id)
         task_metadata = {
             "display_name": f"Scheduled Message: {schedule.name} · {fire_time}",
             **(schedule.task_metadata or {}),

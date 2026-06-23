@@ -8,6 +8,7 @@ from src.api.schemas.agent_run_schedules import (
     CreateAgentRunScheduleRequest,
     PauseRunScheduleRequest,
     ResumeRunScheduleRequest,
+    UpdateAgentRunScheduleRequest,
 )
 from src.api.schemas.authorization_types import (
     AgentexResourceType,
@@ -135,6 +136,47 @@ async def get_run_schedule(
         AuthorizedOperationType.read,
     )
     return await run_schedules_use_case.get_schedule(agent_id, name)
+
+
+@router.patch(
+    "/{name}",
+    response_model=AgentRunScheduleResponse,
+    summary="Update Run Schedule",
+    description="Partially update a run schedule's definition (cadence, window, input, etc.).",
+)
+async def update_run_schedule(
+    agent_id: str,
+    name: str,
+    request: UpdateAgentRunScheduleRequest,
+    run_schedules_use_case: DAgentRunSchedulesUseCase,
+    authorization: DAuthorizationService,
+) -> AgentRunScheduleResponse:
+    await _check_schedule_or_collapse_to_404(
+        authorization,
+        build_run_schedule_authz_selector(agent_id, name),
+        AuthorizedOperationType.update,
+    )
+    return await run_schedules_use_case.update_schedule(agent_id, name, request)
+
+
+@router.post(
+    "/{name}/trigger",
+    response_model=AgentRunScheduleResponse,
+    summary="Trigger Run Schedule",
+    description="Trigger an immediate, out-of-band run of the schedule (in addition to its cadence).",
+)
+async def trigger_run_schedule(
+    agent_id: str,
+    name: str,
+    run_schedules_use_case: DAgentRunSchedulesUseCase,
+    authorization: DAuthorizationService,
+) -> AgentRunScheduleResponse:
+    await _check_schedule_or_collapse_to_404(
+        authorization,
+        build_run_schedule_authz_selector(agent_id, name),
+        AuthorizedOperationType.update,
+    )
+    return await run_schedules_use_case.trigger_schedule(agent_id, name)
 
 
 @router.post(

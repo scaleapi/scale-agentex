@@ -14,6 +14,8 @@ from temporalio.client import (
     SchedulePolicy,
     ScheduleSpec,
     ScheduleState,
+    ScheduleUpdate,
+    ScheduleUpdateInput,
     WorkflowExecution,
     WorkflowHandle,
 )
@@ -611,6 +613,70 @@ class TemporalAdapter(TemporalGateway):
             logger.error(f"Failed to trigger schedule {schedule_id}: {e}")
             raise TemporalScheduleError(
                 message=f"Failed to trigger schedule '{schedule_id}'",
+                detail=str(e),
+            ) from e
+
+    async def update_schedule(
+        self,
+        schedule_id: str,
+        cron_expressions: list[str] | None = None,
+        interval_seconds: int | None = None,
+        start_at: Any | None = None,
+        end_at: Any | None = None,
+        time_zone_name: str | None = None,
+        paused: bool | None = None,
+    ) -> None:
+        """
+        Update an existing schedule's spec and/or paused state.
+
+        Rebuilds the schedule spec (cadence, window, timezone) from the provided
+        values and replaces it, leaving the workflow action untouched. ``paused``
+        is applied only when provided. The caller is expected to pass the full
+        desired spec (cron XOR interval), mirroring ``create_schedule``.
+        """
+        if not self.client:
+            raise TemporalConnectionError("Temporal client is not connected")
+
+        if not cron_expressions and not interval_seconds:
+            raise TemporalInvalidArgumentError(
+                message="Either cron_expressions or interval_seconds must be provided",
+                detail="A schedule requires at least one scheduling specification",
+            )
+
+        spec_kwargs: dict[str, Any] = {}
+        if time_zone_name:
+            spec_kwargs["time_zone_name"] = time_zone_name
+        new_spec = ScheduleSpec(
+            cron_expressions=cron_expressions or [],
+            intervals=[ScheduleIntervalSpec(every=timedelta(seconds=interval_seconds))]
+            if interval_seconds
+            else [],
+            start_at=start_at,
+            end_at=end_at,
+            **spec_kwargs,
+        )
+
+        def _apply(input: ScheduleUpdateInput) -> ScheduleUpdate:
+            schedule = input.description.schedule
+            schedule.spec = new_spec
+            if paused is not None:
+                schedule.state.paused = paused
+            return ScheduleUpdate(schedule=schedule)
+
+        try:
+            handle = self.client.get_schedule_handle(schedule_id)
+            await handle.update(_apply)
+            logger.info(f"Updated schedule {schedule_id}")
+        except Exception as e:
+            if "not found" in str(e).lower():
+                logger.error(f"Schedule {schedule_id} not found: {e}")
+                raise TemporalScheduleNotFoundError(
+                    message=f"Schedule '{schedule_id}' not found",
+                    detail=str(e),
+                ) from e
+            logger.error(f"Failed to update schedule {schedule_id}: {e}")
+            raise TemporalScheduleError(
+                message=f"Failed to update schedule '{schedule_id}'",
                 detail=str(e),
             ) from e
 

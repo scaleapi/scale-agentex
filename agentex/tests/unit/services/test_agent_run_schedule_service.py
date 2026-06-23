@@ -2,10 +2,12 @@ from unittest.mock import AsyncMock, PropertyMock
 from uuid import uuid4
 
 import pytest
+from src.adapters.temporal.exceptions import TemporalScheduleNotFoundError
 from src.api.schemas.agent_run_schedules import (
     CreateAgentRunScheduleRequest,
     RunScheduleState,
     ScheduleInitialInput,
+    UpdateAgentRunScheduleRequest,
 )
 from src.domain.entities.agent_run_schedules import AgentRunScheduleEntity
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
@@ -188,3 +190,119 @@ class TestAgentRunScheduleServiceList:
         result = await service.list_schedules(agent.id, authorized_schedule_ids=None)
 
         assert result.total == 1
+
+    async def test_list_does_not_fan_out_to_temporal(self, service, agent):
+        # The list path must not issue a describe RPC per row (would scale list
+        # latency with the number of schedules). State comes from the row instead.
+        rows = [
+            _persisted(agent.id, _request(name="sched-a")),
+            _persisted(agent.id, _request(name="sched-b")),
+        ]
+        service.schedule_repository.list_by_agent_id.return_value = rows
+        service.agent_repository.get.return_value = agent
+
+        await service.list_schedules(agent.id, authorized_schedule_ids=None)
+
+        service.temporal_adapter.describe_schedule.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestAgentRunScheduleServiceDelete:
+    async def test_delete_tolerates_missing_temporal_schedule(self, service, agent):
+        # A prior partial delete (Temporal gone, row survived) must still be
+        # cleanable: a missing Temporal schedule is treated as success.
+        row = _persisted(agent.id, _request())
+        service.schedule_repository.get_by_agent_id_and_name_or_raise.return_value = row
+        service.temporal_adapter.delete_schedule.side_effect = (
+            TemporalScheduleNotFoundError(message="gone", detail="gone")
+        )
+
+        result = await service.delete_schedule(agent.id, row.name)
+
+        assert result == row.id
+        service.schedule_repository.delete.assert_called_once_with(id=row.id)
+        service.authorization_service.deregister_resource.assert_called_once()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestAgentRunScheduleServicePauseResume:
+    async def test_pause_tolerates_missing_temporal_schedule(self, service, agent):
+        row = _persisted(agent.id, _request())
+        service.schedule_repository.get_by_agent_id_and_name_or_raise.return_value = row
+        service.schedule_repository.update.return_value = row
+        service.agent_repository.get.return_value = agent
+        service.temporal_adapter.pause_schedule.side_effect = (
+            TemporalScheduleNotFoundError(message="gone", detail="gone")
+        )
+
+        response = await service.pause_schedule(agent.id, row.name)
+
+        # The persisted paused flag is still flipped even though the clock is gone.
+        assert row.paused is True
+        assert response.paused is True
+        service.schedule_repository.update.assert_called_once()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestAgentRunScheduleServiceUpdate:
+    async def test_update_swaps_cron_for_interval(self, service, agent):
+        row = _persisted(agent.id, _request())  # cron-based
+        service.schedule_repository.get_by_agent_id_and_name_or_raise.return_value = row
+        service.schedule_repository.update.return_value = row
+        service.agent_repository.get.return_value = agent
+
+        await service.update_schedule(
+            agent.id, row.name, UpdateAgentRunScheduleRequest(interval_seconds=120)
+        )
+
+        # Setting interval clears cron, and the new cadence is pushed to Temporal.
+        assert row.cron_expression is None
+        assert row.interval_seconds == 120
+        update_kwargs = service.temporal_adapter.update_schedule.call_args.kwargs
+        assert update_kwargs["interval_seconds"] == 120
+        assert update_kwargs["cron_expressions"] is None
+
+    async def test_update_rejects_clearing_all_cadences(self, service, agent):
+        row = _persisted(agent.id, _request())  # cron-based, no interval
+        service.schedule_repository.get_by_agent_id_and_name_or_raise.return_value = row
+
+        # Explicitly nulling cron without supplying an interval leaves no cadence.
+        with pytest.raises(ClientError):
+            await service.update_schedule(
+                agent.id, row.name, UpdateAgentRunScheduleRequest(cron_expression=None)
+            )
+
+        service.temporal_adapter.update_schedule.assert_not_called()
+
+    async def test_update_tolerates_missing_temporal_schedule(self, service, agent):
+        row = _persisted(agent.id, _request())
+        service.schedule_repository.get_by_agent_id_and_name_or_raise.return_value = row
+        service.schedule_repository.update.return_value = row
+        service.agent_repository.get.return_value = agent
+        service.temporal_adapter.update_schedule.side_effect = (
+            TemporalScheduleNotFoundError(message="gone", detail="gone")
+        )
+
+        response = await service.update_schedule(
+            agent.id, row.name, UpdateAgentRunScheduleRequest(description="new")
+        )
+
+        assert response.description == "new"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestAgentRunScheduleServiceTrigger:
+    async def test_trigger_calls_temporal(self, service, agent):
+        row = _persisted(agent.id, _request())
+        service.schedule_repository.get_by_agent_id_and_name_or_raise.return_value = row
+        service.agent_repository.get.return_value = agent
+
+        await service.trigger_schedule(agent.id, row.name)
+
+        service.temporal_adapter.trigger_schedule.assert_called_once_with(
+            build_run_schedule_temporal_id(row.id)
+        )

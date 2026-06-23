@@ -5,6 +5,7 @@ import pytest
 from src.api.schemas.agent_run_schedules import (
     CreateAgentRunScheduleRequest,
     ScheduleInitialInput,
+    UpdateAgentRunScheduleRequest,
 )
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
 from src.domain.exceptions import ClientError
@@ -96,3 +97,22 @@ class TestAgentRunSchedulesUseCase:
 
         await use_case.delete_schedule(agent.id, "daily-summary")
         mock_service.delete_schedule.assert_called_once_with(agent.id, "daily-summary")
+
+    async def test_update_delegates(self, use_case, mock_service, agent):
+        request = UpdateAgentRunScheduleRequest(interval_seconds=120)
+        await use_case.update_schedule(agent.id, "daily-summary", request)
+        mock_service.update_schedule.assert_called_once_with(
+            agent.id, "daily-summary", request
+        )
+
+    async def test_update_rejects_both_cadences(self, use_case, agent):
+        request = UpdateAgentRunScheduleRequest(
+            cron_expression="0 0 * * *", interval_seconds=30
+        )
+        with pytest.raises(ClientError) as exc:
+            await use_case.update_schedule(agent.id, "daily-summary", request)
+        assert "only one" in str(exc.value)
+
+    async def test_trigger_delegates(self, use_case, mock_service, agent):
+        await use_case.trigger_schedule(agent.id, "daily-summary")
+        mock_service.trigger_schedule.assert_called_once_with(agent.id, "daily-summary")

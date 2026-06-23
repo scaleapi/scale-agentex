@@ -157,6 +157,49 @@ class AgentRunScheduleListResponse(BaseModel):
     total: int = Field(..., description="The number of run schedules returned.")
 
 
+class UpdateAgentRunScheduleRequest(BaseModel):
+    """Partial update for a scheduled agent run.
+
+    Only fields present in the request body are changed; the schedule ``name`` is
+    immutable (it is the natural key). Setting ``cron_expression`` clears
+    ``interval_seconds`` and vice versa; providing both is rejected.
+    """
+
+    description: str | None = Field(
+        None, description="Optional description of what this schedule does."
+    )
+    cron_expression: str | None = Field(
+        None,
+        description="New cron cadence. Mutually exclusive with interval_seconds.",
+    )
+    interval_seconds: int | None = Field(
+        None,
+        ge=1,
+        description="New interval cadence in seconds. Mutually exclusive with cron_expression.",
+    )
+    timezone: str | None = Field(
+        None, description="IANA timezone the cron expression is evaluated in."
+    )
+    start_at: datetime | None = Field(
+        None, description="When the schedule should start being active."
+    )
+    end_at: datetime | None = Field(
+        None, description="When the schedule should stop being active."
+    )
+    paused: bool | None = Field(
+        None, description="Pause/resume the schedule as part of the update."
+    )
+    task_params: dict[str, Any] | None = Field(
+        None, description="Resolved config forwarded as task `params` at fire time."
+    )
+    task_metadata: dict[str, Any] | None = Field(
+        None, description="Metadata copied onto each created task at fire time."
+    )
+    initial_input: ScheduleInitialInput | None = Field(
+        None, description="Replacement initial input delivered to each created task."
+    )
+
+
 class PauseRunScheduleRequest(BaseModel):
     note: str | None = Field(None, description="Optional note explaining the pause.")
 
