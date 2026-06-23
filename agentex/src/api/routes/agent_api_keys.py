@@ -1,5 +1,6 @@
 import os
 import secrets
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -36,6 +37,10 @@ router = APIRouter(
     prefix="/agent_api_keys",
     tags=["Agent APIKeys"],
 )
+
+
+def _has_control_chars(value: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in value)
 
 
 @router.post(
@@ -155,7 +160,7 @@ async def create_webhook_trigger(
             ),
         )
 
-    secret = request.secret or secrets.token_hex(32)
+    secret = request.secret if request.secret is not None else secrets.token_hex(32)
     agent_api_key_entity = await agent_api_key_use_case.create(
         agent_id=agent.id,
         api_key=str(secret),
@@ -164,7 +169,14 @@ async def create_webhook_trigger(
     )
 
     forward_path = request.forward_path.lstrip("/")
-    webhook_path = f"/agents/forward/name/{request.agent_name}/{forward_path}"
+    if _has_control_chars(forward_path):
+        raise HTTPException(
+            status_code=400,
+            detail="forward_path must not contain control characters.",
+        )
+    encoded_agent_name = quote(request.agent_name, safe="")
+    encoded_forward_path = quote(forward_path, safe="/")
+    webhook_path = f"/agents/forward/name/{encoded_agent_name}/{encoded_forward_path}"
     base_url = (request.base_url or os.environ.get("AGENTEX_PUBLIC_URL", "")).rstrip(
         "/"
     )

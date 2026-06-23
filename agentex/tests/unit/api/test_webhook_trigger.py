@@ -76,6 +76,44 @@ class TestCreateWebhookTrigger:
         assert resp.webhook_url is None  # no AGENTEX_PUBLIC_URL configured
         assert resp.webhook_path == "/agents/forward/name/a/gh"
 
+    async def test_github_empty_secret_is_preserved(self, monkeypatch):
+        req = CreateWebhookTriggerRequest(
+            agent_name="a",
+            source=AgentAPIKeyType.GITHUB,
+            name="o/r",
+            forward_path="gh",
+            secret="",
+        )
+        resp, akuc = await self._call(monkeypatch, req)
+        assert resp.secret == ""
+        assert akuc.create.await_args.kwargs["api_key"] == ""
+
+    async def test_forward_path_reserved_chars_are_url_encoded(self, monkeypatch):
+        req = CreateWebhookTriggerRequest(
+            agent_name="golden agent",
+            source=AgentAPIKeyType.GITHUB,
+            name="o/r",
+            forward_path="github-pr/cfg-9?mode=review#frag ment",
+        )
+        resp, _ = await self._call(monkeypatch, req, base_env="https://sgp.example.com/")
+
+        assert (
+            resp.webhook_path
+            == "/agents/forward/name/golden%20agent/github-pr/cfg-9%3Fmode%3Dreview%23frag%20ment"
+        )
+        assert resp.webhook_url == f"https://sgp.example.com{resp.webhook_path}"
+
+    async def test_forward_path_control_chars_rejected(self, monkeypatch):
+        req = CreateWebhookTriggerRequest(
+            agent_name="a",
+            source=AgentAPIKeyType.GITHUB,
+            name="o/r",
+            forward_path="github-pr/cfg-9\nnext",
+        )
+        with pytest.raises(HTTPException) as exc:
+            await self._call(monkeypatch, req)
+        assert exc.value.status_code == 400
+
     async def test_conflict_when_key_exists(self, monkeypatch):
         req = CreateWebhookTriggerRequest(
             agent_name="a", source=AgentAPIKeyType.GITHUB, name="o/r", forward_path="gh"
@@ -118,3 +156,11 @@ class TestCreateWebhookTrigger:
         resp, akuc = await self._call(monkeypatch, req)
         assert resp.secret == "slack-signing-secret"
         assert akuc.create.await_args.kwargs["api_key"] == "slack-signing-secret"
+
+    async def test_secret_schema_documents_slack_requirement(self):
+        description = CreateWebhookTriggerRequest.model_fields["secret"].description
+
+        assert description is not None
+        assert "For GitHub" in description
+        assert "For Slack" in description
+        assert "required" in description

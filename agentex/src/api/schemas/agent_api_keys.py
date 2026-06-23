@@ -76,7 +76,11 @@ class CreateWebhookTriggerRequest(BaseModel):
     )
     secret: str | None = Field(
         None,
-        description="Optional signing secret; if unset, one is generated and returned.",
+        description=(
+            "Signing secret. For GitHub, omit to generate one, or provide an existing "
+            "webhook secret. For Slack, this is required and must be the Slack app's "
+            "Signing Secret."
+        ),
     )
     base_url: str | None = Field(
         None,
