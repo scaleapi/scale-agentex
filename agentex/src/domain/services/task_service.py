@@ -242,6 +242,15 @@ class AgentTaskService:
 
         return updated_task
 
+    async def merge_task_params(self, task_id: str, patch: dict) -> TaskEntity | None:
+        """Atomically shallow-merge ``patch`` into ``tasks.params``. Returns
+        the updated entity, or ``None`` if no task with ``task_id`` exists.
+
+        Lets callers update agent config on the task row in place; the agent
+        picks up the new values when it next reads ``task.params``.
+        """
+        return await self.task_repository.merge_params(task_id, patch)
+
     async def delete_task(self, id: str | None = None, name: str | None = None) -> None:
         """
         Delete a task from the repository.

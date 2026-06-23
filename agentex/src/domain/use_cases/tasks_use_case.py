@@ -94,6 +94,7 @@ class TasksUseCase:
         id: str | None = None,
         name: str | None = None,
         task_metadata: dict[str, Any] | None = None,
+        merge_params: dict[str, Any] | None = None,
     ) -> TaskEntity:
         """Update mutable fields on a task entity. This is used by our API since not all fields should be mutable."""
 
@@ -108,15 +109,28 @@ class TasksUseCase:
             else:
                 raise ItemDoesNotExist(f"Task {name} not found")
 
-        # if no mutations are provided, don't do anything
-        if task_metadata is None:
+        # No-op if neither field was supplied.
+        if task_metadata is None and merge_params is None:
             return task_entity
 
         if task_metadata is not None:
             task_entity.task_metadata = task_metadata
 
-        updated_task_entity = await self.task_service.update_task(task=task_entity)
-        return updated_task_entity
+        # `merge_params` is a separate atomic JSONB shallow-merge so concurrent
+        # callers don't overwrite each other's fields (vs reading→mutating→writing
+        # the whole params dict on task_entity). Falls through to a normal save
+        # only when task_metadata also changed.
+        if merge_params:
+            merged = await self.task_service.merge_task_params(
+                task_entity.id, merge_params
+            )
+            if merged is not None:
+                task_entity = merged
+
+        if task_metadata is not None:
+            task_entity = await self.task_service.update_task(task=task_entity)
+
+        return task_entity
 
     async def _transition_to_terminal(
         self,
