@@ -96,3 +96,25 @@ class TestCreateWebhookTrigger:
                 authorization_service=MagicMock(),
             )
         assert exc.value.status_code == 400
+
+    async def test_slack_without_secret_rejected(self, monkeypatch):
+        # Slack signs with the app's existing Signing Secret — we can't generate one,
+        # so omitting it must 400 rather than store a random value that never matches.
+        req = CreateWebhookTriggerRequest(
+            agent_name="a", source=AgentAPIKeyType.SLACK, name="my-app", forward_path="slack"
+        )
+        with pytest.raises(HTTPException) as exc:
+            await self._call(monkeypatch, req)
+        assert exc.value.status_code == 400
+
+    async def test_slack_with_provided_secret_ok(self, monkeypatch):
+        req = CreateWebhookTriggerRequest(
+            agent_name="a",
+            source=AgentAPIKeyType.SLACK,
+            name="my-app",
+            forward_path="slack",
+            secret="slack-signing-secret",
+        )
+        resp, akuc = await self._call(monkeypatch, req)
+        assert resp.secret == "slack-signing-secret"
+        assert akuc.create.await_args.kwargs["api_key"] == "slack-signing-secret"

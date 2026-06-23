@@ -141,6 +141,20 @@ async def create_webhook_trigger(
             detail=f"A {request.source} webhook key named '{request.name}' already exists for this agent.",
         )
 
+    # GitHub lets you supply (and we can generate) a per-webhook secret to paste into the
+    # repo's Secret field. Slack is different: it signs every request with the app's own
+    # Signing Secret, so the caller must supply that exact value — a generated one would
+    # never match, and validate_slack_delivery_webhook would reject every real delivery.
+    # (See PR #329 discussion.)
+    if request.source == AgentAPIKeyType.SLACK and not request.secret:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Slack triggers must supply 'secret' set to the Slack app's Signing Secret "
+                "(from your app credentials); it can't be generated."
+            ),
+        )
+
     secret = request.secret or secrets.token_hex(32)
     agent_api_key_entity = await agent_api_key_use_case.create(
         agent_id=agent.id,
