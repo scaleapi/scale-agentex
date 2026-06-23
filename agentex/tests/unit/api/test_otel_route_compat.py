@@ -49,7 +49,14 @@ class TestOtelRouteCompat:
             "path": "/agents",
             "headers": [],
         }
+        matched = 0
         for route in fastapi_app.routes:
             match, _ = route.matches(scope)
             if match in (Match.FULL, Match.PARTIAL):
+                matched += 1
                 assert route.path is not None
+        assert matched > 0, (
+            "No route matched the OPTIONS /agents preflight scope, so the "
+            "`.path` assertion never ran. The test would pass vacuously even "
+            "on a broken FastAPI version. Pick a path served by app.routes."
+        )
