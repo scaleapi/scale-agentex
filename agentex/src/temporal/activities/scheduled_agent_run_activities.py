@@ -20,6 +20,7 @@ Boundary types are JSON-native (the backend data converter does not serialize
 Pydantic models), so args and the return value are plain str / dict.
 """
 
+from datetime import UTC, datetime
 from typing import Any
 
 from src.adapters.authorization.exceptions import AuthorizationError
@@ -199,7 +200,13 @@ class ScheduledAgentRunActivities:
             return denied
 
         task_name = f"scheduled-run:{schedule_id}:{fire_id}"
+        # Human-friendly label the UI renders for the task (it reads
+        # task_metadata.display_name, never the deterministic `name` above).
+        # Templated per fire so runs are distinguishable; placed first so a
+        # caller-supplied display_name in schedule.task_metadata overrides it.
+        fire_time = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
         task_metadata = {
+            "display_name": f"Scheduled Message: {schedule.name} · {fire_time}",
             **(schedule.task_metadata or {}),
             "schedule_id": schedule_id,
             "scheduled_fire_id": fire_id,
