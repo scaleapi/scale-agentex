@@ -21,6 +21,31 @@ Agentex supports three agent types with different execution models and capabilit
 
 ---
 
+## Pick a Framework (Harness)
+
+Choosing an agent type is only the **first** prompt in `agentex init`. After you pick Sync / Async-base / Temporal, the CLI asks which **agent framework** to scaffold. This is independent of the agent type — each type offers the same framework starters:
+
+| `agentex init` prompt | Framework options |
+|---|---|
+| **Sync ACP** | Basic · OpenAI Agents SDK (Recommended) · OpenAI Agents SDK + Local Sandbox · LangGraph · Pydantic AI · Claude Code · Codex |
+| **Async - ACP Only** | Basic · OpenAI Agents SDK · LangGraph · Pydantic AI · Claude Code · Codex |
+| **Async - Temporal** | Basic · OpenAI Agents SDK (Recommended) · Pydantic AI · LangGraph · Claude Code · Codex |
+
+**What "Basic" gives you:** a blank handler that you fill in yourself (the examples in the [Project Structure Guide](project_structure.md) show this variant). Pick it when you're writing your agent loop by hand or calling an LLM through LiteLLM directly.
+
+**What a framework template gives you:** the same project layout **plus** the [unified harness](../development_guides/streaming_patterns.md#unified-harness-surface-framework-agents) wiring already in place — the framework's stream wrapped in a `HarnessTurn` and delivered by `UnifiedEmitter`, so streaming and tracing work out of the box. Some frameworks also add helper files (e.g. `agent.py` + `tools.py` for Pydantic AI / OpenAI Agents, `graph.py` + `tools.py` for LangGraph).
+
+How to choose:
+
+- **Writing the loop yourself / LiteLLM only** → Basic.
+- **Already standardized on a framework** → pick it directly (LangGraph, Pydantic AI, OpenAI Agents SDK).
+- **Wrapping a coding CLI** → Claude Code (spawns the `claude` CLI) or Codex (spawns the `codex` CLI) as a local subprocess, streamed through the harness.
+- **Want tools + good defaults and unsure** → OpenAI Agents SDK (the Recommended option for Sync and Temporal).
+
+To add a framework that isn't in the list, see the `agentex-add-agent-framework` workflow.
+
+---
+
 ## Upgrade Path
 
 | Current Type | When to Upgrade | Upgrade To | Key Benefit |
