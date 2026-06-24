@@ -43,7 +43,7 @@ def create_agent() -> SandboxAgent:
 
 def create_run_config() -> RunConfig:
     return RunConfig(
-        sandbox=Sandbox(
+        sandbox=SandboxRunConfig(
             client=UnixLocalSandboxClient(),
             options=UnixLocalSandboxClientOptions(),
         ),
