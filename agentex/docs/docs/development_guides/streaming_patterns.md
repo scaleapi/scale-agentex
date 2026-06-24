@@ -303,10 +303,24 @@ async def handle_message_send(params: SendMessageParams):
         async for event in emitter.yield_turn(turn):
             yield event
 
-# Async / Temporal — push to Redis, get final text + usage back:
-result = await emitter.auto_send_turn(turn, created_at=workflow.now())  # created_at: Temporal only
-# result.final_text, result.usage
+# Async ACP — push to Redis, get final text + usage back:
+@acp.on_task_event_send
+async def handle_event_send(params: SendEventParams):
+    task_id = params.task.id
+    async with adk.tracing.span(
+        trace_id=task_id, task_id=task_id, name="turn",
+        data={"__span_type__": "AGENT_WORKFLOW"},
+    ) as turn_span:
+        emitter = UnifiedEmitter(
+            task_id=task_id, trace_id=task_id,
+            parent_span_id=turn_span.id if turn_span else None,
+        )
+        turn = LangGraphTurn(graph.astream(...))
+        result = await emitter.auto_send_turn(turn)  # auto_send_turn replaces yield_turn
+        # result.final_text, result.usage
 ```
+
+In a **Temporal** workflow the body is the same — construct the `UnifiedEmitter`, build the `turn`, and `await emitter.auto_send_turn(turn, created_at=workflow.now())` (pass `created_at` so events carry deterministic workflow time).
 
 **Why use it:**
 
