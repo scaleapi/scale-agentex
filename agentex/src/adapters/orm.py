@@ -215,7 +215,6 @@ class AgentRunScheduleORM(BaseORM):
     task_params = Column(JSON, nullable=True)
     task_metadata = Column(JSON, nullable=True)
     initial_input = Column(JSON, nullable=False)
-    initial_input_method = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

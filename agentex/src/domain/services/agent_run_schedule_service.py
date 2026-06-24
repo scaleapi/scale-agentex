@@ -106,8 +106,6 @@ class AgentRunScheduleService:
             task_params=request.task_params,
             task_metadata=request.task_metadata,
             initial_input=request.initial_input.to_dict(mode="json"),
-            # Delivery method is inferred from the agent's ACP type at fire time.
-            initial_input_method=None,
         )
 
         try:
@@ -275,28 +273,37 @@ class AgentRunScheduleService:
                 "Provide only one of cron_expression or interval_seconds, not both"
             )
 
-        updated = await self.schedule_repository.update(row)
-        temporal_id = build_run_schedule_temporal_id(updated.id)
-        # Push the merged cadence/window/paused state to the Temporal clock. A
-        # missing schedule is logged rather than raised so the persisted row stays
-        # the source of truth (mirrors the describe/delete tolerance).
+        temporal_id = build_run_schedule_temporal_id(row.id)
+        # Push the merged cadence/window/paused state to the Temporal clock BEFORE
+        # committing the row. This closes the common divergence: a rejected spec
+        # (invalid cron / timezone) or a transient Temporal error aborts the
+        # update with nothing persisted. A residual window remains — if Temporal
+        # accepts the update and the row write below then fails, the clock leads
+        # the row — but there is no cross-store transaction, and the row stays the
+        # declared source of truth, so any later successful update re-converges
+        # them. (Create keeps the analogous invariant by rolling the row back on
+        # failure; update has no in-place rollback, so it orders the writes
+        # instead.) A missing schedule is logged rather than raised so the
+        # persisted row stays authoritative (mirrors the describe/delete
+        # tolerance) and the merged definition is still committed.
         try:
             await self.temporal_adapter.update_schedule(
                 schedule_id=temporal_id,
                 cron_expressions=(
-                    [updated.cron_expression] if updated.cron_expression else None
+                    [row.cron_expression] if row.cron_expression else None
                 ),
-                interval_seconds=updated.interval_seconds,
-                start_at=updated.start_at,
-                end_at=updated.end_at,
-                time_zone_name=updated.timezone if updated.cron_expression else None,
-                paused=updated.paused,
+                interval_seconds=row.interval_seconds,
+                start_at=row.start_at,
+                end_at=row.end_at,
+                time_zone_name=row.timezone if row.cron_expression else None,
+                paused=row.paused,
             )
         except TemporalScheduleNotFoundError:
             logger.warning(
                 "run_schedule_temporal_missing_on_update",
-                extra={"temporal_id": temporal_id, "schedule_id": updated.id},
+                extra={"temporal_id": temporal_id, "schedule_id": row.id},
             )
+        updated = await self.schedule_repository.update(row)
         agent = await self.agent_repository.get(id=agent_id)
         return await self._to_response(updated, agent=agent, temporal_id=temporal_id)
 
@@ -357,10 +364,7 @@ class AgentRunScheduleService:
         temporal_id: str,
         include_live: bool = True,
     ) -> AgentRunScheduleResponse:
-        effective_method = (
-            entity.initial_input_method
-            or infer_initial_input_method(agent.acp_type).value
-        )
+        effective_method = infer_initial_input_method(agent.acp_type).value
 
         state = RunScheduleState.PAUSED if entity.paused else RunScheduleState.ACTIVE
         next_action_times: list[datetime] = []

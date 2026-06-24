@@ -292,6 +292,21 @@ class TestAgentRunScheduleServiceUpdate:
 
         assert response.description == "new"
 
+    async def test_update_does_not_commit_row_on_temporal_failure(self, service, agent):
+        # A non-NotFound Temporal failure (rejected cron/timezone or a transient
+        # outage) must abort before the row is persisted, so the DB can never
+        # diverge from the clock. Unlike NotFound, this error propagates.
+        row = _persisted(agent.id, _request())
+        service.schedule_repository.get_by_agent_id_and_name_or_raise.return_value = row
+        service.temporal_adapter.update_schedule.side_effect = RuntimeError("boom")
+
+        with pytest.raises(RuntimeError):
+            await service.update_schedule(
+                agent.id, row.name, UpdateAgentRunScheduleRequest(description="new")
+            )
+
+        service.schedule_repository.update.assert_not_called()
+
 
 @pytest.mark.unit
 @pytest.mark.asyncio

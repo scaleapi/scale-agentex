@@ -89,8 +89,7 @@ def _format_fire_time(fire_id: str) -> str:
 def _build_initial_content(initial_input: dict[str, Any]) -> TaskMessageContentEntity:
     """Build the message content delivered as the scheduled task's first input.
 
-    v1 supports text input only; the persisted ``initial_input.type`` is reserved
-    for future content types.
+    Only text input is supported (enforced by ``ScheduleInitialInput.type``).
     """
     author = initial_input.get("author", MessageAuthor.USER.value)
     if not isinstance(author, MessageAuthor):
@@ -198,10 +197,7 @@ class ScheduledAgentRunActivities:
                 "schedule_id": schedule_id,
             }
 
-        method = (
-            schedule.initial_input_method
-            or infer_initial_input_method(agent.acp_type).value
-        )
+        method = infer_initial_input_method(agent.acp_type).value
 
         # Re-check the stored creator principal's permission at fire time, mirroring
         # the JSON-RPC route's authorization order: agent.execute (the RPC endpoint

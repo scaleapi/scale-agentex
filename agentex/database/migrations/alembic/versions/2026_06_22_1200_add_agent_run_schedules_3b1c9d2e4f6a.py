@@ -42,7 +42,6 @@ def upgrade() -> None:
         sa.Column('task_params', sa.JSON(), nullable=True),
         sa.Column('task_metadata', sa.JSON(), nullable=True),
         sa.Column('initial_input', sa.JSON(), nullable=False),
-        sa.Column('initial_input_method', sa.String(), nullable=True),
         sa.Column(
             'created_at',
             sa.DateTime(timezone=True),

@@ -4108,11 +4108,9 @@ components:
           $ref: '#/components/schemas/ScheduleInitialInput'
           description: The initial input.
         initial_input_method:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Initial Input Method
-          description: Effective delivery method (inferred from the agent's ACP type).
+          description: Delivery method, inferred from the agent's ACP type.
         creator_principal:
           anyOf:
           - $ref: '#/components/schemas/ScheduleCreatorPrincipal'
@@ -4161,6 +4159,7 @@ components:
       - agent_id
       - name
       - initial_input
+      - initial_input_method
       title: AgentRunScheduleResponse
       description: Response model describing a scheduled agent run.
     AgentStatus:
@@ -5797,8 +5796,9 @@ components:
       properties:
         type:
           type: string
+          const: text
           title: Type
-          description: Input content type. Only 'text' in v1.
+          description: Input content type.
           default: text
         author:
           $ref: '#/components/schemas/MessageAuthor'

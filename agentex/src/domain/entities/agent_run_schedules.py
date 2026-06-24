@@ -11,8 +11,7 @@ from src.utils.model_utils import BaseModel
 class InitialInputMethod(str, Enum):
     """How the configured first input is delivered to the freshly created task.
 
-    Inferred from the target agent's ACP type at fire time; persisted only when
-    the caller wants the schedule definition to be explicit.
+    Always inferred from the target agent's ACP type at fire time.
     """
 
     EVENT_SEND = "event/send"  # async / agentic agents
@@ -81,13 +80,6 @@ class AgentRunScheduleEntity(BaseModel):
     )
     initial_input: dict[str, Any] = Field(
         ..., description="The first input delivered to each created task."
-    )
-    initial_input_method: str | None = Field(
-        None,
-        description=(
-            "Delivery method for the initial input (an InitialInputMethod value). "
-            "Inferred from the agent's ACP type at fire time when omitted."
-        ),
     )
     created_at: datetime | None = Field(
         None, description="When the schedule was created."

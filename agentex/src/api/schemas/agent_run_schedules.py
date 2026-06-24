@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -18,7 +18,7 @@ class RunScheduleState(str, Enum):
 class ScheduleInitialInput(BaseModel):
     """The first input delivered to each freshly created scheduled task."""
 
-    type: str = Field("text", description="Input content type. Only 'text' in v1.")
+    type: Literal["text"] = Field("text", description="Input content type.")
     author: MessageAuthor = Field(
         MessageAuthor.USER, description="The author attributed to the initial input."
     )
@@ -120,9 +120,9 @@ class AgentRunScheduleResponse(BaseModel):
         None, description="Task metadata at fire time."
     )
     initial_input: ScheduleInitialInput = Field(..., description="The initial input.")
-    initial_input_method: str | None = Field(
-        None,
-        description="Effective delivery method (inferred from the agent's ACP type).",
+    initial_input_method: str = Field(
+        ...,
+        description="Delivery method, inferred from the agent's ACP type.",
     )
     creator_principal: ScheduleCreatorPrincipal | None = Field(
         None, description="Credential-free creator identity."
