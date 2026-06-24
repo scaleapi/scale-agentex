@@ -266,10 +266,61 @@ async def streaming_with_override(params: SendMessageParams) -> AsyncGenerator[T
 - **Analysis**: Stream thinking process, then replace with final conclusion
 - **Tool integration**: Stream partial results, then override with tool-enhanced content
 
+## Unified Harness Surface (Framework Agents)
+
+!!! tip "Recommended for framework-based agents"
+    If your agent is built on an agent framework (LangGraph, Pydantic AI, OpenAI Agents SDK) or a coding CLI (Claude Code, Codex), the **unified harness surface** is the recommended way to stream. You write nothing ACP-specific: wrap the framework's native event stream in a `HarnessTurn` and hand it to a `UnifiedEmitter`. The emitter delivers the same canonical `StreamTaskMessage*` stream over either channel **and derives tracing spans from it automatically** — no separate tracing handler.
+
+The canonical event stream (`StreamTaskMessageStart/Delta/Full/Done`) is produced **once** by a per-framework *tap* (`convert_<framework>_to_agentex_events`). The emitter consumes it and handles delivery + tracing uniformly, so the same `turn` object works for Sync, Async, and Temporal — only the delivery call changes.
+
+Per-framework `HarnessTurn` wrappers ship today, all re-exported from `agentex.lib.adk`:
+
+| Framework | Turn class | Tap function |
+|---|---|---|
+| Pydantic AI | `PydanticAITurn` | `convert_pydantic_ai_to_agentex_events` |
+| LangGraph | `LangGraphTurn` | `convert_langgraph_to_agentex_events` |
+| OpenAI Agents | `OpenAITurn` | `convert_openai_to_agentex_events` |
+| Claude Code | `ClaudeCodeTurn` | `convert_claude_code_to_agentex_events` |
+| Codex | `CodexTurn` | `convert_codex_to_agentex_events` |
+
+```python
+import agentex.lib.adk as adk
+from agentex.lib.adk import UnifiedEmitter, LangGraphTurn  # swap for any Turn above
+
+# Sync ACP — yield over the HTTP response:
+@acp.on_message_send
+async def handle_message_send(params: SendMessageParams):
+    task_id = params.task.id
+    async with adk.tracing.span(
+        trace_id=task_id, task_id=task_id, name="message",
+        data={"__span_type__": "AGENT_WORKFLOW"},
+    ) as turn_span:
+        emitter = UnifiedEmitter(
+            task_id=task_id, trace_id=task_id,
+            parent_span_id=turn_span.id if turn_span else None,
+        )
+        turn = LangGraphTurn(graph.astream(...))      # feed the framework's native stream
+        async for event in emitter.yield_turn(turn):
+            yield event
+
+# Async / Temporal — push to Redis, get final text + usage back:
+result = await emitter.auto_send_turn(turn, created_at=workflow.now())  # created_at: Temporal only
+# result.final_text, result.usage
+```
+
+**Why use it:**
+
+- **One mental model** for Sync, Async, and Temporal — `yield_turn` vs `auto_send_turn`, same `turn`.
+- **Tracing for free** — tool and reasoning spans are derived from the canonical stream (tool spans paired by `tool_call_id`) and fan out to every registered processor. No `create_<framework>_tracing_handler` to wire (those per-framework tracing handlers have been removed).
+- **Usage + final text** — `auto_send_turn` returns a `TurnResult` (`final_text`, `usage`) with normalized token/cost numbers.
+- **Streamed tool args survive async** — the emitter honors streamed `ToolRequestDelta`s on the Redis channel, not just sync.
+
+To add a framework that doesn't have a `HarnessTurn` yet, follow the `agentex-add-agent-framework` workflow: write a tap + a `<Fw>Turn`, export both from `agentex.lib.adk`. There is no per-framework async streamer or tracing handler to author.
+
 ## OpenAI Agents SDK Streaming
 
-!!! note "More Modular Approach"
-    The **OpenAI Agents SDK** provides a more modular alternative to `auto_send`. Instead of black-box logic, you write custom **providers** (for sync agents) and/or **hooks + providers** (for agentic ACPs) by inheriting classes and overriding methods. This Pythonic approach gives you full control over streaming behavior while working with **any LiteLLM model** (GPT-4, Claude, Gemini, etc.).
+!!! note "Lower-level alternative for fine-grained OpenAI SDK control"
+    The unified harness `OpenAITurn` above covers most OpenAI Agents SDK agents. The custom **provider** (sync) and **hooks + provider** (agentic) approach below is the lower-level path when you need to override streaming behavior directly — it works with **any LiteLLM model** (GPT-4, Claude, Gemini, etc.).
 
 The OpenAI Agents SDK supports [any LiteLLM model](https://openai.github.io/openai-agents-python/models/litellm/) and provides a cleaner architecture than `auto_send`:
 
@@ -515,6 +566,10 @@ graph TB
 ## Key Takeaway
 
 !!! info "Choose the Right Pattern"
+
+    **Framework / coding-CLI agents (Recommended): Unified Harness Surface**
+    - Wrap the framework's stream in a `HarnessTurn` (`LangGraphTurn`, `PydanticAITurn`, `OpenAITurn`, `ClaudeCodeTurn`, `CodexTurn`) and deliver via `UnifiedEmitter`.
+    - `yield_turn` for Sync, `auto_send_turn` for Async/Temporal — same `turn`, tracing derived automatically.
 
     **Standard LiteLLM Providers (via ADK):**
     - **Sync ACP**: Manual delta accumulation, full control
