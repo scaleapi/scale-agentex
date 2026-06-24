@@ -273,7 +273,7 @@ async def streaming_with_override(params: SendMessageParams) -> AsyncGenerator[T
 
 The canonical event stream (`StreamTaskMessageStart/Delta/Full/Done`) is produced **once** by a per-framework *tap* (`convert_<framework>_to_agentex_events`). The emitter consumes it and handles delivery + tracing uniformly, so the same `turn` object works for Sync, Async, and Temporal — only the delivery call changes.
 
-Per-framework `HarnessTurn` wrappers ship today, all re-exported from `agentex.lib.adk`:
+Per-framework `HarnessTurn` wrappers ship today, all re-exported from `agentex.lib.adk` (requires `agentex-sdk >= 0.14.0`):
 
 | Framework | Turn class | Tap function |
 |---|---|---|
