@@ -6,7 +6,7 @@ authors = [{ name = "Felix Su", email = "felix.su@scale.com" }]
 requires-python = ">=3.12,<3.13"
 readme = "README.md"
 dependencies = [
-    "fastapi>=0.115.0",
+    "fastapi>=0.115.0,<0.137.0",  # <0.137.0 keeps app.routes flat; 0.137.0's _IncludedRouter (no .path) crashes injected OTel instrumentation on OPTIONS preflights -> 500
     "litellm>=1.84.0,<2",  # >=1.84.0 clears CVE-2026-49468 (CRITICAL auth bypass)
     "python-dotenv>=1.2.2,<2",
     "temporalio>=1.18.0,<2",
