@@ -38,9 +38,12 @@ Codex does not report wall-clock time in its event stream, so set `turn.duration
 ## Sync delivery (HTTP yield)
 
 ```python
+import os
 import time
 import agentex.lib.adk as adk
 from agentex.lib.adk import UnifiedEmitter, CodexTurn
+
+MODEL = os.environ.get("CODEX_MODEL", "o4-mini")
 
 @acp.on_message_send
 async def handle_message_send(params: SendMessageParams):
