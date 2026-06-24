@@ -14,6 +14,14 @@ Basic agent patterns with simple request-response interactions.
 - **[Multiturn](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/00_sync/010_multiturn){target="_blank"}**: Conversation history and memory
 - **[Streaming](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/00_sync/020_streaming){target="_blank"}**: Real-time response streaming
 
+Framework starters (the `agentex init` Sync ACP options, each on the [unified harness](streaming_patterns.md#unified-harness-surface-framework-agents)):
+
+- **[LangGraph](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/00_sync/030_langgraph){target="_blank"}**
+- **[Pydantic AI](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/00_sync/040_pydantic_ai){target="_blank"}**
+- **[OpenAI Agents SDK](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/00_sync/050_openai_agents){target="_blank"}**
+- **[Claude Code](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/00_sync/060_claude_code){target="_blank"}**
+- **[Codex](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/00_sync/070_codex){target="_blank"}**
+
 ### Async ACP - Base (Learning & Development)
 
 Stateful workflows with full lifecycle control for development and advanced patterns.
@@ -25,6 +33,14 @@ Stateful workflows with full lifecycle control for development and advanced patt
 - **[Other SDKs](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/00_base/040_other_sdks){target="_blank"}**: OpenAI Agents SDK and MCP integration
 - **[Batch Events](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/00_base/080_batch_events){target="_blank"}**: Efficient multi-event handling
 - **[Multi-Agent Assembly Line](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/00_base/090_multi_agent_non_temporal){target="_blank"}**: Multi-agent coordination without Temporal
+
+Framework starters (the `agentex init` Async - ACP Only options, each on the [unified harness](streaming_patterns.md#unified-harness-surface-framework-agents)):
+
+- **[LangGraph](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/00_base/100_langgraph){target="_blank"}**
+- **[Pydantic AI](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/00_base/110_pydantic_ai){target="_blank"}**
+- **[OpenAI Agents SDK](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/00_base/120_openai_agents){target="_blank"}**
+- **[Claude Code](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/00_base/130_claude_code){target="_blank"}**
+- **[Codex](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/00_base/140_codex){target="_blank"}**
 
 ### Async ACP - Temporal (Production)
 
@@ -39,6 +55,14 @@ Enterprise-ready patterns with durable execution for production deployments requ
     - [OpenAI Agents SDK: Hello World](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/10_temporal/060_open_ai_agents_sdk_hello_world){target="_blank"}: Automatic durability for LLM calls
     - [OpenAI Agents SDK: Tools](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/10_temporal/070_open_ai_agents_sdk_tools){target="_blank"}: Single and multi-activity tool patterns
     - [OpenAI Agents SDK: Human-in-the-Loop](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/10_temporal/080_open_ai_agents_sdk_human_in_the_loop){target="_blank"}: Human approval workflows
+
+Framework starters (the `agentex init` Async - Temporal options, each on the [unified harness](streaming_patterns.md#unified-harness-surface-framework-agents)):
+
+- **[Pydantic AI](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/10_temporal/110_pydantic_ai){target="_blank"}**
+- **[OpenAI Agents SDK](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/10_temporal/120_openai_agents){target="_blank"}**
+- **[LangGraph](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/10_temporal/130_langgraph){target="_blank"}**
+- **[Claude Code](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/10_temporal/140_claude_code){target="_blank"}**
+- **[Codex](https://github.com/scaleapi/scale-agentex-python/tree/main/examples/tutorials/10_async/10_temporal/150_codex){target="_blank"}**
 
 ## Why Tutorials are on GitHub
 
