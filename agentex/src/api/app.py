@@ -50,6 +50,10 @@ from src.config.dependencies import (
 )
 from src.config.environment_variables import EnvVarKeys
 from src.domain.exceptions import GenericException
+from src.utils.event_loop_metrics import (
+    start_event_loop_lag_monitor,
+    stop_event_loop_lag_monitor,
+)
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
@@ -96,7 +100,12 @@ async def lifespan(_: FastAPI):
     if global_deps.postgres_metrics_collector:
         await global_deps.postgres_metrics_collector.start_collection()
 
+    # Start event-loop lag monitor (scheduling-delay instrumentation)
+    start_event_loop_lag_monitor()
+
     yield
+
+    await stop_event_loop_lag_monitor()
 
     # Clean up HTTP clients before other shutdown tasks
     await HttpxGateway.close_clients()
