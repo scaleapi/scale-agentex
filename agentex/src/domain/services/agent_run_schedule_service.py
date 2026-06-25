@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Annotated, Any, cast
+from uuid import uuid4
 
 from fastapi import Depends
 from temporalio.client import ScheduleDescription
@@ -318,7 +319,12 @@ class AgentRunScheduleService:
             agent_id, name
         )
         temporal_id = build_run_schedule_temporal_id(row.id)
-        await self.temporal_adapter.trigger_schedule(temporal_id)
+        await self.temporal_adapter.start_workflow(
+            workflow=SCHEDULED_AGENT_RUN_WORKFLOW_NAME,
+            workflow_id=f"{temporal_id}-manual-{uuid4()}",
+            args=[row.id, "manual"],
+            task_queue=self._task_queue(),
+        )
         agent = await self.agent_repository.get(id=agent_id)
         return await self._to_response(row, agent=agent, temporal_id=temporal_id)
 

@@ -145,6 +145,9 @@ class TestLaunchScheduledAgentRun:
         # Deterministic task name embeds schedule id + fire id.
         create_params = use_case.handle_rpc_request.call_args_list[0].kwargs["params"]
         assert create_params.name == f"scheduled-run:{schedule.id}:fire-1"
+        assert create_params.task_metadata["schedule_id"] == schedule.id
+        assert create_params.task_metadata["scheduled_fire_id"] == "fire-1"
+        assert create_params.task_metadata["trigger_type"] == "scheduled"
         use_case.task_service.update_task.assert_awaited_once()
         # Fire-time authz mirrors the RPC route: agent.execute, then task.create,
         # then task.update on the created task — in that order.
@@ -181,6 +184,22 @@ class TestLaunchScheduledAgentRun:
             call.kwargs["method"] for call in use_case.handle_rpc_request.call_args_list
         ]
         assert methods == [AgentRPCMethod.TASK_CREATE, AgentRPCMethod.MESSAGE_SEND]
+
+    async def test_manual_trigger_type_is_stamped(self, activity_instance, monkeypatch):
+        schedule = _schedule()
+        activity_instance.schedule_repository.get.return_value = schedule
+        task = TaskEntity(id="task-1")
+        use_case = _fake_use_case(_agent(ACPType.ASYNC), task)
+        _patch_use_case(monkeypatch, use_case)
+
+        result = await activity_instance.launch_scheduled_agent_run(
+            schedule.id, "manual-fire-1", "manual"
+        )
+
+        assert result["trigger_type"] == "manual"
+        create_params = use_case.handle_rpc_request.call_args_list[0].kwargs["params"]
+        assert create_params.task_metadata["trigger_type"] == "manual"
+        assert create_params.task_metadata["scheduled_fire_id"] == "manual-fire-1"
 
     async def test_skips_delivery_when_already_delivered(
         self, activity_instance, monkeypatch

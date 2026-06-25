@@ -311,13 +311,17 @@ class TestAgentRunScheduleServiceUpdate:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestAgentRunScheduleServiceTrigger:
-    async def test_trigger_calls_temporal(self, service, agent):
+    async def test_trigger_starts_manual_workflow(self, service, agent):
         row = _persisted(agent.id, _request())
         service.schedule_repository.get_by_agent_id_and_name_or_raise.return_value = row
         service.agent_repository.get.return_value = agent
 
         await service.trigger_schedule(agent.id, row.name)
 
-        service.temporal_adapter.trigger_schedule.assert_called_once_with(
-            build_run_schedule_temporal_id(row.id)
-        )
+        temporal_id = build_run_schedule_temporal_id(row.id)
+        service.temporal_adapter.trigger_schedule.assert_not_called()
+        start_kwargs = service.temporal_adapter.start_workflow.call_args.kwargs
+        assert start_kwargs["workflow"] == "ScheduledAgentRunWorkflow"
+        assert start_kwargs["workflow_id"].startswith(f"{temporal_id}-manual-")
+        assert start_kwargs["args"] == [row.id, "manual"]
+        assert start_kwargs["task_queue"] == "agentex-server"

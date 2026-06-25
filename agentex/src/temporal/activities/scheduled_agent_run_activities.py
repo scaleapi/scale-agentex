@@ -149,7 +149,7 @@ class ScheduledAgentRunActivities:
 
     @activity.defn(name=LAUNCH_SCHEDULED_AGENT_RUN_ACTIVITY)
     async def launch_scheduled_agent_run(
-        self, schedule_id: str, fire_id: str
+        self, schedule_id: str, fire_id: str, trigger_type: str = "scheduled"
     ) -> dict[str, Any]:
         """Create a task for the scheduled fire and deliver its initial input.
 
@@ -159,6 +159,8 @@ class ScheduledAgentRunActivities:
                 which Temporal makes unique per fire and stable across activity
                 retries within the same execution). Used to build the
                 deterministic, idempotent task name.
+            trigger_type: ``scheduled`` for cadence fires, ``manual`` for runs
+                started by the trigger endpoint.
 
         Returns:
             A JSON-native dict describing the outcome (``launched`` / ``skipped``).
@@ -231,6 +233,7 @@ class ScheduledAgentRunActivities:
             **(schedule.task_metadata or {}),
             "schedule_id": schedule_id,
             "scheduled_fire_id": fire_id,
+            "trigger_type": trigger_type,
         }
 
         # task/create — get-or-create by deterministic name, so a retry returns
@@ -297,6 +300,7 @@ class ScheduledAgentRunActivities:
             extra={
                 "schedule_id": schedule_id,
                 "task_id": task.id,
+                "trigger_type": trigger_type,
                 "method": method,
             },
         )
@@ -304,5 +308,6 @@ class ScheduledAgentRunActivities:
             "status": "launched",
             "task_id": task.id,
             "schedule_id": schedule_id,
+            "trigger_type": trigger_type,
             "method": method,
         }

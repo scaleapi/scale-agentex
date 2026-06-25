@@ -25,11 +25,13 @@ from temporalio.common import RetryPolicy
 @workflow.defn
 class ScheduledAgentRunWorkflow:
     @workflow.run
-    async def run(self, schedule_id: str) -> dict[str, Any]:
+    async def run(
+        self, schedule_id: str, trigger_type: str = "scheduled"
+    ) -> dict[str, Any]:
         fire_id = workflow.info().workflow_id
         return await workflow.execute_activity(
             LAUNCH_SCHEDULED_AGENT_RUN_ACTIVITY,
-            args=[schedule_id, fire_id],
+            args=[schedule_id, fire_id, trigger_type],
             start_to_close_timeout=timedelta(seconds=120),
             retry_policy=RetryPolicy(
                 maximum_attempts=5,
