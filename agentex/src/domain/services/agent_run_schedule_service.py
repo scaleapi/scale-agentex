@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any, cast
 from uuid import uuid4
 
@@ -319,9 +319,12 @@ class AgentRunScheduleService:
             agent_id, name
         )
         temporal_id = build_run_schedule_temporal_id(row.id)
+        triggered_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        # Schedule starts get a Temporal-generated timestamp suffix; direct manual
+        # starts need their own uniqueness source, while keeping a parseable time.
         await self.temporal_adapter.start_workflow(
             workflow=SCHEDULED_AGENT_RUN_WORKFLOW_NAME,
-            workflow_id=f"{temporal_id}-manual-{uuid4()}",
+            workflow_id=f"{temporal_id}-manual-{uuid4()}-{triggered_at}",
             args=[row.id, "manual"],
             task_queue=self._task_queue(),
         )

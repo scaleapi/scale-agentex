@@ -1,3 +1,4 @@
+import re
 from unittest.mock import AsyncMock, PropertyMock
 from uuid import uuid4
 
@@ -322,6 +323,11 @@ class TestAgentRunScheduleServiceTrigger:
         service.temporal_adapter.trigger_schedule.assert_not_called()
         start_kwargs = service.temporal_adapter.start_workflow.call_args.kwargs
         assert start_kwargs["workflow"] == "ScheduledAgentRunWorkflow"
-        assert start_kwargs["workflow_id"].startswith(f"{temporal_id}-manual-")
+        assert re.fullmatch(
+            rf"{re.escape(temporal_id)}-manual-"
+            r"[0-9a-f-]{36}-"
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z",
+            start_kwargs["workflow_id"],
+        )
         assert start_kwargs["args"] == [row.id, "manual"]
         assert start_kwargs["task_queue"] == "agentex-server"
