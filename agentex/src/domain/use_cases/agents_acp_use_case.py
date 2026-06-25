@@ -10,6 +10,7 @@ from src.adapters.authentication.exceptions import (
     AuthenticationServiceUnavailableError,
 )
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
+from src.api.authentication_cache import AsyncTTLCache
 from src.api.schemas.authorization_types import AgentexResource
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
 from src.domain.entities.agents_rpc import (
@@ -53,6 +54,9 @@ from src.domain.services.task_service import DAgentTaskService
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
+
+# In-memory TTL cache for the agent entity (looked up on every RPC).
+_agent_cache = AsyncTTLCache("agent_entity", max_size=4096, ttl_seconds=300)
 
 
 class DeltaAccumulator:
@@ -341,6 +345,19 @@ class AgentsACPUseCase(TaskMessageMixin):
 
         raise ClientError(f"Agent {agent.id} does not have an ACP URL configured")
 
+    async def _get_agent_cached(
+        self, agent_id: str | None, agent_name: str | None
+    ) -> AgentEntity:
+        """Cached agent lookup (up to TTL-stale; saves a Postgres lookup per RPC)."""
+        cache_key = f"id={agent_id}|name={agent_name}"
+        cached = await _agent_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        agent = await self.agent_repository.get(id=agent_id, name=agent_name)
+        if agent is not None:
+            await _agent_cache.set(cache_key, agent)
+        return agent
+
     async def handle_rpc_request(
         self,
         method: AgentRPCMethod,
@@ -376,7 +393,7 @@ class AgentsACPUseCase(TaskMessageMixin):
             - EventEntity for EVENT_SEND
         """
         # Get the agent
-        agent = await self.agent_repository.get(id=agent_id, name=agent_name)
+        agent = await self._get_agent_cached(agent_id, agent_name)
         if method not in AgentRPCMethod:
             raise ClientError(f"Unsupported method: {method}")
         if agent.status == AgentStatus.DELETED:

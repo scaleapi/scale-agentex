@@ -7,6 +7,7 @@ from fastapi import Depends, Request
 from pydantic import BaseModel
 
 from src.adapters.http.adapter_httpx import DHttpxGateway
+from src.api.authentication_cache import AsyncTTLCache
 from src.domain.delegation_headers import build_delegation_headers
 from src.domain.entities.agents import AgentEntity
 from src.domain.entities.agents_rpc import (
@@ -43,6 +44,11 @@ from src.domain.repositories.agent_repository import DAgentRepository
 from src.utils.logging import ctx_var_request_id, make_logger
 
 logger = make_logger(__name__)
+
+# Cache the per-agent internal API key (uncached Postgres lookup per request).
+_agent_api_key_cache = AsyncTTLCache(
+    "agent_internal_api_key", max_size=4096, ttl_seconds=300
+)
 
 
 USE_STREAMING_ADVISORY_LOCK = os.environ.get(
@@ -291,9 +297,15 @@ class AgentACPService(TaskMessageMixin):
 
     async def get_agent_auth_headers(self, agent: AgentEntity) -> dict[str, str]:
         """Authentication headers the agent pod uses to call back into agentex."""
-        api_key = await self._agent_api_key_repository.get_internal_api_key_by_agent_id(
-            agent_id=agent.id
-        )
+        api_key = await _agent_api_key_cache.get(agent.id)
+        if api_key is None:
+            api_key = (
+                await self._agent_api_key_repository.get_internal_api_key_by_agent_id(
+                    agent_id=agent.id
+                )
+            )
+            if api_key:
+                await _agent_api_key_cache.set(agent.id, api_key)
         if api_key:
             return {"x-agent-api-key": api_key.api_key}
         return {}
