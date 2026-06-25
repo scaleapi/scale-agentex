@@ -76,14 +76,25 @@ def _format_fire_time(fire_id: str) -> str:
     Falls back to the current time when ``fire_id`` carries no recognizable
     timestamp suffix (e.g. a manually triggered fire).
     """
+    fire_time = _extract_fire_time(fire_id)
+    if fire_time is not None:
+        parsed = datetime.fromisoformat(fire_time.replace("Z", "+00:00"))
+        return parsed.strftime("%Y-%m-%d %H:%M UTC")
+    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _extract_fire_time(fire_id: str) -> str | None:
+    """Extract the occurrence time encoded in a schedule/manual fire id."""
     match = _NOMINAL_FIRE_TIME_RE.search(fire_id)
     if match:
         try:
             parsed = datetime.fromisoformat(match.group(1).replace("Z", "+00:00"))
-            return parsed.strftime("%Y-%m-%d %H:%M UTC")
         except ValueError:
-            pass
-    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    return None
 
 
 def _build_initial_content(initial_input: dict[str, Any]) -> TaskMessageContentEntity:
@@ -227,14 +238,20 @@ class ScheduledAgentRunActivities:
         # task_metadata.display_name, never the deterministic `name` above).
         # Templated per fire so runs are distinguishable; placed first so a
         # caller-supplied display_name in schedule.task_metadata overrides it.
-        fire_time = _format_fire_time(fire_id)
+        display_fire_time = _format_fire_time(fire_id)
         task_metadata = {
-            "display_name": f"Scheduled Message: {schedule.name} · {fire_time}",
+            "display_name": f"Scheduled Message: {schedule.name} · {display_fire_time}",
             **(schedule.task_metadata or {}),
             "schedule_id": schedule_id,
             "scheduled_fire_id": fire_id,
             "trigger_type": trigger_type,
         }
+        # `fire_time` is the run occurrence time: nominal scheduled time for
+        # schedule-fired runs, and actual trigger time for manual runs. Store it
+        # separately so product/UI code does not parse `scheduled_fire_id`.
+        fire_time = _extract_fire_time(fire_id)
+        if fire_time is not None:
+            task_metadata["fire_time"] = fire_time
 
         # task/create — get-or-create by deterministic name, so a retry returns
         # the same task. For async / agentic agents this also forwards the task

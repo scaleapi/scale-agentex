@@ -131,9 +131,10 @@ class TestLaunchScheduledAgentRun:
         task = TaskEntity(id="task-1", task_metadata={"schedule_id": schedule.id})
         use_case = _fake_use_case(_agent(ACPType.ASYNC), task)
         _patch_use_case(monkeypatch, use_case)
+        fire_id = f"{schedule.id}-run-2026-06-25T20:00:00Z"
 
         result = await activity_instance.launch_scheduled_agent_run(
-            schedule.id, "fire-1"
+            schedule.id, fire_id
         )
 
         assert result["status"] == "launched"
@@ -144,10 +145,11 @@ class TestLaunchScheduledAgentRun:
         assert methods == [AgentRPCMethod.TASK_CREATE, AgentRPCMethod.EVENT_SEND]
         # Deterministic task name embeds schedule id + fire id.
         create_params = use_case.handle_rpc_request.call_args_list[0].kwargs["params"]
-        assert create_params.name == f"scheduled-run:{schedule.id}:fire-1"
+        assert create_params.name == f"scheduled-run:{schedule.id}:{fire_id}"
         assert create_params.task_metadata["schedule_id"] == schedule.id
-        assert create_params.task_metadata["scheduled_fire_id"] == "fire-1"
+        assert create_params.task_metadata["scheduled_fire_id"] == fire_id
         assert create_params.task_metadata["trigger_type"] == "scheduled"
+        assert create_params.task_metadata["fire_time"] == "2026-06-25T20:00:00Z"
         use_case.task_service.update_task.assert_awaited_once()
         # Fire-time authz mirrors the RPC route: agent.execute, then task.create,
         # then task.update on the created task — in that order.
@@ -191,15 +193,31 @@ class TestLaunchScheduledAgentRun:
         task = TaskEntity(id="task-1")
         use_case = _fake_use_case(_agent(ACPType.ASYNC), task)
         _patch_use_case(monkeypatch, use_case)
+        fire_id = f"{schedule.id}-manual-00000000-0000-0000-0000-000000000000-2026-06-25T20:00:12.123456Z"
 
         result = await activity_instance.launch_scheduled_agent_run(
-            schedule.id, "manual-fire-1", "manual"
+            schedule.id, fire_id, "manual"
         )
 
         assert result["trigger_type"] == "manual"
         create_params = use_case.handle_rpc_request.call_args_list[0].kwargs["params"]
         assert create_params.task_metadata["trigger_type"] == "manual"
-        assert create_params.task_metadata["scheduled_fire_id"] == "manual-fire-1"
+        assert create_params.task_metadata["scheduled_fire_id"] == fire_id
+        assert create_params.task_metadata["fire_time"] == "2026-06-25T20:00:12.123456Z"
+
+    async def test_omits_fire_time_when_fire_id_has_no_timestamp(
+        self, activity_instance, monkeypatch
+    ):
+        schedule = _schedule()
+        activity_instance.schedule_repository.get.return_value = schedule
+        task = TaskEntity(id="task-1")
+        use_case = _fake_use_case(_agent(ACPType.ASYNC), task)
+        _patch_use_case(monkeypatch, use_case)
+
+        await activity_instance.launch_scheduled_agent_run(schedule.id, "fire-1")
+
+        create_params = use_case.handle_rpc_request.call_args_list[0].kwargs["params"]
+        assert "fire_time" not in create_params.task_metadata
 
     async def test_skips_delivery_when_already_delivered(
         self, activity_instance, monkeypatch
