@@ -121,7 +121,13 @@ class EnvironmentVariables(BaseModel):
     MONGODB_DATABASE_NAME: str | None = "agentex"
     MONGODB_MAX_POOL_SIZE: int = 50
     MONGODB_MIN_POOL_SIZE: int = 5
-    REDIS_MAX_CONNECTIONS: int = 50  # Increased for SSE streaming
+    # SSE streaming currently holds one blocking XREAD connection per connected
+    # client, so the pool needs headroom for peak concurrent streams per pod.
+    # NOTE: this is only the in-code default — deployed environments override it
+    # via the REDIS_MAX_CONNECTIONS env var, which is the real cap. Bumping this
+    # buys headroom but does NOT change the 1-connection-per-client scaling; the
+    # durable fix is a shared per-pod reader that fans out to in-process queues.
+    REDIS_MAX_CONNECTIONS: int = 200
     REDIS_CONNECTION_TIMEOUT: int = 60  # Connection timeout in seconds
     REDIS_SOCKET_TIMEOUT: int = 30  # Socket timeout in seconds
     REDIS_STREAM_MAXLEN: int = (
@@ -193,7 +199,7 @@ class EnvironmentVariables(BaseModel):
                 os.environ.get(EnvVarKeys.MONGODB_MIN_POOL_SIZE, "5")
             ),
             REDIS_MAX_CONNECTIONS=int(
-                os.environ.get(EnvVarKeys.REDIS_MAX_CONNECTIONS, "100")
+                os.environ.get(EnvVarKeys.REDIS_MAX_CONNECTIONS, "200")
             ),
             REDIS_CONNECTION_TIMEOUT=int(
                 os.environ.get(EnvVarKeys.REDIS_CONNECTION_TIMEOUT, "20")
