@@ -58,6 +58,24 @@ logger = make_logger(__name__)
 # In-memory TTL cache for the agent entity (looked up on every RPC).
 _agent_cache = AsyncTTLCache("agent_entity", max_size=4096, ttl_seconds=300)
 
+# Strong refs to in-flight background tasks so they are not GC'd before done.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _fire_and_forget(coro, description: str) -> None:
+    """Schedule a coroutine without awaiting it; failures are logged, not raised."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+
+    def _on_done(t: asyncio.Task) -> None:
+        _background_tasks.discard(t)
+        try:
+            t.result()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[fire-and-forget] {description} failed: {exc}")
+
+    task.add_done_callback(_on_done)
+
 
 class DeltaAccumulator:
     def __init__(self):
@@ -481,14 +499,13 @@ class AgentsACPUseCase(TaskMessageMixin):
             task_params=params.task_params,
         )
 
-        # Step 1: Insert the message in the messages table
-        await self._execute_with_error_handling(
-            task=task,
-            operation=lambda: self.task_message_service.append_message(
+        # Step 1: persist the inbound message (fire-and-forget; off the response path)
+        _fire_and_forget(
+            self.task_message_service.append_message(
                 task_id=task.id,
                 content=params.content,
             ),
-            error_message=f"Error appending input message to task {task.id}",
+            description=f"append input message to task {task.id}",
         )
 
         index_to_task_message_content_entities_to_create: dict[
@@ -666,11 +683,14 @@ class AgentsACPUseCase(TaskMessageMixin):
                 task_params=params.task_params,
             )
 
-            # Append the input client message
-            await self.task_message_service.append_message(
-                task_id=task.id,
-                content=params.content,
-                streaming_status="DONE",
+            # Append the input client message (fire-and-forget; off the response path)
+            _fire_and_forget(
+                self.task_message_service.append_message(
+                    task_id=task.id,
+                    content=params.content,
+                    streaming_status="DONE",
+                ),
+                description=f"append input message to task {task.id}",
             )
             # Stream the response - yield raw TaskMessage objects
             async for task_message_update in self.task_service.send_message_stream(
