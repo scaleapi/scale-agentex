@@ -21,6 +21,7 @@ from src.config.environment_variables import Environment, EnvironmentVariables
 from src.utils.database import async_db_engine_creator
 from src.utils.db_metrics import PostgresMetricsCollector
 from src.utils.logging import make_logger
+from src.utils.mongo_pool_metrics import get_mongo_pool_listener
 
 logger = make_logger(__name__)
 
@@ -132,6 +133,7 @@ class GlobalDependencies(metaclass=Singleton):
                 minPoolSize=self.environment_variables.MONGODB_MIN_POOL_SIZE,
                 maxIdleTimeMS=30000,  # Close connections after 30 seconds of inactivity
                 waitQueueTimeoutMS=5000,  # Wait up to 5 seconds for a connection from pool
+                event_listeners=[get_mongo_pool_listener()],
             )
             self.mongodb_database = self.mongodb_client[mongodb_database_name]
 
