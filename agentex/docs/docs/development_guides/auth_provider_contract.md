@@ -70,7 +70,7 @@ decide what happened. The body matters only where noted (`/v1/authn` principal,
 
 | Status | Meaning to Agentex | Resulting behavior |
 | --- | --- | --- |
-| `200` | Success | Proceed. For `check`, the principal is authorized. For `search`, read `items`. |
+| `200` | Success | Proceed. For `check`, the principal is authorized. For `search`, read `items` or the `unscoped` sentinel. |
 | `401` | Unauthenticated — missing/invalid credentials | Request rejected as `401 Unauthorized` |
 | `403` | Authenticated but not permitted | Treated as a permission denial (e.g. `check` failed) |
 | `502` | Provider acted as a bad gateway | Surfaced as a gateway error |
@@ -211,14 +211,25 @@ the returned `items` to **scope list endpoints** — effectively a
 { "items": ["task_1", "task_2", "task_3"], "success": true }
 ```
 
+To grant access to **every** resource of the type without enumerating ids, return
+the wildcard sentinel instead:
+
+```json
+{ "unscoped": true }
+```
+
 | Field | Type | Notes |
 | --- | --- | --- |
-| `items` | `string[]` | Resource ids the principal may access. **Required.** |
+| `items` | `string[]` | Resource ids the principal may access. Required unless `unscoped` is `true`. |
+| `unscoped` | `boolean` | Optional. `true` signals **all resources of this type** — no filter. When set, `items` is ignored. |
 
 > ⚠️ **`items` is an inclusion filter, not a hint.** Returning `[]` hides *every*
-> resource of that type from the principal. There is no "all resources" sentinel
-> in the base contract, so a provider that intends to grant broad access must
-> return the actual set of accessible ids.
+> resource of that type from the principal. To grant **broad** access without
+> enumerating ids, return the wildcard sentinel `{ "unscoped": true }` — Agentex
+> maps it to *no filter at all* (the same path used when authorization is
+> disabled), so a permissive single-account provider can answer `search`
+> statelessly. `unscoped` is an explicit opt-in: omit it (or set it `false`) and
+> `items` is treated as the exact, exhaustive set of accessible ids.
 
 ### `POST /v1/authz/grant`
 
@@ -278,7 +289,7 @@ its relationships.
 | --- | --- | --- | --- |
 | `POST /v1/authn` | Authenticate, return principal | `200` + principal | `401` |
 | `POST /v1/authz/check` | Read gate | `200` | `403` |
-| `POST /v1/authz/search` | List accessible ids | `200` + `{items}` | `200` + `{items: []}` |
+| `POST /v1/authz/search` | List accessible ids | `200` + `{items}` or `{unscoped: true}` | `200` + `{items: []}` |
 | `POST /v1/authz/grant` | Share a resource | `200` | `403` |
 | `POST /v1/authz/revoke` | Un-share a resource | `200` | `403` |
 | `POST /v1/authz/register` | Register created resource | `200` | `403` |

@@ -432,6 +432,33 @@ class TestTasksUseCaseMetadataUpdate:
         # Then
         assert updated.task_metadata == {"via": "name"}
 
+    async def test_update_metadata_and_merge_params_both_persist(
+        self, tasks_use_case, task_service, agent_repository, sample_agent
+    ):
+        """Supplying both task_metadata and merge_params must persist both fields.
+
+        Regression: the merge previously reassigned task_entity to the merged
+        result, discarding the in-memory task_metadata before the final write.
+        """
+        # Given
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent,
+            task_name="combined-update-test",
+            task_params={"model": "gpt-4"},
+        )
+
+        # When
+        updated = await tasks_use_case.update_mutable_fields_on_task(
+            id=task.id,
+            task_metadata={"stage": "tuned"},
+            merge_params={"temperature": 0.7},
+        )
+
+        # Then
+        assert updated.task_metadata == {"stage": "tuned"}
+        assert updated.params == {"model": "gpt-4", "temperature": 0.7}
+
     async def test_update_metadata_on_deleted_task_raises(
         self, tasks_use_case, task_service, agent_repository, sample_agent
     ):

@@ -3,7 +3,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
 from fastapi import Depends
-from sqlalchemy import distinct, func, select, update
+from sqlalchemy import cast, distinct, func, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import selectinload
 from src.adapters.crud_store.adapter_postgres import (
     ColumnPrimitiveValue,
@@ -212,6 +213,46 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
 
             # Return with agents populated
             return TaskEntity.model_validate(modified_orm)
+
+    async def merge_params(self, task_id: str, patch: dict) -> TaskEntity | None:
+        """Atomically shallow-merge ``patch`` into the task's ``params``
+        JSONB column. Returns the updated entity, or ``None`` if no task
+        with that id exists.
+
+        Uses Postgres' ``||`` operator on JSONB so the read-modify-write
+        is collapsed to a single statement (no race with concurrent
+        writers). ``patch`` keys overwrite existing keys at the top
+        level; nested objects are NOT deep-merged — pass the full nested
+        replacement if you need to change a subfield.
+
+        Intended for surfaces that need ``tasks.params`` to reflect the
+        latest agent config after a live edit (see
+        ``TasksUseCase.update_mutable_fields_on_task``); not a
+        general-purpose updater.
+        """
+
+        async with (
+            self.start_async_db_session(True) as session,
+            async_sql_exception_handler(),
+        ):
+            # ``COALESCE(params, '{}'::jsonb)`` so a NULL existing value
+            # doesn't poison the concat to NULL. Both operands cast to
+            # JSONB explicitly so Postgres picks the JSONB ``||`` operator
+            # (not the text concat overload).
+            existing = func.coalesce(TaskORM.params, cast({}, JSONB))
+            merged = existing.op("||", return_type=JSONB)(cast(patch, JSONB))
+            stmt = (
+                update(TaskORM)
+                .where(TaskORM.id == task_id)
+                .values(params=merged)
+                .returning(TaskORM)
+            )
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            await session.commit()
+            if row is None:
+                return None
+            return TaskEntity.model_validate(row)
 
     async def transition_status(
         self,

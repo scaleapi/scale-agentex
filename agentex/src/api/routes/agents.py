@@ -195,11 +195,15 @@ async def register_agent(
     If agent_id is not provided, the system will look for an existing agent by name and update it,
     or create a new one if it doesn't exist.
     """
-    enforce_ownership = _has_resolvable_creator(authorization_service.principal_context)
+    principal_context = authorization_service.principal_context
+    if not _has_resolvable_creator(principal_context):
+        principal_context = request.principal_context
+    enforce_ownership = _has_resolvable_creator(principal_context)
     if enforce_ownership:
         await authorization_service.check(
             AgentexResource.agent("*"),
             AuthorizedOperationType.create,
+            principal_context=principal_context,
         )
     logger.info(
         "Registering agent name=%s agent_id=%s acp_type=%s",
@@ -220,6 +224,7 @@ async def register_agent(
         if enforce_ownership:
             await authorization_service.grant(
                 AgentexResource.agent(agent_entity.id),
+                principal_context=principal_context,
             )
         response_fields = agent_entity.model_dump()
         existing_key = await api_keys_use_case.get_internal_api_key_by_agent_id(

@@ -1,0 +1,38 @@
+name: release-please
+
+# Versioned contract-checkpoint releases (tag + GitHub release + CHANGELOG) from
+# conventional commits — NOT a deploy gate. Uses the CLI (org blocks the action).
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write # release-please labels release PRs (autorelease:*) via the Issues API
+
+jobs:
+  release-please:
+    if: github.repository == 'scaleapi/scale-agentex'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Release PR + GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npx --yes release-please@16 release-pr \
+            --token="$GITHUB_TOKEN" \
+            --repo-url="${{ github.repository }}" \
+            --config-file=release-please-config.json \
+            --manifest-file=.release-please-manifest.json
+          npx --yes release-please@16 github-release \
+            --token="$GITHUB_TOKEN" \
+            --repo-url="${{ github.repository }}" \
+            --config-file=release-please-config.json \
+            --manifest-file=.release-please-manifest.json

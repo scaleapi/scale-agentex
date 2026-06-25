@@ -101,14 +101,15 @@ class StreamsUseCase:
             task_id = task.id
 
         stream_topic = get_task_event_stream_topic(task_id=task_id)
+        # Snapshot the read cursor BEFORE yielding "connected". "connected" is
+        # the client's cue to send its message, which makes the agent start
+        # XADD-ing deltas. Snapshotting after the yield lets a congested relay
+        # fall behind far enough that those deltas land before the snapshot and
+        # are never read. Snapshotting first resolves to "0-0" (stream is empty
+        # until the client sends), so we read from the beginning.
+        last_id = await self.stream_repository.get_stream_tail_id(stream_topic)
         # Send initial connection data
         yield f"data: {TaskStreamConnectedEventEntity(type='connected', taskId=task_id).model_dump_json()}\n\n"
-        # Snapshot the tail once on entry rather than passing "$" to every
-        # XREAD. "$" re-resolves to the current tail on each call, so any
-        # entry XADD'd in the gap between BLOCKing reads lands behind the
-        # new "$" and is unreachable — silently dropping deltas from
-        # fast-emitting agents.
-        last_id = await self.stream_repository.get_stream_tail_id(stream_topic)
         last_message_time = asyncio.get_running_loop().time()
         ping_interval = float(
             self.environment_variables.SSE_KEEPALIVE_PING_INTERVAL

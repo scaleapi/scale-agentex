@@ -193,7 +193,9 @@ async def update_task(
     task_use_case: DTaskUseCase,
 ) -> Task:
     updated_task_entity = await task_use_case.update_mutable_fields_on_task(
-        id=task_id, task_metadata=request.task_metadata
+        id=task_id,
+        task_metadata=request.task_metadata,
+        merge_params=request.merge_params,
     )
     return Task.model_validate(updated_task_entity)
 
@@ -212,7 +214,9 @@ async def update_task_by_name(
     task_use_case: DTaskUseCase,
 ) -> Task:
     updated_task_entity = await task_use_case.update_mutable_fields_on_task(
-        name=task_name, task_metadata=request.task_metadata
+        name=task_name,
+        task_metadata=request.task_metadata,
+        merge_params=request.merge_params,
     )
     return Task.model_validate(updated_task_entity)
 

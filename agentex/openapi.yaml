@@ -1213,19 +1213,25 @@ paths:
             : {\n          \"anyOf\": [\n            {},\n            {\n        \
             \      \"type\": \"null\"\n            }\n          ],\n          \"default\"\
             : null,\n          \"description\": \"The result of the tool.\",\n   \
-            \       \"title\": \"Content\"\n        }\n      },\n      \"title\":\
-            \ \"ToolResponseContentEntityOptional\",\n      \"type\": \"object\"\n\
-            \    }\n  },\n  \"description\": \"Filter model for TaskMessage - all\
-            \ fields optional for flexible filtering.\\n\\nThe `exclude` field determines\
-            \ whether this filter is inclusionary or exclusionary.\\nWhen multiple\
-            \ filters are provided:\\n- Inclusionary filters (exclude=False) are OR'd\
-            \ together\\n- Exclusionary filters (exclude=True) are OR'd together and\
-            \ negated with $nor\\n- The two groups are AND'd: (include1 OR include2)\
-            \ AND NOT (exclude1 OR exclude2)\",\n  \"properties\": {\n    \"content\"\
-            : {\n      \"anyOf\": [\n        {\n          \"$ref\": \"#/$defs/ToolRequestContentEntityOptional\"\
-            \n        },\n        {\n          \"$ref\": \"#/$defs/DataContentEntityOptional\"\
-            \n        },\n        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\
-            \n        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
+            \       \"title\": \"Content\"\n        },\n        \"is_error\": {\n\
+            \          \"anyOf\": [\n            {\n              \"type\": \"boolean\"\
+            \n            },\n            {\n              \"type\": \"null\"\n  \
+            \          }\n          ],\n          \"default\": null,\n          \"\
+            description\": \"Whether the tool call resulted in an error. `None` when\
+            \ the harness does not report a status.\",\n          \"title\": \"Is\
+            \ Error\"\n        }\n      },\n      \"title\": \"ToolResponseContentEntityOptional\"\
+            ,\n      \"type\": \"object\"\n    }\n  },\n  \"description\": \"Filter\
+            \ model for TaskMessage - all fields optional for flexible filtering.\\\
+            n\\nThe `exclude` field determines whether this filter is inclusionary\
+            \ or exclusionary.\\nWhen multiple filters are provided:\\n- Inclusionary\
+            \ filters (exclude=False) are OR'd together\\n- Exclusionary filters (exclude=True)\
+            \ are OR'd together and negated with $nor\\n- The two groups are AND'd:\
+            \ (include1 OR include2) AND NOT (exclude1 OR exclude2)\",\n  \"properties\"\
+            : {\n    \"content\": {\n      \"anyOf\": [\n        {\n          \"$ref\"\
+            : \"#/$defs/ToolRequestContentEntityOptional\"\n        },\n        {\n\
+            \          \"$ref\": \"#/$defs/DataContentEntityOptional\"\n        },\n\
+            \        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\n\
+            \        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
             \n        },\n        {\n          \"$ref\": \"#/$defs/ReasoningContentEntityOptional\"\
             \n        },\n        {\n          \"type\": \"null\"\n        }\n   \
             \   ],\n      \"default\": null,\n      \"description\": \"Filter by message\
@@ -1416,19 +1422,24 @@ paths:
           \            {},\n            {\n              \"type\": \"null\"\n    \
           \        }\n          ],\n          \"default\": null,\n          \"description\"\
           : \"The result of the tool.\",\n          \"title\": \"Content\"\n     \
-          \   }\n      },\n      \"title\": \"ToolResponseContentEntityOptional\"\
-          ,\n      \"type\": \"object\"\n    }\n  },\n  \"description\": \"Filter\
-          \ model for TaskMessage - all fields optional for flexible filtering.\\\
-          n\\nThe `exclude` field determines whether this filter is inclusionary or\
-          \ exclusionary.\\nWhen multiple filters are provided:\\n- Inclusionary filters\
-          \ (exclude=False) are OR'd together\\n- Exclusionary filters (exclude=True)\
-          \ are OR'd together and negated with $nor\\n- The two groups are AND'd:\
-          \ (include1 OR include2) AND NOT (exclude1 OR exclude2)\",\n  \"properties\"\
-          : {\n    \"content\": {\n      \"anyOf\": [\n        {\n          \"$ref\"\
-          : \"#/$defs/ToolRequestContentEntityOptional\"\n        },\n        {\n\
-          \          \"$ref\": \"#/$defs/DataContentEntityOptional\"\n        },\n\
-          \        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\n\
-          \        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
+          \   },\n        \"is_error\": {\n          \"anyOf\": [\n            {\n\
+          \              \"type\": \"boolean\"\n            },\n            {\n  \
+          \            \"type\": \"null\"\n            }\n          ],\n         \
+          \ \"default\": null,\n          \"description\": \"Whether the tool call\
+          \ resulted in an error. `None` when the harness does not report a status.\"\
+          ,\n          \"title\": \"Is Error\"\n        }\n      },\n      \"title\"\
+          : \"ToolResponseContentEntityOptional\",\n      \"type\": \"object\"\n \
+          \   }\n  },\n  \"description\": \"Filter model for TaskMessage - all fields\
+          \ optional for flexible filtering.\\n\\nThe `exclude` field determines whether\
+          \ this filter is inclusionary or exclusionary.\\nWhen multiple filters are\
+          \ provided:\\n- Inclusionary filters (exclude=False) are OR'd together\\\
+          n- Exclusionary filters (exclude=True) are OR'd together and negated with\
+          \ $nor\\n- The two groups are AND'd: (include1 OR include2) AND NOT (exclude1\
+          \ OR exclude2)\",\n  \"properties\": {\n    \"content\": {\n      \"anyOf\"\
+          : [\n        {\n          \"$ref\": \"#/$defs/ToolRequestContentEntityOptional\"\
+          \n        },\n        {\n          \"$ref\": \"#/$defs/DataContentEntityOptional\"\
+          \n        },\n        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\
+          \n        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
           \n        },\n        {\n          \"$ref\": \"#/$defs/ReasoningContentEntityOptional\"\
           \n        },\n        {\n          \"type\": \"null\"\n        }\n     \
           \ ],\n      \"default\": null,\n      \"description\": \"Filter by message\
@@ -1769,19 +1780,25 @@ paths:
             : {\n          \"anyOf\": [\n            {},\n            {\n        \
             \      \"type\": \"null\"\n            }\n          ],\n          \"default\"\
             : null,\n          \"description\": \"The result of the tool.\",\n   \
-            \       \"title\": \"Content\"\n        }\n      },\n      \"title\":\
-            \ \"ToolResponseContentEntityOptional\",\n      \"type\": \"object\"\n\
-            \    }\n  },\n  \"description\": \"Filter model for TaskMessage - all\
-            \ fields optional for flexible filtering.\\n\\nThe `exclude` field determines\
-            \ whether this filter is inclusionary or exclusionary.\\nWhen multiple\
-            \ filters are provided:\\n- Inclusionary filters (exclude=False) are OR'd\
-            \ together\\n- Exclusionary filters (exclude=True) are OR'd together and\
-            \ negated with $nor\\n- The two groups are AND'd: (include1 OR include2)\
-            \ AND NOT (exclude1 OR exclude2)\",\n  \"properties\": {\n    \"content\"\
-            : {\n      \"anyOf\": [\n        {\n          \"$ref\": \"#/$defs/ToolRequestContentEntityOptional\"\
-            \n        },\n        {\n          \"$ref\": \"#/$defs/DataContentEntityOptional\"\
-            \n        },\n        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\
-            \n        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
+            \       \"title\": \"Content\"\n        },\n        \"is_error\": {\n\
+            \          \"anyOf\": [\n            {\n              \"type\": \"boolean\"\
+            \n            },\n            {\n              \"type\": \"null\"\n  \
+            \          }\n          ],\n          \"default\": null,\n          \"\
+            description\": \"Whether the tool call resulted in an error. `None` when\
+            \ the harness does not report a status.\",\n          \"title\": \"Is\
+            \ Error\"\n        }\n      },\n      \"title\": \"ToolResponseContentEntityOptional\"\
+            ,\n      \"type\": \"object\"\n    }\n  },\n  \"description\": \"Filter\
+            \ model for TaskMessage - all fields optional for flexible filtering.\\\
+            n\\nThe `exclude` field determines whether this filter is inclusionary\
+            \ or exclusionary.\\nWhen multiple filters are provided:\\n- Inclusionary\
+            \ filters (exclude=False) are OR'd together\\n- Exclusionary filters (exclude=True)\
+            \ are OR'd together and negated with $nor\\n- The two groups are AND'd:\
+            \ (include1 OR include2) AND NOT (exclude1 OR exclude2)\",\n  \"properties\"\
+            : {\n    \"content\": {\n      \"anyOf\": [\n        {\n          \"$ref\"\
+            : \"#/$defs/ToolRequestContentEntityOptional\"\n        },\n        {\n\
+            \          \"$ref\": \"#/$defs/DataContentEntityOptional\"\n        },\n\
+            \        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\n\
+            \        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
             \n        },\n        {\n          \"$ref\": \"#/$defs/ReasoningContentEntityOptional\"\
             \n        },\n        {\n          \"type\": \"null\"\n        }\n   \
             \   ],\n      \"default\": null,\n      \"description\": \"Filter by message\
@@ -1972,19 +1989,24 @@ paths:
           \            {},\n            {\n              \"type\": \"null\"\n    \
           \        }\n          ],\n          \"default\": null,\n          \"description\"\
           : \"The result of the tool.\",\n          \"title\": \"Content\"\n     \
-          \   }\n      },\n      \"title\": \"ToolResponseContentEntityOptional\"\
-          ,\n      \"type\": \"object\"\n    }\n  },\n  \"description\": \"Filter\
-          \ model for TaskMessage - all fields optional for flexible filtering.\\\
-          n\\nThe `exclude` field determines whether this filter is inclusionary or\
-          \ exclusionary.\\nWhen multiple filters are provided:\\n- Inclusionary filters\
-          \ (exclude=False) are OR'd together\\n- Exclusionary filters (exclude=True)\
-          \ are OR'd together and negated with $nor\\n- The two groups are AND'd:\
-          \ (include1 OR include2) AND NOT (exclude1 OR exclude2)\",\n  \"properties\"\
-          : {\n    \"content\": {\n      \"anyOf\": [\n        {\n          \"$ref\"\
-          : \"#/$defs/ToolRequestContentEntityOptional\"\n        },\n        {\n\
-          \          \"$ref\": \"#/$defs/DataContentEntityOptional\"\n        },\n\
-          \        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\n\
-          \        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
+          \   },\n        \"is_error\": {\n          \"anyOf\": [\n            {\n\
+          \              \"type\": \"boolean\"\n            },\n            {\n  \
+          \            \"type\": \"null\"\n            }\n          ],\n         \
+          \ \"default\": null,\n          \"description\": \"Whether the tool call\
+          \ resulted in an error. `None` when the harness does not report a status.\"\
+          ,\n          \"title\": \"Is Error\"\n        }\n      },\n      \"title\"\
+          : \"ToolResponseContentEntityOptional\",\n      \"type\": \"object\"\n \
+          \   }\n  },\n  \"description\": \"Filter model for TaskMessage - all fields\
+          \ optional for flexible filtering.\\n\\nThe `exclude` field determines whether\
+          \ this filter is inclusionary or exclusionary.\\nWhen multiple filters are\
+          \ provided:\\n- Inclusionary filters (exclude=False) are OR'd together\\\
+          n- Exclusionary filters (exclude=True) are OR'd together and negated with\
+          \ $nor\\n- The two groups are AND'd: (include1 OR include2) AND NOT (exclude1\
+          \ OR exclude2)\",\n  \"properties\": {\n    \"content\": {\n      \"anyOf\"\
+          : [\n        {\n          \"$ref\": \"#/$defs/ToolRequestContentEntityOptional\"\
+          \n        },\n        {\n          \"$ref\": \"#/$defs/DataContentEntityOptional\"\
+          \n        },\n        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\
+          \n        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
           \n        },\n        {\n          \"$ref\": \"#/$defs/ReasoningContentEntityOptional\"\
           \n        },\n        {\n          \"type\": \"null\"\n        }\n     \
           \ ],\n      \"default\": null,\n      \"description\": \"Filter by message\
@@ -2694,6 +2716,47 @@ paths:
                 items:
                   $ref: '#/components/schemas/AgentAPIKey'
                 title: Response List Agent Api Keys Agent Api Keys Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent_api_keys/webhook-trigger:
+    post:
+      tags:
+      - Agent APIKeys
+      summary: Create Webhook Trigger
+      description: 'Wire a webhook trigger in one call.
+
+
+        Registers the source''s signature-verification key (github/slack) for the
+        agent and
+
+        returns the ready-to-paste forward webhook URL plus the signing secret (shown
+        once).
+
+        The webhook then flows through the existing /agents/forward ingress, which
+        verifies
+
+        the signature against this key. Bundles the existing key-create + URL composition
+        so
+
+        a UI (or a curl) can set up a trigger without two steps.'
+      operationId: create_webhook_trigger_agent_api_keys_webhook_trigger_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWebhookTriggerRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateWebhookTriggerResponse'
         '422':
           description: Validation Error
           content:
@@ -4527,6 +4590,93 @@ components:
             to the agent inside the ACP payload for backward compatibility.
       type: object
       title: CreateTaskRequest
+    CreateWebhookTriggerRequest:
+      properties:
+        agent_name:
+          type: string
+          title: Agent Name
+          description: The agent the webhook drives.
+        source:
+          $ref: '#/components/schemas/AgentAPIKeyType'
+          description: Webhook source whose signature is verified (github or slack).
+          default: github
+        name:
+          type: string
+          title: Name
+          description: 'Signature-lookup key: the repo full_name (github) or api_app_id
+            (slack) that the forward ingress matches the incoming webhook against.'
+        forward_path:
+          type: string
+          title: Forward Path
+          description: Subpath the agent's own route handles, e.g. 'github-pr/<config-id>'.
+            Appended to /agents/forward/name/{agent_name}/ to form the webhook URL.
+        secret:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Secret
+          description: Signing secret. For GitHub, omit to generate one, or provide
+            an existing webhook secret. For Slack, this is required and must be the
+            Slack app's Signing Secret.
+        base_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Base Url
+          description: Optional public agentex base URL for the returned webhook_url;
+            defaults to the AGENTEX_PUBLIC_URL env var.
+      type: object
+      required:
+      - agent_name
+      - name
+      - forward_path
+      title: CreateWebhookTriggerRequest
+      description: 'One-call setup for a webhook trigger: register the source''s signature
+        key and
+
+        get back the ready-to-paste forward webhook URL.'
+    CreateWebhookTriggerResponse:
+      properties:
+        key_id:
+          type: string
+          title: Key Id
+          description: The created agent API key id.
+        agent_name:
+          type: string
+          title: Agent Name
+          description: The agent the webhook drives.
+        source:
+          $ref: '#/components/schemas/AgentAPIKeyType'
+          description: Webhook source (github or slack).
+        name:
+          type: string
+          title: Name
+          description: Signature-lookup key (repo full_name / api_app_id).
+        secret:
+          type: string
+          title: Secret
+          description: The signing secret — shown once; paste into the source's webhook
+            config.
+        webhook_path:
+          type: string
+          title: Webhook Path
+          description: The forward path to POST webhooks to.
+        webhook_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Webhook Url
+          description: Full webhook URL to paste into the source (None if no base
+            URL configured).
+      type: object
+      required:
+      - key_id
+      - agent_name
+      - source
+      - name
+      - secret
+      - webhook_path
+      title: CreateWebhookTriggerResponse
     DataContent:
       properties:
         type:
@@ -5221,6 +5371,12 @@ components:
         acp_type:
           $ref: '#/components/schemas/ACPType'
           description: The type of ACP to use for the agent.
+        principal_context:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Principal Context
+          description: Principal used for authorization
         registration_metadata:
           anyOf:
           - additionalProperties: true
@@ -6439,6 +6595,13 @@ components:
         content:
           title: Content
           description: The result of the tool.
+        is_error:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Error
+          description: Whether the tool call resulted in an error. `None` when the
+            harness does not report a status.
       type: object
       required:
       - author
@@ -6474,6 +6637,13 @@ components:
         content:
           title: Content
           description: The result of the tool.
+        is_error:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Error
+          description: Whether the tool call resulted in an error. `None` when the
+            harness does not report a status.
       type: object
       required:
       - author
@@ -6654,6 +6824,13 @@ components:
             type: object
           - type: 'null'
           title: If provided, replaces task_metadata with this value
+        merge_params:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Optional shallow-merge patch applied to the task's params column.
+            Top-level keys overwrite; pass full nested objects to change subfields.
       type: object
       title: UpdateTaskRequest
     ValidationError:
