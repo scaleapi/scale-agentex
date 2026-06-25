@@ -65,6 +65,8 @@ class EnvVarKeys(str, Enum):
     RETENTION_CLEANUP_PAGE_SIZE = "RETENTION_CLEANUP_PAGE_SIZE"
     RETENTION_CLEANUP_MAX_IN_FLIGHT = "RETENTION_CLEANUP_MAX_IN_FLIGHT"
     RETENTION_CLEANUP_DRY_RUN = "RETENTION_CLEANUP_DRY_RUN"
+    ENABLE_TEST_SEEDING = "ENABLE_TEST_SEEDING"
+    TEST_SEED_TOKEN = "TEST_SEED_TOKEN"
 
 
 class Environment(str, Enum):
@@ -128,6 +130,11 @@ class EnvironmentVariables(BaseModel):
     RETENTION_CLEANUP_PAGE_SIZE: int = 200
     RETENTION_CLEANUP_MAX_IN_FLIGHT: int = 20
     RETENTION_CLEANUP_DRY_RUN: bool = True
+    # Test-only seeding gate. Both must be set for the /test/seed endpoint to be
+    # mounted. Defaults are fail-closed: endpoint is unreachable in any env that
+    # doesn't explicitly opt in. Hard-gated off in production regardless of flag.
+    ENABLE_TEST_SEEDING: bool = False
+    TEST_SEED_TOKEN: str | None = None
 
     @classmethod
     def refresh(cls, force_refresh: bool = False) -> EnvironmentVariables | None:
@@ -242,6 +249,10 @@ class EnvironmentVariables(BaseModel):
             RETENTION_CLEANUP_DRY_RUN=(
                 os.environ.get(EnvVarKeys.RETENTION_CLEANUP_DRY_RUN, "true") == "true"
             ),
+            ENABLE_TEST_SEEDING=(
+                os.environ.get(EnvVarKeys.ENABLE_TEST_SEEDING, "false") == "true"
+            ),
+            TEST_SEED_TOKEN=os.environ.get(EnvVarKeys.TEST_SEED_TOKEN),
         )
         refreshed_environment_variables = environment_variables
         return refreshed_environment_variables

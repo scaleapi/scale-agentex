@@ -48,7 +48,7 @@ from src.config.dependencies import (
     GlobalDependencies,
     resolve_environment_variable_dependency,
 )
-from src.config.environment_variables import EnvVarKeys
+from src.config.environment_variables import EnvironmentVariables, EnvVarKeys, Environment
 from src.domain.exceptions import GenericException
 from src.utils.logging import make_logger
 
@@ -207,6 +207,31 @@ fastapi_app.include_router(deployments.router)
 fastapi_app.include_router(schedules.router)
 fastapi_app.include_router(checkpoints.router)
 fastapi_app.include_router(task_retention.router)
+
+# Test-only seeding endpoint. Gated by env (must opt in AND be on a known
+# non-prod environment) so this code path is unreachable in production
+# deployments by construction -- the router is not even mounted.
+#
+# Allow-list rather than deny-list: ENVIRONMENT is typed `str | None` and
+# populated raw from os.environ with no enum coercion, so a deny-list against
+# Environment.PROD would fail OPEN on unset, "prod", "Production", typos, or
+# any new environment name. Mount only when ENVIRONMENT is an explicitly
+# known non-prod value.
+_TEST_SEEDING_ALLOWED_ENVS = {Environment.DEV, Environment.STAGING}
+_test_seeding_env_vars = EnvironmentVariables.refresh()
+if (
+    _test_seeding_env_vars is not None
+    and _test_seeding_env_vars.ENABLE_TEST_SEEDING
+    and _test_seeding_env_vars.ENVIRONMENT in _TEST_SEEDING_ALLOWED_ENVS
+):
+    from src.api.routes import test_seeding
+
+    fastapi_app.include_router(test_seeding.router)
+    logger.warning(
+        "Test seeding endpoint /test/seed is MOUNTED. "
+        "This must never happen in production.",
+        extra={"environment": _test_seeding_env_vars.ENVIRONMENT},
+    )
 
 # Wrap FastAPI app with health check interceptor for sub-millisecond K8s probe responses.
 # This must be the outermost layer to bypass all middleware.
