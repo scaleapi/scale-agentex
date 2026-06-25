@@ -1,9 +1,11 @@
 import contextvars
+import json
 import logging
 import os
 import re
 import sys
 from collections.abc import Sequence
+from typing import Any
 
 import ddtrace
 import json_log_formatter
@@ -13,6 +15,17 @@ from src.utils.request_utils import REQUEST_KEY_REGEXP_BLACKLIST
 
 # Check if Datadog is configured
 _is_datadog_configured = bool(os.environ.get("DD_AGENT_HOST"))
+
+# Emit structured JSON logs in all deployed environments. JSON keeps a
+# multi-line traceback (exc_info=True) as a single log entry — the newlines
+# live inside the quoted `exc_info` field — instead of fanning out into one
+# cluster-log entry per traceback line. Splitting tracebacks per line was a
+# primary multiplier behind a log-ingestion spike on a plain-text-logging
+# cluster. Local development keeps plain text for readable console output;
+# JSON is the default everywhere else (including when ENVIRONMENT is unset)
+# so a deployed cluster can never silently fall back to per-line tracebacks.
+_is_local_dev = os.environ.get("ENVIRONMENT", "").lower() == "development"
+_use_json_logs = not _is_local_dev
 
 # Include Datadog trace IDs only when Datadog is configured
 if _is_datadog_configured:
@@ -89,6 +102,30 @@ class SensitiveDataFilter(logging.Filter):
 _sensitive_data_filter = SensitiveDataFilter()
 
 
+# Cap the size of individual structured fields in JSON logs. Request logging
+# (LoggedAPIRoute.log_request) attaches the decoded body, headers, and
+# query_params as ``extra``, and the JSON formatter serializes ``extra`` —
+# unlike the plain-text formatter, which drops it. Without a cap, a single
+# large request payload would create a very large per-request log entry on
+# every request, reintroducing the log-volume problem this mode exists to
+# avoid. ``exc_info`` is exempt: a traceback is bounded per error (not per
+# request) and the full stack is worth keeping.
+_MAX_JSON_FIELD_CHARS = 4096
+_UNCAPPED_JSON_FIELDS = frozenset({"exc_info"})
+
+
+def _truncate_log_value(value: Any) -> Any:
+    """Return ``value`` unchanged if small, else a truncated string marker."""
+    try:
+        rendered = value if isinstance(value, str) else json.dumps(value, default=str)
+    except (TypeError, ValueError):
+        rendered = str(value)
+    if len(rendered) <= _MAX_JSON_FIELD_CHARS:
+        return value
+    dropped = len(rendered) - _MAX_JSON_FIELD_CHARS
+    return rendered[:_MAX_JSON_FIELD_CHARS] + f"...[truncated {dropped} chars]"
+
+
 class CustomJSONFormatter(json_log_formatter.JSONFormatter):
     def json_record(self, message: str, extra: dict, record: logging.LogRecord) -> dict:
         extra = super().json_record(message, extra, record)
@@ -123,7 +160,12 @@ class CustomJSONFormatter(json_log_formatter.JSONFormatter):
         if version_override:
             extra["dd.version"] = version_override
 
-        return extra
+        # Bound per-field size so large request bodies/headers/query_params
+        # logged via `extra` can't create oversized entries on every request.
+        return {
+            k: v if k in _UNCAPPED_JSON_FIELDS else _truncate_log_value(v)
+            for k, v in extra.items()
+        }
 
 
 def make_logger(name: str) -> logging.Logger:
@@ -134,7 +176,7 @@ def make_logger(name: str) -> logging.Logger:
 
     logger = logging.getLogger(name)
     stream_handler = logging.StreamHandler()
-    if _is_datadog_configured:
+    if _use_json_logs:
         stream_handler.setFormatter(CustomJSONFormatter())
     else:
         stream_handler.setFormatter(logging.Formatter(LOG_FORMAT))
