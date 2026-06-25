@@ -65,6 +65,7 @@ class EnvVarKeys(str, Enum):
     RETENTION_CLEANUP_PAGE_SIZE = "RETENTION_CLEANUP_PAGE_SIZE"
     RETENTION_CLEANUP_MAX_IN_FLIGHT = "RETENTION_CLEANUP_MAX_IN_FLIGHT"
     RETENTION_CLEANUP_DRY_RUN = "RETENTION_CLEANUP_DRY_RUN"
+    RETENTION_CLEANUP_STALE_RUNNING_DAYS = "RETENTION_CLEANUP_STALE_RUNNING_DAYS"
 
 
 class Environment(str, Enum):
@@ -74,6 +75,30 @@ class Environment(str, Enum):
 
 
 refreshed_environment_variables = None
+
+
+def _parse_bool_env(key: EnvVarKeys, default: bool) -> bool:
+    """
+    Strict boolean env parsing: accepts true/false/1/0 case-insensitively,
+    raises on anything else.
+
+    The previous pattern (`os.environ.get(key, ...) == "true"`) silently
+    coerced any unrecognized value to False. For RETENTION_CLEANUP_DRY_RUN
+    that failure mode is destructive: `DRY_RUN=True` (capital T, as YAML
+    tooling tends to render booleans) meant dry_run=False, i.e. live
+    deletion. Fail loud instead so a misconfigured worker refuses to run.
+    """
+    raw = os.environ.get(key)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in ("true", "1"):
+        return True
+    if normalized in ("false", "0"):
+        return False
+    raise ValueError(
+        f"Invalid boolean for {key.value}: {raw!r} (expected true/false/1/0)"
+    )
 
 
 class EnvironmentVariables(BaseModel):
@@ -128,6 +153,10 @@ class EnvironmentVariables(BaseModel):
     RETENTION_CLEANUP_PAGE_SIZE: int = 200
     RETENTION_CLEANUP_MAX_IN_FLIGHT: int = 20
     RETENTION_CLEANUP_DRY_RUN: bool = True
+    # When > 0, tasks stuck in RUNNING with no interaction for this many days
+    # are treated as abandoned and become eligible for cleanup. 0 disables the
+    # override (RUNNING tasks are never cleaned), preserving prior behavior.
+    RETENTION_CLEANUP_STALE_RUNNING_DAYS: int = 0
 
     @classmethod
     def refresh(cls, force_refresh: bool = False) -> EnvironmentVariables | None:
@@ -210,15 +239,14 @@ class EnvironmentVariables(BaseModel):
             AGENTEX_SERVER_TASK_QUEUE=os.environ.get(
                 EnvVarKeys.AGENTEX_SERVER_TASK_QUEUE
             ),
-            ENABLE_HEALTH_CHECK_WORKFLOW=(
-                os.environ.get(EnvVarKeys.ENABLE_HEALTH_CHECK_WORKFLOW, "false")
-                == "true"
+            ENABLE_HEALTH_CHECK_WORKFLOW=_parse_bool_env(
+                EnvVarKeys.ENABLE_HEALTH_CHECK_WORKFLOW, default=False
             ),
             WEBHOOK_REQUEST_TIMEOUT=float(
                 os.environ.get(EnvVarKeys.WEBHOOK_REQUEST_TIMEOUT, "15.0")
             ),
-            RETENTION_CLEANUP_ENABLED=(
-                os.environ.get(EnvVarKeys.RETENTION_CLEANUP_ENABLED, "false") == "true"
+            RETENTION_CLEANUP_ENABLED=_parse_bool_env(
+                EnvVarKeys.RETENTION_CLEANUP_ENABLED, default=False
             ),
             RETENTION_CLEANUP_AGENT_ALLOWLIST=[
                 name.strip()
@@ -239,8 +267,11 @@ class EnvironmentVariables(BaseModel):
             RETENTION_CLEANUP_MAX_IN_FLIGHT=int(
                 os.environ.get(EnvVarKeys.RETENTION_CLEANUP_MAX_IN_FLIGHT, "20")
             ),
-            RETENTION_CLEANUP_DRY_RUN=(
-                os.environ.get(EnvVarKeys.RETENTION_CLEANUP_DRY_RUN, "true") == "true"
+            RETENTION_CLEANUP_DRY_RUN=_parse_bool_env(
+                EnvVarKeys.RETENTION_CLEANUP_DRY_RUN, default=True
+            ),
+            RETENTION_CLEANUP_STALE_RUNNING_DAYS=int(
+                os.environ.get(EnvVarKeys.RETENTION_CLEANUP_STALE_RUNNING_DAYS, "0")
             ),
         )
         refreshed_environment_variables = environment_variables

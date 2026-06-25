@@ -59,7 +59,9 @@ async def test_clean_task_cleaned_outcome():
     assert outcome["status"] == "cleaned"
     assert outcome["task_id"] == "t1"
     assert outcome["messages_deleted"] == 3
-    use_case.clean_task.assert_awaited_once_with(task_id="t1", force=False, idle_days=7)
+    use_case.clean_task.assert_awaited_once_with(
+        task_id="t1", force=False, idle_days=7, stale_running_days=0
+    )
 
 
 @pytest.mark.unit
@@ -83,7 +85,7 @@ async def test_clean_task_defaults_to_dry_run_and_validates_without_writes():
     assert outcome["task_id"] == "t1"
     assert outcome["reason"] == "would_clean"
     use_case.preview_clean_task.assert_awaited_once_with(
-        task_id="t1", force=False, idle_days=7
+        task_id="t1", force=False, idle_days=7, stale_running_days=0
     )
     use_case.clean_task.assert_not_awaited()
 
@@ -128,6 +130,7 @@ async def test_load_cleanup_config_reads_env(monkeypatch):
     monkeypatch.setenv("RETENTION_CLEANUP_PAGE_SIZE", "33")
     monkeypatch.setenv("RETENTION_CLEANUP_MAX_IN_FLIGHT", "4")
     monkeypatch.setenv("RETENTION_CLEANUP_DRY_RUN", "true")
+    monkeypatch.setenv("RETENTION_CLEANUP_STALE_RUNNING_DAYS", "30")
     activities = RetentionCleanupActivities(
         task_repository=AsyncMock(), use_case=AsyncMock()
     )
@@ -139,4 +142,5 @@ async def test_load_cleanup_config_reads_env(monkeypatch):
         "page_size": 33,
         "max_in_flight": 4,
         "dry_run": True,
+        "stale_running_days": 30,
     }
