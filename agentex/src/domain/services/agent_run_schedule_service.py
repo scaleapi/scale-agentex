@@ -127,6 +127,9 @@ class AgentRunScheduleService:
             registered = await self._register_schedule_in_auth(
                 authz_selector=authz_selector, agent_id=agent.id
             )
+            # Temporal schedules append the nominal fire timestamp to this base
+            # workflow id at execution time, so workflow.info().workflow_id is a
+            # per-fire token even though the configured action id is stable.
             await self.temporal_adapter.create_schedule(
                 schedule_id=temporal_id,
                 workflow=SCHEDULED_AGENT_RUN_WORKFLOW_NAME,
