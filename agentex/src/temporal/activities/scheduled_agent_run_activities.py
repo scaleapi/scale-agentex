@@ -189,9 +189,11 @@ class ScheduledAgentRunActivities:
                 "schedule_id": schedule_id,
             }
 
-        if schedule.paused:
+        if schedule.paused and trigger_type != "manual":
             # Temporal pauses the schedule too, but a manual trigger can still
-            # fire a paused schedule — honor the stored paused state defensively.
+            # fire a paused schedule. Honor the stored paused state defensively
+            # only for cadence-driven fires; explicit out-of-band manual triggers
+            # bypass it so an operator can run a paused schedule on demand.
             return {
                 "status": "skipped",
                 "reason": "schedule_paused",
