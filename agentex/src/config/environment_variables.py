@@ -251,8 +251,8 @@ class EnvironmentVariables(BaseModel):
             ENABLE_HEALTH_CHECK_WORKFLOW=_parse_bool_env(
                 EnvVarKeys.ENABLE_HEALTH_CHECK_WORKFLOW, default=False
             ),
-            ENABLE_AGENT_RUN_SCHEDULES=(
-                os.environ.get(EnvVarKeys.ENABLE_AGENT_RUN_SCHEDULES, "false") == "true"
+            ENABLE_AGENT_RUN_SCHEDULES=_parse_bool_env(
+                EnvVarKeys.ENABLE_AGENT_RUN_SCHEDULES, default=False
             ),
             WEBHOOK_REQUEST_TIMEOUT=float(
                 os.environ.get(EnvVarKeys.WEBHOOK_REQUEST_TIMEOUT, "15.0")

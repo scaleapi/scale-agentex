@@ -12,6 +12,16 @@ def test_agent_run_schedules_flag_parses_enabled(monkeypatch):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("value", ["True", "TRUE", "1"])
+def test_agent_run_schedules_flag_uses_strict_bool_parser(monkeypatch, value):
+    monkeypatch.setenv("ENABLE_AGENT_RUN_SCHEDULES", value)
+
+    env = EnvironmentVariables.refresh(force_refresh=True)
+
+    assert env.ENABLE_AGENT_RUN_SCHEDULES is True
+
+
+@pytest.mark.unit
 def test_agent_run_schedules_flag_defaults_disabled(monkeypatch):
     monkeypatch.delenv("ENABLE_AGENT_RUN_SCHEDULES", raising=False)
 
