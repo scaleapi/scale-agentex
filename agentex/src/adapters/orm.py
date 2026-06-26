@@ -219,6 +219,9 @@ class AgentRunScheduleORM(BaseORM):
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    # Soft-delete marker: NULL = active, set = tombstoned for audit. Deleted rows
+    # keep their (agent_id, name) so names are not reusable.
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         # Schedule names are unique per agent (the get/pause/resume/delete

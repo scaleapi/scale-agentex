@@ -36,9 +36,13 @@ class AgentRunScheduleRepository(
         limit: int | None = None,
         page_number: int | None = None,
     ) -> list[AgentRunScheduleEntity]:
-        """List run schedules for a single agent, newest first."""
+        """List run schedules for a single agent, newest first.
+
+        Soft-deleted schedules are excluded.
+        """
         query = select(AgentRunScheduleORM).where(
-            AgentRunScheduleORM.agent_id == agent_id
+            AgentRunScheduleORM.agent_id == agent_id,
+            AgentRunScheduleORM.deleted_at.is_(None),
         )
         return await super().list(
             query=query,
@@ -49,23 +53,31 @@ class AgentRunScheduleRepository(
         )
 
     async def get_by_agent_id_and_name(
-        self, agent_id: str, name: str
+        self, agent_id: str, name: str, include_deleted: bool = False
     ) -> AgentRunScheduleEntity | None:
-        """Get a run schedule by its (agent_id, name) natural key, or None."""
+        """Get a run schedule by its (agent_id, name) natural key, or None.
+
+        Soft-deleted schedules are excluded unless ``include_deleted`` is set
+        (used by create to keep a deleted name reserved — names are not reusable).
+        """
         async with self.start_async_db_session(allow_writes=False) as session:
             query = select(AgentRunScheduleORM).where(
                 AgentRunScheduleORM.agent_id == agent_id,
                 AgentRunScheduleORM.name == name,
             )
+            if not include_deleted:
+                query = query.where(AgentRunScheduleORM.deleted_at.is_(None))
             result = await session.execute(query)
             row = result.scalars().first()
             return AgentRunScheduleEntity.model_validate(row) if row else None
 
     async def get_by_agent_id_and_name_or_raise(
-        self, agent_id: str, name: str
+        self, agent_id: str, name: str, include_deleted: bool = False
     ) -> AgentRunScheduleEntity:
         """Get a run schedule by (agent_id, name) or raise ItemDoesNotExist."""
-        schedule = await self.get_by_agent_id_and_name(agent_id, name)
+        schedule = await self.get_by_agent_id_and_name(
+            agent_id, name, include_deleted=include_deleted
+        )
         if schedule is None:
             raise ItemDoesNotExist(
                 f"Run schedule '{name}' for agent '{agent_id}' does not exist."

@@ -87,3 +87,7 @@ class AgentRunScheduleEntity(BaseModel):
     updated_at: datetime | None = Field(
         None, description="When the schedule was last updated."
     )
+    deleted_at: datetime | None = Field(
+        None,
+        description="When the schedule was soft-deleted (None while active).",
+    )

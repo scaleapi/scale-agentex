@@ -84,8 +84,9 @@ class AgentRunScheduleService:
         request: CreateAgentRunScheduleRequest,
         creator_principal: dict[str, Any],
     ) -> AgentRunScheduleResponse:
+        # include_deleted: a soft-deleted name stays reserved (no reuse in v1).
         existing = await self.schedule_repository.get_by_agent_id_and_name(
-            agent.id, request.name
+            agent.id, request.name, include_deleted=True
         )
         if existing is not None:
             raise ClientError(
@@ -213,10 +214,12 @@ class AgentRunScheduleService:
         )
         temporal_id = build_run_schedule_temporal_id(row.id)
         # Temporal is the recurring clock; delete it first so no further fires can
-        # occur, then drop the row and the auth entry. A missing Temporal schedule
-        # is treated as success (the clock is already gone) so a prior partial
-        # delete — Temporal removed but the row write failed — can still be cleaned
-        # up through this path rather than being stranded forever.
+        # occur, then soft-delete the row and drop the auth entry. The Postgres row
+        # is tombstoned (deleted_at set) rather than removed so the schedule remains
+        # auditable and its (agent_id, name) stays reserved (names are not reusable).
+        # A missing Temporal schedule is treated as success (the clock is already
+        # gone) so a prior partial delete — Temporal removed but the row write
+        # failed — can still be cleaned up through this path rather than stranded.
         try:
             await self.temporal_adapter.delete_schedule(temporal_id)
         except TemporalScheduleNotFoundError:
@@ -224,7 +227,8 @@ class AgentRunScheduleService:
                 "run_schedule_temporal_already_absent_on_delete",
                 extra={"temporal_id": temporal_id, "schedule_id": row.id},
             )
-        await self.schedule_repository.delete(id=row.id)
+        row.deleted_at = datetime.now(UTC)
+        await self.schedule_repository.update(row)
         await self._deregister_schedule_from_auth(
             authz_selector=build_run_schedule_authz_selector(agent_id, row.name)
         )
