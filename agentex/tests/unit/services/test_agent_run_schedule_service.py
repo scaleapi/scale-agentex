@@ -183,6 +183,30 @@ class TestAgentRunScheduleServiceList:
         assert result.total == 1
         assert result.run_schedules[0].name == "sched-a"
 
+    async def test_list_filters_before_applying_limit(self, service, agent):
+        # The auth filter must run before the limit is applied: an authorized
+        # schedule that sorts beyond the limit window must still be returned, not
+        # silently dropped by a DB-level limit applied before filtering.
+        rows = [
+            _persisted(agent.id, _request(name="other-a")),
+            _persisted(agent.id, _request(name="other-b")),
+            _persisted(agent.id, _request(name="mine")),
+        ]
+        service.schedule_repository.list_by_agent_id.return_value = rows
+        service.agent_repository.get.return_value = agent
+
+        authorized = [build_run_schedule_authz_selector(agent.id, "mine")]
+        result = await service.list_schedules(
+            agent.id, authorized_schedule_ids=authorized, limit=1
+        )
+
+        # The owned schedule is returned even though it sorts last and limit=1.
+        assert result.total == 1
+        assert result.run_schedules[0].name == "mine"
+        # The query is no longer pre-truncated by limit (filtering happens first).
+        _, kwargs = service.schedule_repository.list_by_agent_id.call_args
+        assert kwargs.get("limit") is None
+
     async def test_list_none_authorized_means_bypass(self, service, agent):
         rows = [_persisted(agent.id, _request(name="sched-a"))]
         service.schedule_repository.list_by_agent_id.return_value = rows

@@ -162,7 +162,14 @@ class AgentRunScheduleService:
         authorized_schedule_ids: list[str] | None = None,
         limit: int = 100,
     ) -> AgentRunScheduleListResponse:
-        rows = await self.schedule_repository.list_by_agent_id(agent_id, limit=limit)
+        # Fetch without a DB limit so the authorization filter below runs against
+        # the full set, then truncate to ``limit`` after filtering. Applying the
+        # DB limit first would drop authorized schedules that sort beyond the
+        # window before the auth filter ever sees them, silently hiding rows the
+        # caller is entitled to. Safe at the expected low per-agent row count; if
+        # schedules per agent ever grow large, push the authorized names into the
+        # query instead.
+        rows = await self.schedule_repository.list_by_agent_id(agent_id)
 
         # Gate on ``is not None``: an empty list means the caller owns nothing and
         # everything is filtered out; None means authorization is bypassed.
@@ -174,6 +181,8 @@ class AgentRunScheduleService:
         agent = await self.agent_repository.get(id=agent_id)
         items: list[AgentRunScheduleResponse] = []
         for row in rows:
+            if len(items) >= limit:
+                break
             selector = build_run_schedule_authz_selector(agent_id, row.name)
             if authorized is not None and selector not in authorized:
                 continue
