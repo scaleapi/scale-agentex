@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -122,6 +123,16 @@ class TestLaunchScheduledAgentRun:
 
         assert result["status"] == "skipped"
         assert result["reason"] == "schedule_paused"
+
+    async def test_skips_when_schedule_deleted(self, activity_instance):
+        activity_instance.schedule_repository.get.return_value = _schedule(
+            deleted_at=datetime.now(UTC)
+        )
+
+        result = await activity_instance.launch_scheduled_agent_run("sched-1", "fire-1")
+
+        assert result["status"] == "skipped"
+        assert result["reason"] == "schedule_deleted"
 
     async def test_async_agent_delivers_via_event_send(
         self, activity_instance, monkeypatch

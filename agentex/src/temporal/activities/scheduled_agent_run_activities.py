@@ -189,6 +189,13 @@ class ScheduledAgentRunActivities:
                 "schedule_id": schedule_id,
             }
 
+        if schedule.deleted_at is not None:
+            return {
+                "status": "skipped",
+                "reason": "schedule_deleted",
+                "schedule_id": schedule_id,
+            }
+
         if schedule.paused and trigger_type != "manual":
             # Temporal pauses the schedule too, but a manual trigger can still
             # fire a paused schedule. Honor the stored paused state defensively
