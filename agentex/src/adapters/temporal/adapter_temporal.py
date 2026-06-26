@@ -93,10 +93,13 @@ class TemporalAdapter(TemporalGateway):
             if start_delay:
                 options["start_delay"] = start_delay
 
-            # Start the workflow
+            # Start the workflow. Temporal's client.start_workflow takes a single
+            # positional ``arg``; multiple workflow arguments must be passed via
+            # the ``args`` keyword (spreading them positionally raises "takes from
+            # 2 to 3 positional arguments").
             handle = await self.client.start_workflow(
                 workflow,
-                *args if args else [],
+                args=args if args else [],
                 **options,
             )
 
