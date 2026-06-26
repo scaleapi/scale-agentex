@@ -114,6 +114,11 @@ class StreamsUseCase:
         ping_interval = float(
             self.environment_variables.SSE_KEEPALIVE_PING_INTERVAL
         )  # Configurable keepalive ping interval
+        # Track consecutive read failures so we can back off and avoid a
+        # tight error loop. When the Redis pool is exhausted, every connected
+        # client's read fails on each cycle; without backoff this turns into a
+        # log-ingestion firehose (one failure per client per cycle, ~once/sec).
+        consecutive_errors = 0
         try:
             # Application-level control loop
             while True:
@@ -133,6 +138,10 @@ class StreamsUseCase:
                         last_message_time = asyncio.get_running_loop().time()
                         await asyncio.sleep(0.02)
 
+                    # A read cycle completed without raising — the stream is
+                    # healthy again, so reset the backoff/error counter.
+                    consecutive_errors = 0
+
                     # If we didn't get any messages, add a small pause
                     # to prevent tight loops and send keepalive ping if needed
                     if message_count == 0:
@@ -151,13 +160,25 @@ class StreamsUseCase:
                     )
                     raise
                 except Exception as e:
+                    consecutive_errors += 1
+                    # Always log the full traceback — nothing is swallowed.
+                    # Volume is controlled two ways instead of by dropping
+                    # diagnostics: structured JSON logging keeps each traceback
+                    # to a single log entry (see utils.logging), and the
+                    # exponential backoff below caps how often a sustained
+                    # failure can repeat. The failure counter gives context on
+                    # how long a stream has been erroring.
                     logger.error(
-                        f"Error processing events for task {task_id}: {e}",
+                        f"Error processing events for task {task_id} "
+                        f"(failure #{consecutive_errors}): {e}",
                         exc_info=True,
                     )
                     yield f"data: {TaskStreamErrorEventEntity(type='error', message=str(e)).model_dump_json()}\n\n"
-                    # Add a small delay before continuing
-                    await asyncio.sleep(1)
+                    # Exponential backoff (capped) so a sustained failure (e.g.
+                    # Redis pool exhaustion) doesn't spin a tight per-client
+                    # loop hammering Redis and flooding logs.
+                    backoff = min(2.0 ** min(consecutive_errors - 1, 5), 30.0)
+                    await asyncio.sleep(backoff)
 
         except asyncio.CancelledError:
             # Just exit the generator on cancellation
