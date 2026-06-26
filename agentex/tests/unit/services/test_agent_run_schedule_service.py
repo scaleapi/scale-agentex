@@ -211,10 +211,13 @@ class TestAgentRunScheduleServiceList:
 @pytest.mark.asyncio
 class TestAgentRunScheduleServiceDelete:
     async def test_delete_tolerates_missing_temporal_schedule(self, service, agent):
-        # A prior partial delete (Temporal gone, row survived) must still be
-        # cleanable: a missing Temporal schedule is treated as success.
+        # Delete soft-deletes (tombstones) the row for audit rather than removing
+        # it, and tolerates a missing Temporal schedule: a prior partial delete
+        # (Temporal gone, row survived) must still be cleanable, treating a
+        # missing clock as success.
         row = _persisted(agent.id, _request())
         service.schedule_repository.get_by_agent_id_and_name_or_raise.return_value = row
+        service.schedule_repository.update.return_value = row
         service.temporal_adapter.delete_schedule.side_effect = (
             TemporalScheduleNotFoundError(message="gone", detail="gone")
         )
@@ -222,7 +225,11 @@ class TestAgentRunScheduleServiceDelete:
         result = await service.delete_schedule(agent.id, row.name)
 
         assert result == row.id
-        service.schedule_repository.delete.assert_called_once_with(id=row.id)
+        # Soft delete: the row is tombstoned via update, not hard-removed.
+        service.schedule_repository.delete.assert_not_called()
+        service.schedule_repository.update.assert_called_once()
+        tombstoned = service.schedule_repository.update.call_args.args[0]
+        assert tombstoned.deleted_at is not None
         service.authorization_service.deregister_resource.assert_called_once()
 
 
