@@ -9,7 +9,6 @@ from src.api.schemas.agent_run_schedules import (
     UpdateAgentRunScheduleRequest,
 )
 from src.domain.entities.agents import AgentEntity
-from src.domain.exceptions import ClientError
 from src.domain.services.agent_run_schedule_service import DAgentRunScheduleService
 from src.utils.logging import make_logger
 
@@ -31,14 +30,8 @@ class AgentRunSchedulesUseCase:
         request: CreateAgentRunScheduleRequest,
         creator_principal: dict[str, Any],
     ) -> AgentRunScheduleResponse:
-        if not request.cron_expression and not request.interval_seconds:
-            raise ClientError(
-                "Either cron_expression or interval_seconds must be provided"
-            )
-        if request.cron_expression and request.interval_seconds:
-            raise ClientError(
-                "Provide only one of cron_expression or interval_seconds, not both"
-            )
+        # Cadence mutual-exclusivity is enforced on the request models
+        # (CreateAgentRunScheduleRequest / UpdateAgentRunScheduleRequest).
         return await self.run_schedule_service.create_schedule(
             agent, request, creator_principal
         )
@@ -73,10 +66,6 @@ class AgentRunSchedulesUseCase:
     async def update_schedule(
         self, agent_id: str, name: str, request: UpdateAgentRunScheduleRequest
     ) -> AgentRunScheduleResponse:
-        if request.cron_expression and request.interval_seconds:
-            raise ClientError(
-                "Provide only one of cron_expression or interval_seconds, not both"
-            )
         return await self.run_schedule_service.update_schedule(agent_id, name, request)
 
     async def trigger_schedule(

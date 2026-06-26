@@ -8,7 +8,6 @@ from src.api.schemas.agent_run_schedules import (
     UpdateAgentRunScheduleRequest,
 )
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
-from src.domain.exceptions import ClientError
 from src.domain.use_cases.agent_run_schedules_use_case import (
     AgentRunSchedulesUseCase,
 )
@@ -68,22 +67,6 @@ class TestAgentRunSchedulesUseCase:
 
         mock_service.create_schedule.assert_called_once()
 
-    async def test_create_requires_a_cadence(self, use_case, agent):
-        request = _request(cron_expression=None, interval_seconds=None)
-
-        with pytest.raises(ClientError) as exc:
-            await use_case.create_schedule(agent, request, {"user_id": "u1"})
-
-        assert "cron_expression or interval_seconds" in str(exc.value)
-
-    async def test_create_rejects_both_cadences(self, use_case, agent):
-        request = _request(cron_expression="0 0 * * *", interval_seconds=30)
-
-        with pytest.raises(ClientError) as exc:
-            await use_case.create_schedule(agent, request, {"user_id": "u1"})
-
-        assert "only one" in str(exc.value)
-
     async def test_pause_resume_delete_delegate(self, use_case, mock_service, agent):
         await use_case.pause_schedule(agent.id, "daily-summary", note="n")
         mock_service.pause_schedule.assert_called_once_with(
@@ -104,14 +87,6 @@ class TestAgentRunSchedulesUseCase:
         mock_service.update_schedule.assert_called_once_with(
             agent.id, "daily-summary", request
         )
-
-    async def test_update_rejects_both_cadences(self, use_case, agent):
-        request = UpdateAgentRunScheduleRequest(
-            cron_expression="0 0 * * *", interval_seconds=30
-        )
-        with pytest.raises(ClientError) as exc:
-            await use_case.update_schedule(agent.id, "daily-summary", request)
-        assert "only one" in str(exc.value)
 
     async def test_trigger_delegates(self, use_case, mock_service, agent):
         await use_case.trigger_schedule(agent.id, "daily-summary")
