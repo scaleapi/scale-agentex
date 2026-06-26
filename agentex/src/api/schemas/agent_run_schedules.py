@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from src.domain.entities.task_messages import MessageAuthor
 from src.utils.model_utils import BaseModel
@@ -92,6 +92,17 @@ class CreateAgentRunScheduleRequest(BaseModel):
     initial_input: ScheduleInitialInput = Field(
         ..., description="The first input delivered to each created task."
     )
+
+    @model_validator(mode="after")
+    def validate_single_cadence(self):
+        # Exactly one cadence is required at create time. Rejecting both here
+        # prevents a ScheduleSpec with both a cron and an interval (which would
+        # fire on both); rejecting neither prevents a cadence-less schedule.
+        if (self.cron_expression is None) == (self.interval_seconds is None):
+            raise ValueError(
+                "Provide exactly one of cron_expression or interval_seconds"
+            )
+        return self
 
 
 class AgentRunScheduleResponse(BaseModel):
@@ -198,6 +209,17 @@ class UpdateAgentRunScheduleRequest(BaseModel):
     initial_input: ScheduleInitialInput | None = Field(
         None, description="Replacement initial input delivered to each created task."
     )
+
+    @model_validator(mode="after")
+    def reject_both_cadences(self):
+        # Partial update: providing neither cadence is fine (other fields may be
+        # changing), but providing both is rejected here so the apply loop can't
+        # silently drop one and leave a misleading 200.
+        if self.cron_expression is not None and self.interval_seconds is not None:
+            raise ValueError(
+                "Provide only one of cron_expression or interval_seconds, not both"
+            )
+        return self
 
 
 class PauseRunScheduleRequest(BaseModel):

@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, PropertyMock
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 from src.adapters.temporal.exceptions import TemporalScheduleNotFoundError
 from src.api.schemas.agent_run_schedules import (
     CreateAgentRunScheduleRequest,
@@ -362,3 +363,27 @@ class TestAgentRunScheduleServiceTrigger:
         )
         assert start_kwargs["args"] == [row.id, "manual"]
         assert start_kwargs["task_queue"] == "agentex-server"
+
+
+@pytest.mark.unit
+class TestCadenceValidation:
+    def test_create_rejects_both_cadences(self):
+        with pytest.raises(ValidationError):
+            _request(cron_expression="0 9 * * MON", interval_seconds=86400)
+
+    def test_create_rejects_neither_cadence(self):
+        with pytest.raises(ValidationError):
+            _request(cron_expression=None, interval_seconds=None)
+
+    def test_create_accepts_exactly_one_cadence(self):
+        assert _request(cron_expression=None, interval_seconds=3600) is not None
+
+    def test_update_rejects_both_cadences(self):
+        with pytest.raises(ValidationError):
+            UpdateAgentRunScheduleRequest(
+                cron_expression="0 9 * * MON", interval_seconds=86400
+            )
+
+    def test_update_allows_neither_cadence(self):
+        # Partial update changing only an unrelated field is valid.
+        assert UpdateAgentRunScheduleRequest(description="new") is not None
