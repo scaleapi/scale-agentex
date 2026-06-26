@@ -305,9 +305,12 @@ class ScheduledAgentRunActivities:
                 agent_id=schedule.agent_id,
             )
 
-        # Best-effort delivered marker for the retry guard above. A crash between
-        # delivery and this update is the only window where a retry could
-        # re-deliver; deterministic task naming still prevents duplicate tasks.
+        # Best-effort delivered marker, written only AFTER delivery succeeds, so
+        # scheduled delivery is at-least-once by design: a crash after send but
+        # before this write makes a retry re-deliver (deterministic task naming
+        # still prevents duplicate tasks). Marker-after is deliberate — claiming
+        # before send would instead risk a silent missed delivery. A delivery-level
+        # idempotency_key in event/send & message/send is the post-v1 fix.
         task.task_metadata = {
             **(task.task_metadata or {}),
             _INPUT_DELIVERED_MARKER: True,
