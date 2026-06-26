@@ -54,6 +54,16 @@ def build_run_schedule_authz_selector(agent_id: str, name: str) -> str:
     Derivable from the (agent_id, name) path params so the CRUD endpoints can
     authorize without a prior DB lookup. The ``run-schedule::`` prefix namespaces
     the selector within the ``schedule`` resource type.
+
+    Design note: ``name`` currently doubles as the external identity — URL
+    handle, unique key, and this authz selector — which is why a soft-deleted
+    name stays reserved (no reuse). The row's immutable ``id`` is the better
+    long-term handle (it is already returned in responses and is what Temporal
+    keys off), so moving the external identity to ``id`` with ``name`` as a
+    mutable label is a planned fast-follow that makes name reuse a non-issue and
+    keeps audit unambiguous. Deferred here to keep this change's scope contained;
+    the move is additive (id-based routes/selector alongside the name ones)
+    rather than a breaking reshape.
     """
     return f"run-schedule::{agent_id}::{name}"
 
