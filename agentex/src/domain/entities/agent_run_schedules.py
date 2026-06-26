@@ -91,3 +91,10 @@ class AgentRunScheduleEntity(BaseModel):
         None,
         description="When the schedule was soft-deleted (None while active).",
     )
+    version: int = Field(
+        1,
+        description=(
+            "Monotonic record version reserved for future optimistic concurrency "
+            "control / change history. Not enforced yet."
+        ),
+    )

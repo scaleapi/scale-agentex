@@ -222,6 +222,9 @@ class AgentRunScheduleORM(BaseORM):
     # Soft-delete marker: NULL = active, set = tombstoned for audit. Deleted rows
     # keep their (agent_id, name) so names are not reusable.
     deleted_at = Column(DateTime(timezone=True), nullable=True)
+    # Monotonic record version reserved for future optimistic concurrency /
+    # change history. Not enforced yet — no read-modify-write path increments it.
+    version = Column(Integer, nullable=False, server_default="1")
 
     __table_args__ = (
         # Schedule names are unique per agent (the get/pause/resume/delete

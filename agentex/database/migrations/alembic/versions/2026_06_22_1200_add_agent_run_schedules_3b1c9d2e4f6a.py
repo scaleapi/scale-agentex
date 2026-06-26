@@ -54,6 +54,10 @@ def upgrade() -> None:
         # Soft-delete marker: NULL = active, set = tombstoned for audit. Deleted
         # rows keep occupying their (agent_id, name) so names are not reusable.
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
+        # Monotonic record version reserved for future optimistic concurrency /
+        # change history. Added now (brand-new table) to avoid a later backfill;
+        # not enforced yet.
+        sa.Column("version", sa.Integer(), nullable=False, server_default="1"),
         sa.ForeignKeyConstraint(["agent_id"], ["agents.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
