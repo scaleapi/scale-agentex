@@ -39,6 +39,7 @@ from src.adapters.temporal.exceptions import (
 )
 from src.adapters.temporal.port import TemporalGateway
 from src.utils.logging import make_logger
+from src.utils.schedule_metrics import record_schedule_temporal_op
 
 logger = make_logger(__name__)
 
@@ -446,22 +447,26 @@ class TemporalAdapter(TemporalGateway):
             )
 
             logger.info(f"Created schedule {schedule_id} successfully")
+            record_schedule_temporal_op("create", "success")
             return handle
 
         except ScheduleAlreadyRunningError as e:
             logger.error(f"Schedule {schedule_id} already exists: {e}")
+            record_schedule_temporal_op("create", "error")
             raise TemporalScheduleAlreadyExistsError(
                 message=f"Schedule with ID '{schedule_id}' already exists",
                 detail=str(e),
             ) from e
         except ValueError as e:
             logger.error(f"Invalid arguments for schedule {schedule_id}: {e}")
+            record_schedule_temporal_op("create", "error")
             raise TemporalInvalidArgumentError(
                 message=f"Invalid arguments provided for schedule '{schedule_id}'",
                 detail=str(e),
             ) from e
         except Exception as e:
             logger.error(f"Failed to create schedule {schedule_id}: {e}")
+            record_schedule_temporal_op("create", "error")
             raise TemporalScheduleError(
                 message=f"Failed to create schedule '{schedule_id}'",
                 detail=str(e),
@@ -667,14 +672,17 @@ class TemporalAdapter(TemporalGateway):
             handle = self.client.get_schedule_handle(schedule_id)
             await handle.update(_apply)
             logger.info(f"Updated schedule {schedule_id}")
+            record_schedule_temporal_op("update", "success")
         except Exception as e:
             if "not found" in str(e).lower():
                 logger.error(f"Schedule {schedule_id} not found: {e}")
+                record_schedule_temporal_op("update", "not_found")
                 raise TemporalScheduleNotFoundError(
                     message=f"Schedule '{schedule_id}' not found",
                     detail=str(e),
                 ) from e
             logger.error(f"Failed to update schedule {schedule_id}: {e}")
+            record_schedule_temporal_op("update", "error")
             raise TemporalScheduleError(
                 message=f"Failed to update schedule '{schedule_id}'",
                 detail=str(e),
@@ -691,14 +699,17 @@ class TemporalAdapter(TemporalGateway):
             handle = self.client.get_schedule_handle(schedule_id)
             await handle.delete()
             logger.info(f"Deleted schedule {schedule_id}")
+            record_schedule_temporal_op("delete", "success")
         except Exception as e:
             if "not found" in str(e).lower():
                 logger.error(f"Schedule {schedule_id} not found: {e}")
+                record_schedule_temporal_op("delete", "not_found")
                 raise TemporalScheduleNotFoundError(
                     message=f"Schedule '{schedule_id}' not found",
                     detail=str(e),
                 ) from e
             logger.error(f"Failed to delete schedule {schedule_id}: {e}")
+            record_schedule_temporal_op("delete", "error")
             raise TemporalScheduleError(
                 message=f"Failed to delete schedule '{schedule_id}'",
                 detail=str(e),
