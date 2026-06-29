@@ -15,11 +15,11 @@ Boundary types are JSON-native (the backend data converter does not serialize
 Pydantic models).
 """
 
+from collections.abc import Callable
 from typing import TypedDict
 
 from src.config.environment_variables import EnvironmentVariables
 from src.domain.exceptions import ClientError
-from src.domain.repositories.task_repository import TaskRepository
 from src.domain.use_cases.task_retention_use_case import TaskRetentionUseCase
 from src.utils.logging import make_logger
 from temporalio import activity
@@ -46,11 +46,15 @@ class CleanTaskOutcome(TypedDict):
 class RetentionCleanupActivities:
     def __init__(
         self,
-        task_repository: TaskRepository,
-        use_case: TaskRetentionUseCase,
+        use_case_factory: Callable[[], TaskRetentionUseCase],
     ):
-        self.task_repository = task_repository
-        self.use_case = use_case
+        # Build the use case (and its Mongo-backed repositories) per activity run
+        # rather than capturing it at worker startup. The OIDC client refresh
+        # periodically swaps GlobalDependencies.mongodb_database to a fresh client
+        # and closes the old one; a use case captured once would hold collections
+        # bound to the stale (eventually closed) client. Resolving per run always
+        # picks up the current client.
+        self._use_case_factory = use_case_factory
 
     @activity.defn(name=LOAD_CLEANUP_CONFIG_ACTIVITY)
     async def load_cleanup_config(self) -> dict:
@@ -101,7 +105,8 @@ class RetentionCleanupActivities:
             "find_cleanup_candidates_started",
             extra={"after_id": after_id, "limit": limit},
         )
-        result = await self.task_repository.list_cleanup_candidate_ids(
+        task_repository = self._use_case_factory().task_repository
+        result = await task_repository.list_cleanup_candidate_ids(
             idle_days=idle_days,
             agent_names=agent_names,
             after_id=after_id,
@@ -120,7 +125,8 @@ class RetentionCleanupActivities:
         Cleanup deletes task-wide content, so these are skipped by the scheduled
         workflow before any per-task child workflow can run.
         """
-        result = await self.task_repository.list_multi_agent_task_ids(task_ids=task_ids)
+        task_repository = self._use_case_factory().task_repository
+        result = await task_repository.list_multi_agent_task_ids(task_ids=task_ids)
         logger.info(
             "find_multi_agent_cleanup_candidates_completed",
             extra={"count": len(result)},
@@ -146,9 +152,10 @@ class RetentionCleanupActivities:
             (e.g. task is still active, not yet idle long enough, or already
             cleaned).  Other exceptions propagate so Temporal can retry them.
         """
+        use_case = self._use_case_factory()
         try:
             if dry_run:
-                result = await self.use_case.preview_clean_task(
+                result = await use_case.preview_clean_task(
                     task_id=task_id, force=False, idle_days=idle_days
                 )
                 logger.info(
@@ -163,7 +170,7 @@ class RetentionCleanupActivities:
                     "task_states_deleted": 0,
                     "events_deleted": 0,
                 }
-            result = await self.use_case.clean_task(
+            result = await use_case.clean_task(
                 task_id=task_id, force=False, idle_days=idle_days
             )
             return {

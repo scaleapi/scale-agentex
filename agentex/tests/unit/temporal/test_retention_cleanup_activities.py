@@ -9,12 +9,19 @@ from src.temporal.activities.retention_cleanup_activities import (
 )
 
 
+def _activities(use_case) -> RetentionCleanupActivities:
+    """Wrap a use case in the per-run factory the activities now expect."""
+    return RetentionCleanupActivities(use_case_factory=lambda: use_case)
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_find_cleanup_candidates_delegates_to_repo():
     repo = AsyncMock()
     repo.list_cleanup_candidate_ids.return_value = ["t1", "t2"]
-    activities = RetentionCleanupActivities(task_repository=repo, use_case=AsyncMock())
+    use_case = AsyncMock()
+    use_case.task_repository = repo
+    activities = _activities(use_case)
 
     result = await activities.find_cleanup_candidates(
         after_id=None, limit=200, idle_days=7, agent_names=["a"]
@@ -31,7 +38,9 @@ async def test_find_cleanup_candidates_delegates_to_repo():
 async def test_find_multi_agent_cleanup_candidates_delegates_to_repo():
     repo = AsyncMock()
     repo.list_multi_agent_task_ids.return_value = ["t2"]
-    activities = RetentionCleanupActivities(task_repository=repo, use_case=AsyncMock())
+    use_case = AsyncMock()
+    use_case.task_repository = repo
+    activities = _activities(use_case)
 
     result = await activities.find_multi_agent_cleanup_candidates(["t1", "t2"])
 
@@ -50,9 +59,7 @@ async def test_clean_task_cleaned_outcome():
         task_states_deleted=1,
         events_deleted=2,
     )
-    activities = RetentionCleanupActivities(
-        task_repository=AsyncMock(), use_case=use_case
-    )
+    activities = _activities(use_case)
 
     outcome = await activities.clean_task(task_id="t1", idle_days=7, dry_run=False)
 
@@ -73,9 +80,7 @@ async def test_clean_task_defaults_to_dry_run_and_validates_without_writes():
         task_states_deleted=0,
         events_deleted=0,
     )
-    activities = RetentionCleanupActivities(
-        task_repository=AsyncMock(), use_case=use_case
-    )
+    activities = _activities(use_case)
 
     outcome = await activities.clean_task(task_id="t1", idle_days=7)
 
@@ -95,9 +100,7 @@ async def test_clean_task_clienterror_maps_to_skipped():
     use_case.clean_task.side_effect = ClientError(
         "Cannot clean task t1: status is RUNNING (active)"
     )
-    activities = RetentionCleanupActivities(
-        task_repository=AsyncMock(), use_case=use_case
-    )
+    activities = _activities(use_case)
 
     outcome = await activities.clean_task(task_id="t1", idle_days=7, dry_run=False)
 
@@ -111,12 +114,37 @@ async def test_clean_task_clienterror_maps_to_skipped():
 async def test_clean_task_unexpected_error_propagates():
     use_case = AsyncMock()
     use_case.clean_task.side_effect = RuntimeError("mongo timeout")
-    activities = RetentionCleanupActivities(
-        task_repository=AsyncMock(), use_case=use_case
-    )
+    activities = _activities(use_case)
 
     with pytest.raises(RuntimeError):
         await activities.clean_task(task_id="t1", idle_days=7, dry_run=False)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_use_case_resolved_per_activity_run():
+    """Each activity call must resolve the use case fresh from the factory, so a
+    swapped Mongo client (from the OIDC refresh) is always picked up rather than a
+    stale captured one."""
+    calls = []
+
+    def factory():
+        use_case = AsyncMock()
+        use_case.task_repository.list_cleanup_candidate_ids.return_value = []
+        use_case.task_repository.list_multi_agent_task_ids.return_value = []
+        calls.append(use_case)
+        return use_case
+
+    activities = RetentionCleanupActivities(use_case_factory=factory)
+
+    await activities.find_cleanup_candidates(
+        after_id=None, limit=10, idle_days=7, agent_names=[]
+    )
+    await activities.find_multi_agent_cleanup_candidates([])
+    await activities.clean_task(task_id="t1", idle_days=7)
+
+    # One fresh resolution per activity invocation — never cached on the instance.
+    assert len(calls) == 3
 
 
 @pytest.mark.unit
@@ -128,9 +156,7 @@ async def test_load_cleanup_config_reads_env(monkeypatch):
     monkeypatch.setenv("RETENTION_CLEANUP_PAGE_SIZE", "33")
     monkeypatch.setenv("RETENTION_CLEANUP_MAX_IN_FLIGHT", "4")
     monkeypatch.setenv("RETENTION_CLEANUP_DRY_RUN", "true")
-    activities = RetentionCleanupActivities(
-        task_repository=AsyncMock(), use_case=AsyncMock()
-    )
+    activities = _activities(AsyncMock())
     config = await activities.load_cleanup_config()
     assert config == {
         "enabled": True,

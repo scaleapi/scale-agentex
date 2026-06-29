@@ -267,8 +267,14 @@ class GlobalDependencies(metaclass=Singleton):
 
         new_client = self._build_mongodb_client(mongodb_uri)
         # Force fresh OIDC auth and validate the new client before trusting it.
-        # If this raises, we keep using the existing (working) client.
-        await new_client.admin.command("ping")
+        # If this raises, close the candidate (so a repeated auth/network outage
+        # can't accumulate orphaned clients across retries) and keep using the
+        # existing, working client.
+        try:
+            await new_client.admin.command("ping")
+        except BaseException:
+            await new_client.close()
+            raise
 
         old_client = self.mongodb_client
         self.mongodb_client = new_client

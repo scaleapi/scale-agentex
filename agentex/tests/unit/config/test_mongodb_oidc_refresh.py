@@ -129,6 +129,9 @@ async def test_refresh_keeps_old_client_when_new_fails_validation(deps, monkeypa
     # Never swapped to the broken client; never tore down the working one.
     assert deps.mongodb_client is old_client
     old_client.close.assert_not_awaited()
+    # The candidate is closed before re-raising, so repeated failures can't leak
+    # orphaned clients across retries.
+    broken.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio

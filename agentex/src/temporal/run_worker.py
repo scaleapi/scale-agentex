@@ -153,12 +153,13 @@ def create_agentex_server_worker(
         http_client=http_client,
     )
 
-    retention_use_case = build_task_retention_use_case(global_dependencies)
-    # Reuse the repository the factory already built (avoids a duplicate
-    # TaskRepository) via the use case's stable accessor.
+    # Build the retention use case per activity run (not once here): the OIDC
+    # client refresh swaps global_dependencies.mongodb_database to a fresh client
+    # and closes the old one, so a use case captured at startup would eventually
+    # hold Mongo collections bound to a closed client. global_dependencies is the
+    # singleton, so each call reads the current mongodb_database.
     retention_activities = RetentionCleanupActivities(
-        task_repository=retention_use_case.task_repository,
-        use_case=retention_use_case,
+        use_case_factory=lambda: build_task_retention_use_case(global_dependencies),
     )
 
     return asyncio.create_task(
