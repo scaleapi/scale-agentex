@@ -43,5 +43,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE agent_run_schedules DROP COLUMN IF EXISTS version")
-    op.execute("ALTER TABLE agent_run_schedules DROP COLUMN IF EXISTS deleted_at")
+    # Intentionally a no-op. ``deleted_at`` and ``version`` belong to the final
+    # form of the parent revision (3b1c9d2e4f6a); this revision only re-adds them
+    # where that revision ran in an earlier form that omitted them. Because we
+    # cannot tell whether this migration or the parent created the columns,
+    # dropping them on downgrade would strip parent-owned columns from
+    # environments that created the table whole — reintroducing the
+    # UndefinedColumnError this migration exists to fix. So we leave them in place.
+    pass
