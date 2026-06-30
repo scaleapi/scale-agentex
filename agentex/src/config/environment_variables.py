@@ -57,6 +57,10 @@ class EnvVarKeys(str, Enum):
     SSE_KEEPALIVE_PING_INTERVAL = "SSE_KEEPALIVE_PING_INTERVAL"
     AGENTEX_SERVER_TASK_QUEUE = "AGENTEX_SERVER_TASK_QUEUE"
     ENABLE_HEALTH_CHECK_WORKFLOW = "ENABLE_HEALTH_CHECK_WORKFLOW"
+    # Backend performance toggles.
+    ENABLE_AGENT_CACHE = "ENABLE_AGENT_CACHE"
+    ENABLE_API_KEY_CACHE = "ENABLE_API_KEY_CACHE"
+    ENABLE_FIRE_AND_FORGET_APPEND = "ENABLE_FIRE_AND_FORGET_APPEND"
     WEBHOOK_REQUEST_TIMEOUT = "WEBHOOK_REQUEST_TIMEOUT"
     RETENTION_CLEANUP_ENABLED = "RETENTION_CLEANUP_ENABLED"
     RETENTION_CLEANUP_AGENT_ALLOWLIST = "RETENTION_CLEANUP_AGENT_ALLOWLIST"
@@ -120,6 +124,10 @@ class EnvironmentVariables(BaseModel):
     SSE_KEEPALIVE_PING_INTERVAL: int = 15  # SSE keepalive ping interval in seconds
     AGENTEX_SERVER_TASK_QUEUE: str | None = None
     ENABLE_HEALTH_CHECK_WORKFLOW: bool = False
+    # Backend performance toggles; default on, set to "false" to disable.
+    ENABLE_AGENT_CACHE: bool = True
+    ENABLE_API_KEY_CACHE: bool = True
+    ENABLE_FIRE_AND_FORGET_APPEND: bool = True
     WEBHOOK_REQUEST_TIMEOUT: float = 15.0  # Webhook request timeout in seconds
     RETENTION_CLEANUP_ENABLED: bool = False
     RETENTION_CLEANUP_AGENT_ALLOWLIST: list[str] = []
@@ -212,6 +220,16 @@ class EnvironmentVariables(BaseModel):
             ),
             ENABLE_HEALTH_CHECK_WORKFLOW=(
                 os.environ.get(EnvVarKeys.ENABLE_HEALTH_CHECK_WORKFLOW, "false")
+                == "true"
+            ),
+            ENABLE_AGENT_CACHE=(
+                os.environ.get(EnvVarKeys.ENABLE_AGENT_CACHE, "true") == "true"
+            ),
+            ENABLE_API_KEY_CACHE=(
+                os.environ.get(EnvVarKeys.ENABLE_API_KEY_CACHE, "true") == "true"
+            ),
+            ENABLE_FIRE_AND_FORGET_APPEND=(
+                os.environ.get(EnvVarKeys.ENABLE_FIRE_AND_FORGET_APPEND, "true")
                 == "true"
             ),
             WEBHOOK_REQUEST_TIMEOUT=float(

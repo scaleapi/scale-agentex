@@ -8,6 +8,8 @@ from pydantic import BaseModel
 
 from src.adapters.http.adapter_httpx import DHttpxGateway
 from src.api.authentication_cache import AsyncTTLCache
+from src.config.dependencies import resolve_environment_variable_dependency
+from src.config.environment_variables import EnvVarKeys
 from src.domain.delegation_headers import build_delegation_headers
 from src.domain.entities.agents import AgentEntity
 from src.domain.entities.agents_rpc import (
@@ -297,14 +299,17 @@ class AgentACPService(TaskMessageMixin):
 
     async def get_agent_auth_headers(self, agent: AgentEntity) -> dict[str, str]:
         """Authentication headers the agent pod uses to call back into agentex."""
-        api_key = await _agent_api_key_cache.get(agent.id)
+        use_cache = resolve_environment_variable_dependency(
+            EnvVarKeys.ENABLE_API_KEY_CACHE
+        )
+        api_key = await _agent_api_key_cache.get(agent.id) if use_cache else None
         if api_key is None:
             api_key = (
                 await self._agent_api_key_repository.get_internal_api_key_by_agent_id(
                     agent_id=agent.id
                 )
             )
-            if api_key:
+            if api_key and use_cache:
                 await _agent_api_key_cache.set(agent.id, api_key)
         if api_key:
             return {"x-agent-api-key": api_key.api_key}

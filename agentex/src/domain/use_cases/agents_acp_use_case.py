@@ -12,6 +12,8 @@ from src.adapters.authentication.exceptions import (
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.api.authentication_cache import AsyncTTLCache
 from src.api.schemas.authorization_types import AgentexResource
+from src.config.dependencies import resolve_environment_variable_dependency
+from src.config.environment_variables import EnvVarKeys
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
 from src.domain.entities.agents_rpc import (
     ACP_TYPE_TO_ALLOWED_RPC_METHODS,
@@ -367,6 +369,8 @@ class AgentsACPUseCase(TaskMessageMixin):
         self, agent_id: str | None, agent_name: str | None
     ) -> AgentEntity:
         """Cached agent lookup (up to TTL-stale; saves a Postgres lookup per RPC)."""
+        if not resolve_environment_variable_dependency(EnvVarKeys.ENABLE_AGENT_CACHE):
+            return await self.agent_repository.get(id=agent_id, name=agent_name)
         cache_key = f"id={agent_id}|name={agent_name}"
         cached = await _agent_cache.get(cache_key)
         if cached is not None:
@@ -499,14 +503,20 @@ class AgentsACPUseCase(TaskMessageMixin):
             task_params=params.task_params,
         )
 
-        # Step 1: persist the inbound message (fire-and-forget; off the response path)
-        _fire_and_forget(
-            self.task_message_service.append_message(
-                task_id=task.id,
-                content=params.content,
-            ),
-            description=f"append input message to task {task.id}",
+        # Step 1: persist the inbound message (off the response path when enabled)
+        _append_input = self.task_message_service.append_message(
+            task_id=task.id,
+            content=params.content,
         )
+        if resolve_environment_variable_dependency(
+            EnvVarKeys.ENABLE_FIRE_AND_FORGET_APPEND
+        ):
+            _fire_and_forget(
+                _append_input,
+                description=f"append input message to task {task.id}",
+            )
+        else:
+            await _append_input
 
         index_to_task_message_content_entities_to_create: dict[
             int, TaskMessageContentEntity
@@ -683,15 +693,21 @@ class AgentsACPUseCase(TaskMessageMixin):
                 task_params=params.task_params,
             )
 
-            # Append the input client message (fire-and-forget; off the response path)
-            _fire_and_forget(
-                self.task_message_service.append_message(
-                    task_id=task.id,
-                    content=params.content,
-                    streaming_status="DONE",
-                ),
-                description=f"append input message to task {task.id}",
+            # Append the input client message (off the response path when enabled)
+            _append_input = self.task_message_service.append_message(
+                task_id=task.id,
+                content=params.content,
+                streaming_status="DONE",
             )
+            if resolve_environment_variable_dependency(
+                EnvVarKeys.ENABLE_FIRE_AND_FORGET_APPEND
+            ):
+                _fire_and_forget(
+                    _append_input,
+                    description=f"append input message to task {task.id}",
+                )
+            else:
+                await _append_input
             # Stream the response - yield raw TaskMessage objects
             async for task_message_update in self.task_service.send_message_stream(
                 agent=agent,
