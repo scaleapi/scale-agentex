@@ -93,7 +93,7 @@ When running `make dev` in agentex/, the following services start:
 - **Port 5003**: FastAPI backend server
 - **Port 5432**: PostgreSQL (application database)
 - **Port 5433**: PostgreSQL (Temporal database)
-- **Port 6379**: Redis (streams and caching)
+- **Port 6379**: Redis (streams and caching) — required for streaming/messaging; the Docker stack starts it automatically, and a local Redis will conflict on this port (see [Redis Port Conflicts](#redis-port-conflicts))
 - **Port 27017**: MongoDB (document storage)
 - **Port 7233**: Temporal server
 - **Port 8080**: Temporal Web UI

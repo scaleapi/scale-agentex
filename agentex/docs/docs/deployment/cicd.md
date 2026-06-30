@@ -187,6 +187,9 @@ This will build and push your agent image to `your-registry-here/your-repository
 
 Agents require credentials (API keys, database URLs, etc.) that live in your secrets manager (AWS Secrets Manager, Azure Key Vault, etc.), not in code. The `agentex secrets sync` command bridges your secrets manager to Kubernetes by injecting credentials directly into the target namespace.
 
+!!! note "`REDIS_URL` is a required baseline secret"
+    `agentex secrets sync` is not only for your own custom credentials. Any agent that streams or sends messages also needs `REDIS_URL` synced as a secret (shown as `REDIS_URL_SECRET` below) — it is **required**, not optional. Without it, the agent starts up fine but fails the first time it streams. See [Deploying Your Agent](overview.md#prerequisites).
+
 **Authentication requirements**: Your CI/CD runner (e.g., GitHub Actions runner) needs access to both your secrets manager (to read secrets) and your Kubernetes cluster (to create Secret objects).
 
 **How it works**: The workflow fetches secrets from your secrets manager and constructs a YAML file containing the credentials and image pull secrets. This YAML is then passed to the sync command, which creates Kubernetes Secret objects in your namespace.
@@ -199,7 +202,7 @@ credentials:
     api-key-jdoe: abc12345
     api-key-jsmith: def6789
   REDIS_URL_SECRET:
-    redis-url-secret: redis://localhost/
+    redis-url-secret: <your-redis-connection-string>  # e.g. rediss://<host>:6380 (TLS) or redis://<host>:6379
 imagePullSecrets:
   pull-secret-1:
     registry: registry-url
