@@ -512,7 +512,15 @@ class AgentRunScheduleService:
             # Spark registration above for the future path, and write the legacy
             # grant so current list/check calls can see the schedule.
             await self.authorization_service.grant(schedule_resource)
-        except Exception:
+        except Exception as grant_exc:
+            logger.warning(
+                "Auth grant failed for run schedule; compensating with deregister",
+                extra={
+                    "authz_selector": authz_selector,
+                    "error_type": type(grant_exc).__name__,
+                },
+                exc_info=True,
+            )
             try:
                 await self.authorization_service.deregister_resource(
                     resource=schedule_resource,

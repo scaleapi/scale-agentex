@@ -151,8 +151,12 @@ class TestAgentRunScheduleServiceCreate:
             await service.create_schedule(agent, request, {"user_id": "u1"})
 
         # The orphaned row and both auth entries are compensated.
+        authz_selector = build_run_schedule_authz_selector(agent.id, persisted.name)
+        schedule_resource = AgentexResource.schedule(authz_selector)
         service.schedule_repository.delete.assert_called_once_with(id=persisted.id)
-        service.authorization_service.revoke.assert_called_once()
+        service.authorization_service.revoke.assert_called_once_with(
+            resource=schedule_resource
+        )
         service.authorization_service.deregister_resource.assert_called_once()
 
     async def test_create_rolls_back_row_on_auth_registration_failure(
@@ -298,7 +302,11 @@ class TestAgentRunScheduleServiceDelete:
         service.schedule_repository.update.assert_called_once()
         tombstoned = service.schedule_repository.update.call_args.args[0]
         assert tombstoned.deleted_at is not None
-        service.authorization_service.revoke.assert_called_once()
+        authz_selector = build_run_schedule_authz_selector(agent.id, row.name)
+        schedule_resource = AgentexResource.schedule(authz_selector)
+        service.authorization_service.revoke.assert_called_once_with(
+            resource=schedule_resource
+        )
         service.authorization_service.deregister_resource.assert_called_once()
 
 
