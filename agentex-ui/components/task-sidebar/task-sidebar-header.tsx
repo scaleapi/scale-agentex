@@ -1,7 +1,7 @@
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 
-import { PanelLeftClose, MessageSquarePlus } from 'lucide-react';
+import { PanelLeftClose, MessageSquarePlus, Settings2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -55,6 +55,15 @@ export function TaskSidebarHeader({
         <kbd className="bg-muted text-muted-foreground pointer-events-none inline-flex h-5 items-center gap-1 rounded border px-1.5 font-mono text-[10px] font-medium opacity-100 select-none">
           <span className="text-xs/snug">⌘</span>K
         </kbd>
+      </ResizableSidebar.Button>
+      <ResizableSidebar.Button
+        onClick={() => router.push('/agent-configs')}
+        className="text-foreground flex items-center gap-2 p-2"
+        aria-label="Agent configs"
+        disableAnimation={true}
+      >
+        <Settings2 className="size-5" />
+        Agent configs
       </ResizableSidebar.Button>
     </div>
   );
