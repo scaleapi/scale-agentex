@@ -11,6 +11,7 @@ from src.api.schemas.agent_run_schedules import (
     ScheduleInitialInput,
     UpdateAgentRunScheduleRequest,
 )
+from src.api.schemas.authorization_types import AgentexResource
 from src.domain.entities.agent_run_schedules import AgentRunScheduleEntity
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
 from src.domain.exceptions import ClientError
@@ -112,8 +113,16 @@ class TestAgentRunScheduleServiceCreate:
         )
         assert create_kwargs["time_zone_name"] == "America/New_York"
 
-        # Ownership registered before the Temporal write.
-        service.authorization_service.register_resource.assert_called_once()
+        # Ownership is written to both auth paths before the Temporal write:
+        # Spark resource registration for the future path, and a legacy grant
+        # for current SGP list/check behavior.
+        authz_selector = build_run_schedule_authz_selector(agent.id, persisted.name)
+        schedule_resource = AgentexResource.schedule(authz_selector)
+        service.authorization_service.register_resource.assert_called_once_with(
+            resource=schedule_resource,
+            parent=AgentexResource.agent(agent.id),
+        )
+        service.authorization_service.grant.assert_called_once_with(schedule_resource)
 
         assert response.name == "daily-summary"
         assert response.initial_input_method == "event/send"  # async agent
@@ -141,8 +150,13 @@ class TestAgentRunScheduleServiceCreate:
         with pytest.raises(RuntimeError):
             await service.create_schedule(agent, request, {"user_id": "u1"})
 
-        # The orphaned row and auth entry are compensated.
+        # The orphaned row and both auth entries are compensated.
+        authz_selector = build_run_schedule_authz_selector(agent.id, persisted.name)
+        schedule_resource = AgentexResource.schedule(authz_selector)
         service.schedule_repository.delete.assert_called_once_with(id=persisted.id)
+        service.authorization_service.revoke.assert_called_once_with(
+            resource=schedule_resource
+        )
         service.authorization_service.deregister_resource.assert_called_once()
 
     async def test_create_rolls_back_row_on_auth_registration_failure(
@@ -163,6 +177,39 @@ class TestAgentRunScheduleServiceCreate:
         # must not create a Temporal schedule.
         service.schedule_repository.delete.assert_called_once_with(id=persisted.id)
         service.temporal_adapter.create_schedule.assert_not_called()
+        service.authorization_service.grant.assert_not_called()
+
+    async def test_create_compensates_register_when_grant_fails(self, service, agent):
+        request = _request()
+        persisted = _persisted(agent.id, request)
+        service.schedule_repository.get_by_agent_id_and_name.return_value = None
+        service.schedule_repository.create.return_value = persisted
+        service.authorization_service.grant.side_effect = RuntimeError("authz down")
+
+        with pytest.raises(RuntimeError):
+            await service.create_schedule(agent, request, {"user_id": "u1"})
+
+        # The Spark registration is compensated, the row is removed, and the
+        # Temporal clock is never created if the legacy grant cannot be written.
+        service.authorization_service.register_resource.assert_called_once()
+        service.authorization_service.deregister_resource.assert_called_once()
+        service.authorization_service.revoke.assert_not_called()
+        service.schedule_repository.delete.assert_called_once_with(id=persisted.id)
+        service.temporal_adapter.create_schedule.assert_not_called()
+
+    async def test_create_skips_auth_when_no_creator(self, service, agent):
+        type(service.authorization_service).principal_context = PropertyMock(
+            return_value={}
+        )
+        request = _request()
+        persisted = _persisted(agent.id, request)
+        service.schedule_repository.get_by_agent_id_and_name.return_value = None
+        service.schedule_repository.create.return_value = persisted
+
+        await service.create_schedule(agent, request, {})
+
+        service.authorization_service.register_resource.assert_not_called()
+        service.authorization_service.grant.assert_not_called()
 
 
 @pytest.mark.unit
@@ -255,6 +302,11 @@ class TestAgentRunScheduleServiceDelete:
         service.schedule_repository.update.assert_called_once()
         tombstoned = service.schedule_repository.update.call_args.args[0]
         assert tombstoned.deleted_at is not None
+        authz_selector = build_run_schedule_authz_selector(agent.id, row.name)
+        schedule_resource = AgentexResource.schedule(authz_selector)
+        service.authorization_service.revoke.assert_called_once_with(
+            resource=schedule_resource
+        )
         service.authorization_service.deregister_resource.assert_called_once()
 
 
