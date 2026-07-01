@@ -49,6 +49,37 @@ logger = make_logger(__name__)
 # Task queue name for agentex server operations
 AGENTEX_SERVER_TASK_QUEUE = "agentex-server"
 
+
+OTLP_METRICS_DEFAULT_PORT = 4317
+
+
+def build_metrics_url(host_url: str | None) -> str | None:
+    """Build the OTLP metrics endpoint URL from a ``host`` or ``host:port`` value.
+
+    Accepts a bare hostname/IPv4, an IPv6 literal (bracketed or not), or any of
+    those with an explicit ``:port`` suffix. Per RFC 3986 only IPv6 literals are
+    wrapped in brackets, and the default OTLP gRPC port is appended only when the
+    value does not already carry one. Returns None when no host is configured.
+    """
+    if not host_url:
+        return None
+
+    host = host_url.strip()
+    port: str | None = None
+
+    if host.startswith("["):
+        bracket_end = host.find("]")
+        if bracket_end != -1:
+            rest = host[bracket_end + 1 :]
+            port = rest[1:] if rest.startswith(":") else None
+            host = host[1:bracket_end]
+    elif host.count(":") == 1:
+        host, port = host.split(":", 1)
+
+    bracketed = f"[{host}]" if ":" in host else host
+    return f"http://{bracketed}:{port or OTLP_METRICS_DEFAULT_PORT}"
+
+
 # Global worker instance
 health_check_worker: Worker | None = None
 
@@ -93,7 +124,7 @@ async def run_worker(
 
         # Check for metrics configuration
         host_url = os.environ.get("DD_AGENT_HOST")
-        metrics_url = f"http://[{host_url}]:4317" if host_url else None
+        metrics_url = build_metrics_url(host_url)
         if metrics_url:
             logger.info(f"Configuring worker with metrics URL: {metrics_url}")
 
