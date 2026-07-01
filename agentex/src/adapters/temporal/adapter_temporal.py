@@ -10,8 +10,12 @@ from temporalio.client import (
     ScheduleDescription,
     ScheduleHandle,
     ScheduleIntervalSpec,
+    ScheduleOverlapPolicy,
+    SchedulePolicy,
     ScheduleSpec,
     ScheduleState,
+    ScheduleUpdate,
+    ScheduleUpdateInput,
     WorkflowExecution,
     WorkflowHandle,
 )
@@ -35,6 +39,7 @@ from src.adapters.temporal.exceptions import (
 )
 from src.adapters.temporal.port import TemporalGateway
 from src.utils.logging import make_logger
+from src.utils.schedule_metrics import record_schedule_temporal_op
 
 logger = make_logger(__name__)
 
@@ -88,10 +93,13 @@ class TemporalAdapter(TemporalGateway):
             if start_delay:
                 options["start_delay"] = start_delay
 
-            # Start the workflow
+            # Start the workflow. Temporal's client.start_workflow takes a single
+            # positional ``arg``; multiple workflow arguments must be passed via
+            # the ``args`` keyword (spreading them positionally raises "takes from
+            # 2 to 3 positional arguments").
             handle = await self.client.start_workflow(
                 workflow,
-                *args if args else [],
+                args=args if args else [],
                 **options,
             )
 
@@ -362,9 +370,20 @@ class TemporalAdapter(TemporalGateway):
         start_at: Any | None = None,
         end_at: Any | None = None,
         paused: bool = False,
+        time_zone_name: str | None = None,
+        overlap_policy: str | None = None,
     ) -> ScheduleHandle:
         """
         Create a new schedule for recurring workflow execution.
+
+        ``time_zone_name`` is an optional IANA timezone (e.g. ``America/New_York``)
+        the cron expression is evaluated in; when omitted, cron is evaluated in
+        UTC. Ignored for interval-based schedules.
+
+        ``overlap_policy`` is an optional ScheduleOverlapPolicy name (e.g.
+        ``"skip"``, ``"buffer_one"``) controlling what happens when a fire is due
+        while a prior run is still executing. When omitted, Temporal's default
+        (SKIP) applies.
         """
         if not self.client:
             raise TemporalConnectionError("Temporal client is not connected")
@@ -377,6 +396,9 @@ class TemporalAdapter(TemporalGateway):
 
         try:
             # Build schedule spec
+            spec_kwargs: dict[str, Any] = {}
+            if time_zone_name:
+                spec_kwargs["time_zone_name"] = time_zone_name
             spec = ScheduleSpec(
                 cron_expressions=cron_expressions or [],
                 intervals=[
@@ -386,6 +408,7 @@ class TemporalAdapter(TemporalGateway):
                 else [],
                 start_at=start_at,
                 end_at=end_at,
+                **spec_kwargs,
             )
 
             # Build workflow action
@@ -408,6 +431,13 @@ class TemporalAdapter(TemporalGateway):
                 paused=paused,
             )
 
+            # Build schedule policies (overlap), when requested
+            schedule_kwargs: dict[str, Any] = {}
+            if overlap_policy:
+                schedule_kwargs["policy"] = SchedulePolicy(
+                    overlap=ScheduleOverlapPolicy[overlap_policy.upper()]
+                )
+
             # Create the schedule
             handle = await self.client.create_schedule(
                 schedule_id,
@@ -415,26 +445,31 @@ class TemporalAdapter(TemporalGateway):
                     action=action,
                     spec=spec,
                     state=state,
+                    **schedule_kwargs,
                 ),
             )
 
             logger.info(f"Created schedule {schedule_id} successfully")
+            record_schedule_temporal_op("create", "success")
             return handle
 
         except ScheduleAlreadyRunningError as e:
             logger.error(f"Schedule {schedule_id} already exists: {e}")
+            record_schedule_temporal_op("create", "error")
             raise TemporalScheduleAlreadyExistsError(
                 message=f"Schedule with ID '{schedule_id}' already exists",
                 detail=str(e),
             ) from e
         except ValueError as e:
             logger.error(f"Invalid arguments for schedule {schedule_id}: {e}")
+            record_schedule_temporal_op("create", "error")
             raise TemporalInvalidArgumentError(
                 message=f"Invalid arguments provided for schedule '{schedule_id}'",
                 detail=str(e),
             ) from e
         except Exception as e:
             logger.error(f"Failed to create schedule {schedule_id}: {e}")
+            record_schedule_temporal_op("create", "error")
             raise TemporalScheduleError(
                 message=f"Failed to create schedule '{schedule_id}'",
                 detail=str(e),
@@ -589,6 +624,73 @@ class TemporalAdapter(TemporalGateway):
                 detail=str(e),
             ) from e
 
+    async def update_schedule(
+        self,
+        schedule_id: str,
+        cron_expressions: list[str] | None = None,
+        interval_seconds: int | None = None,
+        start_at: Any | None = None,
+        end_at: Any | None = None,
+        time_zone_name: str | None = None,
+        paused: bool | None = None,
+    ) -> None:
+        """
+        Update an existing schedule's spec and/or paused state.
+
+        Rebuilds the schedule spec (cadence, window, timezone) from the provided
+        values and replaces it, leaving the workflow action untouched. ``paused``
+        is applied only when provided. The caller is expected to pass the full
+        desired spec (cron XOR interval), mirroring ``create_schedule``.
+        """
+        if not self.client:
+            raise TemporalConnectionError("Temporal client is not connected")
+
+        if not cron_expressions and not interval_seconds:
+            raise TemporalInvalidArgumentError(
+                message="Either cron_expressions or interval_seconds must be provided",
+                detail="A schedule requires at least one scheduling specification",
+            )
+
+        spec_kwargs: dict[str, Any] = {}
+        if time_zone_name:
+            spec_kwargs["time_zone_name"] = time_zone_name
+        new_spec = ScheduleSpec(
+            cron_expressions=cron_expressions or [],
+            intervals=[ScheduleIntervalSpec(every=timedelta(seconds=interval_seconds))]
+            if interval_seconds
+            else [],
+            start_at=start_at,
+            end_at=end_at,
+            **spec_kwargs,
+        )
+
+        def _apply(input: ScheduleUpdateInput) -> ScheduleUpdate:
+            schedule = input.description.schedule
+            schedule.spec = new_spec
+            if paused is not None:
+                schedule.state.paused = paused
+            return ScheduleUpdate(schedule=schedule)
+
+        try:
+            handle = self.client.get_schedule_handle(schedule_id)
+            await handle.update(_apply)
+            logger.info(f"Updated schedule {schedule_id}")
+            record_schedule_temporal_op("update", "success")
+        except Exception as e:
+            if "not found" in str(e).lower():
+                logger.error(f"Schedule {schedule_id} not found: {e}")
+                record_schedule_temporal_op("update", "not_found")
+                raise TemporalScheduleNotFoundError(
+                    message=f"Schedule '{schedule_id}' not found",
+                    detail=str(e),
+                ) from e
+            logger.error(f"Failed to update schedule {schedule_id}: {e}")
+            record_schedule_temporal_op("update", "error")
+            raise TemporalScheduleError(
+                message=f"Failed to update schedule '{schedule_id}'",
+                detail=str(e),
+            ) from e
+
     async def delete_schedule(self, schedule_id: str) -> None:
         """
         Delete a schedule.
@@ -600,14 +702,17 @@ class TemporalAdapter(TemporalGateway):
             handle = self.client.get_schedule_handle(schedule_id)
             await handle.delete()
             logger.info(f"Deleted schedule {schedule_id}")
+            record_schedule_temporal_op("delete", "success")
         except Exception as e:
             if "not found" in str(e).lower():
                 logger.error(f"Schedule {schedule_id} not found: {e}")
+                record_schedule_temporal_op("delete", "not_found")
                 raise TemporalScheduleNotFoundError(
                     message=f"Schedule '{schedule_id}' not found",
                     detail=str(e),
                 ) from e
             logger.error(f"Failed to delete schedule {schedule_id}: {e}")
+            record_schedule_temporal_op("delete", "error")
             raise TemporalScheduleError(
                 message=f"Failed to delete schedule '{schedule_id}'",
                 detail=str(e),

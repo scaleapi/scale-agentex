@@ -27,11 +27,20 @@ from src.temporal.activities.healthcheck_activities import HealthCheckActivities
 from src.temporal.activities.retention_cleanup_activities import (
     RetentionCleanupActivities,
 )
+from src.temporal.activities.scheduled_agent_run_activities import (
+    ScheduledAgentRunActivities,
+)
+from src.temporal.scheduled_agent_run_factory import (
+    build_agent_run_schedule_repository,
+)
 from src.temporal.task_retention_factory import build_task_retention_use_case
 from src.temporal.workflows.healthcheck_workflow import HealthCheckWorkflow
 from src.temporal.workflows.retention_cleanup_workflow import (
     RetentionCleanupSweepWorkflow,
     RetentionCleanupTaskWorkflow,
+)
+from src.temporal.workflows.scheduled_agent_run_workflow import (
+    ScheduledAgentRunWorkflow,
 )
 from src.utils.logging import make_logger
 
@@ -161,6 +170,11 @@ def create_agentex_server_worker(
         use_case=retention_use_case,
     )
 
+    scheduled_agent_run_activities = ScheduledAgentRunActivities(
+        global_dependencies=global_dependencies,
+        schedule_repository=build_agent_run_schedule_repository(global_dependencies),
+    )
+
     return asyncio.create_task(
         run_worker(
             task_queue=task_queue,
@@ -168,6 +182,7 @@ def create_agentex_server_worker(
                 HealthCheckWorkflow,
                 RetentionCleanupSweepWorkflow,
                 RetentionCleanupTaskWorkflow,
+                ScheduledAgentRunWorkflow,
             ],
             activities=[
                 health_check_activities.check_status_activity,
@@ -176,6 +191,7 @@ def create_agentex_server_worker(
                 retention_activities.find_cleanup_candidates,
                 retention_activities.find_multi_agent_cleanup_candidates,
                 retention_activities.clean_task,
+                scheduled_agent_run_activities.launch_scheduled_agent_run,
             ],
             max_workers=50,
             max_concurrent_activities=50,
