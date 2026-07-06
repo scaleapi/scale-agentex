@@ -22,6 +22,7 @@ def test_hostname_and_ipv4_hosts_are_not_bracketed(host):
         ("::1", "http://[::1]:4317"),
         ("fe80::1", "http://[fe80::1]:4317"),
         ("[::1]", "http://[::1]:4317"),
+        ("[::1]:", "http://[::1]:4317"),
     ],
 )
 def test_ipv6_literals_are_bracketed(host, expected):

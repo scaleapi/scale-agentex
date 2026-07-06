@@ -65,7 +65,7 @@ def build_metrics_url(host_url: str | None) -> str | None:
         bracket_end = host.find("]")
         if bracket_end != -1:
             rest = host[bracket_end + 1 :]
-            port = rest[1:] if rest.startswith(":") else port
+            port = rest[1:] or port if rest.startswith(":") else port
             host = host[1:bracket_end]
     elif host.count(":") == 1:
         host, port = host.split(":", 1)
