@@ -48,6 +48,31 @@ logger = make_logger(__name__)
 
 # Task queue name for agentex server operations
 AGENTEX_SERVER_TASK_QUEUE = "agentex-server"
+OTLP_METRICS_DEFAULT_PORT = 4317
+
+
+def build_metrics_url(host_url: str | None) -> str | None:
+    """Build the worker OTLP metrics URL from DD_AGENT_HOST."""
+    if not host_url:
+        return None
+
+    host = host_url.strip()
+    if not host:
+        return None
+
+    port: str | int = OTLP_METRICS_DEFAULT_PORT
+    if host.startswith("["):
+        bracket_end = host.find("]")
+        if bracket_end != -1:
+            rest = host[bracket_end + 1 :]
+            port = rest[1:] or port if rest.startswith(":") else port
+            host = host[1:bracket_end]
+    elif host.count(":") == 1:
+        host, port = host.split(":", 1)
+
+    if ":" in host:
+        host = f"[{host}]"
+    return f"http://{host}:{port}"
 
 # Global worker instance
 health_check_worker: Worker | None = None
@@ -93,7 +118,7 @@ async def run_worker(
 
         # Check for metrics configuration
         host_url = os.environ.get("DD_AGENT_HOST")
-        metrics_url = f"http://[{host_url}]:4317" if host_url else None
+        metrics_url = build_metrics_url(host_url)
         if metrics_url:
             logger.info(f"Configuring worker with metrics URL: {metrics_url}")
 
