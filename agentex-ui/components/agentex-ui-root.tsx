@@ -20,34 +20,39 @@ export function AgentexUIRoot() {
   const { agentName, taskID, updateParams } = useSafeSearchParams();
   const [isTracesSidebarOpen, setIsTracesSidebarOpen] = useState(false);
   const { agentexClient } = useAgentexClient();
-  const { data: agents = [], isLoading } = useAgents(agentexClient);
+  const { data: agents = [], isFetching: isAgentsFetching } =
+    useAgents(agentexClient);
   // Validate the deep-linked agent directly against the backend so a valid agent opens
   // even if it sits outside the loaded list (e.g. on accounts with many agents).
-  const { data: agentByName, isLoading: isAgentByNameLoading } = useAgentByName(
-    agentexClient,
-    agentName
-  );
+  const {
+    data: agentByName,
+    isFetching: isAgentByNameFetching,
+    isError: isAgentByNameError,
+  } = useAgentByName(agentexClient, agentName);
   const [localAgentName, setLocalAgentName] = useLocalStorageState<
     string | undefined
   >('lastSelectedAgent', undefined);
 
-  // Gate on `isLoading` (not `isPending`): a disabled by-name query stays `pending` forever,
-  // but `isLoading` is `pending && fetching`, so it's false while disabled — letting the
-  // localStorage-restore branch run when no agent_name is present. Deps are intentionally
-  // narrowed to the load-settled flags + agentName so we re-validate on load completion and
-  // on agent_name changes, not on every `agents`/`agentByName` identity change.
+  // Wait until neither query is fetching before validating. We gate on `isFetching` (not
+  // `isLoading`, which is false once a query has cached data) so we never validate against
+  // stale data mid-refetch. A disabled by-name query reports `isFetching: false`, so it
+  // doesn't block the localStorage-restore path when there's no agent_name. Deps are
+  // intentionally narrowed so we re-validate on fetch settle / agent_name change.
   useEffect(() => {
-    if (isLoading || isAgentByNameLoading) return;
+    if (isAgentsFetching || isAgentByNameFetching) return;
 
     // Accept an agent found in the (paginated) list OR resolved directly by name, so a valid
     // deep-linked agent opens even if it falls outside the loaded list.
-    const selectedAgent =
-      agents.find(agent => agent.name === agentName) ??
-      agentByName ??
-      undefined;
+    const agentInList = agents.find(agent => agent.name === agentName);
+    const selectedAgent = agentInList ?? agentByName ?? undefined;
     const isAgentValid = selectedAgent && selectedAgent.status === 'Ready';
 
-    if (agentName && !isAgentValid) {
+    // If the agent isn't in the loaded list and the by-name lookup errored (a transient
+    // failure, not a 404), we can't tell whether it's valid — leave the URL alone rather
+    // than bouncing a possibly-valid deep link to the home grid.
+    const couldNotDetermine = !agentInList && isAgentByNameError;
+
+    if (agentName && !isAgentValid && !couldNotDetermine) {
       updateParams({ [SearchParamKey.AGENT_NAME]: null });
       setLocalAgentName(undefined);
     }
@@ -56,7 +61,7 @@ export function AgentexUIRoot() {
       updateParams({ [SearchParamKey.AGENT_NAME]: localAgentName });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, isAgentByNameLoading, agentName]);
+  }, [isAgentsFetching, isAgentByNameFetching, isAgentByNameError, agentName]);
 
   const handleSelectTask = useCallback(
     (taskId: string | null) => {

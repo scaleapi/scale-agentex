@@ -14,14 +14,14 @@ export const agentsKeys = {
  * 50 agents per page, so a single unpaginated call only ever returns the first page. We
  * request a larger page and keep fetching until a page comes back short.
  */
-const AGENTS_PAGE_SIZE = 100;
+export const AGENTS_PAGE_SIZE = 100;
 
 /**
  * Upper bound on the number of pages we fetch, as a safety valve against an unbounded
  * loop if the backend ever stops short-paging. At {@link AGENTS_PAGE_SIZE} per page this
  * covers far more agents than any real account.
  */
-const MAX_AGENT_PAGES = 100;
+export const MAX_AGENT_PAGES = 100;
 
 /**
  * Fetches the complete list of agents available in the system.

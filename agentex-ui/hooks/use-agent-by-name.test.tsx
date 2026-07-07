@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react';
+import { APIError, NotFoundError } from 'agentex';
 import { describe, expect, it, vi } from 'vitest';
 
 import { useAgentByName } from './use-agent-by-name';
@@ -59,10 +60,14 @@ describe('useAgentByName', () => {
     expect(retrieveByName).toHaveBeenCalledWith('interview-agent');
   });
 
-  it('resolves to null (not an error) when the lookup fails', async () => {
-    const retrieveByName = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('404 not found'));
+  it('resolves to null (not an error) on a 404', async () => {
+    const notFound = new NotFoundError(
+      404,
+      undefined,
+      'Not found',
+      new Headers()
+    );
+    const retrieveByName = vi.fn().mockRejectedValueOnce(notFound);
 
     const { result } = renderHook(
       () => useAgentByName(clientWith(retrieveByName), 'missing-agent'),
@@ -73,5 +78,24 @@ describe('useAgentByName', () => {
 
     expect(result.current.data).toBeNull();
     expect(result.current.isError).toBe(false);
+  });
+
+  it('surfaces a non-404 error instead of masquerading as not-found', async () => {
+    const serverError = new APIError(
+      500,
+      undefined,
+      'Server error',
+      new Headers()
+    );
+    const retrieveByName = vi.fn().mockRejectedValueOnce(serverError);
+
+    const { result } = renderHook(
+      () => useAgentByName(clientWith(retrieveByName), 'some-agent'),
+      { wrapper: createWrapper() }
+    );
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(result.current.data).toBeUndefined();
   });
 });

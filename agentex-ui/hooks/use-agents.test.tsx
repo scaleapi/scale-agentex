@@ -4,13 +4,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { useAgents } from './use-agents';
+import {
+  AGENTS_PAGE_SIZE as PAGE_SIZE,
+  MAX_AGENT_PAGES,
+  useAgents,
+} from './use-agents';
 
 import type AgentexSDK from 'agentex';
 import type { Agent } from 'agentex/resources';
-
-// Keep in sync with AGENTS_PAGE_SIZE in use-agents.ts — the page size the hook requests.
-const PAGE_SIZE = 100;
 
 function makeAgents(count: number, prefix: string): Agent[] {
   return Array.from(
@@ -118,9 +119,8 @@ describe('useAgents', () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    // MAX_AGENT_PAGES is 100 in use-agents.ts.
-    expect(list).toHaveBeenCalledTimes(100);
-    expect(result.current.data).toHaveLength(PAGE_SIZE * 100);
+    expect(list).toHaveBeenCalledTimes(MAX_AGENT_PAGES);
+    expect(result.current.data).toHaveLength(PAGE_SIZE * MAX_AGENT_PAGES);
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('MAX_AGENT_PAGES')
     );
