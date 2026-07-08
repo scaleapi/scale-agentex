@@ -118,130 +118,301 @@ async def list_run_schedules(
     )
 
 
+async def _resolve_name_alias_and_check(
+    agent_id: str,
+    name: str,
+    operation: AuthorizedOperationType,
+    run_schedules_use_case: DAgentRunSchedulesUseCase,
+    authorization: DAuthorizationService,
+) -> str:
+    # Name aliases are per-agent labels, so resolve them under the agent first
+    # and then authorize/operate on the immutable schedule id. Acting on the id,
+    # not the name, keeps it the stable auth and mutation target even if the
+    # label changes, and closes the rename/recreate race where a check on the old
+    # row could precede a write that lands on a new one. Absent names 404; denied
+    # resources collapse to 404.
+    schedule_id = await run_schedules_use_case.get_schedule_id_by_name(agent_id, name)
+    await _check_schedule_or_collapse_to_404(
+        authorization,
+        build_run_schedule_authz_selector(agent_id, schedule_id),
+        operation,
+    )
+    return schedule_id
+
+
 @router.get(
-    "/{name}",
+    "/name/{name}",
     response_model=AgentRunScheduleResponse,
-    summary="Get Run Schedule",
-    description="Get a run schedule by its name.",
+    summary="Get Run Schedule By Name",
+    description="Get a run schedule by its active name.",
 )
-async def get_run_schedule(
+async def get_run_schedule_by_name(
     agent_id: str,
     name: str,
     run_schedules_use_case: DAgentRunSchedulesUseCase,
     authorization: DAuthorizationService,
 ) -> AgentRunScheduleResponse:
+    schedule_id = await _resolve_name_alias_and_check(
+        agent_id,
+        name,
+        AuthorizedOperationType.read,
+        run_schedules_use_case,
+        authorization,
+    )
+    return await run_schedules_use_case.get_schedule(agent_id, schedule_id)
+
+
+@router.get(
+    "/{schedule_id}",
+    response_model=AgentRunScheduleResponse,
+    summary="Get Run Schedule",
+    description="Get a run schedule by its id.",
+)
+async def get_run_schedule(
+    agent_id: str,
+    schedule_id: str,
+    run_schedules_use_case: DAgentRunSchedulesUseCase,
+    authorization: DAuthorizationService,
+) -> AgentRunScheduleResponse:
     await _check_schedule_or_collapse_to_404(
         authorization,
-        build_run_schedule_authz_selector(agent_id, name),
+        build_run_schedule_authz_selector(agent_id, schedule_id),
         AuthorizedOperationType.read,
     )
-    return await run_schedules_use_case.get_schedule(agent_id, name)
+    return await run_schedules_use_case.get_schedule(agent_id, schedule_id)
 
 
 @router.patch(
-    "/{name}",
+    "/name/{name}",
     response_model=AgentRunScheduleResponse,
-    summary="Update Run Schedule",
-    description="Partially update a run schedule's definition (cadence, window, input, etc.).",
+    summary="Update Run Schedule By Name",
+    description="Partially update a run schedule's definition by its active name.",
 )
-async def update_run_schedule(
+async def update_run_schedule_by_name(
     agent_id: str,
     name: str,
     request: UpdateAgentRunScheduleRequest,
     run_schedules_use_case: DAgentRunSchedulesUseCase,
     authorization: DAuthorizationService,
 ) -> AgentRunScheduleResponse:
+    schedule_id = await _resolve_name_alias_and_check(
+        agent_id,
+        name,
+        AuthorizedOperationType.update,
+        run_schedules_use_case,
+        authorization,
+    )
+    return await run_schedules_use_case.update_schedule(agent_id, schedule_id, request)
+
+
+@router.patch(
+    "/{schedule_id}",
+    response_model=AgentRunScheduleResponse,
+    summary="Update Run Schedule",
+    description="Partially update a run schedule's definition (cadence, window, input, etc.).",
+)
+async def update_run_schedule(
+    agent_id: str,
+    schedule_id: str,
+    request: UpdateAgentRunScheduleRequest,
+    run_schedules_use_case: DAgentRunSchedulesUseCase,
+    authorization: DAuthorizationService,
+) -> AgentRunScheduleResponse:
     await _check_schedule_or_collapse_to_404(
         authorization,
-        build_run_schedule_authz_selector(agent_id, name),
+        build_run_schedule_authz_selector(agent_id, schedule_id),
         AuthorizedOperationType.update,
     )
-    return await run_schedules_use_case.update_schedule(agent_id, name, request)
+    return await run_schedules_use_case.update_schedule(agent_id, schedule_id, request)
 
 
 @router.post(
-    "/{name}/trigger",
+    "/name/{name}/trigger",
+    response_model=AgentRunScheduleResponse,
+    summary="Trigger Run Schedule By Name",
+    description="Trigger an immediate, out-of-band run of the schedule by its active name.",
+)
+async def trigger_run_schedule_by_name(
+    agent_id: str,
+    name: str,
+    run_schedules_use_case: DAgentRunSchedulesUseCase,
+    authorization: DAuthorizationService,
+) -> AgentRunScheduleResponse:
+    schedule_id = await _resolve_name_alias_and_check(
+        agent_id,
+        name,
+        AuthorizedOperationType.update,
+        run_schedules_use_case,
+        authorization,
+    )
+    return await run_schedules_use_case.trigger_schedule(agent_id, schedule_id)
+
+
+@router.post(
+    "/{schedule_id}/trigger",
     response_model=AgentRunScheduleResponse,
     summary="Trigger Run Schedule",
     description="Trigger an immediate, out-of-band run of the schedule (in addition to its cadence).",
 )
 async def trigger_run_schedule(
     agent_id: str,
-    name: str,
+    schedule_id: str,
     run_schedules_use_case: DAgentRunSchedulesUseCase,
     authorization: DAuthorizationService,
 ) -> AgentRunScheduleResponse:
     await _check_schedule_or_collapse_to_404(
         authorization,
-        build_run_schedule_authz_selector(agent_id, name),
+        build_run_schedule_authz_selector(agent_id, schedule_id),
         AuthorizedOperationType.update,
     )
-    return await run_schedules_use_case.trigger_schedule(agent_id, name)
+    return await run_schedules_use_case.trigger_schedule(agent_id, schedule_id)
 
 
 @router.post(
-    "/{name}/pause",
+    "/name/{name}/pause",
     response_model=AgentRunScheduleResponse,
-    summary="Pause Run Schedule",
-    description="Pause a run schedule so it stops firing.",
+    summary="Pause Run Schedule By Name",
+    description="Pause a run schedule by its active name.",
 )
-async def pause_run_schedule(
+async def pause_run_schedule_by_name(
     agent_id: str,
     name: str,
     run_schedules_use_case: DAgentRunSchedulesUseCase,
     authorization: DAuthorizationService,
     request: PauseRunScheduleRequest | None = None,
 ) -> AgentRunScheduleResponse:
-    await _check_schedule_or_collapse_to_404(
-        authorization,
-        build_run_schedule_authz_selector(agent_id, name),
+    schedule_id = await _resolve_name_alias_and_check(
+        agent_id,
+        name,
         AuthorizedOperationType.update,
+        run_schedules_use_case,
+        authorization,
     )
     note = request.note if request else None
-    return await run_schedules_use_case.pause_schedule(agent_id, name, note=note)
+    return await run_schedules_use_case.pause_schedule(agent_id, schedule_id, note=note)
 
 
 @router.post(
-    "/{name}/resume",
+    "/{schedule_id}/pause",
     response_model=AgentRunScheduleResponse,
-    summary="Resume Run Schedule",
-    description="Resume a paused run schedule so it fires again.",
+    summary="Pause Run Schedule",
+    description="Pause a run schedule so it stops firing.",
 )
-async def resume_run_schedule(
+async def pause_run_schedule(
+    agent_id: str,
+    schedule_id: str,
+    run_schedules_use_case: DAgentRunSchedulesUseCase,
+    authorization: DAuthorizationService,
+    request: PauseRunScheduleRequest | None = None,
+) -> AgentRunScheduleResponse:
+    await _check_schedule_or_collapse_to_404(
+        authorization,
+        build_run_schedule_authz_selector(agent_id, schedule_id),
+        AuthorizedOperationType.update,
+    )
+    note = request.note if request else None
+    return await run_schedules_use_case.pause_schedule(agent_id, schedule_id, note=note)
+
+
+@router.post(
+    "/name/{name}/resume",
+    response_model=AgentRunScheduleResponse,
+    summary="Resume Run Schedule By Name",
+    description="Resume a paused run schedule by its active name.",
+)
+async def resume_run_schedule_by_name(
     agent_id: str,
     name: str,
     run_schedules_use_case: DAgentRunSchedulesUseCase,
     authorization: DAuthorizationService,
     request: ResumeRunScheduleRequest | None = None,
 ) -> AgentRunScheduleResponse:
+    schedule_id = await _resolve_name_alias_and_check(
+        agent_id,
+        name,
+        AuthorizedOperationType.update,
+        run_schedules_use_case,
+        authorization,
+    )
+    note = request.note if request else None
+    return await run_schedules_use_case.resume_schedule(
+        agent_id, schedule_id, note=note
+    )
+
+
+@router.post(
+    "/{schedule_id}/resume",
+    response_model=AgentRunScheduleResponse,
+    summary="Resume Run Schedule",
+    description="Resume a paused run schedule so it fires again.",
+)
+async def resume_run_schedule(
+    agent_id: str,
+    schedule_id: str,
+    run_schedules_use_case: DAgentRunSchedulesUseCase,
+    authorization: DAuthorizationService,
+    request: ResumeRunScheduleRequest | None = None,
+) -> AgentRunScheduleResponse:
     await _check_schedule_or_collapse_to_404(
         authorization,
-        build_run_schedule_authz_selector(agent_id, name),
+        build_run_schedule_authz_selector(agent_id, schedule_id),
         AuthorizedOperationType.update,
     )
     note = request.note if request else None
-    return await run_schedules_use_case.resume_schedule(agent_id, name, note=note)
+    return await run_schedules_use_case.resume_schedule(
+        agent_id, schedule_id, note=note
+    )
 
 
 @router.delete(
-    "/{name}",
+    "/name/{name}",
+    response_model=DeleteResponse,
+    summary="Delete Run Schedule By Name",
+    description="Delete a run schedule by its active name.",
+)
+async def delete_run_schedule_by_name(
+    agent_id: str,
+    name: str,
+    run_schedules_use_case: DAgentRunSchedulesUseCase,
+    authorization: DAuthorizationService,
+) -> DeleteResponse:
+    schedule_id = await _resolve_name_alias_and_check(
+        agent_id,
+        name,
+        AuthorizedOperationType.delete,
+        run_schedules_use_case,
+        authorization,
+    )
+    deleted_schedule_id = await run_schedules_use_case.delete_schedule(
+        agent_id, schedule_id
+    )
+    return DeleteResponse(
+        id=deleted_schedule_id,
+        message=f"Run schedule '{name}' deleted successfully",
+    )
+
+
+@router.delete(
+    "/{schedule_id}",
     response_model=DeleteResponse,
     summary="Delete Run Schedule",
     description="Delete a run schedule permanently.",
 )
 async def delete_run_schedule(
     agent_id: str,
-    name: str,
+    schedule_id: str,
     run_schedules_use_case: DAgentRunSchedulesUseCase,
     authorization: DAuthorizationService,
 ) -> DeleteResponse:
     await _check_schedule_or_collapse_to_404(
         authorization,
-        build_run_schedule_authz_selector(agent_id, name),
+        build_run_schedule_authz_selector(agent_id, schedule_id),
         AuthorizedOperationType.delete,
     )
-    schedule_id = await run_schedules_use_case.delete_schedule(agent_id, name)
+    deleted_schedule_id = await run_schedules_use_case.delete_schedule(
+        agent_id, schedule_id
+    )
     return DeleteResponse(
-        id=schedule_id,
-        message=f"Run schedule '{name}' deleted successfully",
+        id=deleted_schedule_id,
+        message=f"Run schedule '{schedule_id}' deleted successfully",
     )

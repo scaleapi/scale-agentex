@@ -48,24 +48,14 @@ def build_run_schedule_temporal_id(schedule_row_id: str) -> str:
     return f"{RUN_SCHEDULE_TEMPORAL_ID_PREFIX}:{schedule_row_id}"
 
 
-def build_run_schedule_authz_selector(agent_id: str, name: str) -> str:
+def build_run_schedule_authz_selector(agent_id: str, schedule_id: str) -> str:
     """Authorization selector for a run schedule's ``schedule`` resource.
 
-    Derivable from the (agent_id, name) path params so the CRUD endpoints can
-    authorize without a prior DB lookup. The ``run-schedule::`` prefix namespaces
-    the selector within the ``schedule`` resource type.
-
-    Design note: ``name`` currently doubles as the external identity — URL
-    handle, unique key, and this authz selector — which is why a soft-deleted
-    name stays reserved (no reuse). The row's immutable ``id`` is the better
-    long-term handle (it is already returned in responses and is what Temporal
-    keys off), so moving the external identity to ``id`` with ``name`` as a
-    mutable label is a planned fast-follow that makes name reuse a non-issue and
-    keeps audit unambiguous. Deferred here to keep this change's scope contained;
-    the move is additive (id-based routes/selector alongside the name ones)
-    rather than a breaking reshape.
+    Derivable from the (agent_id, schedule_id) path params so the CRUD endpoints
+    can authorize without a prior DB lookup. The ``run-schedule::`` prefix
+    namespaces the selector within the ``schedule`` resource type.
     """
-    return f"run-schedule::{agent_id}::{name}"
+    return f"run-schedule::{agent_id}::{schedule_id}"
 
 
 class AgentRunScheduleService:
@@ -94,9 +84,8 @@ class AgentRunScheduleService:
         request: CreateAgentRunScheduleRequest,
         creator_principal: dict[str, Any],
     ) -> AgentRunScheduleResponse:
-        # include_deleted: a soft-deleted name stays reserved (no reuse in v1).
         existing = await self.schedule_repository.get_by_agent_id_and_name(
-            agent.id, request.name, include_deleted=True
+            agent.id, request.name
         )
         if existing is not None:
             raise ClientError(
@@ -128,7 +117,7 @@ class AgentRunScheduleService:
             ) from exc
 
         temporal_id = build_run_schedule_temporal_id(created.id)
-        authz_selector = build_run_schedule_authz_selector(agent.id, created.name)
+        authz_selector = build_run_schedule_authz_selector(agent.id, created.id)
         # Register (fail-closed, before the Temporal write) and create the schedule
         # under one rollback scope: if EITHER the auth registration or the Temporal
         # create fails, the persisted row is removed so a failed create leaves
@@ -193,7 +182,7 @@ class AgentRunScheduleService:
         for row in rows:
             if len(items) >= limit:
                 break
-            selector = build_run_schedule_authz_selector(agent_id, row.name)
+            selector = build_run_schedule_authz_selector(agent_id, row.id)
             if authorized is not None and selector not in authorized:
                 continue
             temporal_id = build_run_schedule_temporal_id(row.id)
@@ -208,34 +197,44 @@ class AgentRunScheduleService:
             )
         return AgentRunScheduleListResponse(run_schedules=items, total=len(items))
 
-    async def get_schedule(self, agent_id: str, name: str) -> AgentRunScheduleResponse:
-        row = await self.schedule_repository.get_by_agent_id_and_name_or_raise(
-            agent_id, name
+    async def get_schedule(
+        self, agent_id: str, schedule_id: str
+    ) -> AgentRunScheduleResponse:
+        row = await self.schedule_repository.get_by_agent_id_and_id_or_raise(
+            agent_id, schedule_id
         )
         agent = await self.agent_repository.get(id=agent_id)
         return await self._to_response(
             row, agent=agent, temporal_id=build_run_schedule_temporal_id(row.id)
         )
 
+    async def get_schedule_id_by_name(self, agent_id: str, name: str) -> str:
+        row = await self.schedule_repository.get_by_agent_id_and_name(agent_id, name)
+        if row is None:
+            raise ItemDoesNotExist(
+                f"Run schedule '{name}' for agent '{agent_id}' does not exist."
+            )
+        return row.id
+
     async def pause_schedule(
-        self, agent_id: str, name: str, note: str | None = None
+        self, agent_id: str, schedule_id: str, note: str | None = None
     ) -> AgentRunScheduleResponse:
-        return await self._set_paused(agent_id, name, paused=True, note=note)
+        return await self._set_paused(agent_id, schedule_id, paused=True, note=note)
 
     async def resume_schedule(
-        self, agent_id: str, name: str, note: str | None = None
+        self, agent_id: str, schedule_id: str, note: str | None = None
     ) -> AgentRunScheduleResponse:
-        return await self._set_paused(agent_id, name, paused=False, note=note)
+        return await self._set_paused(agent_id, schedule_id, paused=False, note=note)
 
-    async def delete_schedule(self, agent_id: str, name: str) -> str:
-        row = await self.schedule_repository.get_by_agent_id_and_name_or_raise(
-            agent_id, name
+    async def delete_schedule(self, agent_id: str, schedule_id: str) -> str:
+        row = await self.schedule_repository.get_by_agent_id_and_id_or_raise(
+            agent_id, schedule_id
         )
         temporal_id = build_run_schedule_temporal_id(row.id)
         # Temporal is the recurring clock; delete it first so no further fires can
         # occur, then soft-delete the row and drop the auth entry. The Postgres row
         # is tombstoned (deleted_at set) rather than removed so the schedule remains
-        # auditable and its (agent_id, name) stays reserved (names are not reusable).
+        # auditable.
         # A missing Temporal schedule is treated as success (the clock is already
         # gone) so a prior partial delete — Temporal removed but the row write
         # failed — can still be cleaned up through this path rather than stranded.
@@ -249,12 +248,12 @@ class AgentRunScheduleService:
         row.deleted_at = datetime.now(UTC)
         await self.schedule_repository.update(row)
         await self._deregister_schedule_from_auth(
-            authz_selector=build_run_schedule_authz_selector(agent_id, row.name)
+            authz_selector=build_run_schedule_authz_selector(agent_id, row.id)
         )
         return row.id
 
     async def update_schedule(
-        self, agent_id: str, name: str, request: UpdateAgentRunScheduleRequest
+        self, agent_id: str, schedule_id: str, request: UpdateAgentRunScheduleRequest
     ) -> AgentRunScheduleResponse:
         """Apply a partial update to a schedule's definition and Temporal spec.
 
@@ -262,10 +261,19 @@ class AgentRunScheduleService:
         cron_expression / interval_seconds clears the other; the merged result
         must still have exactly one cadence.
         """
-        row = await self.schedule_repository.get_by_agent_id_and_name_or_raise(
-            agent_id, name
+        row = await self.schedule_repository.get_by_agent_id_and_id_or_raise(
+            agent_id, schedule_id
         )
         provided = request.model_dump(exclude_unset=True)
+        if "name" in provided and request.name is not None and request.name != row.name:
+            existing = await self.schedule_repository.get_by_agent_id_and_name(
+                agent_id, request.name
+            )
+            if existing is not None and existing.id != row.id:
+                raise ClientError(
+                    f"Run schedule '{request.name}' already exists for agent '{agent_id}'"
+                )
+            row.name = request.name
         if "description" in provided:
             row.description = request.description
         if "cron_expression" in provided:
@@ -330,16 +338,21 @@ class AgentRunScheduleService:
                 "run_schedule_temporal_missing_on_update",
                 extra={"temporal_id": temporal_id, "schedule_id": row.id},
             )
-        updated = await self.schedule_repository.update(row)
+        try:
+            updated = await self.schedule_repository.update(row)
+        except DuplicateItemError as exc:
+            raise ClientError(
+                f"Run schedule '{row.name}' already exists for agent '{agent_id}'"
+            ) from exc
         agent = await self.agent_repository.get(id=agent_id)
         return await self._to_response(updated, agent=agent, temporal_id=temporal_id)
 
     async def trigger_schedule(
-        self, agent_id: str, name: str
+        self, agent_id: str, schedule_id: str
     ) -> AgentRunScheduleResponse:
         """Trigger an immediate, out-of-band fire of the schedule."""
-        row = await self.schedule_repository.get_by_agent_id_and_name_or_raise(
-            agent_id, name
+        row = await self.schedule_repository.get_by_agent_id_and_id_or_raise(
+            agent_id, schedule_id
         )
         temporal_id = build_run_schedule_temporal_id(row.id)
         triggered_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
@@ -357,10 +370,10 @@ class AgentRunScheduleService:
     # -- internals ---------------------------------------------------------
 
     async def _set_paused(
-        self, agent_id: str, name: str, *, paused: bool, note: str | None
+        self, agent_id: str, schedule_id: str, *, paused: bool, note: str | None
     ) -> AgentRunScheduleResponse:
-        row = await self.schedule_repository.get_by_agent_id_and_name_or_raise(
-            agent_id, name
+        row = await self.schedule_repository.get_by_agent_id_and_id_or_raise(
+            agent_id, schedule_id
         )
         temporal_id = build_run_schedule_temporal_id(row.id)
         # A missing Temporal schedule is logged rather than raised: the persisted

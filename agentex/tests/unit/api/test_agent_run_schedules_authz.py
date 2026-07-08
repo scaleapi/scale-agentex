@@ -15,6 +15,7 @@ from src.api.routes.agent_run_schedules import (
     create_run_schedule,
     delete_run_schedule,
     get_run_schedule,
+    get_run_schedule_by_name,
     list_run_schedules,
     pause_run_schedule,
     resume_run_schedule,
@@ -43,8 +44,8 @@ def _dep_callable(annotation):
     return annotation.__metadata__[0].dependency
 
 
-def _authz_selector(agent_id: str = "agent-1", name: str = "nightly") -> str:
-    return build_run_schedule_authz_selector(agent_id, name)
+def _authz_selector(agent_id: str = "agent-1", schedule_id: str = "schedule-1") -> str:
+    return build_run_schedule_authz_selector(agent_id, schedule_id)
 
 
 @pytest.mark.unit
@@ -119,7 +120,7 @@ class TestSingleResourceRouteAuthz:
 
         await get_run_schedule(
             agent_id="agent-1",
-            name="nightly",
+            schedule_id="schedule-1",
             run_schedules_use_case=use_case,
             authorization=authorization,
         )
@@ -127,7 +128,27 @@ class TestSingleResourceRouteAuthz:
         called = authorization.check.await_args.kwargs
         assert called["resource"] == AgentexResource.schedule(_authz_selector())
         assert called["operation"] == AuthorizedOperationType.read
-        use_case.get_schedule.assert_awaited_once_with("agent-1", "nightly")
+        use_case.get_schedule.assert_awaited_once_with("agent-1", "schedule-1")
+
+    async def test_get_by_name_resolves_id_then_checks_read(self):
+        authorization = MagicMock()
+        authorization.check = AsyncMock(return_value=True)
+        use_case = MagicMock()
+        use_case.get_schedule_id_by_name = AsyncMock(return_value="schedule-1")
+        use_case.get_schedule = AsyncMock(return_value=MagicMock())
+
+        await get_run_schedule_by_name(
+            agent_id="agent-1",
+            name="nightly",
+            run_schedules_use_case=use_case,
+            authorization=authorization,
+        )
+
+        use_case.get_schedule_id_by_name.assert_awaited_once_with("agent-1", "nightly")
+        called = authorization.check.await_args.kwargs
+        assert called["resource"] == AgentexResource.schedule(_authz_selector())
+        assert called["operation"] == AuthorizedOperationType.read
+        use_case.get_schedule.assert_awaited_once_with("agent-1", "schedule-1")
 
     async def test_get_denied_collapses_to_404_and_skips_use_case(self):
         authorization = MagicMock()
@@ -138,7 +159,7 @@ class TestSingleResourceRouteAuthz:
         with pytest.raises(ItemDoesNotExist):
             await get_run_schedule(
                 agent_id="agent-1",
-                name="nightly",
+                schedule_id="schedule-1",
                 run_schedules_use_case=use_case,
                 authorization=authorization,
             )
@@ -161,7 +182,7 @@ class TestSingleResourceRouteAuthz:
 
         await route(
             agent_id="agent-1",
-            name="nightly",
+            schedule_id="schedule-1",
             run_schedules_use_case=use_case,
             authorization=authorization,
         )
@@ -180,7 +201,7 @@ class TestSingleResourceRouteAuthz:
 
         await update_run_schedule(
             agent_id="agent-1",
-            name="nightly",
+            schedule_id="schedule-1",
             request=request,
             run_schedules_use_case=use_case,
             authorization=authorization,
@@ -189,7 +210,9 @@ class TestSingleResourceRouteAuthz:
         called = authorization.check.await_args.kwargs
         assert called["resource"] == AgentexResource.schedule(_authz_selector())
         assert called["operation"] == AuthorizedOperationType.update
-        use_case.update_schedule.assert_awaited_once_with("agent-1", "nightly", request)
+        use_case.update_schedule.assert_awaited_once_with(
+            "agent-1", "schedule-1", request
+        )
 
     async def test_delete_uses_delete_op_and_denial_skips_delete(self):
         authorization = MagicMock()
@@ -200,7 +223,7 @@ class TestSingleResourceRouteAuthz:
         with pytest.raises(ItemDoesNotExist):
             await delete_run_schedule(
                 agent_id="agent-1",
-                name="nightly",
+                schedule_id="schedule-1",
                 run_schedules_use_case=use_case,
                 authorization=authorization,
             )
@@ -318,13 +341,13 @@ class TestListOwnershipFiltering:
         await list_run_schedules(
             agent_id="agent-1",
             run_schedules_use_case=use_case,
-            authorized_schedule_ids=[_authz_selector("agent-1", "mine")],
+            authorized_schedule_ids=[_authz_selector("agent-1", "schedule-1")],
             limit=5,
         )
 
         use_case.list_schedules.assert_awaited_once_with(
             "agent-1",
-            authorized_schedule_ids=[_authz_selector("agent-1", "mine")],
+            authorized_schedule_ids=[_authz_selector("agent-1", "schedule-1")],
             limit=5,
         )
 

@@ -44,9 +44,7 @@ class AgentRunScheduleEntity(BaseModel):
 
     id: str = Field(..., description="The unique identifier of the run schedule.")
     agent_id: str = Field(..., description="The agent this schedule belongs to.")
-    name: str = Field(
-        ..., description="Human-readable schedule name, unique per agent."
-    )
+    name: str = Field(..., description="Human-readable schedule name.")
     description: str | None = Field(
         None, description="Optional description of the schedule."
     )

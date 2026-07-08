@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
+from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
 from src.adapters.temporal.exceptions import TemporalScheduleNotFoundError
 from src.api.schemas.agent_run_schedules import (
     CreateAgentRunScheduleRequest,
@@ -87,8 +88,8 @@ class TestRunScheduleIdHelpers:
     def test_authz_selector_distinct_from_bare_schedule(self):
         # Bare schedules key the shared `schedule` resource as `{agent}--{name}`;
         # run schedules must not collide with that namespace.
-        selector = build_run_schedule_authz_selector("agent-123", "daily-summary")
-        assert selector == "run-schedule::agent-123::daily-summary"
+        selector = build_run_schedule_authz_selector("agent-123", "schedule-456")
+        assert selector == "run-schedule::agent-123::schedule-456"
         assert selector != "agent-123--daily-summary"
 
 
@@ -116,7 +117,7 @@ class TestAgentRunScheduleServiceCreate:
         # Ownership is written to both auth paths before the Temporal write:
         # Spark resource registration for the future path, and a legacy grant
         # for current SGP list/check behavior.
-        authz_selector = build_run_schedule_authz_selector(agent.id, persisted.name)
+        authz_selector = build_run_schedule_authz_selector(agent.id, persisted.id)
         schedule_resource = AgentexResource.schedule(authz_selector)
         service.authorization_service.register_resource.assert_called_once_with(
             resource=schedule_resource,
@@ -151,7 +152,7 @@ class TestAgentRunScheduleServiceCreate:
             await service.create_schedule(agent, request, {"user_id": "u1"})
 
         # The orphaned row and both auth entries are compensated.
-        authz_selector = build_run_schedule_authz_selector(agent.id, persisted.name)
+        authz_selector = build_run_schedule_authz_selector(agent.id, persisted.id)
         schedule_resource = AgentexResource.schedule(authz_selector)
         service.schedule_repository.delete.assert_called_once_with(id=persisted.id)
         service.authorization_service.revoke.assert_called_once_with(
@@ -223,7 +224,7 @@ class TestAgentRunScheduleServiceList:
         service.agent_repository.get.return_value = agent
 
         # Authorize only sched-a's selector.
-        authorized = [build_run_schedule_authz_selector(agent.id, "sched-a")]
+        authorized = [build_run_schedule_authz_selector(agent.id, rows[0].id)]
         result = await service.list_schedules(
             agent.id, authorized_schedule_ids=authorized
         )
@@ -243,7 +244,7 @@ class TestAgentRunScheduleServiceList:
         service.schedule_repository.list_by_agent_id.return_value = rows
         service.agent_repository.get.return_value = agent
 
-        authorized = [build_run_schedule_authz_selector(agent.id, "mine")]
+        authorized = [build_run_schedule_authz_selector(agent.id, rows[2].id)]
         result = await service.list_schedules(
             agent.id, authorized_schedule_ids=authorized, limit=1
         )
@@ -281,6 +282,27 @@ class TestAgentRunScheduleServiceList:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+class TestAgentRunScheduleServiceNameLookup:
+    async def test_get_schedule_id_by_name_returns_active_row_id(self, service, agent):
+        row = _persisted(agent.id, _request())
+        service.schedule_repository.get_by_agent_id_and_name.return_value = row
+
+        result = await service.get_schedule_id_by_name(agent.id, row.name)
+
+        assert result == row.id
+        service.schedule_repository.get_by_agent_id_and_name.assert_awaited_once_with(
+            agent.id, row.name
+        )
+
+    async def test_get_schedule_id_by_name_raises_when_absent(self, service, agent):
+        service.schedule_repository.get_by_agent_id_and_name.return_value = None
+
+        with pytest.raises(ItemDoesNotExist):
+            await service.get_schedule_id_by_name(agent.id, "missing")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 class TestAgentRunScheduleServiceDelete:
     async def test_delete_tolerates_missing_temporal_schedule(self, service, agent):
         # Delete soft-deletes (tombstones) the row for audit rather than removing
@@ -288,13 +310,13 @@ class TestAgentRunScheduleServiceDelete:
         # (Temporal gone, row survived) must still be cleanable, treating a
         # missing clock as success.
         row = _persisted(agent.id, _request())
-        service.schedule_repository.get_by_agent_id_and_name_or_raise.return_value = row
+        service.schedule_repository.get_by_agent_id_and_id_or_raise.return_value = row
         service.schedule_repository.update.return_value = row
         service.temporal_adapter.delete_schedule.side_effect = (
             TemporalScheduleNotFoundError(message="gone", detail="gone")
         )
 
-        result = await service.delete_schedule(agent.id, row.name)
+        result = await service.delete_schedule(agent.id, row.id)
 
         assert result == row.id
         # Soft delete: the row is tombstoned via update, not hard-removed.
@@ -302,7 +324,7 @@ class TestAgentRunScheduleServiceDelete:
         service.schedule_repository.update.assert_called_once()
         tombstoned = service.schedule_repository.update.call_args.args[0]
         assert tombstoned.deleted_at is not None
-        authz_selector = build_run_schedule_authz_selector(agent.id, row.name)
+        authz_selector = build_run_schedule_authz_selector(agent.id, row.id)
         schedule_resource = AgentexResource.schedule(authz_selector)
         service.authorization_service.revoke.assert_called_once_with(
             resource=schedule_resource
@@ -315,14 +337,14 @@ class TestAgentRunScheduleServiceDelete:
 class TestAgentRunScheduleServicePauseResume:
     async def test_pause_tolerates_missing_temporal_schedule(self, service, agent):
         row = _persisted(agent.id, _request())
-        service.schedule_repository.get_by_agent_id_and_name_or_raise.return_value = row
+        service.schedule_repository.get_by_agent_id_and_id_or_raise.return_value = row
         service.schedule_repository.update.return_value = row
         service.agent_repository.get.return_value = agent
         service.temporal_adapter.pause_schedule.side_effect = (
             TemporalScheduleNotFoundError(message="gone", detail="gone")
         )
 
-        response = await service.pause_schedule(agent.id, row.name)
+        response = await service.pause_schedule(agent.id, row.id)
 
         # The persisted paused flag is still flipped even though the clock is gone.
         assert row.paused is True
@@ -335,12 +357,12 @@ class TestAgentRunScheduleServicePauseResume:
 class TestAgentRunScheduleServiceUpdate:
     async def test_update_swaps_cron_for_interval(self, service, agent):
         row = _persisted(agent.id, _request())  # cron-based
-        service.schedule_repository.get_by_agent_id_and_name_or_raise.return_value = row
+        service.schedule_repository.get_by_agent_id_and_id_or_raise.return_value = row
         service.schedule_repository.update.return_value = row
         service.agent_repository.get.return_value = agent
 
         await service.update_schedule(
-            agent.id, row.name, UpdateAgentRunScheduleRequest(interval_seconds=120)
+            agent.id, row.id, UpdateAgentRunScheduleRequest(interval_seconds=120)
         )
 
         # Setting interval clears cron, and the new cadence is pushed to Temporal.
@@ -352,19 +374,19 @@ class TestAgentRunScheduleServiceUpdate:
 
     async def test_update_rejects_clearing_all_cadences(self, service, agent):
         row = _persisted(agent.id, _request())  # cron-based, no interval
-        service.schedule_repository.get_by_agent_id_and_name_or_raise.return_value = row
+        service.schedule_repository.get_by_agent_id_and_id_or_raise.return_value = row
 
         # Explicitly nulling cron without supplying an interval leaves no cadence.
         with pytest.raises(ClientError):
             await service.update_schedule(
-                agent.id, row.name, UpdateAgentRunScheduleRequest(cron_expression=None)
+                agent.id, row.id, UpdateAgentRunScheduleRequest(cron_expression=None)
             )
 
         service.temporal_adapter.update_schedule.assert_not_called()
 
     async def test_update_tolerates_missing_temporal_schedule(self, service, agent):
         row = _persisted(agent.id, _request())
-        service.schedule_repository.get_by_agent_id_and_name_or_raise.return_value = row
+        service.schedule_repository.get_by_agent_id_and_id_or_raise.return_value = row
         service.schedule_repository.update.return_value = row
         service.agent_repository.get.return_value = agent
         service.temporal_adapter.update_schedule.side_effect = (
@@ -372,7 +394,7 @@ class TestAgentRunScheduleServiceUpdate:
         )
 
         response = await service.update_schedule(
-            agent.id, row.name, UpdateAgentRunScheduleRequest(description="new")
+            agent.id, row.id, UpdateAgentRunScheduleRequest(description="new")
         )
 
         assert response.description == "new"
@@ -382,15 +404,57 @@ class TestAgentRunScheduleServiceUpdate:
         # outage) must abort before the row is persisted, so the DB can never
         # diverge from the clock. Unlike NotFound, this error propagates.
         row = _persisted(agent.id, _request())
-        service.schedule_repository.get_by_agent_id_and_name_or_raise.return_value = row
+        service.schedule_repository.get_by_agent_id_and_id_or_raise.return_value = row
         service.temporal_adapter.update_schedule.side_effect = RuntimeError("boom")
 
         with pytest.raises(RuntimeError):
             await service.update_schedule(
-                agent.id, row.name, UpdateAgentRunScheduleRequest(description="new")
+                agent.id, row.id, UpdateAgentRunScheduleRequest(description="new")
             )
 
         service.schedule_repository.update.assert_not_called()
+
+    async def test_update_allows_name_change(self, service, agent):
+        row = _persisted(agent.id, _request(name="old-name"))
+        service.schedule_repository.get_by_agent_id_and_id_or_raise.return_value = row
+        service.schedule_repository.get_by_agent_id_and_name.return_value = None
+        service.schedule_repository.update.return_value = row
+        service.agent_repository.get.return_value = agent
+
+        response = await service.update_schedule(
+            agent.id, row.id, UpdateAgentRunScheduleRequest(name="new-name")
+        )
+
+        assert row.name == "new-name"
+        assert response.name == "new-name"
+        service.schedule_repository.get_by_agent_id_and_name.assert_awaited_once_with(
+            agent.id, "new-name"
+        )
+
+    async def test_update_rejects_duplicate_active_name(self, service, agent):
+        row = _persisted(agent.id, _request(name="old-name"))
+        duplicate = _persisted(agent.id, _request(name="new-name"))
+        service.schedule_repository.get_by_agent_id_and_id_or_raise.return_value = row
+        service.schedule_repository.get_by_agent_id_and_name.return_value = duplicate
+
+        with pytest.raises(ClientError):
+            await service.update_schedule(
+                agent.id, row.id, UpdateAgentRunScheduleRequest(name="new-name")
+            )
+
+        service.temporal_adapter.update_schedule.assert_not_called()
+        service.schedule_repository.update.assert_not_called()
+
+    async def test_update_converts_duplicate_index_error(self, service, agent):
+        row = _persisted(agent.id, _request(name="old-name"))
+        service.schedule_repository.get_by_agent_id_and_id_or_raise.return_value = row
+        service.schedule_repository.get_by_agent_id_and_name.return_value = None
+        service.schedule_repository.update.side_effect = DuplicateItemError("duplicate")
+
+        with pytest.raises(ClientError):
+            await service.update_schedule(
+                agent.id, row.id, UpdateAgentRunScheduleRequest(name="new-name")
+            )
 
 
 @pytest.mark.unit
@@ -398,10 +462,10 @@ class TestAgentRunScheduleServiceUpdate:
 class TestAgentRunScheduleServiceTrigger:
     async def test_trigger_starts_manual_workflow(self, service, agent):
         row = _persisted(agent.id, _request())
-        service.schedule_repository.get_by_agent_id_and_name_or_raise.return_value = row
+        service.schedule_repository.get_by_agent_id_and_id_or_raise.return_value = row
         service.agent_repository.get.return_value = agent
 
-        await service.trigger_schedule(agent.id, row.name)
+        await service.trigger_schedule(agent.id, row.id)
 
         temporal_id = build_run_schedule_temporal_id(row.id)
         service.temporal_adapter.trigger_schedule.assert_not_called()

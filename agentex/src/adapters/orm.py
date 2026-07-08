@@ -219,21 +219,20 @@ class AgentRunScheduleORM(BaseORM):
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
-    # Soft-delete marker: NULL = active, set = tombstoned for audit. Deleted rows
-    # keep their (agent_id, name) so names are not reusable.
+    # Soft-delete marker: NULL = active, set = tombstoned for audit.
     deleted_at = Column(DateTime(timezone=True), nullable=True)
     # Monotonic record version reserved for future optimistic concurrency /
     # change history. Not enforced yet — no read-modify-write path increments it.
     version = Column(Integer, nullable=False, server_default="1")
 
     __table_args__ = (
-        # Schedule names are unique per agent (the get/pause/resume/delete
-        # endpoints address a schedule by agent_id + name).
+        # Schedule names are mutable labels, unique only among active schedules.
         Index(
-            "uq_agent_run_schedules_agent_name",
+            "uq_agent_run_schedules_active_agent_name",
             "agent_id",
             "name",
             unique=True,
+            postgresql_where=(deleted_at.is_(None)),
         ),
         Index("idx_agent_run_schedules_agent", "agent_id"),
     )

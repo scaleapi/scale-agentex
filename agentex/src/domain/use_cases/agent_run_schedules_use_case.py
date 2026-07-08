@@ -48,33 +48,42 @@ class AgentRunSchedulesUseCase:
             limit=limit,
         )
 
-    async def get_schedule(self, agent_id: str, name: str) -> AgentRunScheduleResponse:
-        return await self.run_schedule_service.get_schedule(agent_id, name)
+    async def get_schedule(
+        self, agent_id: str, schedule_id: str
+    ) -> AgentRunScheduleResponse:
+        return await self.run_schedule_service.get_schedule(agent_id, schedule_id)
+
+    async def get_schedule_id_by_name(self, agent_id: str, name: str) -> str:
+        return await self.run_schedule_service.get_schedule_id_by_name(agent_id, name)
 
     async def pause_schedule(
-        self, agent_id: str, name: str, note: str | None = None
+        self, agent_id: str, schedule_id: str, note: str | None = None
     ) -> AgentRunScheduleResponse:
-        return await self.run_schedule_service.pause_schedule(agent_id, name, note=note)
+        return await self.run_schedule_service.pause_schedule(
+            agent_id, schedule_id, note=note
+        )
 
     async def resume_schedule(
-        self, agent_id: str, name: str, note: str | None = None
+        self, agent_id: str, schedule_id: str, note: str | None = None
     ) -> AgentRunScheduleResponse:
         return await self.run_schedule_service.resume_schedule(
-            agent_id, name, note=note
+            agent_id, schedule_id, note=note
         )
 
     async def update_schedule(
-        self, agent_id: str, name: str, request: UpdateAgentRunScheduleRequest
+        self, agent_id: str, schedule_id: str, request: UpdateAgentRunScheduleRequest
     ) -> AgentRunScheduleResponse:
-        return await self.run_schedule_service.update_schedule(agent_id, name, request)
+        return await self.run_schedule_service.update_schedule(
+            agent_id, schedule_id, request
+        )
 
     async def trigger_schedule(
-        self, agent_id: str, name: str
+        self, agent_id: str, schedule_id: str
     ) -> AgentRunScheduleResponse:
-        return await self.run_schedule_service.trigger_schedule(agent_id, name)
+        return await self.run_schedule_service.trigger_schedule(agent_id, schedule_id)
 
-    async def delete_schedule(self, agent_id: str, name: str) -> str:
-        return await self.run_schedule_service.delete_schedule(agent_id, name)
+    async def delete_schedule(self, agent_id: str, schedule_id: str) -> str:
+        return await self.run_schedule_service.delete_schedule(agent_id, schedule_id)
 
 
 DAgentRunSchedulesUseCase = Annotated[

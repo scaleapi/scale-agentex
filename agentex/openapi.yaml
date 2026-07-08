@@ -3320,13 +3320,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /agents/{agent_id}/schedules/{name}:
+  /agents/{agent_id}/schedules/name/{name}:
     get:
       tags:
       - Schedules
-      summary: Get Run Schedule
-      description: Get a run schedule by its name.
-      operationId: get_run_schedule_agents__agent_id__schedules__name__get
+      summary: Get Run Schedule By Name
+      description: Get a run schedule by its active name.
+      operationId: get_run_schedule_by_name_agents__agent_id__schedules_name__name__get
       parameters:
       - name: agent_id
         in: path
@@ -3356,10 +3356,9 @@ paths:
     patch:
       tags:
       - Schedules
-      summary: Update Run Schedule
-      description: Partially update a run schedule's definition (cadence, window,
-        input, etc.).
-      operationId: update_run_schedule_agents__agent_id__schedules__name__patch
+      summary: Update Run Schedule By Name
+      description: Partially update a run schedule's definition by its active name.
+      operationId: update_run_schedule_by_name_agents__agent_id__schedules_name__name__patch
       parameters:
       - name: agent_id
         in: path
@@ -3395,9 +3394,9 @@ paths:
     delete:
       tags:
       - Schedules
-      summary: Delete Run Schedule
-      description: Delete a run schedule permanently.
-      operationId: delete_run_schedule_agents__agent_id__schedules__name__delete
+      summary: Delete Run Schedule By Name
+      description: Delete a run schedule by its active name.
+      operationId: delete_run_schedule_by_name_agents__agent_id__schedules_name__name__delete
       parameters:
       - name: agent_id
         in: path
@@ -3424,14 +3423,118 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /agents/{agent_id}/schedules/{name}/trigger:
+  /agents/{agent_id}/schedules/{schedule_id}:
+    get:
+      tags:
+      - Schedules
+      summary: Get Run Schedule
+      description: Get a run schedule by its id.
+      operationId: get_run_schedule_agents__agent_id__schedules__schedule_id__get
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: schedule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Schedules
+      summary: Update Run Schedule
+      description: Partially update a run schedule's definition (cadence, window,
+        input, etc.).
+      operationId: update_run_schedule_agents__agent_id__schedules__schedule_id__patch
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: schedule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAgentRunScheduleRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Schedules
+      summary: Delete Run Schedule
+      description: Delete a run schedule permanently.
+      operationId: delete_run_schedule_agents__agent_id__schedules__schedule_id__delete
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: schedule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/schedules/name/{name}/trigger:
     post:
       tags:
       - Schedules
-      summary: Trigger Run Schedule
-      description: Trigger an immediate, out-of-band run of the schedule (in addition
-        to its cadence).
-      operationId: trigger_run_schedule_agents__agent_id__schedules__name__trigger_post
+      summary: Trigger Run Schedule By Name
+      description: Trigger an immediate, out-of-band run of the schedule by its active
+        name.
+      operationId: trigger_run_schedule_by_name_agents__agent_id__schedules_name__name__trigger_post
       parameters:
       - name: agent_id
         in: path
@@ -3458,13 +3561,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /agents/{agent_id}/schedules/{name}/pause:
+  /agents/{agent_id}/schedules/{schedule_id}/trigger:
     post:
       tags:
       - Schedules
-      summary: Pause Run Schedule
-      description: Pause a run schedule so it stops firing.
-      operationId: pause_run_schedule_agents__agent_id__schedules__name__pause_post
+      summary: Trigger Run Schedule
+      description: Trigger an immediate, out-of-band run of the schedule (in addition
+        to its cadence).
+      operationId: trigger_run_schedule_agents__agent_id__schedules__schedule_id__trigger_post
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: schedule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/schedules/name/{name}/pause:
+    post:
+      tags:
+      - Schedules
+      summary: Pause Run Schedule By Name
+      description: Pause a run schedule by its active name.
+      operationId: pause_run_schedule_by_name_agents__agent_id__schedules_name__name__pause_post
       parameters:
       - name: agent_id
         in: path
@@ -3499,13 +3636,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /agents/{agent_id}/schedules/{name}/resume:
+  /agents/{agent_id}/schedules/{schedule_id}/pause:
     post:
       tags:
       - Schedules
-      summary: Resume Run Schedule
-      description: Resume a paused run schedule so it fires again.
-      operationId: resume_run_schedule_agents__agent_id__schedules__name__resume_post
+      summary: Pause Run Schedule
+      description: Pause a run schedule so it stops firing.
+      operationId: pause_run_schedule_agents__agent_id__schedules__schedule_id__pause_post
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: schedule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/PauseRunScheduleRequest'
+              - type: 'null'
+              title: Request
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/schedules/name/{name}/resume:
+    post:
+      tags:
+      - Schedules
+      summary: Resume Run Schedule By Name
+      description: Resume a paused run schedule by its active name.
+      operationId: resume_run_schedule_by_name_agents__agent_id__schedules_name__name__resume_post
       parameters:
       - name: agent_id
         in: path
@@ -3519,6 +3697,47 @@ paths:
         schema:
           type: string
           title: Name
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/ResumeRunScheduleRequest'
+              - type: 'null'
+              title: Request
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/schedules/{schedule_id}/resume:
+    post:
+      tags:
+      - Schedules
+      summary: Resume Run Schedule
+      description: Resume a paused run schedule so it fires again.
+      operationId: resume_run_schedule_agents__agent_id__schedules__schedule_id__resume_post
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: schedule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Id
       requestBody:
         content:
           application/json:
@@ -4047,7 +4266,7 @@ components:
         name:
           type: string
           title: Name
-          description: Schedule name, unique per agent.
+          description: Human-readable schedule name.
         description:
           anyOf:
           - type: string
@@ -4521,7 +4740,8 @@ components:
           minLength: 1
           pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$
           title: Schedule Name
-          description: Human-readable name, unique per agent (e.g. 'daily-granola-summary').
+          description: Human-readable name, unique among active schedules for the
+            agent.
         description:
           anyOf:
           - type: string
@@ -6751,6 +6971,16 @@ components:
       description: Delta for tool response updates
     UpdateAgentRunScheduleRequest:
       properties:
+        name:
+          anyOf:
+          - type: string
+            maxLength: 64
+            minLength: 1
+            pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$
+          - type: 'null'
+          title: Schedule Name
+          description: Human-readable name, unique among active schedules for the
+            agent.
         description:
           anyOf:
           - type: string
@@ -6820,12 +7050,12 @@ components:
       description: 'Partial update for a scheduled agent run.
 
 
-        Only fields present in the request body are changed; the schedule ``name``
-        is
+        Only fields present in the request body are changed. Setting
 
-        immutable (it is the natural key). Setting ``cron_expression`` clears
+        ``cron_expression`` clears ``interval_seconds`` and vice versa; providing
+        both
 
-        ``interval_seconds`` and vice versa; providing both is rejected.'
+        is rejected.'
     UpdateAgentTaskTrackerRequest:
       properties:
         last_processed_event_id:
