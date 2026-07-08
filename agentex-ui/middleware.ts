@@ -7,11 +7,9 @@ import {
 
 import { auth, authEnabled } from '@/auth';
 
-// Standard BFF pattern: validate the auth.js session (the wrapper reassembles
-// chunked cookies, verifies + rotates tokens — middleware is a cookie-writable
-// context) and route unauthenticated users through the server-side auto-signin
-// handler so the sign-in → provider redirect happens server-side (avoids the
-// RSC-seed refresh loop).
+// Validate the session (the auth wrapper reassembles chunked cookies + rotates tokens in
+// this cookie-writable context) and route unauthenticated users through the server-side
+// auto-signin handler so the provider redirect happens server-side.
 const authMiddleware = auth(req => {
   if (req.auth && !req.auth.error) return; // authenticated → continue
 

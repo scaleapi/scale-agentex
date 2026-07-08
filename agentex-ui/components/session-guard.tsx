@@ -5,11 +5,9 @@ import { useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 
 /**
- * Forces re-authentication on a terminal refresh error (the refresh token expired or was
- * revoked). Routes through the server-side auto-signin handler, which silently re-auths
- * if the provider session is still valid, otherwise shows the login. Complements the
- * middleware, which only redirects on navigation — this covers no-navigation sessions
- * (e.g. an active chat making only API calls).
+ * Forces re-auth on a terminal refresh error (refresh token expired/revoked) via the
+ * server-side auto-signin handler. Complements the middleware (which only redirects on
+ * navigation) — this covers sessions making only API calls, e.g. an active chat.
  */
 export function SessionGuard() {
   const { data: session } = useSession();

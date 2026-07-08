@@ -1,13 +1,9 @@
 import { providerId, signIn } from '@/auth';
 
 /**
- * Server-side auto sign-in: middleware sends unauthenticated users here so the
- * OIDC redirect to the provider is initiated server-side (NextAuth sets the
- * PKCE/state cookies + performs the redirect). Single provider, so no picker page.
- *
- * Relies on `signIn` performing the redirect (throwing NEXT_REDIRECT) in a GET
- * route handler; if it returns a URL instead, use
- * `return Response.redirect(await signIn(providerId, { redirectTo, redirect: false }))`.
+ * Server-side auto sign-in: the middleware sends unauthenticated users here so NextAuth
+ * initiates the OIDC redirect (setting PKCE/state cookies) server-side. Single provider,
+ * so no picker.
  */
 export async function GET(req: Request): Promise<Response> {
   if (!providerId) return new Response(null, { status: 404 });

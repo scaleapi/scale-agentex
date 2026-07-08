@@ -28,8 +28,8 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Gate NextAuth's SessionProvider on auth: in direct (legacy) mode it never
-  // mounts, so the client makes no /api/auth/session calls.
+  // Gate SessionProvider on auth: in default mode it never mounts, so the client makes
+  // no /api/auth/session calls.
   const authEnabled = !!process.env.AGENTEX_UI_AUTH_PROVIDER_ID;
   const tree = (
     <QueryProvider>

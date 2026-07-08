@@ -1,19 +1,14 @@
 import NextAuth, { type NextAuthConfig } from 'next-auth';
 
 /**
- * Generic OIDC auth for agentex-ui — vanilla NextAuth v5, the IdP is fully env-driven.
+ * Generic OIDC auth for agentex-ui — vanilla NextAuth v5, IdP is env-driven.
  *
- * Client authentication is env-selected:
- *   - OIDC_PRIVATE_KEY_JWK set → private_key_jwt (matches deployments whose client
- *     registration is private_key_jwt-only)
- *   - else OIDC_CLIENT_SECRET → client_secret_post (convenient for local dev)
+ * Client auth is env-selected: OIDC_PRIVATE_KEY_JWK → private_key_jwt, else
+ * OIDC_CLIENT_SECRET → client_secret_post. Token + end-session endpoints come from the
+ * issuer's OIDC discovery document, so refresh and logout work for any compliant IdP.
  *
- * Token + end-session endpoints are resolved from the issuer's OIDC discovery document,
- * so the refresh and logout paths work for any compliant IdP — not just Ory's paths.
- *
- * Route protection + auto sign-in live in middleware.ts (which redirects to the
- * server-side /api/auth/auto-signin handler) — a standard BFF pattern. Env is read
- * lazily so `next build` works without env present.
+ * Route protection + auto sign-in live in middleware.ts. Env is read lazily so
+ * `next build` works without it.
  */
 
 const CLIENT_ASSERTION_TYPE =
@@ -25,10 +20,9 @@ const CLIENT_ASSERTION_TYPE =
 const REFRESH_SKEW_S = 300;
 
 /**
- * The provider id BOTH selects the OIDC provider AND enables auth: set
- * AGENTEX_UI_AUTH_PROVIDER_ID to turn login on (unset = original direct behavior).
- * Its value must equal the callback segment registered as the IdP redirect_uri
- * (`/api/auth/callback/<id>`) — e.g. `oneauth`.
+ * The provider id both selects the OIDC provider AND enables auth: AGENTEX_UI_AUTH_PROVIDER_ID
+ * unset = no login. Its value must equal the registered redirect_uri callback segment
+ * (`/api/auth/callback/<id>`).
  */
 export const providerId = process.env.AGENTEX_UI_AUTH_PROVIDER_ID;
 export const authEnabled = !!providerId;
@@ -61,10 +55,8 @@ function env() {
 
 const trimSlash = (u: string) => u.replace(/\/$/, '');
 
-// ─── OIDC discovery ───
-// The refresh + logout paths need the token/end-session endpoints. Resolve them from
-// the issuer's well-known document so any IdP works (not just Ory's fixed paths);
-// cache per-process and fall back to the Ory conventions if discovery is unavailable.
+// Resolve the token/end-session endpoints from the issuer's well-known document so any
+// IdP works. Cached per-process; a failed lookup isn't cached, so it retries.
 let discoveryPromise: Promise<Record<string, unknown>> | null = null;
 
 function discoverOidc(): Promise<Record<string, unknown>> {
@@ -284,11 +276,9 @@ if (authEnabled) {
   }
 }
 
-// Resolve any private_key_jwt CryptoKey (imported async) INTO the config before
-// constructing NextAuth. Config MUST be a static object — a config *function*
-// makes NextAuth's `auth` async, so `auth((req) => …)` returns a Promise instead
-// of a callable middleware ("authMiddleware is not a function"). Top-level await
-// is fine on the Node runtime the middleware uses; a no-op for client_secret.
+// Resolve any private_key_jwt CryptoKey into the config before constructing NextAuth.
+// Config must be a static object, not a function — a config function makes `auth` async,
+// so `auth((req) => …)` returns a Promise instead of callable middleware.
 for (const p of config.providers ?? []) {
   const tok = (p as { token?: { clientPrivateKey?: unknown } }).token;
   if (tok && tok.clientPrivateKey instanceof Promise) {
