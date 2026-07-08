@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { getToken } from 'next-auth/jwt';
 
-import { signOut } from '@/auth';
+import { oidcEndSessionEndpoint, signOut } from '@/auth';
 
 /**
  * RP-initiated (SSO) logout: clear the local NextAuth session AND end the provider's
@@ -19,9 +19,9 @@ export async function GET(req: Request): Promise<Response> {
   await signOut({ redirect: false }); // clears the session cookie
 
   const origin = process.env.AUTH_URL ?? new URL(req.url).origin;
-  const issuer = process.env.OIDC_ISSUER_URL;
-  if (issuer && idToken) {
-    const url = new URL(`${issuer}/oauth2/sessions/logout`);
+  const endSession = await oidcEndSessionEndpoint();
+  if (endSession && idToken) {
+    const url = new URL(endSession);
     url.searchParams.set('id_token_hint', idToken);
     url.searchParams.set('post_logout_redirect_uri', origin);
     return NextResponse.redirect(url);

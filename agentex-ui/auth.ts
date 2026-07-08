@@ -8,6 +8,9 @@ import NextAuth, { type NextAuthConfig } from 'next-auth';
  *     registration is private_key_jwt-only)
  *   - else OIDC_CLIENT_SECRET → client_secret_post (convenient for local dev)
  *
+ * Token + end-session endpoints are resolved from the issuer's OIDC discovery document,
+ * so the refresh and logout paths work for any compliant IdP — not just Ory's paths.
+ *
  * Route protection + auto sign-in live in middleware.ts (which redirects to the
  * server-side /api/auth/auto-signin handler) — a standard BFF pattern. Env is read
  * lazily so `next build` works without env present.
@@ -54,6 +57,47 @@ function env() {
     clientSecret: process.env.OIDC_CLIENT_SECRET,
     privateKeyJwk: process.env.OIDC_PRIVATE_KEY_JWK,
   };
+}
+
+const trimSlash = (u: string) => u.replace(/\/$/, '');
+
+// ─── OIDC discovery ───
+// The refresh + logout paths need the token/end-session endpoints. Resolve them from
+// the issuer's well-known document so any IdP works (not just Ory's fixed paths);
+// cache per-process and fall back to the Ory conventions if discovery is unavailable.
+let discoveryPromise: Promise<Record<string, unknown>> | null = null;
+
+function discoverOidc(): Promise<Record<string, unknown>> {
+  if (!discoveryPromise) {
+    const url = `${trimSlash(env().issuer)}/.well-known/openid-configuration`;
+    discoveryPromise = fetch(url)
+      .then(r => {
+        if (!r.ok) throw new Error(`discovery ${r.status}`);
+        return r.json() as Promise<Record<string, unknown>>;
+      })
+      .catch(() => {
+        discoveryPromise = null; // don't cache a failure — retry on the next call
+        return {};
+      });
+  }
+  return discoveryPromise;
+}
+
+async function oidcTokenEndpoint(): Promise<string> {
+  const endpoint = (await discoverOidc()).token_endpoint;
+  // token_endpoint is mandatory in OIDC discovery; if it's missing the issuer is
+  // unreachable/misconfigured — fail the refresh so the caller re-authenticates.
+  if (typeof endpoint !== 'string' || !endpoint) {
+    throw new Error('OIDC discovery returned no token_endpoint');
+  }
+  return endpoint;
+}
+
+/** end_session_endpoint for RP-initiated logout; undefined if the IdP advertises none
+ *  (in which case logout is local-only — no OP round-trip to a guessed path). */
+export async function oidcEndSessionEndpoint(): Promise<string | undefined> {
+  const endpoint = (await discoverOidc()).end_session_endpoint;
+  return typeof endpoint === 'string' && endpoint ? endpoint : undefined;
 }
 
 // ─── private_key_jwt helpers (WebCrypto only — OSS-clean, no deps) ───
@@ -137,8 +181,7 @@ function buildProvider(id: string) {
 }
 
 function buildConfig(): NextAuthConfig {
-  const { issuer, clientId, clientSecret, privateKeyJwk } = env();
-  const tokenEndpoint = `${issuer}/oauth2/token`;
+  const { clientId, clientSecret, privateKeyJwk } = env();
   const usePkJwt = !!privateKeyJwk && privateKeyJwk.trim().length > 0;
 
   return {
@@ -161,6 +204,7 @@ function buildConfig(): NextAuthConfig {
           token.refreshToken
         ) {
           try {
+            const tokenEndpoint = await oidcTokenEndpoint();
             const body = new URLSearchParams({
               grant_type: 'refresh_token',
               refresh_token: token.refreshToken,
