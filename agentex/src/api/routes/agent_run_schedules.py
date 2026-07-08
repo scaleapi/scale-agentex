@@ -129,13 +129,16 @@ async def _resolve_name_alias_and_check(
     # and then authorize/operate on the immutable schedule id. Acting on the id,
     # not the name, keeps it the stable auth and mutation target even if the
     # label changes, and closes the rename/recreate race where a check on the old
-    # row could precede a write that lands on a new one. Absent names 404; denied
-    # resources collapse to 404.
+    # row could precede a write that lands on a new one. Both the absent-name and
+    # the denied-resource paths raise this same name-based 404 so an unauthorized
+    # caller can neither distinguish the two nor read back the resolved id.
+    not_found_message = f"Run schedule '{name}' for agent '{agent_id}' does not exist."
     schedule_id = await run_schedules_use_case.get_schedule_id_by_name(agent_id, name)
     await _check_schedule_or_collapse_to_404(
         authorization,
         build_run_schedule_authz_selector(agent_id, schedule_id),
         operation,
+        not_found_message=not_found_message,
     )
     return schedule_id
 

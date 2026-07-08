@@ -150,6 +150,29 @@ class TestSingleResourceRouteAuthz:
         assert called["operation"] == AuthorizedOperationType.read
         use_case.get_schedule.assert_awaited_once_with("agent-1", "schedule-1")
 
+    async def test_get_by_name_denied_404_hides_existence_and_resolved_id(self):
+        # A denied name-alias request must 404 with a name-based body identical to
+        # the absent-name case, and must never echo the resolved schedule id — else
+        # an unauthorized caller could probe existence / read back the id.
+        authorization = MagicMock()
+        authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
+        use_case = MagicMock()
+        use_case.get_schedule_id_by_name = AsyncMock(return_value="secret-id")
+        use_case.get_schedule = AsyncMock()
+
+        with pytest.raises(ItemDoesNotExist) as exc_info:
+            await get_run_schedule_by_name(
+                agent_id="agent-1",
+                name="nightly",
+                run_schedules_use_case=use_case,
+                authorization=authorization,
+            )
+
+        message = str(exc_info.value)
+        assert message == "Run schedule 'nightly' for agent 'agent-1' does not exist."
+        assert "secret-id" not in message
+        use_case.get_schedule.assert_not_called()
+
     async def test_get_denied_collapses_to_404_and_skips_use_case(self):
         authorization = MagicMock()
         authorization.check = AsyncMock(side_effect=AuthorizationError("denied"))
