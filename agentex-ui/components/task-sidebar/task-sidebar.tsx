@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react';
 
 import { MessageSquarePlus, PanelLeftOpen } from 'lucide-react';
 
-import { AccountPicker } from '@/components/account-picker/account-picker';
 import { TaskSidebarBody } from '@/components/task-sidebar/task-sidebar-body';
 import { TaskSidebarFooter } from '@/components/task-sidebar/task-sidebar-footer';
 import { TaskSidebarHeader } from '@/components/task-sidebar/task-sidebar-header';
@@ -44,7 +43,6 @@ export function TaskSidebar() {
               className="text-foreground"
               aria-label="Open Task Sidebar"
             />
-            <AccountPicker collapsed />
             <IconButton
               icon={MessageSquarePlus}
               onClick={handleNewChat}

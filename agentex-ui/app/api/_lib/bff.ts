@@ -14,7 +14,8 @@ export const SGP_BASE_URL =
  * credential reaches client JS. Shared by every /api/* proxy (agentex, platform):
  *   - `x-selected-account-id` from the client (sourced from the account_id query param);
  *     forwarded as-is — the upstream authorizes the principal's access to the account.
- *   - the request cookies are forwarded for the upstream's own cookie auth.
+ *   - any client-supplied `authorization` is dropped so a client can't inject its own
+ *     bearer token; the request cookies are forwarded for the upstream's cookie auth.
  */
 export async function applyBffCredentials(
   req: Request,
@@ -23,6 +24,9 @@ export async function applyBffCredentials(
   const accountId = req.headers.get('x-selected-account-id');
   if (accountId) headers.set('x-selected-account-id', accountId);
   else headers.delete('x-selected-account-id');
+
+  // Credentials are server-managed: never trust a client-sent Authorization header.
+  headers.delete('authorization');
 
   const cookie = req.headers.get('cookie');
   if (cookie) headers.set('cookie', cookie);

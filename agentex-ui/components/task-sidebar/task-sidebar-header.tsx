@@ -3,7 +3,6 @@ import { useRouter } from 'next/navigation';
 
 import { PanelLeftClose, MessageSquarePlus } from 'lucide-react';
 
-import { AccountPicker } from '@/components/account-picker/account-picker';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -43,7 +42,6 @@ export function TaskSidebarHeader({
           aria-label="Close Task Sidebar"
         />
       </div>
-      <AccountPicker />
       <ResizableSidebar.Button
         onClick={handleNewChat}
         className="text-foreground flex items-center justify-between gap-2 p-2"

@@ -1,5 +1,6 @@
 import { MessageSquare } from 'lucide-react';
 
+import { AccountPicker } from '@/components/account-picker/account-picker';
 import { IconButton } from '@/components/ui/icon-button';
 import { ResizableSidebar } from '@/components/ui/resizable-sidebar';
 import { cn } from '@/lib/utils';
@@ -29,6 +30,7 @@ export function TaskSidebarFooter({
           className="text-foreground"
           aria-label="Give Feedback"
         />
+        <AccountPicker collapsed />
       </div>
     );
   }
@@ -45,6 +47,7 @@ export function TaskSidebarFooter({
           Give Feedback
         </div>
       </ResizableSidebar.Button>
+      <AccountPicker />
     </div>
   );
 }

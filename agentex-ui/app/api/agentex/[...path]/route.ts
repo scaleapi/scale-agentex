@@ -50,6 +50,10 @@ async function proxy(
   // Pass the upstream body through unbuffered so SSE / streaming responses work.
   const resHeaders = new Headers(upstream.headers);
   for (const h of STRIP_RES) resHeaders.delete(h);
+  // Don't leak an upstream (internal) redirect target to the browser.
+  if (upstream.status >= 300 && upstream.status < 400) {
+    resHeaders.delete('location');
+  }
   return new Response(upstream.body, {
     status: upstream.status,
     headers: resHeaders,
