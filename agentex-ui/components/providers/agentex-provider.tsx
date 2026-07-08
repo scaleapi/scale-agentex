@@ -20,6 +20,7 @@ import {
 interface AgentexContextValue {
   agentexClient: AgentexSDK;
   sgpAppURL: string;
+  authEnabled: boolean;
   // Platform API configured → the account picker can fetch/switch accounts.
   accountsEnabled: boolean;
   // Selected account (from the `account_id` param) + a setter that mirrors it to the URL.
@@ -37,10 +38,12 @@ const AgentexContext = createContext<AgentexContextValue | null>(null);
 export function AgentexProvider({
   children,
   sgpAppURL,
+  authEnabled,
   accountsEnabled,
 }: {
   children: ReactNode;
   sgpAppURL: string;
+  authEnabled: boolean;
   accountsEnabled: boolean;
 }) {
   const { sgpAccountID, updateParams } = useSafeSearchParams();
@@ -95,6 +98,7 @@ export function AgentexProvider({
       value={{
         agentexClient,
         sgpAppURL,
+        authEnabled,
         accountsEnabled,
         selectedAccountId: sgpAccountID,
         setSelectedAccountId,
