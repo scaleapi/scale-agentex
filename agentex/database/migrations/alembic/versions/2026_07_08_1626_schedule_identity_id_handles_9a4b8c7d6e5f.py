@@ -11,6 +11,7 @@ idempotent: index creation/drop use CONCURRENTLY with IF EXISTS / IF NOT EXISTS.
 
 from collections.abc import Sequence
 
+import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -34,6 +35,22 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    connection = op.get_bind()
+    duplicate = connection.execute(
+        sa.text(
+            "SELECT 1 FROM agent_run_schedules "
+            "GROUP BY agent_id, name "
+            "HAVING COUNT(*) > 1 "
+            "LIMIT 1"
+        )
+    ).scalar()
+    if duplicate is not None:
+        raise RuntimeError(
+            "Downgrade is unsafe after schedule name reuse. Clean up duplicate "
+            "(agent_id, name) rows before recreating "
+            "uq_agent_run_schedules_agent_name."
+        )
+
     with op.get_context().autocommit_block():
         op.execute(
             "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "
