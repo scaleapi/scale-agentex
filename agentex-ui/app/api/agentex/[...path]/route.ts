@@ -1,23 +1,17 @@
 import { applyBffCredentials } from '@/app/api/_lib/bff';
 
 /**
- * BFF proxy for the Agentex API. The browser ALWAYS calls this same-origin route, so
- * the backend origin + credentials never touch client JS. Credentials (access token
- * or forwarded cookies, plus x-selected-account-id) are applied server-side by
- * applyBffCredentials — see app/api/_lib/bff.ts.
+ * Same-origin BFF proxy for the Agentex API, so the upstream URL and credentials never
+ * reach client JS. applyBffCredentials attaches credentials server-side.
  */
 export const dynamic = 'force-dynamic';
 
-// Server-only upstream — the client only ever calls /api/agentex, so the backend URL
-// stays out of the browser bundle.
 const UPSTREAM = (
   process.env.AGENTEX_API_URL ?? 'http://localhost:5003'
 ).replace(/\/$/, '');
 
-// Hop-by-hop request headers to drop before forwarding. Credential headers (`cookie`,
-// `authorization`) are intentionally NOT listed here: applyBffCredentials owns them — it
-// deletes any client-supplied values and sets the server-managed ones — so the same
-// stripping applies to every /api/* proxy, not just this route.
+// Hop-by-hop headers to drop. Credential headers (cookie/authorization) are handled by
+// applyBffCredentials, not here.
 const STRIP_REQ = ['host', 'connection', 'content-length'];
 const STRIP_RES = [
   'content-encoding',

@@ -37,10 +37,9 @@ export function AccountPicker({
   const profiles = useMemo(() => data?.access_profiles ?? [], [data]);
   const selectedId = selectedAccountId ?? undefined;
 
-  // Reset (not just invalidate) account-scoped data on a switch. invalidate keeps the
-  // previous data cached during the refetch, so the new account would briefly render the
-  // old account's agents (HomeView) before recalibrating; reset clears it so we show a
-  // loading state instead. user-info is preserved — the account list doesn't change.
+  // Reset (not invalidate) account-scoped data on switch: invalidate keeps the old data
+  // cached during refetch, briefly showing the previous account's agents. user-info is
+  // preserved — the account list doesn't change on switch.
   const resetAccountScoped = useCallback(
     () =>
       queryClient.resetQueries({
@@ -73,8 +72,8 @@ export function AccountPicker({
 
   if (!accountsEnabled) return null;
 
-  // A size-9 icon tile — the collapsed-rail footprint. Shared by the loading placeholder
-  // (muted) and the single-account display (solid, with the name as a tooltip).
+  // Size-9 collapsed-rail tile — shared by the loading placeholder (muted) and the
+  // single-account display (solid).
   const iconTile = (opts?: { muted?: boolean; title?: string | undefined }) => (
     <div
       title={opts?.title}
@@ -89,8 +88,7 @@ export function AccountPicker({
     </div>
   );
 
-  // While accounts load, show a disabled, empty picker (icon only) instead of a skeleton
-  // block — keeps the row stable and reads as a loading account selector.
+  // Loading: a disabled, empty picker (icon only) rather than a skeleton — keeps the row stable.
   if (isLoading) {
     return collapsed ? (
       iconTile({ muted: true })
@@ -123,8 +121,7 @@ export function AccountPicker({
   );
 
   if (collapsed) {
-    // Single account → static icon; multiple → an icon-only trigger whose dropdown pops
-    // out beside the collapsed rail (Radix keeps it in view).
+    // Single → static icon; multiple → icon-only trigger (dropdown pops out beside the rail).
     if (single) return iconTile({ title: current?.account.name });
     return (
       <Select value={selectedId ?? ''} onValueChange={onAccountChange}>
@@ -142,8 +139,7 @@ export function AccountPicker({
     );
   }
 
-  // A single account needs no switcher — show it as static context, matching the New Chat
-  // button's size + spacing (size-5 icon, p-2, medium weight).
+  // Single account: no switcher, just static context (matches the New Chat button).
   if (single) {
     return (
       <div

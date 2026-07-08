@@ -16,11 +16,7 @@ type UserInfo = { access_profiles: AccessProfile[] };
 
 export const userInfoKey = ['user-info'] as const;
 
-/**
- * Fetches the caller's accounts (access_profiles) via the scoped `/api/user-info` BFF
- * proxy, to bootstrap / switch the selected account. `enabled` gates the fetch (off when
- * the platform API isn't configured).
- */
+/** Caller's accounts (access_profiles) via /api/user-info; `enabled` off when unconfigured. */
 export function useUserInfo(enabled: boolean) {
   return useQuery({
     queryKey: userInfoKey,
@@ -30,8 +26,8 @@ export function useUserInfo(enabled: boolean) {
       if (!res.ok) throw new Error(`user-info: ${res.status}`);
       return res.json();
     },
-    // The account list is stable for the session — fetch once, don't refetch on remount
-    // (e.g. the account_id navigation) or focus.
+    // The account list is stable for the session — don't refetch on the account_id
+    // navigation or window focus.
     staleTime: Infinity,
     refetchOnWindowFocus: false,
   });

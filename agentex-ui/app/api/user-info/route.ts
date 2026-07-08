@@ -3,10 +3,9 @@ import { NextResponse } from 'next/server';
 import { applyBffCredentials, SGP_BASE_URL } from '@/app/api/_lib/bff';
 
 /**
- * BFF proxy for the one SGP endpoint agentex-ui needs client-side: the caller's
- * accounts (access_profiles), used to bootstrap / switch the selected account. Scoped
- * to just this path — deliberately NOT a catch-all SGP proxy — so the browser can't
- * reach arbitrary SGP endpoints with the server-attached credentials.
+ * Scoped BFF proxy for the caller's accounts (access_profiles), used to bootstrap/switch
+ * the selected account. Only this path is exposed — not a catch-all — so the browser can't
+ * reach arbitrary platform endpoints with the server-attached credentials.
  */
 export const dynamic = 'force-dynamic';
 

@@ -78,8 +78,7 @@ export async function POST(request: Request) {
     );
   }
 
-  // Same server-side credentials the agentex proxy forwards (access token or cookies,
-  // plus x-selected-account-id) — the client never sends them.
+  // Credentials attached server-side (see applyBffCredentials).
   const sgpHeaders = new Headers({ 'Content-Type': 'application/json' });
   await applyBffCredentials(request, sgpHeaders);
   const now = new Date().toISOString();

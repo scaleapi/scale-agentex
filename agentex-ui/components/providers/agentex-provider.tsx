@@ -20,10 +20,9 @@ import {
 interface AgentexContextValue {
   agentexClient: AgentexSDK;
   sgpAppURL: string;
-  // Whether the platform API is configured, so the account picker can fetch/switch accounts
+  // Platform API configured → the account picker can fetch/switch accounts.
   accountsEnabled: boolean;
-  // Selected account id (from the `account_id` query param) + a setter that mirrors it
-  // to the URL and updates the header the SDK sends.
+  // Selected account (from the `account_id` param) + a setter that mirrors it to the URL.
   selectedAccountId: string | null;
   setSelectedAccountId: (id: string, replace?: boolean) => void;
 }
@@ -31,10 +30,9 @@ interface AgentexContextValue {
 const AgentexContext = createContext<AgentexContextValue | null>(null);
 
 /**
- * Main provider. The SDK ALWAYS targets the same-origin BFF proxy (`/api/agentex`), which
- * forwards credentials server-side. The selected account travels as the
- * `x-selected-account-id` header, sourced from the `account_id` query param — no cookie
- * involved.
+ * The SDK always targets the same-origin BFF (`/api/agentex`), which attaches credentials
+ * server-side. The selected account rides as `x-selected-account-id`, from the `account_id`
+ * query param.
  */
 export function AgentexProvider({
   children,
@@ -47,9 +45,8 @@ export function AgentexProvider({
 }) {
   const { sgpAccountID, updateParams } = useSafeSearchParams();
 
-  // Synchronous source for the SDK's per-request header. Seeded from the URL and kept in
-  // sync with it; setSelectedAccountId also sets it synchronously so a switch's refetch doesn't
-  // race the (async) URL navigation.
+  // Synchronous source for the SDK header: setSelectedAccountId sets it before the (async)
+  // URL navigation, so a switch's refetch doesn't race it.
   const selectedAccountIdRef = useRef<string | null>(sgpAccountID);
   useEffect(() => {
     selectedAccountIdRef.current = sgpAccountID;
@@ -61,8 +58,8 @@ export function AgentexProvider({
       updateParams(
         {
           [SearchParamKey.SGP_ACCOUNT_ID]: id,
-          // An explicit switch (not the initial bootstrap, which passes replace) drops the
-          // open task — it's account-scoped and won't resolve under the new account.
+          // An explicit switch (not bootstrap, which passes replace) drops the open task:
+          // it's account-scoped and won't resolve under the new account.
           ...(replace ? {} : { [SearchParamKey.TASK_ID]: null }),
         },
         replace
@@ -72,9 +69,8 @@ export function AgentexProvider({
   );
 
   const agentexClient = useMemo(() => {
-    // The SDK builds request URLs with `new URL()`, so the base must be ABSOLUTE. On the
-    // server `window` is absent, but no request fires during the initial server render
-    // (react-query fetches on the client); the client render recomputes an absolute URL.
+    // The SDK builds URLs with `new URL()`, so the base must be absolute. `window` is absent
+    // on the server, but no request fires during SSR; the client render recomputes it.
     const baseURL =
       typeof window !== 'undefined'
         ? `${window.location.origin}/api/agentex`
