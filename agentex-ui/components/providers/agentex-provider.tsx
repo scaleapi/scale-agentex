@@ -58,7 +58,15 @@ export function AgentexProvider({
   const setSelectedAccountId = useCallback(
     (id: string, replace = false) => {
       selectedAccountIdRef.current = id;
-      updateParams({ [SearchParamKey.SGP_ACCOUNT_ID]: id }, replace);
+      updateParams(
+        {
+          [SearchParamKey.SGP_ACCOUNT_ID]: id,
+          // An explicit switch (not the initial bootstrap, which passes replace) drops the
+          // open task — it's account-scoped and won't resolve under the new account.
+          ...(replace ? {} : { [SearchParamKey.TASK_ID]: null }),
+        },
+        replace
+      );
     },
     [updateParams]
   );

@@ -46,6 +46,14 @@ export function AccountPicker({
       }),
     [queryClient]
   );
+  const onAccountChange = useCallback(
+    (id: string) => {
+      if (id === selectedId) return;
+      setSelectedAccountId(id);
+      void refetchAccountScoped();
+    },
+    [selectedId, setSelectedAccountId, refetchAccountScoped]
+  );
 
   // Default to the first account when the URL has no valid account_id (fixes the
   // "no account → 401" first load). `replace` so it doesn't add a history entry.
@@ -62,20 +70,29 @@ export function AccountPicker({
   }, [profiles, selectedId, setSelectedAccountId, refetchAccountScoped]);
 
   if (!accountsEnabled) return null;
-  // While accounts load, show a disabled, empty picker (building icon only) rather than
-  // a bare skeleton block — keeps the footer row stable and reads as "account selector,
-  // loading". Once loaded with no accounts, render nothing.
+
+  // A size-9 icon tile — the collapsed-rail footprint. Shared by the loading placeholder
+  // (muted) and the single-account display (solid, with the name as a tooltip).
+  const iconTile = (opts?: { muted?: boolean; title?: string | undefined }) => (
+    <div
+      title={opts?.title}
+      className={cn('flex size-9 items-center justify-center', className)}
+    >
+      <Building2
+        className={cn(
+          'size-5 shrink-0',
+          opts?.muted ? 'text-muted-foreground' : 'text-foreground'
+        )}
+      />
+    </div>
+  );
+
+  // While accounts load, show a disabled, empty picker (icon only) instead of a skeleton
+  // block — keeps the row stable and reads as a loading account selector.
   if (isLoading) {
-    if (collapsed) {
-      return (
-        <div
-          className={cn('flex size-9 items-center justify-center', className)}
-        >
-          <Building2 className="text-muted-foreground size-5 shrink-0" />
-        </div>
-      );
-    }
-    return (
+    return collapsed ? (
+      iconTile({ muted: true })
+    ) : (
       <Select disabled>
         <SelectTrigger
           aria-label="Account"
@@ -88,31 +105,27 @@ export function AccountPicker({
       </Select>
     );
   }
+
   if (profiles.length === 0) return null;
 
-  const select = (id: string) => {
-    if (id === selectedId) return;
-    setSelectedAccountId(id);
-    void refetchAccountScoped();
-  };
-
   const current = profiles.find(p => p.account.id === selectedId);
+  const single = profiles.length === 1;
+  const options = (
+    <SelectContent>
+      {profiles.map(p => (
+        <SelectItem key={p.account.id} value={p.account.id}>
+          {p.account.name}
+        </SelectItem>
+      ))}
+    </SelectContent>
+  );
 
   if (collapsed) {
     // Single account → static icon; multiple → an icon-only trigger whose dropdown pops
-    // out beside the collapsed rail (Radix positions it to stay in view).
-    if (profiles.length === 1) {
-      return (
-        <div
-          title={current?.account.name}
-          className={cn('flex size-9 items-center justify-center', className)}
-        >
-          <Building2 className="text-foreground size-5 shrink-0" />
-        </div>
-      );
-    }
+    // out beside the collapsed rail (Radix keeps it in view).
+    if (single) return iconTile({ title: current?.account.name });
     return (
-      <Select value={selectedId ?? ''} onValueChange={select}>
+      <Select value={selectedId ?? ''} onValueChange={onAccountChange}>
         <SelectTrigger
           aria-label="Account"
           className={cn(
@@ -122,23 +135,17 @@ export function AccountPicker({
         >
           <Building2 className="text-foreground size-5 shrink-0" />
         </SelectTrigger>
-        <SelectContent>
-          {profiles.map(p => (
-            <SelectItem key={p.account.id} value={p.account.id}>
-              {p.account.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
+        {options}
       </Select>
     );
   }
 
-  // A single account needs no switcher — show it as static context.
-  if (profiles.length === 1) {
+  // A single account needs no switcher — show it as static context, matching the New Chat
+  // button's size + spacing (size-5 icon, p-2, medium weight).
+  if (single) {
     return (
       <div
         className={cn(
-          // Match the New Chat button's size + spacing (size-5 icon, p-2, medium weight).
           'text-foreground flex items-center gap-2 p-2 text-sm font-medium select-none',
           className
         )}
@@ -150,7 +157,7 @@ export function AccountPicker({
   }
 
   return (
-    <Select value={selectedId ?? ''} onValueChange={select}>
+    <Select value={selectedId ?? ''} onValueChange={onAccountChange}>
       <SelectTrigger
         className={cn('w-full gap-2 rounded-md font-medium', className)}
         aria-label="Account"
@@ -162,13 +169,7 @@ export function AccountPicker({
           <SelectValue placeholder="Select account" />
         </span>
       </SelectTrigger>
-      <SelectContent>
-        {profiles.map(p => (
-          <SelectItem key={p.account.id} value={p.account.id}>
-            {p.account.name}
-          </SelectItem>
-        ))}
-      </SelectContent>
+      {options}
     </Select>
   );
 }
