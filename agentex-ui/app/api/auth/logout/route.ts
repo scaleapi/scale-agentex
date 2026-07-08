@@ -1,5 +1,3 @@
-import { NextResponse } from 'next/server';
-
 import { getToken } from 'next-auth/jwt';
 
 import { oidcEndSessionEndpoint, signOut } from '@/auth';
@@ -8,8 +6,13 @@ import { oidcEndSessionEndpoint, signOut } from '@/auth';
  * RP-initiated (SSO) logout: clear the local NextAuth session AND end the provider's
  * SSO (OP) session, so middleware auto-signin doesn't silently log the user back in.
  * The id_token is read server-side (getToken) and never exposed on the session.
+ *
+ * POST-only, by design: logout is destructive (it can end the whole IdP SSO session), and
+ * a SameSite=Lax session cookie is NOT sent on cross-site POSTs — so a crafted cross-site
+ * link can't trigger it (GET-logout CSRF). The client POSTs here and then navigates to the
+ * returned RP-initiated logout `url`.
  */
-export async function GET(req: Request): Promise<Response> {
+export async function POST(req: Request): Promise<Response> {
   const token = await getToken({
     req: req as never,
     secret: process.env.AUTH_SECRET ?? '',
@@ -24,7 +27,7 @@ export async function GET(req: Request): Promise<Response> {
     const url = new URL(endSession);
     url.searchParams.set('id_token_hint', idToken);
     url.searchParams.set('post_logout_redirect_uri', origin);
-    return NextResponse.redirect(url);
+    return Response.json({ url: url.toString() });
   }
-  return NextResponse.redirect(origin);
+  return Response.json({ url: origin });
 }

@@ -61,8 +61,16 @@ export function TaskSidebarFooter({
 // guarantees an authenticated session, so this always shows — no session check, which
 // would otherwise flicker in after the async session resolves.
 function LogoutButton({ collapsed = false }: { collapsed?: boolean }) {
-  const handleLogout = () => {
-    window.location.href = '/api/auth/logout';
+  // POST (not a GET navigation) so logout can't be triggered cross-site, then follow the
+  // server-provided RP-initiated logout URL. See app/api/auth/logout/route.ts.
+  const handleLogout = async () => {
+    try {
+      const res = await fetch('/api/auth/logout', { method: 'POST' });
+      const { url } = (await res.json()) as { url: string };
+      window.location.href = url;
+    } catch {
+      window.location.href = '/';
+    }
   };
 
   if (collapsed) {
