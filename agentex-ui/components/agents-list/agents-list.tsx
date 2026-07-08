@@ -50,7 +50,7 @@ export function AgentsList({ agents, isLoading = false }: AgentsListProps) {
   return (
     <TooltipProvider delayDuration={200}>
       <motion.div
-        className="mb-2 flex max-h-[60vh] max-w-4xl flex-wrap items-center justify-center gap-2 overflow-y-auto"
+        className="mb-2 flex max-h-[60vh] max-w-4xl flex-wrap items-center justify-center gap-2 overflow-y-auto p-2"
         layout={hasMounted.current}
       >
         {displayedAgents.length > 0 ? (
