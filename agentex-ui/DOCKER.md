@@ -91,13 +91,13 @@ The application runs with the following default environment variables:
 - `PORT=3000`
 - `HOSTNAME=0.0.0.0`
 
-To configure public runtime variables, pass them when running the container:
+To configure runtime variables, pass them when running the container:
 
 ```bash
 # Explicit env flags
 docker run --rm -p 3000:3000 \
-  -e NEXT_PUBLIC_AGENTEX_API_BASE_URL=http://localhost:5003 \
-  -e NEXT_PUBLIC_SGP_APP_URL=https://egp.dashboard.scale.com \
+  -e AGENTEX_API_URL=http://localhost:5003 \
+  -e NEXT_PUBLIC_SGP_APP_URL=https://app.example.com \
   agentex-ui:latest
 
 # Or via an env file

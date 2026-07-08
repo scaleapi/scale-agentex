@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 
+import { applyBffCredentials, SGP_BASE_URL } from '@/app/api/_lib/bff';
+
 type FeedbackRequestBody = {
   traceId: string;
   messageId: string;
@@ -13,33 +15,10 @@ type FeedbackRequestBody = {
   agentAcpType?: string;
 };
 
-const SGP_BASE_URL =
-  process.env.NEXT_PUBLIC_SGP_API_URL ??
-  (process.env.NEXT_PUBLIC_SGP_APP_URL
-    ? `${process.env.NEXT_PUBLIC_SGP_APP_URL}/api`
-    : undefined);
-
-function getSGPHeaders(request: Request): Record<string, string> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  const forwarded = [
-    'cookie',
-    'authorization',
-    'x-api-key',
-    'x-selected-account-id',
-  ];
-  for (const key of forwarded) {
-    const value = request.headers.get(key);
-    if (value) headers[key] = value;
-  }
-  return headers;
-}
-
 async function sgpPost<T>(
   path: string,
   body: unknown,
-  headers: Record<string, string>
+  headers: Headers
 ): Promise<T> {
   const res = await fetch(`${SGP_BASE_URL}${path}`, {
     method: 'POST',
@@ -57,8 +36,7 @@ export async function POST(request: Request) {
   if (!SGP_BASE_URL) {
     return NextResponse.json(
       {
-        error:
-          'SGP feedback is not configured. Set NEXT_PUBLIC_SGP_API_URL or NEXT_PUBLIC_SGP_APP_URL.',
+        error: 'SGP feedback is not configured. Set SGP_API_URL.',
       },
       { status: 503 }
     );
@@ -100,7 +78,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const sgpHeaders = getSGPHeaders(request);
+  // Same server-side credentials the agentex proxy forwards (access token or cookies,
+  // plus x-selected-account-id) — the client never sends them.
+  const sgpHeaders = new Headers({ 'Content-Type': 'application/json' });
+  await applyBffCredentials(request, sgpHeaders);
   const now = new Date().toISOString();
 
   try {
