@@ -13,7 +13,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Skeleton } from '@/components/ui/skeleton';
 import { useUserInfo, userInfoKey } from '@/hooks/use-user-info';
 import { cn } from '@/lib/utils';
 
@@ -63,16 +62,30 @@ export function AccountPicker({
   }, [profiles, selectedId, setSelectedAccountId, refetchAccountScoped]);
 
   if (!accountsEnabled) return null;
-  // Reserve the picker's height while accounts load so New Chat doesn't jump when it
-  // appears. Once loaded with no accounts, render nothing.
+  // While accounts load, show a disabled, empty picker (building icon only) rather than
+  // a bare skeleton block — keeps the footer row stable and reads as "account selector,
+  // loading". Once loaded with no accounts, render nothing.
   if (isLoading) {
+    if (collapsed) {
+      return (
+        <div
+          className={cn('flex size-9 items-center justify-center', className)}
+        >
+          <Building2 className="text-muted-foreground size-5 shrink-0" />
+        </div>
+      );
+    }
     return (
-      <Skeleton
-        className={cn(
-          collapsed ? 'size-9 rounded-md' : 'h-9 w-full rounded-md',
-          className
-        )}
-      />
+      <Select disabled>
+        <SelectTrigger
+          aria-label="Account"
+          className={cn('w-full gap-2 rounded-md font-medium', className)}
+        >
+          <span className="flex flex-1 items-center gap-2 overflow-hidden text-left">
+            <Building2 className="text-muted-foreground size-5 shrink-0" />
+          </span>
+        </SelectTrigger>
+      </Select>
     );
   }
   if (profiles.length === 0) return null;
