@@ -37,11 +37,13 @@ export function AccountPicker({
   const profiles = useMemo(() => data?.access_profiles ?? [], [data]);
   const selectedId = selectedAccountId ?? undefined;
 
-  // Refetch account-scoped data (agents, tasks, …) on an account change — but NOT
-  // user-info: the account list itself doesn't change when you switch accounts.
-  const refetchAccountScoped = useCallback(
+  // Reset (not just invalidate) account-scoped data on a switch. invalidate keeps the
+  // previous data cached during the refetch, so the new account would briefly render the
+  // old account's agents (HomeView) before recalibrating; reset clears it so we show a
+  // loading state instead. user-info is preserved — the account list doesn't change.
+  const resetAccountScoped = useCallback(
     () =>
-      queryClient.invalidateQueries({
+      queryClient.resetQueries({
         predicate: q => q.queryKey[0] !== userInfoKey[0],
       }),
     [queryClient]
@@ -50,9 +52,9 @@ export function AccountPicker({
     (id: string) => {
       if (id === selectedId) return;
       setSelectedAccountId(id);
-      void refetchAccountScoped();
+      void resetAccountScoped();
     },
-    [selectedId, setSelectedAccountId, refetchAccountScoped]
+    [selectedId, setSelectedAccountId, resetAccountScoped]
   );
 
   // Default to the first account when the URL has no valid account_id (fixes the
@@ -66,8 +68,8 @@ export function AccountPicker({
     const first = profiles[0];
     if (!first) return;
     setSelectedAccountId(first.account.id, true);
-    void refetchAccountScoped();
-  }, [profiles, selectedId, setSelectedAccountId, refetchAccountScoped]);
+    void resetAccountScoped();
+  }, [profiles, selectedId, setSelectedAccountId, resetAccountScoped]);
 
   if (!accountsEnabled) return null;
 
