@@ -502,16 +502,57 @@ class AgentRunScheduleService:
                 extra={"authz_selector": authz_selector, "agent_id": agent_id},
             )
             return False
+        schedule_resource = AgentexResource.schedule(authz_selector)
         await self.authorization_service.register_resource(
-            resource=AgentexResource.schedule(authz_selector),
+            resource=schedule_resource,
             parent=AgentexResource.agent(agent_id),
         )
+        try:
+            # Legacy SGP auth treats register_resource as a no-op. Keep the
+            # Spark registration above for the future path, and write the legacy
+            # grant so current list/check calls can see the schedule.
+            await self.authorization_service.grant(schedule_resource)
+        except Exception as grant_exc:
+            logger.warning(
+                "Auth grant failed for run schedule; compensating with deregister",
+                extra={
+                    "authz_selector": authz_selector,
+                    "error_type": type(grant_exc).__name__,
+                },
+                exc_info=True,
+            )
+            try:
+                await self.authorization_service.deregister_resource(
+                    resource=schedule_resource,
+                )
+            except Exception as cleanup_exc:
+                logger.warning(
+                    "Auth deregister failed after run schedule grant failure",
+                    extra={
+                        "authz_selector": authz_selector,
+                        "error_type": type(cleanup_exc).__name__,
+                    },
+                    exc_info=True,
+                )
+            raise
         return True
 
     async def _deregister_schedule_from_auth(self, *, authz_selector: str) -> None:
+        schedule_resource = AgentexResource.schedule(authz_selector)
+        try:
+            await self.authorization_service.revoke(resource=schedule_resource)
+        except Exception as exc:
+            logger.warning(
+                "Auth revoke failed for run schedule; entry may be orphaned",
+                extra={
+                    "authz_selector": authz_selector,
+                    "error_type": type(exc).__name__,
+                },
+                exc_info=True,
+            )
         try:
             await self.authorization_service.deregister_resource(
-                resource=AgentexResource.schedule(authz_selector),
+                resource=schedule_resource
             )
         except Exception as exc:
             logger.warning(

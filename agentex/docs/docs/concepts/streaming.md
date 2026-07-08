@@ -8,6 +8,9 @@ Streaming enables real-time delivery of messages as they're being generated, pro
 
 Agentex decouples streaming from LLM provider streaming. You're not limited to streaming LLM responses - you can stream any content: progress updates, status messages, multi-step workflows, or custom notifications.
 
+!!! note "Streaming requires Redis"
+    Streaming and messaging are delivered through Redis streams, so a reachable Redis is **required** for any agent that streams or sends messages. Locally, the Docker stack starts Redis for you. In deployment, the `REDIS_URL` environment variable must point at your Redis instance — see [Deploying Your Agent](../deployment/overview.md#prerequisites).
+
 
 
 ## Streaming by Agent Type
