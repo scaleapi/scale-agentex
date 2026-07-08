@@ -14,8 +14,10 @@ const UPSTREAM = (
   process.env.AGENTEX_API_URL ?? 'http://localhost:5003'
 ).replace(/\/$/, '');
 
-// Hop-by-hop / spoofable request headers to drop before forwarding. `cookie` and
-// `authorization` are managed by applyBffCredentials, not stripped here.
+// Hop-by-hop request headers to drop before forwarding. Credential headers (`cookie`,
+// `authorization`) are intentionally NOT listed here: applyBffCredentials owns them — it
+// deletes any client-supplied values and sets the server-managed ones — so the same
+// stripping applies to every /api/* proxy, not just this route.
 const STRIP_REQ = ['host', 'connection', 'content-length'];
 const STRIP_RES = [
   'content-encoding',
