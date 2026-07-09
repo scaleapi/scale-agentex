@@ -30,6 +30,7 @@ function TaskButtonImpl({ task }: TaskButtonProps) {
       updateParams({
         [SearchParamKey.TASK_ID]: taskID,
         [SearchParamKey.AGENT_NAME]: firstAgentName,
+        [SearchParamKey.VIEW]: null,
       });
     },
     [updateParams, firstAgentName]

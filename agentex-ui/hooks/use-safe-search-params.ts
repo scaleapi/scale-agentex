@@ -6,14 +6,20 @@ export enum SearchParamKey {
   SGP_ACCOUNT_ID = 'account_id',
   TASK_ID = 'task_id',
   AGENT_NAME = 'agent_name',
+  VIEW = 'view',
 }
 
 type SearchParamUpdates = Partial<Record<SearchParamKey, string | null>>;
+
+export enum AppView {
+  SCHEDULED_TASKS = 'scheduled_tasks',
+}
 
 type SafeSearchParams = {
   sgpAccountID: string | null;
   taskID: string | null;
   agentName: string | null;
+  view: AppView | null;
   updateParams: (updates: SearchParamUpdates, replace?: boolean) => void;
 };
 
@@ -28,6 +34,9 @@ export function useSafeSearchParams(): SafeSearchParams {
   const sgpAccountID = searchParams.get(SearchParamKey.SGP_ACCOUNT_ID);
   const taskID = searchParams.get(SearchParamKey.TASK_ID);
   const agentName = searchParams.get(SearchParamKey.AGENT_NAME);
+  const viewParam = searchParams.get(SearchParamKey.VIEW);
+  const view =
+    viewParam === AppView.SCHEDULED_TASKS ? AppView.SCHEDULED_TASKS : null;
 
   const updateParams = useCallback(
     (updates: SearchParamUpdates, replace: boolean = false): void => {
@@ -65,8 +74,9 @@ export function useSafeSearchParams(): SafeSearchParams {
       sgpAccountID: sgpAccountID || null,
       taskID: taskID || null,
       agentName: agentName || null,
+      view,
       updateParams,
     }),
-    [sgpAccountID, taskID, agentName, updateParams]
+    [sgpAccountID, taskID, agentName, view, updateParams]
   );
 }

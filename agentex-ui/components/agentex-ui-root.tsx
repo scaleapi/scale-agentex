@@ -84,6 +84,7 @@ export function AgentexUIRoot() {
     (taskId: string | null) => {
       updateParams({
         [SearchParamKey.TASK_ID]: taskId,
+        [SearchParamKey.VIEW]: null,
       });
     },
     [updateParams]

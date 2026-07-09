@@ -20,6 +20,7 @@ export function TaskSidebar() {
   const handleNewChat = useCallback(() => {
     updateParams({
       [SearchParamKey.TASK_ID]: null,
+      [SearchParamKey.VIEW]: null,
     });
   }, [updateParams]);
 
