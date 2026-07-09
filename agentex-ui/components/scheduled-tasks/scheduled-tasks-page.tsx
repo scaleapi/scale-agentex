@@ -1,8 +1,19 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { CalendarClock, Loader2, MoreHorizontal } from 'lucide-react';
+import {
+  Bot,
+  CalendarClock,
+  Clock3,
+  Loader2,
+  MoreHorizontal,
+  PauseCircle,
+  Pencil,
+  Play,
+  Trash2,
+  X,
+} from 'lucide-react';
 
 import { useAgentexClient } from '@/components/providers';
 import { Button } from '@/components/ui/button';
@@ -16,14 +27,18 @@ import {
 import { toast } from '@/components/ui/toast';
 import { useAgentByName } from '@/hooks/use-agent-by-name';
 import {
-  useAgentRunScheduleDetails,
+  useAgentRunScheduleDetailsForItems,
   useAgentRunSchedules,
+  useAgentRunSchedulesForAgents,
   useCreateAgentRunSchedule,
   useScheduleAction,
   useUpdateAgentRunSchedule,
 } from '@/hooks/use-agent-run-schedules';
 import { useAgents } from '@/hooks/use-agents';
-import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
+import {
+  SearchParamKey,
+  useSafeSearchParams,
+} from '@/hooks/use-safe-search-params';
 import type { AgentRunSchedule } from '@/lib/agent-run-schedules';
 import {
   cadenceToPayload,
@@ -36,6 +51,22 @@ import {
   type CadenceType,
 } from '@/lib/schedule-utils';
 import { cn } from '@/lib/utils';
+
+import type { Agent } from 'agentex/resources';
+
+type ScheduleScope = 'current' | 'all';
+type ScheduleView = 'upcoming' | 'all';
+
+type ScheduleListItem = {
+  agentId: string;
+  agentName: string;
+  schedule: AgentRunSchedule;
+};
+
+type UpcomingRunItem = ScheduleListItem & {
+  runTime: Date;
+  isSkipped: boolean;
+};
 
 const DAYS = [
   ['MON', 'Monday'],
@@ -69,62 +100,378 @@ function getBrowserTimezone() {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
 
+function getNextRun(schedule: AgentRunSchedule) {
+  const nextRun = schedule.next_action_times[0];
+  return nextRun ? new Date(nextRun) : null;
+}
+
+function getNextRunTime(schedule: AgentRunSchedule) {
+  return getNextRun(schedule)?.getTime() ?? null;
+}
+
+function getVisibleUpcomingRuns(schedule: AgentRunSchedule) {
+  const now = Date.now();
+  const runItems = [
+    ...schedule.next_action_times.map(nextRun => ({
+      runTime: new Date(nextRun),
+      isSkipped: false,
+    })),
+    ...schedule.skipped_action_times.map(skippedRun => ({
+      runTime: new Date(skippedRun),
+      isSkipped: true,
+    })),
+  ];
+  const runsByTime = new Map<string, { runTime: Date; isSkipped: boolean }>();
+
+  for (const runItem of runItems) {
+    if (runItem.runTime.getTime() >= now) {
+      const key = runItem.runTime.toISOString();
+      const existing = runsByTime.get(key);
+      runsByTime.set(key, {
+        runTime: runItem.runTime,
+        isSkipped: runItem.isSkipped || existing?.isSkipped === true,
+      });
+    }
+  }
+
+  return Array.from(runsByTime.values())
+    .sort((a, b) => a.runTime.getTime() - b.runTime.getTime())
+    .slice(0, 5);
+}
+
+function isSchedulePaused(schedule: AgentRunSchedule) {
+  return schedule.state === 'PAUSED' || schedule.paused;
+}
+
+function sortScheduleItems(items: ScheduleListItem[], view: ScheduleView) {
+  return [...items].sort((a, b) => {
+    const aNextRun = getNextRunTime(a.schedule);
+    const bNextRun = getNextRunTime(b.schedule);
+
+    if (view === 'upcoming') {
+      return (aNextRun ?? 0) - (bNextRun ?? 0);
+    }
+
+    if (aNextRun != null && bNextRun != null) {
+      return aNextRun - bNextRun;
+    }
+    if (aNextRun != null) return -1;
+    if (bNextRun != null) return 1;
+    return a.schedule.name.localeCompare(b.schedule.name);
+  });
+}
+
+function formatRunTime(date: Date) {
+  return date.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function formatRunDateTime(date: Date) {
+  return date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function getUpcomingGroup(date: Date) {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const startOfTomorrow = new Date(startOfToday);
+  startOfTomorrow.setDate(startOfToday.getDate() + 1);
+  const startOfDayAfterTomorrow = new Date(startOfTomorrow);
+  startOfDayAfterTomorrow.setDate(startOfTomorrow.getDate() + 1);
+
+  if (date >= startOfToday && date < startOfTomorrow) {
+    return 'Today';
+  }
+  if (date >= startOfTomorrow && date < startOfDayAfterTomorrow) {
+    return 'Tomorrow';
+  }
+  return 'Later';
+}
+
+function formatUpcomingSubtitle(date: Date) {
+  const group = getUpcomingGroup(date);
+  if (group === 'Today') {
+    return `Today, ${formatRunTime(date)}`;
+  }
+  if (group === 'Tomorrow') {
+    return `Tomorrow, ${formatRunTime(date)}`;
+  }
+  return formatRunDateTime(date);
+}
+
+function groupUpcomingRuns(items: ScheduleListItem[]) {
+  const groups = new Map<string, UpcomingRunItem[]>();
+  for (const item of items) {
+    for (const run of getVisibleUpcomingRuns(item.schedule)) {
+      const group = getUpcomingGroup(run.runTime);
+      groups.set(group, [...(groups.get(group) ?? []), { ...item, ...run }]);
+    }
+  }
+  return ['Today', 'Tomorrow', 'Later']
+    .map(label => ({
+      label,
+      items: [...(groups.get(label) ?? [])].sort(
+        (a, b) => a.runTime.getTime() - b.runTime.getTime()
+      ),
+    }))
+    .filter(group => group.items.length > 0);
+}
+
+function useCloseOnOutsideClick<T extends HTMLElement>(
+  isOpen: boolean,
+  onClose: () => void
+) {
+  const ref = useRef<T>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) {
+        onClose();
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose]);
+
+  return ref;
+}
+
 export function ScheduledTasksPage() {
-  const { agentName } = useSafeSearchParams();
+  const { agentName, updateParams } = useSafeSearchParams();
   const { agentexClient } = useAgentexClient();
   const agentexAPIBaseURL = '/api/agentex';
-  const { data: agents = [] } = useAgents(agentexClient);
+  const { data: agents = [], isLoading: agentsLoading } =
+    useAgents(agentexClient);
   const { data: agentByName } = useAgentByName(agentexClient, agentName);
+  const [scope, setScope] = useState<ScheduleScope>('current');
+  const [scheduleView, setScheduleView] = useState<ScheduleView>('upcoming');
   const selectedAgent =
     agents.find(agent => agent.name === agentName) ?? agentByName ?? null;
   const agentId = selectedAgent?.id ?? null;
 
   const schedulesQuery = useAgentRunSchedules(agentexAPIBaseURL, agentId);
-  const schedules = schedulesQuery.data ?? [];
-  const detailQueries = useAgentRunScheduleDetails(
-    agentexAPIBaseURL,
-    agentId,
-    schedules
+  const schedules = useMemo(
+    () => schedulesQuery.data ?? [],
+    [schedulesQuery.data]
   );
-  const schedulesWithLiveFields = schedules.map((schedule, index) => {
-    const detail = detailQueries[index]?.data;
-    return detail ?? schedule;
-  });
+  const allScheduleQueries = useAgentRunSchedulesForAgents(
+    agentexAPIBaseURL,
+    agents,
+    scope === 'all'
+  );
+
+  const currentItems = useMemo<ScheduleListItem[]>(
+    () =>
+      selectedAgent
+        ? schedules.map(schedule => ({
+            agentId: selectedAgent.id,
+            agentName: selectedAgent.name,
+            schedule,
+          }))
+        : [],
+    [schedules, selectedAgent]
+  );
+
+  const allItems = useMemo<ScheduleListItem[]>(
+    () =>
+      agents.flatMap((agent, index) =>
+        (allScheduleQueries[index]?.data ?? []).map(schedule => ({
+          agentId: agent.id,
+          agentName: agent.name,
+          schedule,
+        }))
+      ),
+    [agents, allScheduleQueries]
+  );
+
+  const baseItems = scope === 'all' ? allItems : currentItems;
+  const detailQueries = useAgentRunScheduleDetailsForItems(
+    agentexAPIBaseURL,
+    baseItems
+  );
+  const schedulesWithLiveFields = baseItems.map((item, index) => ({
+    ...item,
+    schedule: detailQueries[index]?.data ?? item.schedule,
+  }));
+
+  const visibleItems = useMemo(() => {
+    const scopedItems =
+      scheduleView === 'upcoming'
+        ? schedulesWithLiveFields.filter(
+            item =>
+              !isSchedulePaused(item.schedule) &&
+              getNextRunTime(item.schedule) != null
+          )
+        : schedulesWithLiveFields;
+    return sortScheduleItems(scopedItems, scheduleView);
+  }, [scheduleView, schedulesWithLiveFields]);
+
+  const isLoading =
+    scope === 'all'
+      ? agentsLoading || allScheduleQueries.some(query => query.isLoading)
+      : schedulesQuery.isLoading;
+  const error =
+    scope === 'all'
+      ? (allScheduleQueries.find(query => query.error)?.error ?? null)
+      : schedulesQuery.error;
+  const emptyMessage =
+    scheduleView === 'upcoming'
+      ? 'No upcoming scheduled runs'
+      : scope === 'all'
+        ? 'No schedules across agents yet'
+        : 'No scheduled tasks yet';
 
   return (
     <div className="flex h-full flex-1 flex-col overflow-hidden">
-      <div className="border-border flex items-center justify-between border-b px-8 py-5">
+      <div className="border-border flex flex-wrap items-center justify-between gap-4 border-b px-8 py-5">
         <div>
           <h1 className="text-foreground text-xl font-semibold">
             Scheduled Tasks
           </h1>
           <p className="text-muted-foreground text-sm">
-            {agentName
-              ? `Run ${agentName} automatically on a cadence.`
-              : 'Select an agent to schedule recurring tasks.'}
+            {scope === 'all'
+              ? 'Browse schedules across all agents.'
+              : agentName
+                ? `Run ${agentName} automatically on a cadence.`
+                : 'Select an agent to schedule recurring tasks.'}
           </p>
         </div>
+        <ScheduleScopeSelector
+          scope={scope}
+          selectedAgent={selectedAgent}
+          agents={agents}
+          onChange={setScope}
+          onSelectAgent={nextAgentName => {
+            setScope('current');
+            updateParams({ [SearchParamKey.AGENT_NAME]: nextAgentName });
+          }}
+        />
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-8 py-6">
-        {!selectedAgent ? (
+        {scope === 'current' && !selectedAgent ? (
           <EmptyState message="Select an agent to create scheduled tasks." />
         ) : (
           <>
-            <ScheduleComposer
-              agentId={selectedAgent.id}
-              baseURL={agentexAPIBaseURL}
-              schedules={schedules}
-            />
+            {scope === 'current' && selectedAgent && (
+              <ScheduleComposer
+                agentId={selectedAgent.id}
+                baseURL={agentexAPIBaseURL}
+                schedules={schedules}
+              />
+            )}
+            <ScheduleViewTabs view={scheduleView} onChange={setScheduleView} />
             <ScheduleList
-              agentId={selectedAgent.id}
               baseURL={agentexAPIBaseURL}
-              schedules={schedulesWithLiveFields}
-              isLoading={schedulesQuery.isLoading}
-              error={schedulesQuery.error}
+              items={visibleItems}
+              isLoading={isLoading}
+              error={error}
+              emptyMessage={emptyMessage}
+              showAgentName={scope === 'all'}
+              view={scheduleView}
             />
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+function ScheduleScopeSelector({
+  scope,
+  selectedAgent,
+  agents,
+  onChange,
+  onSelectAgent,
+}: {
+  scope: ScheduleScope;
+  selectedAgent: Agent | null;
+  agents: Agent[];
+  onChange: (scope: ScheduleScope) => void;
+  onSelectAgent: (agentName: string) => void;
+}) {
+  const value = scope === 'all' ? 'all' : selectedAgent?.name;
+
+  return (
+    <Select
+      {...(value ? { value } : {})}
+      onValueChange={nextValue => {
+        if (nextValue === 'all') {
+          onChange('all');
+          return;
+        }
+        onSelectAgent(nextValue);
+      }}
+    >
+      <SelectTrigger
+        className="max-w-80 min-w-64"
+        aria-label="Schedule agent scope"
+      >
+        <SelectValue placeholder="Select an agent" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">
+          <span className="flex items-center gap-2">
+            <CalendarClock className="size-4" />
+            All agents
+          </span>
+        </SelectItem>
+        {agents.map(agent => (
+          <SelectItem key={agent.id} value={agent.name}>
+            <span className="flex items-center gap-2">
+              <Bot className="size-4" />
+              {agent.name}
+            </span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function ScheduleViewTabs({
+  view,
+  onChange,
+}: {
+  view: ScheduleView;
+  onChange: (view: ScheduleView) => void;
+}) {
+  return (
+    <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-3">
+      <div className="border-border bg-background flex rounded-full border p-1 shadow-sm">
+        {(['upcoming', 'all'] as const).map(option => (
+          <button
+            key={option}
+            type="button"
+            onClick={() => onChange(option)}
+            className={cn(
+              'rounded-full px-3 py-1.5 text-sm transition-colors',
+              view === option
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            {option === 'upcoming' ? 'Upcoming' : 'All Schedules'}
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -176,7 +523,7 @@ function ScheduleComposer({
           value={prompt}
           onChange={event => setPrompt(event.target.value)}
           placeholder="What should this agent do on a schedule?"
-          className="min-h-20 resize-none bg-transparent text-sm leading-6 outline-none"
+          className="min-h-20 resize-none border-0 bg-transparent text-sm leading-6 outline-none focus:border-0 focus:ring-0 focus:outline-none focus-visible:outline-none"
         />
         <div className="flex flex-wrap items-center gap-3">
           <CadenceControls cadence={cadence} onChange={setCadence} />
@@ -339,17 +686,21 @@ function TimezoneSelect({
 }
 
 function ScheduleList({
-  agentId,
   baseURL,
-  schedules,
+  items,
   isLoading,
   error,
+  emptyMessage,
+  showAgentName,
+  view,
 }: {
-  agentId: string;
   baseURL: string;
-  schedules: AgentRunSchedule[];
+  items: ScheduleListItem[];
   isLoading: boolean;
   error: Error | null;
+  emptyMessage: string;
+  showAgentName: boolean;
+  view: ScheduleView;
 }) {
   if (isLoading) {
     return (
@@ -366,106 +717,345 @@ function ScheduleList({
     );
   }
 
-  if (schedules.length === 0) {
-    return <EmptyState message="No scheduled tasks yet" />;
+  if (items.length === 0) {
+    return <EmptyState message={emptyMessage} />;
+  }
+
+  if (view === 'upcoming') {
+    return (
+      <UpcomingScheduleList
+        baseURL={baseURL}
+        items={items}
+        showAgentName={showAgentName}
+      />
+    );
   }
 
   return (
-    <section className="mx-auto grid w-full max-w-4xl gap-3">
-      {schedules.map(schedule => (
-        <ScheduleCard
-          key={schedule.id}
-          agentId={agentId}
-          baseURL={baseURL}
-          schedule={schedule}
-        />
-      ))}
+    <AllSchedulesList
+      baseURL={baseURL}
+      items={items}
+      showAgentName={showAgentName}
+    />
+  );
+}
+
+function UpcomingScheduleList({
+  baseURL,
+  items,
+  showAgentName,
+}: {
+  baseURL: string;
+  items: ScheduleListItem[];
+  showAgentName: boolean;
+}) {
+  const groupedItems = groupUpcomingRuns(items);
+
+  return (
+    <section className="mx-auto w-full max-w-4xl">
+      <div className="flex flex-col gap-6">
+        {groupedItems.map(group => (
+          <div key={group.label} className="grid grid-cols-[5rem_1fr] gap-6">
+            <div className="text-muted-foreground pt-1 text-sm font-medium">
+              {group.label}
+            </div>
+            <div className="before:bg-border relative flex flex-col gap-5 pl-8 before:absolute before:top-2 before:bottom-2 before:left-1 before:w-px">
+              {group.items.map(item => (
+                <UpcomingScheduleRow
+                  key={`${item.schedule.id}-${item.runTime.toISOString()}`}
+                  baseURL={baseURL}
+                  item={item}
+                  showAgentName={showAgentName}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
 
-function ScheduleCard({
-  agentId,
+function UpcomingScheduleRow({
   baseURL,
-  schedule,
+  item,
+  showAgentName,
 }: {
-  agentId: string;
   baseURL: string;
-  schedule: AgentRunSchedule;
+  item: UpcomingRunItem;
+  showAgentName: boolean;
 }) {
-  const [isEditing, setIsEditing] = useState(false);
-  const pause = useScheduleAction({ baseURL, agentId, action: 'pause' });
-  const resume = useScheduleAction({ baseURL, agentId, action: 'resume' });
+  const { agentId, agentName, schedule } = item;
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isRunModalOpen, setIsRunModalOpen] = useState(false);
   const trigger = useScheduleAction({ baseURL, agentId, action: 'trigger' });
-  const deleteSchedule = useScheduleAction({
+  const skip = useScheduleAction({
     baseURL,
     agentId,
-    action: 'delete',
+    action: 'skip',
   });
-  const isPaused = schedule.state === 'PAUSED' || schedule.paused;
-  const nextRun = schedule.next_action_times[0];
+  const unskip = useScheduleAction({
+    baseURL,
+    agentId,
+    action: 'unskip',
+  });
 
   return (
-    <article className="border-border bg-card rounded-2xl border p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h2 className="truncate text-sm font-semibold">{schedule.name}</h2>
-            <span
-              className={cn(
-                'rounded-full px-2 py-0.5 text-xs',
-                isPaused
-                  ? 'bg-muted text-muted-foreground'
-                  : 'bg-green-500/10 text-green-700 dark:text-green-400'
-              )}
-            >
-              {isPaused ? 'Paused' : 'Active'}
+    <div className="relative flex items-center justify-between gap-4">
+      <span className="absolute top-2 -left-8 z-10 size-2 rounded-full bg-[#7C5CFF]" />
+      <div className="min-w-0">
+        <div className="truncate text-sm font-semibold">{schedule.name}</div>
+        <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-sm">
+          <span>{formatUpcomingSubtitle(item.runTime)}</span>
+          {showAgentName && <span>· {agentName}</span>}
+          {item.isSkipped && (
+            <span className="rounded-full bg-[#7C5CFF]/10 px-2 py-0.5 text-xs font-medium text-[#6F4DFF]">
+              Skipped
             </span>
-          </div>
-          <p className="text-muted-foreground mt-1 line-clamp-2 text-sm">
-            {schedule.initial_input.content}
-          </p>
-          <p className="text-muted-foreground mt-2 text-xs">
-            {describeCadence(schedule)} · {schedule.timezone}
-            {nextRun ? ` · Next run ${new Date(nextRun).toLocaleString()}` : ''}
-          </p>
+          )}
         </div>
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => trigger.mutate(schedule.id)}
-            disabled={trigger.isPending}
-          >
-            Run Now
-          </Button>
+      </div>
+      <div className="relative flex shrink-0 items-center gap-2">
+        {item.isSkipped ? (
           <Button
             variant="outline"
             size="sm"
             onClick={() =>
-              isPaused ? resume.mutate(schedule.id) : pause.mutate(schedule.id)
+              unskip.mutate({
+                scheduleId: schedule.id,
+                scheduledTime: item.runTime.toISOString(),
+              })
             }
-            disabled={pause.isPending || resume.isPending}
+            disabled={unskip.isPending}
           >
-            {isPaused ? 'Resume' : 'Pause'}
+            Unskip
           </Button>
+        ) : (
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setIsEditing(true)}
+            onClick={() => setIsRunModalOpen(true)}
           >
-            Edit
+            <Play className="size-4" />
+            Run now
           </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => deleteSchedule.mutate(schedule.id)}
-            disabled={deleteSchedule.isPending}
-          >
-            Delete
+        )}
+        {isRunModalOpen && (
+          <RunNowModal
+            schedule={schedule}
+            runTime={item.runTime}
+            onClose={() => setIsRunModalOpen(false)}
+            onRunNow={() => {
+              setIsRunModalOpen(false);
+              trigger.mutate(schedule.id);
+            }}
+            onRunNowAndSkip={() => {
+              setIsRunModalOpen(false);
+              void (async () => {
+                await trigger.mutateAsync(schedule.id);
+                await skip.mutateAsync({
+                  scheduleId: schedule.id,
+                  scheduledTime: item.runTime.toISOString(),
+                });
+              })().catch(() => undefined);
+            }}
+            isRunNowPending={trigger.isPending}
+            isRunNowAndSkipPending={trigger.isPending || skip.isPending}
+          />
+        )}
+        <ScheduleOverflowMenu
+          isOpen={isMenuOpen}
+          setIsOpen={setIsMenuOpen}
+          schedule={schedule}
+          baseURL={baseURL}
+          agentId={agentId}
+          includeRunNow={false}
+          scheduledTime={item.runTime.toISOString()}
+          isSkipped={item.isSkipped}
+        />
+      </div>
+    </div>
+  );
+}
+
+function RunNowModal({
+  schedule,
+  runTime,
+  onClose,
+  onRunNow,
+  onRunNowAndSkip,
+  isRunNowPending,
+  isRunNowAndSkipPending,
+}: {
+  schedule: AgentRunSchedule;
+  runTime: Date;
+  onClose: () => void;
+  onRunNow: () => void;
+  onRunNowAndSkip: () => void;
+  isRunNowPending: boolean;
+  isRunNowAndSkipPending: boolean;
+}) {
+  const runLabel = formatUpcomingSubtitle(runTime);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+      <div className="bg-background w-full max-w-md rounded-2xl border p-5 shadow-xl">
+        <div className="mb-5 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">Run task now</h2>
+            <p className="text-muted-foreground mt-1 text-sm">
+              Choose how to handle the scheduled run at {runLabel}.
+            </p>
+          </div>
+          <Button variant="ghost" size="icon" onClick={onClose}>
+            <X className="size-4" />
           </Button>
-          <MoreHorizontal className="text-muted-foreground mt-1 size-4" />
         </div>
+
+        <div className="flex flex-col gap-2">
+          <RunNowOption
+            title="Run now"
+            description={`Runs ${schedule.name} once right now. The scheduled run at ${runLabel} still happens as planned.`}
+            onClick={onRunNow}
+            disabled={isRunNowPending}
+          />
+          <RunNowOption
+            title="Run now & skip scheduled run"
+            description={`Runs once right now and skips only the scheduled run at ${runLabel}. Future scheduled runs are unchanged.`}
+            onClick={onRunNowAndSkip}
+            disabled={isRunNowAndSkipPending}
+          />
+        </div>
+
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <p className="text-muted-foreground text-xs">
+            Skipping only affects this occurrence; the schedule remains active.
+          </p>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RunNowOption({
+  title,
+  description,
+  onClick,
+  disabled,
+}: {
+  title: string;
+  description: string;
+  onClick: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="border-border hover:bg-muted/40 flex w-full items-start gap-3 rounded-xl border p-4 text-left transition-colors disabled:pointer-events-none disabled:opacity-60"
+    >
+      <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl bg-[#7C5CFF]/10 text-[#6F4DFF]">
+        <Play className="size-4" />
+      </span>
+      <span>
+        <span className="block text-sm font-semibold">{title}</span>
+        <span className="text-muted-foreground mt-1 block text-sm leading-5">
+          {description}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function AllSchedulesList({
+  baseURL,
+  items,
+  showAgentName,
+}: {
+  baseURL: string;
+  items: ScheduleListItem[];
+  showAgentName: boolean;
+}) {
+  return (
+    <section className="mx-auto w-full max-w-4xl">
+      <div className="border-border overflow-visible rounded-2xl border">
+        {items.map(({ agentId, agentName, schedule }) => (
+          <ScheduleRow
+            key={schedule.id}
+            agentId={agentId}
+            agentName={agentName}
+            baseURL={baseURL}
+            schedule={schedule}
+            showAgentName={showAgentName}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ScheduleRow({
+  agentId,
+  agentName,
+  baseURL,
+  schedule,
+  showAgentName,
+}: {
+  agentId: string;
+  agentName: string;
+  baseURL: string;
+  schedule: AgentRunSchedule;
+  showAgentName: boolean;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const pause = useScheduleAction({ baseURL, agentId, action: 'pause' });
+  const resume = useScheduleAction({ baseURL, agentId, action: 'resume' });
+  const isPaused = isSchedulePaused(schedule);
+
+  return (
+    <article className="border-border/70 relative flex items-center justify-between gap-4 border-b px-4 py-3 last:border-b-0">
+      <div className="min-w-0">
+        <div className="truncate text-sm font-semibold">{schedule.name}</div>
+        <div className="text-muted-foreground truncate text-sm">
+          {describeCadence(schedule)}
+          {showAgentName ? ` · ${agentName}` : ''}
+          {` · ${schedule.num_tasks_created} runs`}
+        </div>
+      </div>
+      <div className="relative flex shrink-0 items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={() =>
+            isPaused ? resume.mutate(schedule.id) : pause.mutate(schedule.id)
+          }
+          disabled={pause.isPending || resume.isPending}
+          className={cn(
+            'flex h-6 w-11 items-center rounded-full p-0.5 transition-colors disabled:opacity-60',
+            isPaused ? 'bg-slate-200 dark:bg-slate-700' : 'bg-[#6F4DFF]'
+          )}
+          aria-label={isPaused ? 'Activate schedule' : 'Deactivate schedule'}
+        >
+          <span
+            className={cn(
+              'bg-background size-5 rounded-full shadow-sm transition-transform',
+              isPaused ? 'translate-x-0' : 'translate-x-5'
+            )}
+          />
+        </button>
+        <ScheduleOverflowMenu
+          isOpen={isMenuOpen}
+          setIsOpen={setIsMenuOpen}
+          schedule={schedule}
+          baseURL={baseURL}
+          agentId={agentId}
+          onEdit={() => setIsEditing(true)}
+          includeRunNow={true}
+        />
       </div>
       {isEditing && (
         <EditScheduleModal
@@ -476,6 +1066,167 @@ function ScheduleCard({
         />
       )}
     </article>
+  );
+}
+
+function ScheduleOverflowMenu({
+  isOpen,
+  setIsOpen,
+  schedule,
+  baseURL,
+  agentId,
+  onEdit,
+  includeRunNow,
+  scheduledTime,
+  isSkipped = false,
+}: {
+  isOpen: boolean;
+  setIsOpen: (isOpen: boolean | ((isOpen: boolean) => boolean)) => void;
+  schedule: AgentRunSchedule;
+  baseURL: string;
+  agentId: string;
+  onEdit?: () => void;
+  includeRunNow: boolean;
+  scheduledTime?: string;
+  isSkipped?: boolean;
+}) {
+  const menuRef = useCloseOnOutsideClick<HTMLDivElement>(isOpen, () =>
+    setIsOpen(false)
+  );
+  const pause = useScheduleAction({ baseURL, agentId, action: 'pause' });
+  const resume = useScheduleAction({ baseURL, agentId, action: 'resume' });
+  const skip = useScheduleAction({
+    baseURL,
+    agentId,
+    action: 'skip',
+  });
+  const unskip = useScheduleAction({
+    baseURL,
+    agentId,
+    action: 'unskip',
+  });
+  const trigger = useScheduleAction({ baseURL, agentId, action: 'trigger' });
+  const deleteSchedule = useScheduleAction({
+    baseURL,
+    agentId,
+    action: 'delete',
+  });
+  const isPaused = isSchedulePaused(schedule);
+
+  return (
+    <div ref={menuRef} className="relative">
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={() => setIsOpen(open => !open)}
+        aria-label={`Open actions for ${schedule.name}`}
+      >
+        <MoreHorizontal className="size-4" />
+      </Button>
+      {isOpen && (
+        <div className="bg-popover text-popover-foreground absolute top-10 right-0 z-50 min-w-48 rounded-md border p-1 shadow-lg">
+          {includeRunNow && (
+            <MenuButton
+              onClick={() => {
+                setIsOpen(false);
+                trigger.mutate(schedule.id);
+              }}
+              disabled={trigger.isPending}
+            >
+              <Play className="size-4" />
+              Run now
+            </MenuButton>
+          )}
+          {isSkipped ? (
+            <MenuButton
+              onClick={() => {
+                if (!scheduledTime) return;
+                setIsOpen(false);
+                unskip.mutate({ scheduleId: schedule.id, scheduledTime });
+              }}
+              disabled={unskip.isPending || !scheduledTime}
+            >
+              <Clock3 className="size-4" />
+              Unskip run
+            </MenuButton>
+          ) : (
+            <MenuButton
+              onClick={() => {
+                setIsOpen(false);
+                skip.mutate(
+                  scheduledTime
+                    ? { scheduleId: schedule.id, scheduledTime }
+                    : schedule.id
+                );
+              }}
+              disabled={skip.isPending}
+            >
+              <Play className="size-4" />
+              Skip run
+            </MenuButton>
+          )}
+          <MenuButton disabled title="Backend support needed">
+            <Clock3 className="size-4" />
+            Snooze
+          </MenuButton>
+          <MenuButton
+            onClick={() => {
+              setIsOpen(false);
+              if (isPaused) {
+                resume.mutate(schedule.id);
+              } else {
+                pause.mutate(schedule.id);
+              }
+            }}
+            disabled={pause.isPending || resume.isPending}
+          >
+            <PauseCircle className="size-4" />
+            {isPaused ? 'Resume' : 'Pause'}
+          </MenuButton>
+          {onEdit && (
+            <MenuButton
+              onClick={() => {
+                setIsOpen(false);
+                onEdit();
+              }}
+            >
+              <Pencil className="size-4" />
+              Edit
+            </MenuButton>
+          )}
+          <MenuButton
+            onClick={() => {
+              setIsOpen(false);
+              deleteSchedule.mutate(schedule.id);
+            }}
+            disabled={deleteSchedule.isPending}
+            className="text-destructive hover:text-destructive"
+          >
+            <Trash2 className="size-4" />
+            Delete
+          </MenuButton>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuButton({
+  children,
+  className,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        'hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm disabled:pointer-events-none disabled:opacity-50',
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </button>
   );
 }
 
