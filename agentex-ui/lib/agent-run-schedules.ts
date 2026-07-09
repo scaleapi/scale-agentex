@@ -23,8 +23,10 @@ export type AgentRunSchedule = {
   updated_at: string | null;
   state: 'ACTIVE' | 'PAUSED';
   next_action_times: string[];
+  skipped_action_times: string[];
   last_action_time: string | null;
   num_actions_taken: number;
+  num_tasks_created: number;
 };
 
 export type AgentRunScheduleListResponse = {
@@ -144,5 +146,35 @@ export const agentRunSchedulesAPI = {
       baseURL,
       `${schedulesPath(agentId)}/${encodeURIComponent(scheduleId)}/trigger`,
       { method: 'POST' }
+    ),
+
+  skip: (
+    baseURL: string,
+    agentId: string,
+    scheduleId: string,
+    scheduledTime?: string
+  ) =>
+    request<AgentRunSchedule>(
+      baseURL,
+      `${schedulesPath(agentId)}/${encodeURIComponent(scheduleId)}/skip`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ scheduled_time: scheduledTime }),
+      }
+    ),
+
+  unskip: (
+    baseURL: string,
+    agentId: string,
+    scheduleId: string,
+    scheduledTime: string
+  ) =>
+    request<AgentRunSchedule>(
+      baseURL,
+      `${schedulesPath(agentId)}/${encodeURIComponent(scheduleId)}/unskip`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ scheduled_time: scheduledTime }),
+      }
     ),
 };

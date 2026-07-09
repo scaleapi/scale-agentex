@@ -28,6 +28,7 @@ from src.domain.repositories.agent_repository import DAgentRepository
 from src.domain.repositories.agent_run_schedule_repository import (
     DAgentRunScheduleRepository,
 )
+from src.domain.repositories.task_repository import DTaskRepository
 from src.domain.services.authorization_service import DAuthorizationService
 from src.utils.ids import orm_id
 from src.utils.logging import make_logger
@@ -72,11 +73,13 @@ class AgentRunScheduleService:
         authorization_service: DAuthorizationService,
         schedule_repository: DAgentRunScheduleRepository,
         agent_repository: DAgentRepository,
+        task_repository: DTaskRepository,
     ):
         self.temporal_adapter = temporal_adapter
         self.authorization_service = authorization_service
         self.schedule_repository = schedule_repository
         self.agent_repository = agent_repository
+        self.task_repository = task_repository
 
     async def create_schedule(
         self,
@@ -447,6 +450,12 @@ class AgentRunScheduleService:
         skipped_action_times: list[datetime] = []
         last_action_time: datetime | None = None
         num_actions_taken = 0
+        num_tasks_created = (
+            await self.task_repository.count_by_agent_id_and_task_metadata(
+                agent_id=entity.agent_id,
+                task_metadata={"schedule_id": entity.id},
+            )
+        )
 
         # Live Temporal fields are best-effort and opt-in. ``include_live=False``
         # (list path) skips the describe RPC entirely and serves state from the
@@ -496,6 +505,7 @@ class AgentRunScheduleService:
             skipped_action_times=skipped_action_times,
             last_action_time=last_action_time,
             num_actions_taken=num_actions_taken,
+            num_tasks_created=num_tasks_created,
         )
 
     @staticmethod

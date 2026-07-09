@@ -160,6 +160,12 @@ class AgentRunScheduleResponse(BaseModel):
     num_actions_taken: int = Field(
         0, description="Number of times the schedule has fired."
     )
+    num_tasks_created: int = Field(
+        0,
+        description=(
+            "Number of non-deleted tasks created by this schedule, including manual runs."
+        ),
+    )
 
 
 class AgentRunScheduleListResponse(BaseModel):

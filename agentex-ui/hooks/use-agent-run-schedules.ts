@@ -13,6 +13,8 @@ import {
   type UpdateAgentRunScheduleRequest,
 } from '@/lib/agent-run-schedules';
 
+import type { Agent } from 'agentex/resources';
+
 export const scheduleKeys = {
   all: ['agentRunSchedules'] as const,
   byAgentId: (agentId: string | null) =>
@@ -26,6 +28,18 @@ export const scheduleKeys = {
 type ScheduleMutationContext = {
   baseURL: string;
   agentId: string;
+};
+
+type ScheduleActionInput =
+  | string
+  | {
+      scheduleId: string;
+      scheduledTime?: string;
+    };
+
+export type AgentRunScheduleListItem = {
+  agentId: string;
+  schedule: AgentRunSchedule;
 };
 
 function errorMessage(error: unknown) {
@@ -46,21 +60,33 @@ export function useAgentRunSchedules(baseURL: string, agentId: string | null) {
   });
 }
 
-export function useAgentRunScheduleDetails(
+export function useAgentRunSchedulesForAgents(
   baseURL: string,
-  agentId: string | null,
-  schedules: AgentRunSchedule[]
+  agents: Agent[],
+  enabled: boolean
 ) {
   return useQueries({
-    queries:
-      agentId == null
-        ? []
-        : schedules.map(schedule => ({
-            queryKey: scheduleKeys.detail(agentId, schedule.id),
-            queryFn: () =>
-              agentRunSchedulesAPI.get(baseURL, agentId, schedule.id),
-            staleTime: 30_000,
-          })),
+    queries: agents.map(agent => ({
+      queryKey: scheduleKeys.byAgentId(agent.id),
+      queryFn: async () => {
+        const response = await agentRunSchedulesAPI.list(baseURL, agent.id);
+        return response.run_schedules;
+      },
+      enabled,
+    })),
+  });
+}
+
+export function useAgentRunScheduleDetailsForItems(
+  baseURL: string,
+  items: AgentRunScheduleListItem[]
+) {
+  return useQueries({
+    queries: items.map(({ agentId, schedule }) => ({
+      queryKey: scheduleKeys.detail(agentId, schedule.id),
+      queryFn: () => agentRunSchedulesAPI.get(baseURL, agentId, schedule.id),
+      staleTime: 30_000,
+    })),
   });
 }
 
@@ -130,16 +156,19 @@ export function useScheduleAction({
   agentId,
   action,
 }: ScheduleMutationContext & {
-  action: 'delete' | 'pause' | 'resume' | 'trigger';
+  action: 'delete' | 'pause' | 'resume' | 'skip' | 'trigger' | 'unskip';
 }) {
   const queryClient = useQueryClient();
 
   return useMutation<
     AgentRunSchedule | { id: string; message: string },
     Error,
-    string
+    ScheduleActionInput
   >({
-    mutationFn: (scheduleId: string) => {
+    mutationFn: input => {
+      const scheduleId = typeof input === 'string' ? input : input.scheduleId;
+      const scheduledTime =
+        typeof input === 'string' ? undefined : input.scheduledTime;
       switch (action) {
         case 'delete':
           return agentRunSchedulesAPI.delete(baseURL, agentId, scheduleId);
@@ -147,8 +176,25 @@ export function useScheduleAction({
           return agentRunSchedulesAPI.pause(baseURL, agentId, scheduleId);
         case 'resume':
           return agentRunSchedulesAPI.resume(baseURL, agentId, scheduleId);
+        case 'skip':
+          return agentRunSchedulesAPI.skip(
+            baseURL,
+            agentId,
+            scheduleId,
+            scheduledTime
+          );
         case 'trigger':
           return agentRunSchedulesAPI.trigger(baseURL, agentId, scheduleId);
+        case 'unskip':
+          if (!scheduledTime) {
+            throw new Error('scheduledTime is required to unskip a run');
+          }
+          return agentRunSchedulesAPI.unskip(
+            baseURL,
+            agentId,
+            scheduleId,
+            scheduledTime
+          );
       }
     },
     onSuccess: result => {
@@ -163,7 +209,11 @@ export function useScheduleAction({
       toast.success(
         action === 'trigger'
           ? 'Scheduled task triggered'
-          : `Scheduled task ${action === 'delete' ? 'deleted' : `${action}d`}`
+          : action === 'skip'
+            ? 'Scheduled run skipped'
+            : action === 'unskip'
+              ? 'Scheduled run restored'
+              : `Scheduled task ${action === 'delete' ? 'deleted' : `${action}d`}`
       );
     },
     onError: error => {
