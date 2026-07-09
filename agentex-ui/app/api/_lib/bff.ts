@@ -1,6 +1,4 @@
-import { getToken } from 'next-auth/jwt';
-
-import { authEnabled } from '@/auth';
+import { authEnabled, getSessionToken } from '@/auth';
 
 /** Server-only platform API base for the BFF routes. Prefers SGP_API_URL, else the app URL. */
 export const SGP_BASE_URL =
@@ -41,12 +39,10 @@ export async function applyBffCredentials(
 
   if (authEnabled) {
     headers.delete('cookie');
-    const token = await getToken({
-      req: req as never,
-      secret: process.env.AUTH_SECRET ?? '',
-    });
-    const accessToken = token?.accessToken as string | undefined;
-    if (accessToken) headers.set('authorization', `Bearer ${accessToken}`);
+    const token = await getSessionToken(req);
+    if (token?.accessToken) {
+      headers.set('authorization', `Bearer ${token.accessToken}`);
+    }
     return;
   }
 

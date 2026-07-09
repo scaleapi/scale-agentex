@@ -1,6 +1,4 @@
-import { getToken } from 'next-auth/jwt';
-
-import { oidcEndSessionEndpoint, signOut } from '@/auth';
+import { getSessionToken, oidcEndSessionEndpoint, signOut } from '@/auth';
 
 /**
  * RP-initiated (SSO) logout: clear the local session AND end the provider's SSO session,
@@ -11,11 +9,8 @@ import { oidcEndSessionEndpoint, signOut } from '@/auth';
  * trigger logout (GET-logout CSRF). The client POSTs, then navigates to the returned `url`.
  */
 export async function POST(req: Request): Promise<Response> {
-  const token = await getToken({
-    req: req as never,
-    secret: process.env.AUTH_SECRET ?? '',
-  });
-  const idToken = token?.idToken as string | undefined;
+  const token = await getSessionToken(req);
+  const idToken = token?.idToken;
 
   await signOut({ redirect: false }); // clears the session cookie
 

@@ -1,4 +1,5 @@
 import NextAuth, { type NextAuthConfig } from 'next-auth';
+import { getToken } from 'next-auth/jwt';
 
 /**
  * Generic OIDC auth for agentex-ui — vanilla NextAuth v5, IdP is env-driven.
@@ -30,8 +31,9 @@ export const authEnabled = !!providerId;
 // `| undefined` is explicit so assignments compile under exactOptionalPropertyTypes.
 declare module 'next-auth' {
   interface Session {
-    // BFF: the access token is NOT exposed on the session (stays in the JWT/cookie).
+    // Non-secret claims only — the access token stays in the JWT, never on the session.
     error?: string | undefined;
+    sub?: string | undefined;
   }
 }
 declare module '@auth/core/jwt' {
@@ -55,6 +57,19 @@ function env() {
 
 const trimSlash = (u: string) => u.replace(/\/$/, '');
 
+/**
+ * Read the session JWT server-side. getToken defaults to the non-secure cookie name, so
+ * pass `secureCookie` (from AUTH_URL) to match the `__Secure-` cookie NextAuth writes over
+ * HTTPS — otherwise it returns null behind a TLS-terminating proxy (pod sees HTTP).
+ */
+export function getSessionToken(req: Request) {
+  return getToken({
+    req,
+    secret: process.env.AUTH_SECRET ?? '',
+    secureCookie: (process.env.AUTH_URL ?? '').startsWith('https://'),
+  });
+}
+
 // Resolve the token/end-session endpoints from the issuer's well-known document so any
 // IdP works. Cached per-process; a failed lookup isn't cached, so it retries.
 let discoveryPromise: Promise<Record<string, unknown>> | null = null;
@@ -66,6 +81,13 @@ function discoverOidc(): Promise<Record<string, unknown>> {
       .then(r => {
         if (!r.ok) throw new Error(`discovery ${r.status}`);
         return r.json() as Promise<Record<string, unknown>>;
+      })
+      .then(doc => {
+        // token_endpoint is mandatory; a 200 without it is unusable, so throw (don't cache).
+        if (typeof doc.token_endpoint !== 'string' || !doc.token_endpoint) {
+          throw new Error('discovery missing token_endpoint');
+        }
+        return doc;
       })
       .catch(() => {
         discoveryPromise = null; // don't cache a failure — retry on the next call
@@ -154,14 +176,17 @@ function buildProvider(id: string) {
     checks: ['pkce', 'state'] as ('pkce' | 'state')[],
   };
   if (privateKeyJwk && privateKeyJwk.trim().length > 0) {
+    const jwk = JSON.parse(privateKeyJwk) as JsonWebKey & { kid?: string };
     return {
       ...base,
       client: { token_endpoint_auth_method: 'private_key_jwt' },
-      // Promise<CryptoKey> — resolved before @auth/core reads it (see export).
+      // { key, kid } so oauth4webapi adds `kid` to the login assertion (parity with the
+      // refresh signer). `key` is a Promise<CryptoKey> resolved before @auth/core reads it.
       token: {
-        clientPrivateKey: importEs256Key(
-          JSON.parse(privateKeyJwk)
-        ) as unknown as CryptoKey,
+        clientPrivateKey: {
+          key: importEs256Key(jwk) as unknown as CryptoKey,
+          ...(jwk.kid ? { kid: jwk.kid } : {}),
+        },
       },
     };
   }
@@ -182,12 +207,19 @@ function buildConfig(): NextAuthConfig {
     session: { strategy: 'jwt' },
     providers: providerId ? [buildProvider(providerId)] : [],
     callbacks: {
-      async jwt({ token, account }) {
+      async jwt({ token, account, profile }) {
         if (account) {
           token.accessToken = account.access_token;
           token.refreshToken = account.refresh_token;
           token.idToken = account.id_token;
           token.expiresAt = account.expires_at;
+        }
+        // Non-secret identity claims for the session.
+        if (profile) {
+          if (profile.sub) token.sub = profile.sub;
+          if (profile.name) token.name = profile.name;
+          if (profile.email) token.email = profile.email;
+          if (profile.picture) token.picture = profile.picture;
         }
         const expiresAt = token.expiresAt;
         if (
@@ -221,9 +253,17 @@ function buildConfig(): NextAuthConfig {
               body,
             });
             if (!res.ok) {
-              token.accessToken = undefined;
-              token.refreshToken = undefined;
-              return { ...token, error: 'RefreshAccessTokenError' };
+              // Only invalid_grant (dead refresh token) is terminal; keep the token on
+              // transient failures so the next cycle retries.
+              const body = (await res.json().catch(() => ({}))) as {
+                error?: string;
+              };
+              if (res.status === 400 && body.error === 'invalid_grant') {
+                token.accessToken = undefined;
+                token.refreshToken = undefined;
+                return { ...token, error: 'RefreshAccessTokenError' };
+              }
+              return token;
             }
             const r = (await res.json()) as {
               access_token?: string;
@@ -239,17 +279,14 @@ function buildConfig(): NextAuthConfig {
             if (r.refresh_token) token.refreshToken = r.refresh_token;
             if (r.id_token) token.idToken = r.id_token;
           } catch {
-            token.accessToken = undefined;
-            token.refreshToken = undefined;
-            return { ...token, error: 'RefreshAccessTokenError' };
+            return token; // transient — keep the token, retry next cycle
           }
         }
         return token;
       },
       session({ session, token }) {
-        // BFF: keep the access token server-side (JWT/cookie); never on session.
-        // The /api/agentex proxy reads it via getToken() and attaches the Bearer.
         if (token.error) session.error = token.error;
+        session.sub = token.sub;
         return session;
       },
     },
@@ -280,9 +317,10 @@ if (authEnabled) {
 // Config must be a static object, not a function — a config function makes `auth` async,
 // so `auth((req) => …)` returns a Promise instead of callable middleware.
 for (const p of config.providers ?? []) {
-  const tok = (p as { token?: { clientPrivateKey?: unknown } }).token;
-  if (tok && tok.clientPrivateKey instanceof Promise) {
-    tok.clientPrivateKey = await tok.clientPrivateKey;
+  const pk = (p as { token?: { clientPrivateKey?: { key?: unknown } } }).token
+    ?.clientPrivateKey;
+  if (pk && pk.key instanceof Promise) {
+    pk.key = await pk.key;
   }
 }
 
