@@ -11,6 +11,7 @@ import json
 import httpx
 from src.domain.entities.agents import AgentStatus
 from src.domain.repositories.agent_repository import AgentRepository
+from src.utils.acp_url import resolve_acp_url
 from src.utils.logging import make_logger
 from temporalio import activity
 
@@ -54,6 +55,9 @@ class HealthCheckActivities:
         Returns:
             bool: True if the agent is healthy, False otherwise
         """
+        # In docker-free local mode, rewrite host.docker.internal -> the host-reachable
+        # override so the healthcheck matches how the request path dials the agent.
+        acp_url = resolve_acp_url(acp_url)
         logger.info(f"Checking status of agent {agent_id} via {acp_url}")
         try:
             response = await self.http_client.get(f"{acp_url}/healthz", timeout=5)

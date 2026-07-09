@@ -5,7 +5,8 @@
 # Delegates to existing Makefiles - this is an orchestration layer, not a replacement
 #
 # Usage:
-#   ./dev.sh          Start all services
+#   ./dev.sh          Start all services (Docker backend + frontend)
+#   ./dev.sh local    Start all services WITHOUT Docker (embedded pg/redis, local temporal/mongo/otel)
 #   ./dev.sh setup    Install all prerequisites (macOS)
 #   ./dev.sh stop     Stop all services
 #   ./dev.sh logs     Show logs
@@ -18,6 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="$SCRIPT_DIR/.dev-logs"
 BACKEND_PID_FILE="$LOG_DIR/backend.pid"
 FRONTEND_PID_FILE="$LOG_DIR/frontend.pid"
+MODE_FILE="$LOG_DIR/mode"  # records "docker" or "local" so stop/status know how to act
 
 # Colors for output
 RED='\033[0;31m'
@@ -166,7 +168,8 @@ install_prerequisites() {
     echo "========================================"
     echo ""
     echo "You can now run:"
-    echo "  ./dev.sh              # Start the development environment"
+    echo "  ./dev.sh              # Start the development environment (Docker)"
+    echo "  ./dev.sh local        # Start without Docker (embedded services)"
     echo ""
     echo "Once running, create your first agent:"
     echo "  agentex init          # Create a new agent"
@@ -202,17 +205,121 @@ ensure_prerequisites() {
         needs_install=true
     fi
 
-    # Docker must be running (can't auto-install - user chooses Docker Desktop or Rancher)
-    if ! docker info &> /dev/null; then
-        log_error "Docker daemon is not running. Please start Docker Desktop or Rancher Desktop."
-        exit 1
-    fi
-
     if [ "$needs_install" = true ]; then
         log_info "Some prerequisites missing - installing automatically..."
         install_prerequisites
     else
         log_success "All prerequisites found"
+    fi
+}
+
+require_docker() {
+    # Docker must be running for the Docker-based backend (can't auto-install -
+    # the user chooses Docker Desktop or Rancher).
+    if ! docker info &> /dev/null; then
+        log_error "Docker daemon is not running. Please start Docker Desktop or Rancher Desktop."
+        log_info "Tip: run './dev.sh local' to start the backend WITHOUT Docker."
+        exit 1
+    fi
+}
+
+# Install the OpenTelemetry Collector (contrib). It is NOT distributed via Homebrew,
+# so we fetch the official release binary for this OS/arch. Best-effort: OTel is
+# optional, so any failure returns non-zero and the caller just warns.
+install_otel_collector() {
+    local ver="0.156.0"
+    local os arch
+    case "$(uname -s)" in
+        Darwin) os=darwin ;;
+        Linux)  os=linux ;;
+        *) log_warn "Unsupported OS for otel auto-install."; return 1 ;;
+    esac
+    case "$(uname -m)" in
+        arm64|aarch64) arch=arm64 ;;
+        x86_64|amd64)  arch=amd64 ;;
+        *) log_warn "Unsupported arch for otel auto-install."; return 1 ;;
+    esac
+
+    local tarball="otelcol-contrib_${ver}_${os}_${arch}.tar.gz"
+    local base="https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${ver}"
+
+    local dest
+    if [ -w /opt/homebrew/bin ]; then dest=/opt/homebrew/bin
+    elif [ -w /usr/local/bin ]; then dest=/usr/local/bin
+    else dest="$HOME/.local/bin"; mkdir -p "$dest"; fi
+
+    log_info "Installing OpenTelemetry collector v${ver} (release binary; not in Homebrew)..."
+    local tmp; tmp="$(mktemp -d)"
+    if ! curl -fL -o "$tmp/otel.tar.gz" "${base}/${tarball}"; then
+        rm -rf "$tmp"; return 1
+    fi
+    # Verify against the release checksums file when available.
+    if curl -fsL -o "$tmp/checksums.txt" "${base}/otelcol-contrib_${ver}_checksums.txt"; then
+        local expected actual
+        expected="$(grep " ${tarball}\$" "$tmp/checksums.txt" | awk '{print $1}')"
+        actual="$(shasum -a 256 "$tmp/otel.tar.gz" | awk '{print $1}')"
+        if [ -n "$expected" ] && [ "$expected" != "$actual" ]; then
+            log_warn "otel collector checksum mismatch; skipping install."
+            rm -rf "$tmp"; return 1
+        fi
+    fi
+    if ! tar xzf "$tmp/otel.tar.gz" -C "$tmp" otelcol-contrib; then
+        rm -rf "$tmp"; return 1
+    fi
+    install -m 0755 "$tmp/otelcol-contrib" "$dest/otelcol-contrib" || { rm -rf "$tmp"; return 1; }
+    rm -rf "$tmp"
+    # Make it findable this session if we landed in ~/.local/bin.
+    case ":$PATH:" in *":$dest:"*) : ;; *) export PATH="$dest:$PATH" ;; esac
+    log_success "otel collector installed to $dest/otelcol-contrib"
+}
+
+ensure_local_service_binaries() {
+    # `local` mode runs Postgres/Redis/Temporal with no install (bundled /
+    # auto-downloaded). MongoDB is REQUIRED for the full stack (the Temporal worker
+    # needs it) so we always ensure it and FAIL FAST if we can't. The OTel collector is
+    # genuinely optional, so its install is best-effort. Honors the runner opt-out
+    # flags forwarded in "$@": --lean/--no-otel skip the OTel install, and an external
+    # --mongo-uri means the runner won't launch a local mongod (so no local install).
+    local want_mongo=true want_otel=true
+    for arg in "$@"; do
+        case "$arg" in
+            --no-otel)  want_otel=false ;;
+            --lean)     want_otel=false ;;
+            --mongo-uri|--mongo-uri=*) want_mongo=false ;;
+        esac
+    done
+
+    # ----- MongoDB: required (unless pointing at an external --mongo-uri) -----
+    if [ "$want_mongo" = true ]; then
+        if command -v mongod &> /dev/null; then
+            log_success "mongod already installed"
+        elif command -v brew &> /dev/null; then
+            log_info "Installing MongoDB (mongod) via Homebrew (required for local mode)..."
+            brew tap mongodb/brew &> /dev/null || true
+            # Modern Homebrew refuses to install from an untrusted tap; trust it first.
+            brew trust mongodb/brew &> /dev/null || true
+            if ! brew install mongodb-community; then
+                log_error "MongoDB install failed, but it is REQUIRED for local mode."
+                log_error "Install mongod manually, or pass --mongo-uri to use an external MongoDB."
+                exit 1
+            fi
+        else
+            log_error "mongod is not installed and Homebrew is unavailable to install it."
+            log_error "MongoDB is REQUIRED for local mode — install mongod (https://www.mongodb.com/docs/manual/administration/install-community/),"
+            log_error "or pass --mongo-uri to use an external MongoDB."
+            exit 1
+        fi
+    else
+        log_info "Using external MongoDB (--mongo-uri); skipping local mongod install."
+    fi
+
+    # ----- OTel collector: optional -----
+    if [ "$want_otel" = true ]; then
+        if command -v otelcol-contrib &> /dev/null || command -v otelcol &> /dev/null; then
+            log_success "otel collector already installed"
+        else
+            install_otel_collector || log_warn "otel collector install failed; telemetry will be skipped (the app runs fine without it)."
+        fi
     fi
 }
 
@@ -229,7 +336,7 @@ setup_log_dir() {
 }
 
 start_backend() {
-    log_info "Starting backend services..."
+    log_info "Starting backend services (Docker)..."
 
     cd "$SCRIPT_DIR/agentex"
 
@@ -237,6 +344,7 @@ start_backend() {
     make dev > "$LOG_DIR/backend.log" 2>&1 &
     local pid=$!
     echo $pid > "$BACKEND_PID_FILE"
+    echo "docker" > "$MODE_FILE"
 
     log_success "Backend starting (PID: $pid)"
     log_info "Backend logs: tail -f $LOG_DIR/backend.log"
@@ -244,8 +352,52 @@ start_backend() {
     cd "$SCRIPT_DIR"
 }
 
+start_backend_local() {
+    log_info "Starting backend services (local, no Docker)..."
+
+    cd "$SCRIPT_DIR/agentex"
+
+    # Run the docker-free runner DIRECTLY via `uv run` (not `make`) so a SIGTERM
+    # from `./dev.sh stop` is forwarded straight to the Python supervisor, which
+    # tears down the embedded datastores cleanly. --group dev-local pulls
+    # pgserver/redislite/greenlet.
+    uv run --group dev-local python -m scripts.dev_local "$@" > "$LOG_DIR/backend.log" 2>&1 &
+    local pid=$!
+    echo $pid > "$BACKEND_PID_FILE"
+    echo "local" > "$MODE_FILE"
+
+    log_success "Backend starting (PID: $pid)"
+    log_info "Backend logs: tail -f $LOG_DIR/backend.log"
+
+    cd "$SCRIPT_DIR"
+}
+
+# Kill a PID and all its descendants. The frontend runs as make -> npm -> next, so
+# killing only the recorded (make) PID orphans the npm/next children; over repeated
+# runs those pile up and hold ports 3000, 3001, 3002, ... This walks the tree.
+kill_tree() {
+    local pid=$1
+    [ -z "$pid" ] && return 0
+    local child
+    for child in $(pgrep -P "$pid" 2>/dev/null); do
+        kill_tree "$child"
+    done
+    kill "$pid" 2>/dev/null || true
+}
+
+# Sweep any stray `next dev` server belonging to THIS repo's UI. Scoped by absolute
+# path so it never touches another project's dev server, and catches orphans whose
+# parent (make/npm) has already exited.
+sweep_stray_frontends() {
+    pkill -f "$SCRIPT_DIR/agentex-ui/node_modules/.bin/next" 2>/dev/null || true
+}
+
 start_frontend() {
     log_info "Starting frontend..."
+
+    # Clear any stale frontend from a previous run first, so `next dev` can bind :3000
+    # instead of silently climbing to :3001/:3002/...
+    sweep_stray_frontends
 
     cd "$SCRIPT_DIR/agentex-ui"
 
@@ -283,29 +435,54 @@ wait_for_backend() {
     log_info "Check logs with: ./dev.sh logs"
 }
 
+# Echo the recorded backend mode ("docker" or "local"), defaulting to docker.
+current_mode() {
+    if [ -f "$MODE_FILE" ]; then cat "$MODE_FILE"; else echo "docker"; fi
+}
+
 stop_services() {
     log_info "Stopping all services..."
 
-    # Stop frontend
+    # Stop frontend: kill the whole make -> npm -> next tree, then sweep any strays
+    # orphaned by earlier runs (their parent may already be gone).
     if [ -f "$FRONTEND_PID_FILE" ]; then
-        local frontend_pid=$(cat "$FRONTEND_PID_FILE")
-        if kill -0 "$frontend_pid" 2>/dev/null; then
-            kill "$frontend_pid" 2>/dev/null || true
-            log_success "Frontend stopped"
-        fi
+        kill_tree "$(cat "$FRONTEND_PID_FILE")"
         rm -f "$FRONTEND_PID_FILE"
     fi
+    sweep_stray_frontends
+    log_success "Frontend stopped"
 
-    # Stop backend (docker compose)
-    cd "$SCRIPT_DIR/agentex"
-    docker compose down 2>/dev/null || true
-    log_success "Backend stopped"
+    # Stop backend according to how it was started.
+    local mode
+    mode=$(current_mode)
 
-    if [ -f "$BACKEND_PID_FILE" ]; then
-        rm -f "$BACKEND_PID_FILE"
+    if [ "$mode" = "local" ]; then
+        if [ -f "$BACKEND_PID_FILE" ]; then
+            local backend_pid
+            backend_pid=$(cat "$BACKEND_PID_FILE")
+            if kill -0 "$backend_pid" 2>/dev/null; then
+                log_info "Stopping local backend (PID: $backend_pid) — tearing down embedded services..."
+                kill -TERM "$backend_pid" 2>/dev/null || true
+                local waited=0
+                while kill -0 "$backend_pid" 2>/dev/null && [ "$waited" -lt 20 ]; do
+                    sleep 1
+                    waited=$((waited + 1))
+                done
+                if kill -0 "$backend_pid" 2>/dev/null; then
+                    log_warn "Backend did not stop gracefully; forcing."
+                    kill -9 "$backend_pid" 2>/dev/null || true
+                fi
+            fi
+        fi
+        log_success "Backend stopped"
+    else
+        cd "$SCRIPT_DIR/agentex"
+        docker compose down 2>/dev/null || true
+        cd "$SCRIPT_DIR"
+        log_success "Backend stopped"
     fi
 
-    cd "$SCRIPT_DIR"
+    rm -f "$BACKEND_PID_FILE" "$MODE_FILE"
 
     log_success "All services stopped"
 }
@@ -328,37 +505,55 @@ show_logs() {
 }
 
 show_status() {
+    local mode
+    mode=$(current_mode)
+
     echo ""
     echo "=== Agentex Development Status ==="
     echo ""
 
     # Check backend
-    echo -n "Backend (Docker): "
-    if docker compose -f "$SCRIPT_DIR/agentex/docker-compose.yml" ps 2>/dev/null | grep -q "Up"; then
+    echo -n "Backend ($mode): "
+    if [ "$mode" = "local" ]; then
+        if [ -f "$BACKEND_PID_FILE" ] && kill -0 "$(cat "$BACKEND_PID_FILE")" 2>/dev/null; then
+            echo -e "${GREEN}Running${NC}"
+        else
+            echo -e "${RED}Stopped${NC}"
+        fi
+    else
+        if docker compose -f "$SCRIPT_DIR/agentex/docker-compose.yml" ps 2>/dev/null | grep -q "Up"; then
+            echo -e "${GREEN}Running${NC}"
+        else
+            echo -e "${RED}Stopped${NC}"
+        fi
+    fi
+
+    # Check frontend — report by what's actually serving :3000, not just the recorded
+    # PID (make/npm can exit while next keeps serving, and vice versa).
+    echo -n "Frontend (Next.js): "
+    if lsof -nP -iTCP:3000 -sTCP:LISTEN &> /dev/null \
+       || { [ -f "$FRONTEND_PID_FILE" ] && kill -0 "$(cat "$FRONTEND_PID_FILE")" 2>/dev/null; }; then
         echo -e "${GREEN}Running${NC}"
     else
         echo -e "${RED}Stopped${NC}"
     fi
 
-    # Check frontend
-    echo -n "Frontend (Next.js): "
-    if [ -f "$FRONTEND_PID_FILE" ] && kill -0 "$(cat "$FRONTEND_PID_FILE")" 2>/dev/null; then
-        echo -e "${GREEN}Running${NC}"
-    else
-        echo -e "${RED}Stopped${NC}"
-    fi
+    # Temporal UI port differs: local dev server uses 8233, Docker UI uses 8080.
+    local temporal_ui="http://localhost:8080"
+    [ "$mode" = "local" ] && temporal_ui="http://localhost:8233"
 
     echo ""
     echo "=== URLs ==="
     echo "Frontend:     http://localhost:3000"
     echo "Backend API:  http://localhost:5003"
     echo "Swagger:      http://localhost:5003/swagger"
-    echo "Temporal UI:  http://localhost:8080"
+    echo "Temporal UI:  $temporal_ui"
     echo ""
 }
 
 start_all() {
     ensure_prerequisites
+    require_docker
     check_redis_conflict
     setup_log_dir
 
@@ -403,10 +598,59 @@ start_all() {
     echo ""
 }
 
+start_all_local() {
+    ensure_prerequisites                # no Docker requirement in local mode
+    ensure_local_service_binaries "$@"  # ensure mongod (required) + otel (optional); honors --mongo-uri/--lean
+    setup_log_dir
+
+    echo ""
+    echo "========================================"
+    echo "   Starting Agentex Development Env (Local, no Docker)   "
+    echo "========================================"
+    echo ""
+
+    start_backend_local "$@"
+    start_frontend
+
+    echo ""
+    log_info "Services are starting up (embedded Postgres/Redis + Temporal + MongoDB [required] + OTel [optional])..."
+    echo ""
+    echo "=== URLs (will be ready shortly) ==="
+    echo "Frontend:     http://localhost:3000"
+    echo "Backend API:  http://localhost:5003"
+    echo "Swagger:      http://localhost:5003/swagger"
+    echo "Temporal UI:  http://localhost:8233"
+    echo ""
+    echo "=== Commands ==="
+    echo "./dev.sh logs      - View all logs"
+    echo "./dev.sh logs backend  - View backend logs"
+    echo "./dev.sh logs frontend - View frontend logs"
+    echo "./dev.sh status    - Check service status"
+    echo "./dev.sh stop      - Stop all services"
+    echo ""
+
+    wait_for_backend
+
+    echo ""
+    log_success "Development environment is ready!"
+    log_info "Open http://localhost:3000 to access the UI"
+    echo ""
+    log_info "To create an agent, in a new terminal run:"
+    echo "  agentex init"
+    echo "  cd <your-agent-name>"
+    echo "  uv venv && source .venv/bin/activate && uv sync"
+    echo "  agentex agents run --manifest manifest.yaml"
+    echo ""
+}
+
 # Main command router
 case "${1:-start}" in
     start|"")
         start_all
+        ;;
+    local)
+        shift  # drop the 'local' subcommand so only flags reach dev_local.py
+        start_all_local "$@"
         ;;
     setup)
         install_prerequisites
@@ -421,9 +665,17 @@ case "${1:-start}" in
         show_status
         ;;
     restart)
+        # Restart in whatever mode was last used. stop_services clears MODE_FILE,
+        # so capture the mode first. (Local restarts use default flags — the original
+        # runner flags are not persisted.)
+        restart_mode=$(current_mode)
         stop_services
         sleep 2
-        start_all
+        if [ "$restart_mode" = "local" ]; then
+            start_all_local
+        else
+            start_all
+        fi
         ;;
     help|--help|-h)
         echo "Agentex Development Script"
@@ -431,9 +683,15 @@ case "${1:-start}" in
         echo "Usage: $0 [command]"
         echo ""
         echo "Commands:"
-        echo "  (none)    Start everything (auto-installs prerequisites if needed)"
+        echo "  (none)    Start everything with Docker (auto-installs prerequisites if needed)"
+        echo "  local     Start everything WITHOUT Docker (embedded pg/redis + Temporal + MongoDB + OTel)"
+        echo "            MongoDB is required for the full stack and is auto-installed; OTel is optional."
+        echo "            Flags pass through to the runner, e.g.:"
+        echo "              ./dev.sh local --full        # whole stack (default)"
+        echo "              ./dev.sh local --lean        # Postgres + Redis + API + MongoDB only"
+        echo "              ./dev.sh local --no-temporal # skip Temporal + worker"
         echo "  setup     Just install prerequisites without starting"
-        echo "  stop      Stop all services"
+        echo "  stop      Stop all services (Docker or local)"
         echo "  restart   Restart all services"
         echo "  logs      Show logs (logs backend|frontend|all)"
         echo "  status    Check service status"

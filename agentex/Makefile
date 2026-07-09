@@ -41,9 +41,19 @@ dev: install-dev ## Start development server with Docker Compose
 	@echo "🚀 Starting development server with Docker Compose..."
 	docker compose up --build
 
+dev-local: install-dev ## Start development server locally (no Docker)
+	@echo "🚀 Starting development server locally without Docker..."
+	@echo "ℹ️  MongoDB is REQUIRED for the full stack. If 'mongod' is not on your PATH,"
+	@echo "   install it (brew tap mongodb/brew && brew install mongodb-community) or point"
+	@echo "   at an external one with ARGS=\"--mongo-uri <uri>\". (Unlike './dev.sh local',"
+	@echo "   make does not auto-install it.)"
+	uv sync --group dev --group dev-local
+	uv run python -m scripts.dev_local $(ARGS)
+
 dev-stop: ## Stop development server
 	@echo "Stopping dev server"
 	docker compose down
+# 	TODO: Add support for stopping local dev server
 
 dev-wipe: ## Stop dev server and wipe DB
 	@echo "Stopping dev server and wiping DB"

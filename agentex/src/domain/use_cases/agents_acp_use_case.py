@@ -50,6 +50,7 @@ from src.domain.services.agent_acp_service import DAgentACPService
 from src.domain.services.authorization_service import DAuthorizationService
 from src.domain.services.task_message_service import DTaskMessageService
 from src.domain.services.task_service import DAgentTaskService
+from src.utils.acp_url import resolve_acp_url
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
@@ -323,23 +324,29 @@ class AgentsACPUseCase(TaskMessageMixin):
         agent: AgentEntity,
         acp_url_override: str | None = None,
     ) -> str:
-        """Resolve the ACP URL for an agent, optionally overriding with a specific URL."""
-        if acp_url_override:
-            return acp_url_override
+        """Resolve the ACP URL for an agent, optionally overriding with a specific URL.
 
-        # Resolve through production deployment if available
-        if agent.production_deployment_id:
+        The resolved URL is passed through resolve_acp_url so that, in docker-free
+        local mode, an agent registered at host.docker.internal is dialed at the
+        host-reachable override address (a no-op in Docker/prod).
+        """
+        raw = acp_url_override
+
+        # Prefer the production deployment's URL when there's no explicit override.
+        if raw is None and agent.production_deployment_id:
             deployment = await self.deployment_repo.get(
                 id=agent.production_deployment_id
             )
-            if deployment.acp_url:
-                return deployment.acp_url
+            raw = deployment.acp_url
 
-        # Legacy fallback
-        if agent.acp_url:
-            return agent.acp_url
+        # Legacy fallback to the agent's own URL.
+        if raw is None:
+            raw = agent.acp_url
 
-        raise ClientError(f"Agent {agent.id} does not have an ACP URL configured")
+        if raw is None:
+            raise ClientError(f"Agent {agent.id} does not have an ACP URL configured")
+
+        return resolve_acp_url(raw)
 
     async def handle_rpc_request(
         self,

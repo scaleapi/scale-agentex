@@ -95,14 +95,21 @@ dev = [
     { name = "ruff", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "vulture", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
 ]
+dev-local = [
+    { name = "greenlet", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "pgserver", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "redislite", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+]
 test = [
     { name = "asyncpg", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "factory-boy", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "greenlet", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "httpx", extra = ["http2"], marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "pgserver", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "pytest", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "pytest-asyncio", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "pytest-cov", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "redislite", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "testcontainers", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
 ]
 
@@ -145,14 +152,21 @@ dev = [
     { name = "ruff", specifier = ">=0.3.4" },
     { name = "vulture", specifier = ">=2.14" },
 ]
+dev-local = [
+    { name = "greenlet", specifier = ">=3.2.3" },
+    { name = "pgserver", specifier = ">=0.1.4" },
+    { name = "redislite", specifier = ">=6.2.912183" },
+]
 test = [
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "factory-boy", specifier = ">=3.3.0,<4" },
     { name = "greenlet", specifier = ">=3.2.3" },
     { name = "httpx", extras = ["http2"], specifier = ">=0.27.0,<0.29" },
+    { name = "pgserver", specifier = ">=0.1.4" },
     { name = "pytest", specifier = ">=8.3.3,<9" },
     { name = "pytest-asyncio", specifier = ">=1.0.0,<2" },
     { name = "pytest-cov", specifier = ">=5.0.0,<6" },
+    { name = "redislite", specifier = ">=6.2.912183" },
     { name = "testcontainers", specifier = ">=4.0.0,<5" },
 ]
 
@@ -738,6 +752,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e7/7b/f8e0211e9380f7195ba3f3d40c292594fd81ba8ec4629e3854c353aaca45/fastapi-0.135.1.tar.gz", hash = "sha256:d04115b508d936d254cea545b7312ecaa58a7b3a0f84952535b4c9afae7668cd", size = 394962, upload-time = "2026-03-01T18:18:29.369Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e4/72/42e900510195b23a56bde950d26a51f8b723846bfcaa0286e90287f0422b/fastapi-0.135.1-py3-none-any.whl", hash = "sha256:46e2fc5745924b7c840f71ddd277382af29ce1cdb7d5eab5bf697e3fb9999c9e", size = 116999, upload-time = "2026-03-01T18:18:30.831Z" },
+]
+
+[[package]]
+name = "fasteners"
+version = "0.20"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2d/18/7881a99ba5244bfc82f06017316ffe93217dbbbcfa52b887caa1d4f2a6d3/fasteners-0.20.tar.gz", hash = "sha256:55dce8792a41b56f727ba6e123fcaee77fd87e638a6863cec00007bfea84c8d8", size = 25087, upload-time = "2025-08-11T10:19:37.785Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/51/ac/e5d886f892666d2d1e5cb8c1a41146e1d79ae8896477b1153a21711d3b44/fasteners-0.20-py3-none-any.whl", hash = "sha256:9422c40d1e350e4259f509fb2e608d6bc43c0136f79a00db1b49046029d0b3b7", size = 18702, upload-time = "2025-08-11T10:19:35.716Z" },
 ]
 
 [[package]]
@@ -1728,6 +1751,21 @@ wheels = [
 ]
 
 [[package]]
+name = "pgserver"
+version = "0.1.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "fasteners", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "platformdirs", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "psutil", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/92/e3/9f8eea535ab4f2906a9924eccc5fb3a7bcff3e02222fbe338d9c24639750/pgserver-0.1.4-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:dc34f88561b18bc08edd98a84528f99a3720fe713a4e39a4a6210a4d009fe465", size = 10378168, upload-time = "2024-06-08T18:41:40.377Z" },
+    { url = "https://files.pythonhosted.org/packages/23/57/94b5f05a23d0fa683c01bfc2d785224057a9eaf0eb00cbfd6da19547012f/pgserver-0.1.4-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:780fa89f26a960cca0215caf471e70848dd8597bd8ceaeba7faf42170278980c", size = 9822137, upload-time = "2024-06-08T18:41:43.017Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/f1/c9d717f66d2e4a27801577e1ae233c25aa88db875c586ac3ebe7d73b6b75/pgserver-0.1.4-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:1a5d07c61d51f2abfef4ef61e2ef5cd014b994f7e09de8d3c140d2cf370e84a8", size = 11266316, upload-time = "2024-06-08T18:41:48.033Z" },
+]
+
+[[package]]
 name = "platformdirs"
 version = "4.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2129,6 +2167,20 @@ wheels = [
 ]
 
 [[package]]
+name = "redislite"
+version = "6.2.912183"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "psutil", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "redis", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "setuptools", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/af/7d/b6fc82af45ed2aa31f6c8b2035df009ff9fd8be01ad8a691155cc167f1f2/redislite-6.2.912183.tar.gz", hash = "sha256:40642495cc53bd5ca3cc186355a7235795ef4b36dd167cb77c7e6837d23e5dd6", size = 2555087, upload-time = "2023-12-01T22:19:28.526Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0b/b9/95ce807b397428704bfc01769848d0caa8417e7d3753785ccc14c3b05097/redislite-6.2.912183-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:6610f867c2c1b2022613c093d56cfe8293bdf6e081d2259d62b5f5318487c30e", size = 6071189, upload-time = "2023-12-01T22:22:13.983Z" },
+]
+
+[[package]]
 name = "referencing"
 version = "0.36.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2301,6 +2353,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/86/2b/a6a373ec8d33fad8b553182aa1ceade94434752c935a4ce16ca84d188c0f/scale_gp_beta-0.1.0a20.tar.gz", hash = "sha256:a2be5c1afcb9171d3c2d6f15b45f4512105c79ab12be8e7ef5a22167ac77fb88", size = 157799, upload-time = "2025-06-12T14:46:17.73Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/af/12/55f47289a0ae1065e4115bc8018b2f01df0b6560b07bacfc0dcf6c3bdcbe/scale_gp_beta-0.1.0a20-py3-none-any.whl", hash = "sha256:482385ee6c3b912aecf70795948ac45b215a4d19feba60f67d6e10c4312440c6", size = 157906, upload-time = "2025-06-12T14:46:16.344Z" },
+]
+
+[[package]]
+name = "setuptools"
+version = "83.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/34/26/f5d29e25ffdb535afef2d35cdb55b325298f96debd670da4c325e08d70f4/setuptools-83.0.0.tar.gz", hash = "sha256:025bccbbf0fa05b6192bc64ae1e7b16e001fd6d6d4d5de03c97b1c1ade523bef", size = 1154254, upload-time = "2026-07-04T15:31:22.699Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5d/40/e1e72872c6354b306daef1703549e8e83b4d43cfea356311bf722a043752/setuptools-83.0.0-py3-none-any.whl", hash = "sha256:29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3", size = 1008090, upload-time = "2026-07-04T15:31:20.885Z" },
 ]
 
 [[package]]

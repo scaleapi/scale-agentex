@@ -105,20 +105,23 @@ To do this, you just need to spin up the [Agentex Server](https://github.com/sca
 
 ### Quick Start (Recommended)
 
-Just run one command:
+Just run one command — no Docker required:
 
 ```bash
-./dev.sh
+./dev.sh local
 ```
 
 That's it. This will automatically:
 - Install Homebrew, uv, Node.js, and agentex-sdk if missing (macOS)
 - Install all backend and frontend dependencies
-- Start all Docker services (Postgres, Redis, MongoDB, Temporal)
-- Start the backend API and frontend dev server
+- Start the backend API and frontend dev server as host processes
+- Provision embedded datastores — bundled Postgres + Redis, an auto-downloaded Temporal
+  dev server, a local MongoDB, and an optional OTel collector
 - Wait for everything to be healthy
 
-> **Note:** Make sure Docker Desktop or Rancher Desktop is running before you start.
+> Prefer containers? `./dev.sh` runs the same stack with Docker instead (needs Docker
+> Desktop or Rancher Desktop) — see [Other commands](#other-commands) below. See
+> [Docker-free local mode](#docker-free-local-mode) for `local` flags and details.
 
 Once ready:
 | Service | URL |
@@ -126,15 +129,46 @@ Once ready:
 | Frontend UI | http://localhost:3000 |
 | Backend API | http://localhost:5003 |
 | Swagger Docs | http://localhost:5003/swagger |
-| Temporal UI | http://localhost:8080 |
+| Temporal UI | http://localhost:8233 |
 
-**Other commands:**
+> With `./dev.sh` (Docker) the Temporal UI is on http://localhost:8080 instead.
+
+#### Other commands
 ```bash
+./dev.sh           # Start everything with Docker instead (containers; needs Docker Desktop/Rancher)
 ./dev.sh stop      # Stop all services
 ./dev.sh status    # Check service status
 ./dev.sh logs      # View all logs
 ./dev.sh restart   # Restart all services
 ```
+
+#### Docker-free local mode
+
+`./dev.sh local` accepts flags to trim the stack:
+
+```bash
+./dev.sh local                # whole stack, no Docker
+./dev.sh local --lean         # Postgres + Redis + API + MongoDB only (no Temporal/OTel)
+./dev.sh local --no-temporal  # skip Temporal + the worker
+./dev.sh local --mongo-uri <uri>  # use an external MongoDB instead of a local mongod
+```
+
+> **MongoDB is required for the full local stack** and is always started. The Temporal
+> worker needs it, so `./dev.sh local` auto-installs `mongod` (via Homebrew) and startup
+> **fails fast** with an install message if it can't be made available. Point at an
+> existing MongoDB with `--mongo-uri <uri>` to skip the local `mongod`. The OTel
+> collector is optional; if it's absent the runner continues without telemetry. In local
+> mode the Temporal UI is at http://localhost:8233 (not :8080). Same `stop` / `status` /
+> `logs` / `restart` commands apply.
+
+**Connecting agents in local mode.** Agents scaffolded by `agentex init` register their
+ACP URL as `http://host.docker.internal:<port>` (so a *Docker* backend can reach an
+agent on the host). A host-process backend can't resolve that name, so local mode sets
+`AGENTEX_ACP_HOST_OVERRIDE=127.0.0.1` and the backend automatically rewrites
+`host.docker.internal` → `127.0.0.1` when dialing agents (and their healthchecks). So a
+default-scaffolded agent works with `./dev.sh local` **without editing its manifest**.
+(You can still set `local_development.agent.host_address: localhost` in the manifest if
+you prefer; both work.)
 
 Then skip ahead to [Create Your First Agent](#create-your-first-agent).
 

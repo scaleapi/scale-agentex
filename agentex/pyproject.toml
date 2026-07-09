@@ -43,6 +43,14 @@ dev = [
     "vulture>=2.14",
     "ruff>=0.3.4",
 ]
+dev-local = [
+    "pgserver>=0.1.4",
+    "redislite>=6.2.912183",
+    # SQLAlchemy's async engine needs greenlet at runtime. SQLAlchemy auto-installs
+    # it on linux x86_64 (docker/prod) but NOT on macOS arm64, so the local runner
+    # must pull it explicitly or /readyz and engine teardown fail.
+    "greenlet>=3.2.3",
+]
 test = [
     "pytest>=8.3.3,<9",
     "pytest-asyncio>=1.0.0,<2",
@@ -52,6 +60,9 @@ test = [
     "factory-boy>=3.3.0,<4", # for test data factories
     "greenlet>=3.2.3",
     "asyncpg>=0.29.0",
+    # Embedded datastores for dev_local.py tests (no testcontainers/docker needed)
+    "pgserver>=0.1.4",
+    "redislite>=6.2.912183",
 ]
 
 [tool.hatch.build.targets.sdist]
