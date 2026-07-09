@@ -1,13 +1,14 @@
 import { memo, useCallback, useMemo } from 'react';
 
 import { formatDistanceToNow } from 'date-fns';
+import { CalendarClock } from 'lucide-react';
 
 import { ResizableSidebar } from '@/components/ui/resizable-sidebar';
 import {
   SearchParamKey,
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
-import { createTaskName } from '@/lib/task-utils';
+import { createTaskName, isScheduledTask } from '@/lib/task-utils';
 import { cn } from '@/lib/utils';
 
 import type { TaskListResponse } from 'agentex/resources';
@@ -19,6 +20,7 @@ type TaskButtonProps = {
 function TaskButtonImpl({ task }: TaskButtonProps) {
   const { taskID, updateParams } = useSafeSearchParams();
   const taskName = createTaskName(task);
+  const scheduledTask = isScheduledTask(task);
 
   const firstAgentName = useMemo(
     () => task.agents?.[0]?.name ?? null,
@@ -64,7 +66,12 @@ function TaskButtonImpl({ task }: TaskButtonProps) {
       isSelected={taskID === task.id}
       className={cn('flex flex-col gap-1 text-left')}
     >
-      <span className="w-full truncate text-sm">{taskName}</span>
+      <span className="flex w-full items-center gap-1.5 truncate text-sm">
+        {scheduledTask && (
+          <CalendarClock className="text-muted-foreground size-3.5 shrink-0" />
+        )}
+        <span className="truncate">{taskName}</span>
+      </span>
       <div
         className={cn(
           'text-muted-foreground w-full truncate text-xs',

@@ -249,7 +249,7 @@ class ScheduledAgentRunActivities:
         # caller-supplied display_name in schedule.task_metadata overrides it.
         display_fire_time = _format_fire_time(fire_id)
         task_metadata = {
-            "display_name": f"Scheduled Message: {schedule.name} · {display_fire_time}",
+            "display_name": f"{schedule.name} · {display_fire_time}",
             **(schedule.task_metadata or {}),
             "schedule_id": schedule_id,
             "scheduled_fire_id": fire_id,
