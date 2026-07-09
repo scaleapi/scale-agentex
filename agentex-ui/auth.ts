@@ -221,6 +221,7 @@ function buildConfig(): NextAuthConfig {
           if (profile.email) token.email = profile.email;
           if (profile.picture) token.picture = profile.picture;
         }
+
         const expiresAt = token.expiresAt;
         if (
           expiresAt &&
@@ -234,6 +235,7 @@ function buildConfig(): NextAuthConfig {
               refresh_token: token.refreshToken,
               client_id: clientId,
             });
+
             if (usePkJwt) {
               body.set('client_assertion_type', CLIENT_ASSERTION_TYPE);
               body.set(
@@ -252,13 +254,11 @@ function buildConfig(): NextAuthConfig {
               headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
               body,
             });
+
             if (!res.ok) {
-              // Only invalid_grant (dead refresh token) is terminal; keep the token on
-              // transient failures so the next cycle retries.
-              const body = (await res.json().catch(() => ({}))) as {
-                error?: string;
-              };
-              if (res.status === 400 && body.error === 'invalid_grant') {
+              // 4xx = bad grant/client/request, won't recover by retrying → terminal, re-auth.
+              // 429/5xx (and the catch below: network) are transient → keep token, retry.
+              if (res.status >= 400 && res.status < 500 && res.status !== 429) {
                 token.accessToken = undefined;
                 token.refreshToken = undefined;
                 return { ...token, error: 'RefreshAccessTokenError' };
