@@ -67,27 +67,39 @@ class TestAgentRunSchedulesUseCase:
 
         mock_service.create_schedule.assert_called_once()
 
+    async def test_get_schedule_id_by_name_delegates(self, use_case, mock_service):
+        mock_service.get_schedule_id_by_name.return_value = "schedule-123"
+
+        result = await use_case.get_schedule_id_by_name("agent-1", "daily-summary")
+
+        assert result == "schedule-123"
+        mock_service.get_schedule_id_by_name.assert_called_once_with(
+            "agent-1", "daily-summary"
+        )
+
     async def test_pause_resume_delete_delegate(self, use_case, mock_service, agent):
-        await use_case.pause_schedule(agent.id, "daily-summary", note="n")
+        schedule_id = "schedule-123"
+
+        await use_case.pause_schedule(agent.id, schedule_id, note="n")
         mock_service.pause_schedule.assert_called_once_with(
-            agent.id, "daily-summary", note="n"
+            agent.id, schedule_id, note="n"
         )
 
-        await use_case.resume_schedule(agent.id, "daily-summary")
+        await use_case.resume_schedule(agent.id, schedule_id)
         mock_service.resume_schedule.assert_called_once_with(
-            agent.id, "daily-summary", note=None
+            agent.id, schedule_id, note=None
         )
 
-        await use_case.delete_schedule(agent.id, "daily-summary")
-        mock_service.delete_schedule.assert_called_once_with(agent.id, "daily-summary")
+        await use_case.delete_schedule(agent.id, schedule_id)
+        mock_service.delete_schedule.assert_called_once_with(agent.id, schedule_id)
 
     async def test_update_delegates(self, use_case, mock_service, agent):
         request = UpdateAgentRunScheduleRequest(interval_seconds=120)
-        await use_case.update_schedule(agent.id, "daily-summary", request)
+        await use_case.update_schedule(agent.id, "schedule-123", request)
         mock_service.update_schedule.assert_called_once_with(
-            agent.id, "daily-summary", request
+            agent.id, "schedule-123", request
         )
 
     async def test_trigger_delegates(self, use_case, mock_service, agent):
-        await use_case.trigger_schedule(agent.id, "daily-summary")
-        mock_service.trigger_schedule.assert_called_once_with(agent.id, "daily-summary")
+        await use_case.trigger_schedule(agent.id, "schedule-123")
+        mock_service.trigger_schedule.assert_called_once_with(agent.id, "schedule-123")

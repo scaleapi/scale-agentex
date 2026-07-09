@@ -52,7 +52,7 @@ class CreateAgentRunScheduleRequest(BaseModel):
     name: str = Field(
         ...,
         title="Schedule Name",
-        description="Human-readable name, unique per agent (e.g. 'daily-granola-summary').",
+        description="Human-readable name, unique among active schedules for the agent.",
         pattern=r"^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$",
         min_length=1,
         max_length=64,
@@ -110,7 +110,7 @@ class AgentRunScheduleResponse(BaseModel):
 
     id: str = Field(..., description="The unique identifier of the run schedule.")
     agent_id: str = Field(..., description="The agent this schedule belongs to.")
-    name: str = Field(..., description="Schedule name, unique per agent.")
+    name: str = Field(..., description="Human-readable schedule name.")
     description: str | None = Field(None, description="Optional description.")
     cron_expression: str | None = Field(
         None, description="Cron cadence, if cron-based."
@@ -171,11 +171,19 @@ class AgentRunScheduleListResponse(BaseModel):
 class UpdateAgentRunScheduleRequest(BaseModel):
     """Partial update for a scheduled agent run.
 
-    Only fields present in the request body are changed; the schedule ``name`` is
-    immutable (it is the natural key). Setting ``cron_expression`` clears
-    ``interval_seconds`` and vice versa; providing both is rejected.
+    Only fields present in the request body are changed. Setting
+    ``cron_expression`` clears ``interval_seconds`` and vice versa; providing both
+    is rejected.
     """
 
+    name: str | None = Field(
+        None,
+        title="Schedule Name",
+        description="Human-readable name, unique among active schedules for the agent.",
+        pattern=r"^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$",
+        min_length=1,
+        max_length=64,
+    )
     description: str | None = Field(
         None, description="Optional description of what this schedule does."
     )
