@@ -63,24 +63,10 @@ _INPUT_DELIVERED_MARKER = "scheduled_input_delivered"
 
 # Temporal suffixes a scheduled workflow id with the nominal fire time
 # (e.g. ``...-run-2026-06-23T15:19:00Z``). Matching the trailing ISO-8601 lets
-# the display label use the *scheduled* time, which is stable across activity
-# retries, rather than wall-clock now() (which drifts on a delayed retry).
+# product/UI code read the occurrence time without parsing Temporal ids directly.
 _NOMINAL_FIRE_TIME_RE = re.compile(
     r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)$"
 )
-
-
-def _format_fire_time(fire_id: str) -> str:
-    """Format the schedule's nominal fire time for the task display name.
-
-    Falls back to the current time when ``fire_id`` carries no recognizable
-    timestamp suffix (e.g. a manually triggered fire).
-    """
-    fire_time = _extract_fire_time(fire_id)
-    if fire_time is not None:
-        parsed = datetime.fromisoformat(fire_time.replace("Z", "+00:00"))
-        return parsed.strftime("%Y-%m-%d %H:%M UTC")
-    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
 def _extract_fire_time(fire_id: str) -> str | None:
@@ -245,11 +231,10 @@ class ScheduledAgentRunActivities:
         task_name = f"scheduled-run:{schedule_id}:{fire_id}"
         # Human-friendly label the UI renders for the task (it reads
         # task_metadata.display_name, never the deterministic `name` above).
-        # Templated per fire so runs are distinguishable; placed first so a
-        # caller-supplied display_name in schedule.task_metadata overrides it.
-        display_fire_time = _format_fire_time(fire_id)
+        # Keep it stable and compact; exact occurrence time is stored separately
+        # in fire_time for views that need it.
         task_metadata = {
-            "display_name": f"{schedule.name} · {display_fire_time}",
+            "display_name": schedule.name,
             **(schedule.task_metadata or {}),
             "schedule_id": schedule_id,
             "scheduled_fire_id": fire_id,
