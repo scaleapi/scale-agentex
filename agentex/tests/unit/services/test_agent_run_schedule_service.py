@@ -1,4 +1,5 @@
 import re
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, PropertyMock
 from uuid import uuid4
 
@@ -10,6 +11,8 @@ from src.api.schemas.agent_run_schedules import (
     CreateAgentRunScheduleRequest,
     RunScheduleState,
     ScheduleInitialInput,
+    SkipRunScheduleRequest,
+    UnskipRunScheduleRequest,
     UpdateAgentRunScheduleRequest,
 )
 from src.api.schemas.authorization_types import AgentexResource
@@ -480,6 +483,32 @@ class TestAgentRunScheduleServiceTrigger:
         assert start_kwargs["args"] == [row.id, "manual"]
         assert start_kwargs["task_queue"] == "agentex-server"
 
+    async def test_skip_updates_temporal_schedule(self, service, agent):
+        row = _persisted(agent.id, _request())
+        service.schedule_repository.get_by_agent_id_and_id_or_raise.return_value = row
+        service.agent_repository.get.return_value = agent
+        scheduled_time = datetime(2026, 7, 9, 15, 0, tzinfo=UTC)
+
+        await service.skip_schedule_action(agent.id, row.id, scheduled_time)
+
+        temporal_id = build_run_schedule_temporal_id(row.id)
+        service.temporal_adapter.skip_schedule_action.assert_awaited_once_with(
+            temporal_id, scheduled_time=scheduled_time
+        )
+
+    async def test_unskip_updates_temporal_schedule(self, service, agent):
+        row = _persisted(agent.id, _request())
+        service.schedule_repository.get_by_agent_id_and_id_or_raise.return_value = row
+        service.agent_repository.get.return_value = agent
+        scheduled_time = datetime(2026, 7, 9, 15, 0, tzinfo=UTC)
+
+        await service.unskip_schedule_action(agent.id, row.id, scheduled_time)
+
+        temporal_id = build_run_schedule_temporal_id(row.id)
+        service.temporal_adapter.unskip_schedule_action.assert_awaited_once_with(
+            temporal_id, scheduled_time=scheduled_time
+        )
+
 
 @pytest.mark.unit
 class TestCadenceValidation:
@@ -499,6 +528,17 @@ class TestCadenceValidation:
             UpdateAgentRunScheduleRequest(
                 cron_expression="0 9 * * MON", interval_seconds=86400
             )
+
+    def test_skip_requires_scheduled_time(self):
+        with pytest.raises(ValidationError):
+            SkipRunScheduleRequest()
+
+    @pytest.mark.parametrize(
+        "request_type", [SkipRunScheduleRequest, UnskipRunScheduleRequest]
+    )
+    def test_skip_and_unskip_reject_naive_scheduled_time(self, request_type):
+        with pytest.raises(ValidationError):
+            request_type(scheduled_time=datetime(2026, 7, 9, 15, 0))
 
     def test_update_allows_neither_cadence(self):
         # Partial update changing only an unrelated field is valid.

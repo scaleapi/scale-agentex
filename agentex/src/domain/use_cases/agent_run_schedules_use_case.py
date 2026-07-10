@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import Depends
@@ -81,6 +82,20 @@ class AgentRunSchedulesUseCase:
         self, agent_id: str, schedule_id: str
     ) -> AgentRunScheduleResponse:
         return await self.run_schedule_service.trigger_schedule(agent_id, schedule_id)
+
+    async def skip_schedule_action(
+        self, agent_id: str, schedule_id: str, scheduled_time: datetime
+    ) -> AgentRunScheduleResponse:
+        return await self.run_schedule_service.skip_schedule_action(
+            agent_id, schedule_id, scheduled_time=scheduled_time
+        )
+
+    async def unskip_schedule_action(
+        self, agent_id: str, schedule_id: str, scheduled_time: datetime
+    ) -> AgentRunScheduleResponse:
+        return await self.run_schedule_service.unskip_schedule_action(
+            agent_id, schedule_id, scheduled_time=scheduled_time
+        )
 
     async def delete_schedule(self, agent_id: str, schedule_id: str) -> str:
         return await self.run_schedule_service.delete_schedule(agent_id, schedule_id)

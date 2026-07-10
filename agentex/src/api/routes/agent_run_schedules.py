@@ -8,6 +8,8 @@ from src.api.schemas.agent_run_schedules import (
     CreateAgentRunScheduleRequest,
     PauseRunScheduleRequest,
     ResumeRunScheduleRequest,
+    SkipRunScheduleRequest,
+    UnskipRunScheduleRequest,
     UpdateAgentRunScheduleRequest,
 )
 from src.api.schemas.authorization_types import (
@@ -269,6 +271,56 @@ async def trigger_run_schedule(
         AuthorizedOperationType.update,
     )
     return await run_schedules_use_case.trigger_schedule(agent_id, schedule_id)
+
+
+@router.post(
+    "/{schedule_id}/skip",
+    response_model=AgentRunScheduleResponse,
+    summary="Skip Run Schedule Action",
+    description="Skip a recurring fire of the schedule.",
+)
+async def skip_run_schedule_action(
+    agent_id: str,
+    schedule_id: str,
+    run_schedules_use_case: DAgentRunSchedulesUseCase,
+    authorization: DAuthorizationService,
+    request: SkipRunScheduleRequest,
+) -> AgentRunScheduleResponse:
+    await _check_schedule_or_collapse_to_404(
+        authorization,
+        build_run_schedule_authz_selector(agent_id, schedule_id),
+        AuthorizedOperationType.update,
+    )
+    return await run_schedules_use_case.skip_schedule_action(
+        agent_id,
+        schedule_id,
+        scheduled_time=request.scheduled_time,
+    )
+
+
+@router.post(
+    "/{schedule_id}/unskip",
+    response_model=AgentRunScheduleResponse,
+    summary="Unskip Run Schedule Action",
+    description="Remove a skip for a recurring fire of the schedule.",
+)
+async def unskip_run_schedule_action(
+    agent_id: str,
+    schedule_id: str,
+    run_schedules_use_case: DAgentRunSchedulesUseCase,
+    authorization: DAuthorizationService,
+    request: UnskipRunScheduleRequest,
+) -> AgentRunScheduleResponse:
+    await _check_schedule_or_collapse_to_404(
+        authorization,
+        build_run_schedule_authz_selector(agent_id, schedule_id),
+        AuthorizedOperationType.update,
+    )
+    return await run_schedules_use_case.unskip_schedule_action(
+        agent_id,
+        schedule_id,
+        scheduled_time=request.scheduled_time,
+    )
 
 
 @router.post(

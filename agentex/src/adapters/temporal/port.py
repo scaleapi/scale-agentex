@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from temporalio.client import (
@@ -357,6 +357,40 @@ class TemporalGateway(ABC):
         Raises:
             TemporalScheduleNotFoundError: If schedule doesn't exist
             TemporalScheduleError: If trigger fails
+        """
+        pass
+
+    @abstractmethod
+    async def skip_schedule_action(
+        self, schedule_id: str, scheduled_time: datetime
+    ) -> None:
+        """
+        Skip a scheduled action for a schedule.
+
+        Args:
+            schedule_id: The schedule ID
+            scheduled_time: Specific scheduled fire time to skip.
+
+        Raises:
+            TemporalScheduleNotFoundError: If schedule doesn't exist
+            TemporalScheduleError: If skip fails
+        """
+        pass
+
+    @abstractmethod
+    async def unskip_schedule_action(
+        self, schedule_id: str, scheduled_time: datetime
+    ) -> None:
+        """
+        Remove a one-off skip for a scheduled action.
+
+        Args:
+            schedule_id: The schedule ID
+            scheduled_time: Specific scheduled fire time to unskip.
+
+        Raises:
+            TemporalScheduleNotFoundError: If schedule doesn't exist
+            TemporalScheduleError: If unskip fails
         """
         pass
 
