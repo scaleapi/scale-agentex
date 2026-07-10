@@ -508,7 +508,9 @@ class AgentRunScheduleService:
         next_action_times = (
             list(info.next_action_times) if info.next_action_times else []
         )
-        skipped_action_times = TemporalAdapter.extract_one_off_skip_times(description)
+        skipped_action_times = TemporalAdapter.extract_one_off_skip_times(
+            description, after=datetime.now(UTC)
+        )
         last_action_time: datetime | None = None
         if getattr(info, "recent_actions", None):
             last_action = info.recent_actions[-1]

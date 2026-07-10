@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from src.adapters.temporal.adapter_temporal import TemporalAdapter
+from temporalio.client import ScheduleCalendarSpec, ScheduleRange
 
 
 def _description(*, skips, time_zone_name=None):
@@ -45,3 +46,31 @@ def test_same_one_off_skip_matches_equivalent_instants_in_schedule_timezone():
     right = TemporalAdapter._one_off_skip_spec(same_local_time, "America/New_York")
 
     assert TemporalAdapter._same_one_off_skip(left, right)
+
+
+@pytest.mark.unit
+def test_extract_one_off_skip_times_can_filter_to_future_times():
+    old_time = datetime(2026, 7, 9, 15, 0, tzinfo=UTC)
+    future_time = datetime(2026, 7, 11, 15, 0, tzinfo=UTC)
+    old_skip = TemporalAdapter._one_off_skip_spec(old_time, None)
+    future_skip = TemporalAdapter._one_off_skip_spec(future_time, None)
+
+    assert TemporalAdapter.extract_one_off_skip_times(
+        _description(skips=[old_skip, future_skip]),
+        after=datetime(2026, 7, 10, 15, 0, tzinfo=UTC),
+    ) == [future_time]
+
+
+@pytest.mark.unit
+def test_without_past_one_off_skips_preserves_broad_skip_specs():
+    old_time = datetime(2026, 7, 9, 15, 0, tzinfo=UTC)
+    future_time = datetime(2026, 7, 11, 15, 0, tzinfo=UTC)
+    old_skip = TemporalAdapter._one_off_skip_spec(old_time, None)
+    future_skip = TemporalAdapter._one_off_skip_spec(future_time, None)
+    weekend_skip = ScheduleCalendarSpec(day_of_week=[ScheduleRange(start=0, end=1)])
+
+    assert TemporalAdapter._without_past_one_off_skips(
+        [old_skip, future_skip, weekend_skip],
+        None,
+        now=datetime(2026, 7, 10, 15, 0, tzinfo=UTC),
+    ) == [future_skip, weekend_skip]

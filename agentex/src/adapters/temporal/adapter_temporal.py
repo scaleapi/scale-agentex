@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Annotated, Any
 from zoneinfo import ZoneInfo
 
@@ -642,10 +642,23 @@ class TemporalAdapter(TemporalGateway):
             skip = self._one_off_skip_spec(
                 scheduled_time, description.schedule.spec.time_zone_name
             )
+            now = datetime.now(UTC)
 
             def _apply(input: ScheduleUpdateInput) -> ScheduleUpdate:
                 schedule = input.description.schedule
-                schedule.spec.skip = [*(schedule.spec.skip or []), skip]
+                retained_skips = self._without_past_one_off_skips(
+                    schedule.spec.skip,
+                    schedule.spec.time_zone_name,
+                    now=now,
+                )
+                # Replace an existing exact match so retries do not duplicate skips.
+                schedule.spec.skip = [
+                    existing
+                    for existing in retained_skips
+                    if not self._same_one_off_skip(existing, skip)
+                ]
+                if scheduled_time.astimezone(UTC) >= now:
+                    schedule.spec.skip.append(skip)
                 return ScheduleUpdate(schedule=schedule)
 
             await handle.update(_apply)
@@ -678,12 +691,18 @@ class TemporalAdapter(TemporalGateway):
             target = self._one_off_skip_spec(
                 scheduled_time, description.schedule.spec.time_zone_name
             )
+            now = datetime.now(UTC)
 
             def _apply(input: ScheduleUpdateInput) -> ScheduleUpdate:
                 schedule = input.description.schedule
+                retained_skips = self._without_past_one_off_skips(
+                    schedule.spec.skip,
+                    schedule.spec.time_zone_name,
+                    now=now,
+                )
                 schedule.spec.skip = [
                     skip
-                    for skip in (schedule.spec.skip or [])
+                    for skip in retained_skips
                     if not self._same_one_off_skip(skip, target)
                 ]
                 return ScheduleUpdate(schedule=schedule)
@@ -740,39 +759,67 @@ class TemporalAdapter(TemporalGateway):
         )
 
     @staticmethod
-    def extract_one_off_skip_times(description: ScheduleDescription) -> list[datetime]:
+    def _one_off_skip_time(
+        skip: ScheduleCalendarSpec, timezone: tzinfo
+    ) -> datetime | None:
+        values: dict[str, int] = {}
+        for field, date_part in (
+            ("second", "second"),
+            ("minute", "minute"),
+            ("hour", "hour"),
+            ("day_of_month", "day"),
+            ("month", "month"),
+            ("year", "year"),
+        ):
+            ranges = getattr(skip, field)
+            if len(ranges) != 1 or ranges[0].start != ranges[0].end:
+                return None
+            values[date_part] = ranges[0].start
+
+        return datetime(
+            values["year"],
+            values["month"],
+            values["day"],
+            values["hour"],
+            values["minute"],
+            values["second"],
+            tzinfo=timezone,
+        ).astimezone(UTC)
+
+    @classmethod
+    def _without_past_one_off_skips(
+        cls,
+        skips: list[ScheduleCalendarSpec] | None,
+        time_zone_name: str | None,
+        *,
+        now: datetime,
+    ) -> list[ScheduleCalendarSpec]:
+        timezone = ZoneInfo(time_zone_name) if time_zone_name else UTC
+        now = now.astimezone(UTC)
+        retained_skips: list[ScheduleCalendarSpec] = []
+
+        for skip in skips or []:
+            skipped_time = cls._one_off_skip_time(skip, timezone)
+            if skipped_time is None or skipped_time >= now:
+                retained_skips.append(skip)
+
+        return retained_skips
+
+    @classmethod
+    def extract_one_off_skip_times(
+        cls, description: ScheduleDescription, *, after: datetime | None = None
+    ) -> list[datetime]:
         time_zone_name = description.schedule.spec.time_zone_name
         timezone = ZoneInfo(time_zone_name) if time_zone_name else UTC
         skipped_times: list[datetime] = []
+        after_utc = after.astimezone(UTC) if after else None
 
         for skip in description.schedule.spec.skip or []:
-            values: dict[str, int] = {}
-            for field, date_part in (
-                ("second", "second"),
-                ("minute", "minute"),
-                ("hour", "hour"),
-                ("day_of_month", "day"),
-                ("month", "month"),
-                ("year", "year"),
+            skipped_time = cls._one_off_skip_time(skip, timezone)
+            if skipped_time is not None and (
+                after_utc is None or skipped_time >= after_utc
             ):
-                ranges = getattr(skip, field)
-                if len(ranges) != 1 or ranges[0].start != ranges[0].end:
-                    values = {}
-                    break
-                values[date_part] = ranges[0].start
-
-            if values:
-                skipped_times.append(
-                    datetime(
-                        values["year"],
-                        values["month"],
-                        values["day"],
-                        values["hour"],
-                        values["minute"],
-                        values["second"],
-                        tzinfo=timezone,
-                    ).astimezone(UTC)
-                )
+                skipped_times.append(skipped_time)
 
         return skipped_times
 
