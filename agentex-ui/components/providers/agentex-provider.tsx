@@ -73,9 +73,14 @@ export function AgentexProvider({
       updateParams(
         {
           [SearchParamKey.SGP_ACCOUNT_ID]: id,
-          // An explicit switch (not bootstrap, which passes replace) drops the open task:
-          // it's account-scoped and won't resolve under the new account.
-          ...(replace ? {} : { [SearchParamKey.TASK_ID]: null }),
+          // Explicit switch (bootstrap passes replace): drop the account-scoped task + agent
+          // in one navigation so they don't linger under the new account.
+          ...(replace
+            ? {}
+            : {
+                [SearchParamKey.TASK_ID]: null,
+                [SearchParamKey.AGENT_NAME]: null,
+              }),
         },
         replace
       );
