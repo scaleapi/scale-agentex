@@ -102,6 +102,17 @@ docker run --rm -p 3000:3000 \
 
 # Or via an env file
 docker run --rm -p 3000:3000 --env-file .env.local agentex-ui:latest
+
+# With OIDC login enabled: AGENTEX_UI_AUTH_PROVIDER_ID both selects the provider AND turns login on.
+docker run --rm -p 3000:3000 \
+  -e AGENTEX_API_URL=https://agentex.example.com \
+  -e AGENTEX_UI_AUTH_PROVIDER_ID=<your_provider> \
+  -e OIDC_ISSUER_URL=https://auth.example.com \
+  -e OIDC_CLIENT_ID=<your_client_id> \
+  -e OIDC_PRIVATE_KEY_JWK='{"kty":"EC",...}' \
+  -e AUTH_SECRET=change-me \
+  -e AUTH_URL=https://chat.example.com \
+  agentex-ui:latest
 ```
 
 ## Registry Usage

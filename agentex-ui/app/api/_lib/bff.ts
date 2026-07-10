@@ -1,3 +1,5 @@
+import { authEnabled, getSessionToken } from '@/auth';
+
 /** Server-only platform API base for the BFF routes. Prefers SGP_API_URL, else the app URL. */
 export const SGP_BASE_URL =
   process.env.SGP_API_URL ??
@@ -20,11 +22,10 @@ function stripCookie(header: string | null, name: string): string | null {
 
 /**
  * Attach credentials to an upstream request's `headers` in place, so none reach client JS:
- * forward `x-selected-account-id` (the upstream authorizes the account), drop any
- * client-sent `authorization`, and forward cookies for the upstream's own auth — minus the
- * account-scoped `_jwt` (access-profile) cookie. Cookie-auth backends prioritize `_jwt` over
- * `x-selected-account-id`, so leaving it would pin the account to the one the user linked in
- * with and ignore the selected account; identity still comes from `_identityJwt`.
+ * forward `x-selected-account-id`, drop any client-sent `authorization`, then attach the
+ * session access token as a Bearer (auth mode) or forward cookies (default mode) — minus the
+ * account-scoped `_jwt`, which cookie-auth backends prioritize over the header (it would pin
+ * the account to the one linked in with). Identity stays via `_identityJwt`.
  */
 export async function applyBffCredentials(
   req: Request,
@@ -36,6 +37,16 @@ export async function applyBffCredentials(
 
   headers.delete('authorization');
 
+  if (authEnabled) {
+    headers.delete('cookie');
+    const token = await getSessionToken(req);
+    if (token?.accessToken) {
+      headers.set('authorization', `Bearer ${token.accessToken}`);
+    }
+    return;
+  }
+
+  // Default mode: forward cookies (minus `_jwt`) for the upstream's own cookie auth.
   const cookie = stripCookie(req.headers.get('cookie'), '_jwt');
   if (cookie) headers.set('cookie', cookie);
   else headers.delete('cookie');

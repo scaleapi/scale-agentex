@@ -1,6 +1,7 @@
-import { MessageSquare } from 'lucide-react';
+import { LogOut, MessageSquare } from 'lucide-react';
 
 import { AccountPicker } from '@/components/account-picker/account-picker';
+import { useAgentexClient } from '@/components/providers';
 import { IconButton } from '@/components/ui/icon-button';
 import { ResizableSidebar } from '@/components/ui/resizable-sidebar';
 import { cn } from '@/lib/utils';
@@ -20,6 +21,8 @@ export function TaskSidebarFooter({
   className,
   collapsed = false,
 }: TaskSidebarFooterProps) {
+  const { authEnabled } = useAgentexClient();
+
   if (collapsed) {
     return (
       <div className={cn('flex flex-col items-start gap-2 pl-2', className)}>
@@ -31,6 +34,7 @@ export function TaskSidebarFooter({
           aria-label="Give Feedback"
         />
         <AccountPicker collapsed />
+        {authEnabled && <LogoutButton collapsed />}
       </div>
     );
   }
@@ -48,6 +52,49 @@ export function TaskSidebarFooter({
         </div>
       </ResizableSidebar.Button>
       <AccountPicker />
+      {authEnabled && <LogoutButton />}
     </div>
+  );
+}
+
+// Rendered only when auth is enabled (gated by the footer). When it is, the middleware
+// guarantees an authenticated session, so this always shows — no session check, which
+// would otherwise flicker in after the async session resolves.
+function LogoutButton({ collapsed = false }: { collapsed?: boolean }) {
+  // POST (not a GET navigation) so logout can't be triggered cross-site, then follow the
+  // server-provided RP-initiated logout URL. See app/api/auth/logout/route.ts.
+  const handleLogout = async () => {
+    try {
+      const res = await fetch('/api/auth/logout', { method: 'POST' });
+      const { url } = (await res.json()) as { url: string };
+      window.location.href = url;
+    } catch {
+      window.location.href = '/';
+    }
+  };
+
+  if (collapsed) {
+    return (
+      <IconButton
+        icon={LogOut}
+        onClick={handleLogout}
+        variant="ghost"
+        className="text-foreground"
+        aria-label="Log out"
+      />
+    );
+  }
+
+  return (
+    <ResizableSidebar.Button
+      onClick={handleLogout}
+      className="flex items-center gap-2 p-2"
+      disableAnimation
+    >
+      <div className="flex items-center gap-2">
+        <LogOut className="size-5" />
+        Log out
+      </div>
+    </ResizableSidebar.Button>
   );
 }

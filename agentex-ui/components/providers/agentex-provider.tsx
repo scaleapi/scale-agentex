@@ -17,9 +17,22 @@ import {
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
 
+// Hitting /api/auth/session runs the jwt-callback refresh and rotates the cookie. Deduped
+// so a burst of 401s (e.g. a refocused tab) shares one refresh.
+let sessionRefresh: Promise<unknown> | null = null;
+function refreshSession(): Promise<unknown> {
+  sessionRefresh ??= fetch('/api/auth/session', { credentials: 'include' })
+    .catch(() => {})
+    .finally(() => {
+      sessionRefresh = null;
+    });
+  return sessionRefresh;
+}
+
 interface AgentexContextValue {
   agentexClient: AgentexSDK;
   sgpAppURL: string;
+  authEnabled: boolean;
   // Platform API configured → the account picker can fetch/switch accounts.
   accountsEnabled: boolean;
   // Selected account (from the `account_id` param) + a setter that mirrors it to the URL.
@@ -37,10 +50,12 @@ const AgentexContext = createContext<AgentexContextValue | null>(null);
 export function AgentexProvider({
   children,
   sgpAppURL,
+  authEnabled,
   accountsEnabled,
 }: {
   children: ReactNode;
   sgpAppURL: string;
+  authEnabled: boolean;
   accountsEnabled: boolean;
 }) {
   const { sgpAccountID, updateParams } = useSafeSearchParams();
@@ -76,25 +91,34 @@ export function AgentexProvider({
         ? `${window.location.origin}/api/agentex`
         : '/api/agentex';
 
+    // Attach the selected account (from the ref — always current) on every request.
+    const withAccount = (init?: RequestInit): RequestInit => {
+      const headers = new Headers(init?.headers);
+      if (selectedAccountIdRef.current) {
+        headers.set('x-selected-account-id', selectedAccountIdRef.current);
+      }
+      return { ...init, headers };
+    };
+
     return new AgentexSDK({
       baseURL,
       fetchOptions: { credentials: 'include' },
-      // Attach the selected account on every request (read from the ref — always current).
-      fetch: (input, init) => {
-        const headers = new Headers(init?.headers);
-        if (selectedAccountIdRef.current) {
-          headers.set('x-selected-account-id', selectedAccountIdRef.current);
-        }
-        return fetch(input, { ...init, headers });
+      fetch: async (input, init) => {
+        const res = await fetch(input, withAccount(init));
+        if (res.status !== 401 || !authEnabled) return res;
+        // Token expired between refreshes — refresh the session and retry once.
+        await refreshSession();
+        return fetch(input, withAccount(init));
       },
     });
-  }, []);
+  }, [authEnabled]);
 
   return (
     <AgentexContext.Provider
       value={{
         agentexClient,
         sgpAppURL,
+        authEnabled,
         accountsEnabled,
         selectedAccountId: sgpAccountID,
         setSelectedAccountId,
