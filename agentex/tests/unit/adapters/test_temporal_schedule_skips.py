@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from src.adapters.temporal.adapter_temporal import TemporalAdapter
+from src.adapters.temporal.exceptions import TemporalInvalidArgumentError
 from temporalio.client import ScheduleCalendarSpec, ScheduleRange
 
 
@@ -74,3 +75,21 @@ def test_without_past_one_off_skips_preserves_broad_skip_specs():
         None,
         now=datetime(2026, 7, 10, 15, 0, tzinfo=UTC),
     ) == [future_skip, weekend_skip]
+
+
+@pytest.mark.unit
+def test_contains_instant_matches_equivalent_timezone_instants():
+    target = datetime(2026, 7, 9, 15, 0, tzinfo=UTC)
+    same_instant = datetime(2026, 7, 9, 11, 0, tzinfo=ZoneInfo("America/New_York"))
+
+    assert TemporalAdapter._contains_instant(target, [same_instant])
+
+
+@pytest.mark.unit
+def test_validate_future_scheduled_time_rejects_past_time():
+    with pytest.raises(TemporalInvalidArgumentError):
+        TemporalAdapter._validate_future_scheduled_time(
+            datetime(2026, 7, 9, 15, 0, tzinfo=UTC),
+            now=datetime(2026, 7, 10, 15, 0, tzinfo=UTC),
+            operation="skip",
+        )

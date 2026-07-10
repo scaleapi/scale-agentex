@@ -639,10 +639,23 @@ class TemporalAdapter(TemporalGateway):
         try:
             handle = self.client.get_schedule_handle(schedule_id)
             description = await handle.describe()
+            now = datetime.now(UTC)
+            self._validate_future_scheduled_time(
+                scheduled_time, now=now, operation="skip"
+            )
+            if not self._contains_instant(
+                scheduled_time, description.info.next_action_times or []
+            ):
+                raise TemporalInvalidArgumentError(
+                    message="Cannot skip a time that is not an upcoming schedule action",
+                    detail=(
+                        f"Scheduled time '{scheduled_time.isoformat()}' is not in "
+                        f"the upcoming action times for schedule '{schedule_id}'."
+                    ),
+                )
             skip = self._one_off_skip_spec(
                 scheduled_time, description.schedule.spec.time_zone_name
             )
-            now = datetime.now(UTC)
 
             def _apply(input: ScheduleUpdateInput) -> ScheduleUpdate:
                 schedule = input.description.schedule
@@ -663,6 +676,8 @@ class TemporalAdapter(TemporalGateway):
 
             await handle.update(_apply)
             logger.info(f"Skipped action for schedule {schedule_id}")
+        except TemporalInvalidArgumentError:
+            raise
         except Exception as e:
             if "not found" in str(e).lower():
                 logger.error(f"Schedule {schedule_id} not found: {e}")
@@ -688,10 +703,22 @@ class TemporalAdapter(TemporalGateway):
         try:
             handle = self.client.get_schedule_handle(schedule_id)
             description = await handle.describe()
+            now = datetime.now(UTC)
+            self._validate_future_scheduled_time(
+                scheduled_time, now=now, operation="unskip"
+            )
+            skipped_times = self.extract_one_off_skip_times(description)
+            if not self._contains_instant(scheduled_time, skipped_times):
+                raise TemporalInvalidArgumentError(
+                    message="Cannot unskip a time that is not currently skipped",
+                    detail=(
+                        f"Scheduled time '{scheduled_time.isoformat()}' is not in "
+                        f"the skipped action times for schedule '{schedule_id}'."
+                    ),
+                )
             target = self._one_off_skip_spec(
                 scheduled_time, description.schedule.spec.time_zone_name
             )
-            now = datetime.now(UTC)
 
             def _apply(input: ScheduleUpdateInput) -> ScheduleUpdate:
                 schedule = input.description.schedule
@@ -709,6 +736,8 @@ class TemporalAdapter(TemporalGateway):
 
             await handle.update(_apply)
             logger.info(f"Unskipped action for schedule {schedule_id}")
+        except TemporalInvalidArgumentError:
+            raise
         except Exception as e:
             if "not found" in str(e).lower():
                 logger.error(f"Schedule {schedule_id} not found: {e}")
@@ -757,6 +786,24 @@ class TemporalAdapter(TemporalGateway):
             and getattr(left, field)[0].end == getattr(right, field)[0].end
             for field in fields
         )
+
+    @staticmethod
+    def _contains_instant(target: datetime, times: list[datetime]) -> bool:
+        target_utc = target.astimezone(UTC)
+        return any(time.astimezone(UTC) == target_utc for time in times)
+
+    @staticmethod
+    def _validate_future_scheduled_time(
+        scheduled_time: datetime, *, now: datetime, operation: str
+    ) -> None:
+        if scheduled_time.astimezone(UTC) < now.astimezone(UTC):
+            raise TemporalInvalidArgumentError(
+                message=f"Cannot {operation} a past scheduled time",
+                detail=(
+                    f"Scheduled time '{scheduled_time.isoformat()}' is before "
+                    f"the current time '{now.isoformat()}'."
+                ),
+            )
 
     @staticmethod
     def _one_off_skip_time(
