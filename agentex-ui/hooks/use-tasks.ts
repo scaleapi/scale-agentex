@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { APIError } from 'agentex';
 
 import type AgentexSDK from 'agentex';
 import type {
@@ -42,6 +43,14 @@ export function useTask({
       });
     },
     enabled: !!taskId,
+    // A 4xx (bad/forbidden task_id) is definitive — fail fast so a deep-link denial clears on
+    // the first response instead of after retry backoff. Still retry transient 5xx/network.
+    retry: (failureCount, error) =>
+      !(
+        error instanceof APIError &&
+        error.status >= 400 &&
+        error.status < 500
+      ) && failureCount < 3,
   });
 }
 
