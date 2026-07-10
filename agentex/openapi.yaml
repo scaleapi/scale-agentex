@@ -3616,13 +3616,11 @@ paths:
           type: string
           title: Schedule Id
       requestBody:
+        required: true
         content:
           application/json:
             schema:
-              anyOf:
-              - $ref: '#/components/schemas/SkipRunScheduleRequest'
-              - type: 'null'
-              title: Request
+              $ref: '#/components/schemas/SkipRunScheduleRequest'
       responses:
         '200':
           description: Successful Response
@@ -6177,14 +6175,13 @@ components:
     SkipRunScheduleRequest:
       properties:
         scheduled_time:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+          type: string
+          format: date-time
           title: Scheduled Time
-          description: Specific scheduled fire time to skip. If omitted, the next
-            fire is skipped.
+          description: Specific scheduled fire time to skip.
       type: object
+      required:
+      - scheduled_time
       title: SkipRunScheduleRequest
     Span:
       properties:

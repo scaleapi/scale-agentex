@@ -367,15 +367,15 @@ class AgentRunScheduleService:
         agent = await self.agent_repository.get(id=agent_id)
         return await self._to_response(row, agent=agent, temporal_id=temporal_id)
 
-    async def skip_next_schedule_action(
-        self, agent_id: str, schedule_id: str, scheduled_time: datetime | None = None
+    async def skip_schedule_action(
+        self, agent_id: str, schedule_id: str, scheduled_time: datetime
     ) -> AgentRunScheduleResponse:
-        """Skip a recurring fire, defaulting to the next fire."""
+        """Skip a specific recurring fire."""
         row = await self.schedule_repository.get_by_agent_id_and_id_or_raise(
             agent_id, schedule_id
         )
         temporal_id = build_run_schedule_temporal_id(row.id)
-        await self.temporal_adapter.skip_next_schedule_action(
+        await self.temporal_adapter.skip_schedule_action(
             temporal_id, scheduled_time=scheduled_time
         )
         agent = await self.agent_repository.get(id=agent_id)

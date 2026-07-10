@@ -284,17 +284,17 @@ async def skip_run_schedule_action(
     schedule_id: str,
     run_schedules_use_case: DAgentRunSchedulesUseCase,
     authorization: DAuthorizationService,
-    request: SkipRunScheduleRequest | None = None,
+    request: SkipRunScheduleRequest,
 ) -> AgentRunScheduleResponse:
     await _check_schedule_or_collapse_to_404(
         authorization,
         build_run_schedule_authz_selector(agent_id, schedule_id),
         AuthorizedOperationType.update,
     )
-    return await run_schedules_use_case.skip_next_schedule_action(
+    return await run_schedules_use_case.skip_schedule_action(
         agent_id,
         schedule_id,
-        scheduled_time=request.scheduled_time if request else None,
+        scheduled_time=request.scheduled_time,
     )
 
 

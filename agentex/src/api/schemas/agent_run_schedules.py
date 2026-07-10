@@ -241,16 +241,30 @@ class ResumeRunScheduleRequest(BaseModel):
     note: str | None = Field(None, description="Optional note explaining the resume.")
 
 
+def _require_timezone(value: datetime, field_name: str) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{field_name} must include timezone information.")
+    return value
+
+
 class SkipRunScheduleRequest(BaseModel):
-    scheduled_time: datetime | None = Field(
-        None,
-        description=(
-            "Specific scheduled fire time to skip. If omitted, the next fire is skipped."
-        ),
+    scheduled_time: datetime = Field(
+        ...,
+        description="Specific scheduled fire time to skip.",
     )
+
+    @model_validator(mode="after")
+    def require_scheduled_time_timezone(self):
+        self.scheduled_time = _require_timezone(self.scheduled_time, "scheduled_time")
+        return self
 
 
 class UnskipRunScheduleRequest(BaseModel):
     scheduled_time: datetime = Field(
         ..., description="Specific scheduled fire time to unskip."
     )
+
+    @model_validator(mode="after")
+    def require_scheduled_time_timezone(self):
+        self.scheduled_time = _require_timezone(self.scheduled_time, "scheduled_time")
+        return self

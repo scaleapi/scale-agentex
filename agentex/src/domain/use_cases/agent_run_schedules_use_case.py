@@ -83,10 +83,10 @@ class AgentRunSchedulesUseCase:
     ) -> AgentRunScheduleResponse:
         return await self.run_schedule_service.trigger_schedule(agent_id, schedule_id)
 
-    async def skip_next_schedule_action(
-        self, agent_id: str, schedule_id: str, scheduled_time: datetime | None = None
+    async def skip_schedule_action(
+        self, agent_id: str, schedule_id: str, scheduled_time: datetime
     ) -> AgentRunScheduleResponse:
-        return await self.run_schedule_service.skip_next_schedule_action(
+        return await self.run_schedule_service.skip_schedule_action(
             agent_id, schedule_id, scheduled_time=scheduled_time
         )
 

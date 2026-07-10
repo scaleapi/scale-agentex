@@ -627,8 +627,8 @@ class TemporalAdapter(TemporalGateway):
                 detail=str(e),
             ) from e
 
-    async def skip_next_schedule_action(
-        self, schedule_id: str, scheduled_time: datetime | None = None
+    async def skip_schedule_action(
+        self, schedule_id: str, scheduled_time: datetime
     ) -> None:
         """
         Add a one-off exclusion for a scheduled action time.
@@ -639,15 +639,8 @@ class TemporalAdapter(TemporalGateway):
         try:
             handle = self.client.get_schedule_handle(schedule_id)
             description = await handle.describe()
-            action_time = scheduled_time or (
-                description.info.next_action_times[0]
-                if description.info.next_action_times
-                else None
-            )
-            if action_time is None:
-                return
             skip = self._one_off_skip_spec(
-                action_time, description.schedule.spec.time_zone_name
+                scheduled_time, description.schedule.spec.time_zone_name
             )
 
             def _apply(input: ScheduleUpdateInput) -> ScheduleUpdate:
@@ -656,7 +649,7 @@ class TemporalAdapter(TemporalGateway):
                 return ScheduleUpdate(schedule=schedule)
 
             await handle.update(_apply)
-            logger.info(f"Skipped next action for schedule {schedule_id}")
+            logger.info(f"Skipped action for schedule {schedule_id}")
         except Exception as e:
             if "not found" in str(e).lower():
                 logger.error(f"Schedule {schedule_id} not found: {e}")
@@ -664,9 +657,9 @@ class TemporalAdapter(TemporalGateway):
                     message=f"Schedule '{schedule_id}' not found",
                     detail=str(e),
                 ) from e
-            logger.error(f"Failed to skip next action for schedule {schedule_id}: {e}")
+            logger.error(f"Failed to skip action for schedule {schedule_id}: {e}")
             raise TemporalScheduleError(
-                message=f"Failed to skip next action for schedule '{schedule_id}'",
+                message=f"Failed to skip action for schedule '{schedule_id}'",
                 detail=str(e),
             ) from e
 

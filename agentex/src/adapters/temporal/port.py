@@ -361,16 +361,15 @@ class TemporalGateway(ABC):
         pass
 
     @abstractmethod
-    async def skip_next_schedule_action(
-        self, schedule_id: str, scheduled_time: datetime | None = None
+    async def skip_schedule_action(
+        self, schedule_id: str, scheduled_time: datetime
     ) -> None:
         """
         Skip a scheduled action for a schedule.
 
         Args:
             schedule_id: The schedule ID
-            scheduled_time: Specific scheduled fire time to skip. If omitted,
-                the next scheduled action is skipped.
+            scheduled_time: Specific scheduled fire time to skip.
 
         Raises:
             TemporalScheduleNotFoundError: If schedule doesn't exist
