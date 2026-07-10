@@ -151,6 +151,9 @@ class AgentRunScheduleResponse(BaseModel):
     next_action_times: list[datetime] = Field(
         default_factory=list, description="Upcoming scheduled fire times."
     )
+    skipped_action_times: list[datetime] = Field(
+        default_factory=list, description="Skipped one-off scheduled fire times."
+    )
     last_action_time: datetime | None = Field(
         None, description="When the schedule last fired."
     )
@@ -236,3 +239,18 @@ class PauseRunScheduleRequest(BaseModel):
 
 class ResumeRunScheduleRequest(BaseModel):
     note: str | None = Field(None, description="Optional note explaining the resume.")
+
+
+class SkipRunScheduleRequest(BaseModel):
+    scheduled_time: datetime | None = Field(
+        None,
+        description=(
+            "Specific scheduled fire time to skip. If omitted, the next fire is skipped."
+        ),
+    )
+
+
+class UnskipRunScheduleRequest(BaseModel):
+    scheduled_time: datetime = Field(
+        ..., description="Specific scheduled fire time to unskip."
+    )

@@ -6,7 +6,7 @@ from fastapi import Depends
 from temporalio.client import ScheduleDescription
 
 from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
-from src.adapters.temporal.adapter_temporal import DTemporalAdapter
+from src.adapters.temporal.adapter_temporal import DTemporalAdapter, TemporalAdapter
 from src.adapters.temporal.exceptions import TemporalScheduleNotFoundError
 from src.api.schemas.agent_run_schedules import (
     AgentRunScheduleListResponse,
@@ -367,6 +367,34 @@ class AgentRunScheduleService:
         agent = await self.agent_repository.get(id=agent_id)
         return await self._to_response(row, agent=agent, temporal_id=temporal_id)
 
+    async def skip_next_schedule_action(
+        self, agent_id: str, schedule_id: str, scheduled_time: datetime | None = None
+    ) -> AgentRunScheduleResponse:
+        """Skip a recurring fire, defaulting to the next fire."""
+        row = await self.schedule_repository.get_by_agent_id_and_id_or_raise(
+            agent_id, schedule_id
+        )
+        temporal_id = build_run_schedule_temporal_id(row.id)
+        await self.temporal_adapter.skip_next_schedule_action(
+            temporal_id, scheduled_time=scheduled_time
+        )
+        agent = await self.agent_repository.get(id=agent_id)
+        return await self._to_response(row, agent=agent, temporal_id=temporal_id)
+
+    async def unskip_schedule_action(
+        self, agent_id: str, schedule_id: str, scheduled_time: datetime
+    ) -> AgentRunScheduleResponse:
+        """Remove a skipped recurring fire."""
+        row = await self.schedule_repository.get_by_agent_id_and_id_or_raise(
+            agent_id, schedule_id
+        )
+        temporal_id = build_run_schedule_temporal_id(row.id)
+        await self.temporal_adapter.unskip_schedule_action(
+            temporal_id, scheduled_time=scheduled_time
+        )
+        agent = await self.agent_repository.get(id=agent_id)
+        return await self._to_response(row, agent=agent, temporal_id=temporal_id)
+
     # -- internals ---------------------------------------------------------
 
     async def _set_paused(
@@ -416,6 +444,7 @@ class AgentRunScheduleService:
 
         state = RunScheduleState.PAUSED if entity.paused else RunScheduleState.ACTIVE
         next_action_times: list[datetime] = []
+        skipped_action_times: list[datetime] = []
         last_action_time: datetime | None = None
         num_actions_taken = 0
 
@@ -430,6 +459,7 @@ class AgentRunScheduleService:
                 live = self._extract_live_fields(description)
                 state = live["state"]
                 next_action_times = live["next_action_times"]
+                skipped_action_times = live["skipped_action_times"]
                 last_action_time = live["last_action_time"]
                 num_actions_taken = live["num_actions_taken"]
             except Exception as exc:
@@ -463,6 +493,7 @@ class AgentRunScheduleService:
             updated_at=entity.updated_at,
             state=state,
             next_action_times=next_action_times,
+            skipped_action_times=skipped_action_times,
             last_action_time=last_action_time,
             num_actions_taken=num_actions_taken,
         )
@@ -477,6 +508,7 @@ class AgentRunScheduleService:
         next_action_times = (
             list(info.next_action_times) if info.next_action_times else []
         )
+        skipped_action_times = TemporalAdapter.extract_one_off_skip_times(description)
         last_action_time: datetime | None = None
         if getattr(info, "recent_actions", None):
             last_action = info.recent_actions[-1]
@@ -489,6 +521,7 @@ class AgentRunScheduleService:
         return {
             "state": state,
             "next_action_times": next_action_times,
+            "skipped_action_times": skipped_action_times,
             "last_action_time": last_action_time,
             "num_actions_taken": num_actions_taken,
         }

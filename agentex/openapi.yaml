@@ -3595,6 +3595,86 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/schedules/{schedule_id}/skip:
+    post:
+      tags:
+      - Schedules
+      summary: Skip Run Schedule Action
+      description: Skip a recurring fire of the schedule.
+      operationId: skip_run_schedule_action_agents__agent_id__schedules__schedule_id__skip_post
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: schedule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/SkipRunScheduleRequest'
+              - type: 'null'
+              title: Request
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/schedules/{schedule_id}/unskip:
+    post:
+      tags:
+      - Schedules
+      summary: Unskip Run Schedule Action
+      description: Remove a skip for a recurring fire of the schedule.
+      operationId: unskip_run_schedule_action_agents__agent_id__schedules__schedule_id__unskip_post
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: schedule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UnskipRunScheduleRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /agents/{agent_id}/schedules/name/{name}/pause:
     post:
       tags:
@@ -4360,6 +4440,13 @@ components:
           type: array
           title: Next Action Times
           description: Upcoming scheduled fire times.
+        skipped_action_times:
+          items:
+            type: string
+            format: date-time
+          type: array
+          title: Skipped Action Times
+          description: Skipped one-off scheduled fire times.
         last_action_time:
           anyOf:
           - type: string
@@ -6087,6 +6174,18 @@ components:
       required:
       - content
       title: SendMessageRequest
+    SkipRunScheduleRequest:
+      properties:
+        scheduled_time:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Scheduled Time
+          description: Specific scheduled fire time to skip. If omitted, the next
+            fire is skipped.
+      type: object
+      title: SkipRunScheduleRequest
     Span:
       properties:
         id:
@@ -6969,6 +7068,17 @@ components:
       - name
       title: ToolResponseDelta
       description: Delta for tool response updates
+    UnskipRunScheduleRequest:
+      properties:
+        scheduled_time:
+          type: string
+          format: date-time
+          title: Scheduled Time
+          description: Specific scheduled fire time to unskip.
+      type: object
+      required:
+      - scheduled_time
+      title: UnskipRunScheduleRequest
     UpdateAgentRunScheduleRequest:
       properties:
         name:

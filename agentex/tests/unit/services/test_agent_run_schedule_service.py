@@ -1,4 +1,5 @@
 import re
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, PropertyMock
 from uuid import uuid4
 
@@ -479,6 +480,31 @@ class TestAgentRunScheduleServiceTrigger:
         )
         assert start_kwargs["args"] == [row.id, "manual"]
         assert start_kwargs["task_queue"] == "agentex-server"
+
+    async def test_skip_next_updates_temporal_schedule(self, service, agent):
+        row = _persisted(agent.id, _request())
+        service.schedule_repository.get_by_agent_id_and_id_or_raise.return_value = row
+        service.agent_repository.get.return_value = agent
+
+        await service.skip_next_schedule_action(agent.id, row.id)
+
+        temporal_id = build_run_schedule_temporal_id(row.id)
+        service.temporal_adapter.skip_next_schedule_action.assert_awaited_once_with(
+            temporal_id, scheduled_time=None
+        )
+
+    async def test_unskip_updates_temporal_schedule(self, service, agent):
+        row = _persisted(agent.id, _request())
+        service.schedule_repository.get_by_agent_id_and_id_or_raise.return_value = row
+        service.agent_repository.get.return_value = agent
+        scheduled_time = datetime(2026, 7, 9, 15, 0, tzinfo=UTC)
+
+        await service.unskip_schedule_action(agent.id, row.id, scheduled_time)
+
+        temporal_id = build_run_schedule_temporal_id(row.id)
+        service.temporal_adapter.unskip_schedule_action.assert_awaited_once_with(
+            temporal_id, scheduled_time=scheduled_time
+        )
 
 
 @pytest.mark.unit

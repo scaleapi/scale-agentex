@@ -1,5 +1,6 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends
 from temporalio.client import (
@@ -7,11 +8,13 @@ from temporalio.client import (
     Schedule,
     ScheduleActionStartWorkflow,
     ScheduleAlreadyRunningError,
+    ScheduleCalendarSpec,
     ScheduleDescription,
     ScheduleHandle,
     ScheduleIntervalSpec,
     ScheduleOverlapPolicy,
     SchedulePolicy,
+    ScheduleRange,
     ScheduleSpec,
     ScheduleState,
     ScheduleUpdate,
@@ -623,6 +626,162 @@ class TemporalAdapter(TemporalGateway):
                 message=f"Failed to trigger schedule '{schedule_id}'",
                 detail=str(e),
             ) from e
+
+    async def skip_next_schedule_action(
+        self, schedule_id: str, scheduled_time: datetime | None = None
+    ) -> None:
+        """
+        Add a one-off exclusion for a scheduled action time.
+        """
+        if not self.client:
+            raise TemporalConnectionError("Temporal client is not connected")
+
+        try:
+            handle = self.client.get_schedule_handle(schedule_id)
+            description = await handle.describe()
+            action_time = scheduled_time or (
+                description.info.next_action_times[0]
+                if description.info.next_action_times
+                else None
+            )
+            if action_time is None:
+                return
+            skip = self._one_off_skip_spec(
+                action_time, description.schedule.spec.time_zone_name
+            )
+
+            def _apply(input: ScheduleUpdateInput) -> ScheduleUpdate:
+                schedule = input.description.schedule
+                schedule.spec.skip = [*(schedule.spec.skip or []), skip]
+                return ScheduleUpdate(schedule=schedule)
+
+            await handle.update(_apply)
+            logger.info(f"Skipped next action for schedule {schedule_id}")
+        except Exception as e:
+            if "not found" in str(e).lower():
+                logger.error(f"Schedule {schedule_id} not found: {e}")
+                raise TemporalScheduleNotFoundError(
+                    message=f"Schedule '{schedule_id}' not found",
+                    detail=str(e),
+                ) from e
+            logger.error(f"Failed to skip next action for schedule {schedule_id}: {e}")
+            raise TemporalScheduleError(
+                message=f"Failed to skip next action for schedule '{schedule_id}'",
+                detail=str(e),
+            ) from e
+
+    async def unskip_schedule_action(
+        self, schedule_id: str, scheduled_time: datetime
+    ) -> None:
+        """
+        Remove a one-off exclusion for a scheduled action time.
+        """
+        if not self.client:
+            raise TemporalConnectionError("Temporal client is not connected")
+
+        try:
+            handle = self.client.get_schedule_handle(schedule_id)
+            description = await handle.describe()
+            target = self._one_off_skip_spec(
+                scheduled_time, description.schedule.spec.time_zone_name
+            )
+
+            def _apply(input: ScheduleUpdateInput) -> ScheduleUpdate:
+                schedule = input.description.schedule
+                schedule.spec.skip = [
+                    skip
+                    for skip in (schedule.spec.skip or [])
+                    if not self._same_one_off_skip(skip, target)
+                ]
+                return ScheduleUpdate(schedule=schedule)
+
+            await handle.update(_apply)
+            logger.info(f"Unskipped action for schedule {schedule_id}")
+        except Exception as e:
+            if "not found" in str(e).lower():
+                logger.error(f"Schedule {schedule_id} not found: {e}")
+                raise TemporalScheduleNotFoundError(
+                    message=f"Schedule '{schedule_id}' not found",
+                    detail=str(e),
+                ) from e
+            logger.error(f"Failed to unskip action for schedule {schedule_id}: {e}")
+            raise TemporalScheduleError(
+                message=f"Failed to unskip action for schedule '{schedule_id}'",
+                detail=str(e),
+            ) from e
+
+    @staticmethod
+    def _one_off_skip_spec(
+        scheduled_time: datetime, time_zone_name: str | None
+    ) -> ScheduleCalendarSpec:
+        if time_zone_name:
+            scheduled_time = scheduled_time.astimezone(ZoneInfo(time_zone_name))
+
+        def _range(value: int) -> list[ScheduleRange]:
+            return [ScheduleRange(start=value, end=value)]
+
+        return ScheduleCalendarSpec(
+            second=_range(scheduled_time.second),
+            minute=_range(scheduled_time.minute),
+            hour=_range(scheduled_time.hour),
+            day_of_month=_range(scheduled_time.day),
+            month=_range(scheduled_time.month),
+            year=_range(scheduled_time.year),
+            # Specify all days of week so the exact date fields above decide
+            # the match regardless of Temporal/Python weekday numbering.
+            day_of_week=[ScheduleRange(start=0, end=6)],
+            comment=f"Skipped via API at {datetime.now(UTC).isoformat()}",
+        )
+
+    @staticmethod
+    def _same_one_off_skip(
+        left: ScheduleCalendarSpec, right: ScheduleCalendarSpec
+    ) -> bool:
+        fields = ("second", "minute", "hour", "day_of_month", "month", "year")
+        return all(
+            len(getattr(left, field)) == 1
+            and len(getattr(right, field)) == 1
+            and getattr(left, field)[0].start == getattr(right, field)[0].start
+            and getattr(left, field)[0].end == getattr(right, field)[0].end
+            for field in fields
+        )
+
+    @staticmethod
+    def extract_one_off_skip_times(description: ScheduleDescription) -> list[datetime]:
+        time_zone_name = description.schedule.spec.time_zone_name
+        timezone = ZoneInfo(time_zone_name) if time_zone_name else UTC
+        skipped_times: list[datetime] = []
+
+        for skip in description.schedule.spec.skip or []:
+            values: dict[str, int] = {}
+            for field, date_part in (
+                ("second", "second"),
+                ("minute", "minute"),
+                ("hour", "hour"),
+                ("day_of_month", "day"),
+                ("month", "month"),
+                ("year", "year"),
+            ):
+                ranges = getattr(skip, field)
+                if len(ranges) != 1 or ranges[0].start != ranges[0].end:
+                    values = {}
+                    break
+                values[date_part] = ranges[0].start
+
+            if values:
+                skipped_times.append(
+                    datetime(
+                        values["year"],
+                        values["month"],
+                        values["day"],
+                        values["hour"],
+                        values["minute"],
+                        values["second"],
+                        tzinfo=timezone,
+                    ).astimezone(UTC)
+                )
+
+        return skipped_times
 
     async def update_schedule(
         self,

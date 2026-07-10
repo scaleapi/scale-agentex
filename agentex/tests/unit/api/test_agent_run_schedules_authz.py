@@ -19,12 +19,15 @@ from src.api.routes.agent_run_schedules import (
     list_run_schedules,
     pause_run_schedule,
     resume_run_schedule,
+    skip_run_schedule_action,
     trigger_run_schedule,
+    unskip_run_schedule_action,
     update_run_schedule,
 )
 from src.api.schemas.agent_run_schedules import (
     CreateAgentRunScheduleRequest,
     ScheduleInitialInput,
+    UnskipRunScheduleRequest,
     UpdateAgentRunScheduleRequest,
 )
 from src.api.schemas.authorization_types import (
@@ -195,6 +198,7 @@ class TestSingleResourceRouteAuthz:
             (pause_run_schedule, "pause_schedule"),
             (resume_run_schedule, "resume_schedule"),
             (trigger_run_schedule, "trigger_schedule"),
+            (skip_run_schedule_action, "skip_next_schedule_action"),
         ],
     )
     async def test_mutation_routes_use_update_op(self, route, method_name):
@@ -214,6 +218,25 @@ class TestSingleResourceRouteAuthz:
         assert called["resource"] == AgentexResource.schedule(_authz_selector())
         assert called["operation"] == AuthorizedOperationType.update
         getattr(use_case, method_name).assert_awaited_once()
+
+    async def test_unskip_route_uses_update_op(self):
+        authorization = MagicMock()
+        authorization.check = AsyncMock(return_value=True)
+        use_case = MagicMock()
+        use_case.unskip_schedule_action = AsyncMock(return_value=MagicMock())
+
+        await unskip_run_schedule_action(
+            agent_id="agent-1",
+            schedule_id="schedule-1",
+            run_schedules_use_case=use_case,
+            authorization=authorization,
+            request=UnskipRunScheduleRequest(scheduled_time="2026-07-09T15:00:00Z"),
+        )
+
+        called = authorization.check.await_args.kwargs
+        assert called["resource"] == AgentexResource.schedule(_authz_selector())
+        assert called["operation"] == AuthorizedOperationType.update
+        use_case.unskip_schedule_action.assert_awaited_once()
 
     async def test_update_route_uses_update_op(self):
         authorization = MagicMock()
