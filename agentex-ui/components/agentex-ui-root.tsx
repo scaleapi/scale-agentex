@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ToastContainer } from 'react-toastify';
 
@@ -17,7 +17,8 @@ import {
 } from '@/hooks/use-safe-search-params';
 
 export function AgentexUIRoot() {
-  const { agentName, taskID, updateParams } = useSafeSearchParams();
+  const { agentName, taskID, sgpAccountID, updateParams } =
+    useSafeSearchParams();
   const [isTracesSidebarOpen, setIsTracesSidebarOpen] = useState(false);
   const { agentexClient } = useAgentexClient();
   const { data: agents = [], isFetching: isAgentsFetching } =
@@ -32,6 +33,7 @@ export function AgentexUIRoot() {
   const [localAgentName, setLocalAgentName] = useLocalStorageState<
     string | undefined
   >('lastSelectedAgent', undefined);
+  const accountRef = useRef(sgpAccountID);
 
   // Wait until neither query is fetching before validating. We gate on `isFetching` (not
   // `isLoading`, which is false once a query has cached data) so we never validate against
@@ -39,6 +41,15 @@ export function AgentexUIRoot() {
   // doesn't block the localStorage-restore path when there's no agent_name. Deps are
   // intentionally narrowed so we re-validate on fetch settle / agent_name change.
   useEffect(() => {
+    // An account switch resets to the home grid: the selected agent is account-scoped,
+    // so a same-named agent in the new account must not stay selected.
+    if (accountRef.current !== sgpAccountID) {
+      accountRef.current = sgpAccountID;
+      setLocalAgentName(undefined);
+      if (agentName) updateParams({ [SearchParamKey.AGENT_NAME]: null });
+      return;
+    }
+
     if (isAgentsFetching || isAgentByNameFetching) return;
 
     // Accept an agent found in the (paginated) list OR resolved directly by name, so a valid
@@ -61,7 +72,13 @@ export function AgentexUIRoot() {
       updateParams({ [SearchParamKey.AGENT_NAME]: localAgentName });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAgentsFetching, isAgentByNameFetching, isAgentByNameError, agentName]);
+  }, [
+    sgpAccountID,
+    isAgentsFetching,
+    isAgentByNameFetching,
+    isAgentByNameError,
+    agentName,
+  ]);
 
   const handleSelectTask = useCallback(
     (taskId: string | null) => {
