@@ -28,11 +28,6 @@ export type AgentRunSchedule = {
   num_actions_taken: number;
 };
 
-export type AgentRunScheduleListResponse = {
-  run_schedules: AgentRunSchedule[];
-  total: number;
-};
-
 export type CreateAgentRunScheduleRequest = {
   name: string;
   description?: string | null;
@@ -51,129 +46,62 @@ export type UpdateAgentRunScheduleRequest = Partial<
   }
 >;
 
-async function request<T>(
-  baseURL: string,
-  path: string,
-  init?: RequestInit
-): Promise<T> {
-  const response = await fetch(`${baseURL}${path}`, {
-    ...init,
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...init?.headers,
-    },
-  });
-
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `Request failed with status ${response.status}`);
-  }
-
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
-  return (await response.json()) as T;
-}
-
-function schedulesPath(agentId: string) {
-  return `/agents/${encodeURIComponent(agentId)}/schedules`;
-}
-
-export const agentRunSchedulesAPI = {
-  list: (baseURL: string, agentId: string) =>
-    request<AgentRunScheduleListResponse>(
-      baseURL,
-      `${schedulesPath(agentId)}?limit=100`
-    ),
-
-  get: (baseURL: string, agentId: string, scheduleId: string) =>
-    request<AgentRunSchedule>(
-      baseURL,
-      `${schedulesPath(agentId)}/${encodeURIComponent(scheduleId)}`
-    ),
-
-  create: (
-    baseURL: string,
-    agentId: string,
-    payload: CreateAgentRunScheduleRequest
-  ) =>
-    request<AgentRunSchedule>(baseURL, schedulesPath(agentId), {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-
-  update: (
-    baseURL: string,
-    agentId: string,
-    scheduleId: string,
-    payload: UpdateAgentRunScheduleRequest
-  ) =>
-    request<AgentRunSchedule>(
-      baseURL,
-      `${schedulesPath(agentId)}/${encodeURIComponent(scheduleId)}`,
-      {
-        method: 'PATCH',
-        body: JSON.stringify(payload),
-      }
-    ),
-
-  delete: (baseURL: string, agentId: string, scheduleId: string) =>
-    request<{ id: string; message: string }>(
-      baseURL,
-      `${schedulesPath(agentId)}/${encodeURIComponent(scheduleId)}`,
-      { method: 'DELETE' }
-    ),
-
-  pause: (baseURL: string, agentId: string, scheduleId: string) =>
-    request<AgentRunSchedule>(
-      baseURL,
-      `${schedulesPath(agentId)}/${encodeURIComponent(scheduleId)}/pause`,
-      { method: 'POST', body: JSON.stringify({}) }
-    ),
-
-  resume: (baseURL: string, agentId: string, scheduleId: string) =>
-    request<AgentRunSchedule>(
-      baseURL,
-      `${schedulesPath(agentId)}/${encodeURIComponent(scheduleId)}/resume`,
-      { method: 'POST', body: JSON.stringify({}) }
-    ),
-
-  trigger: (baseURL: string, agentId: string, scheduleId: string) =>
-    request<AgentRunSchedule>(
-      baseURL,
-      `${schedulesPath(agentId)}/${encodeURIComponent(scheduleId)}/trigger`,
-      { method: 'POST' }
-    ),
-
-  skip: (
-    baseURL: string,
-    agentId: string,
-    scheduleId: string,
-    scheduledTime: string
-  ) =>
-    request<AgentRunSchedule>(
-      baseURL,
-      `${schedulesPath(agentId)}/${encodeURIComponent(scheduleId)}/skip`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ scheduled_time: scheduledTime }),
-      }
-    ),
-
-  unskip: (
-    baseURL: string,
-    agentId: string,
-    scheduleId: string,
-    scheduledTime: string
-  ) =>
-    request<AgentRunSchedule>(
-      baseURL,
-      `${schedulesPath(agentId)}/${encodeURIComponent(scheduleId)}/unskip`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ scheduled_time: scheduledTime }),
-      }
-    ),
+type AgentRunScheduleResponse = {
+  id: string;
+  agent_id: string;
+  name: string;
+  initial_input: {
+    content: string;
+    author?: string;
+    type?: 'text';
+  };
+  initial_input_method: string;
+  description?: string | null;
+  cron_expression?: string | null;
+  interval_seconds?: number | null;
+  timezone?: string;
+  start_at?: string | null;
+  end_at?: string | null;
+  paused?: boolean;
+  task_params?: Record<string, unknown> | null;
+  task_metadata?: Record<string, unknown> | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  state?: 'ACTIVE' | 'PAUSED';
+  next_action_times?: string[];
+  skipped_action_times?: string[];
+  last_action_time?: string | null;
+  num_actions_taken?: number;
 };
+
+export function normalizeAgentRunSchedule(
+  schedule: AgentRunScheduleResponse
+): AgentRunSchedule {
+  return {
+    id: schedule.id,
+    agent_id: schedule.agent_id,
+    name: schedule.name,
+    description: schedule.description ?? null,
+    cron_expression: schedule.cron_expression ?? null,
+    interval_seconds: schedule.interval_seconds ?? null,
+    timezone: schedule.timezone ?? 'UTC',
+    start_at: schedule.start_at ?? null,
+    end_at: schedule.end_at ?? null,
+    paused: schedule.paused ?? false,
+    task_params: schedule.task_params ?? null,
+    task_metadata: schedule.task_metadata ?? null,
+    initial_input: {
+      type: 'text',
+      author: 'user',
+      content: schedule.initial_input.content,
+    },
+    initial_input_method: schedule.initial_input_method,
+    created_at: schedule.created_at ?? null,
+    updated_at: schedule.updated_at ?? null,
+    state: schedule.state ?? 'ACTIVE',
+    next_action_times: schedule.next_action_times ?? [],
+    skipped_action_times: schedule.skipped_action_times ?? [],
+    last_action_time: schedule.last_action_time ?? null,
+    num_actions_taken: schedule.num_actions_taken ?? 0,
+  };
+}

@@ -52,6 +52,7 @@ import {
 } from '@/lib/schedule-utils';
 import { cn } from '@/lib/utils';
 
+import type AgentexSDK from 'agentex';
 import type { Agent } from 'agentex/resources';
 
 type ScheduleScope = 'current' | 'all';
@@ -257,7 +258,6 @@ function useCloseOnOutsideClick<T extends HTMLElement>(
 export function ScheduledTasksPage() {
   const { agentName, updateParams } = useSafeSearchParams();
   const { agentexClient } = useAgentexClient();
-  const agentexAPIBaseURL = '/api/agentex';
   const { data: agents = [], isLoading: agentsLoading } =
     useAgents(agentexClient);
   const { data: agentByName } = useAgentByName(agentexClient, agentName);
@@ -267,13 +267,13 @@ export function ScheduledTasksPage() {
     agents.find(agent => agent.name === agentName) ?? agentByName ?? null;
   const agentId = selectedAgent?.id ?? null;
 
-  const schedulesQuery = useAgentRunSchedules(agentexAPIBaseURL, agentId);
+  const schedulesQuery = useAgentRunSchedules(agentexClient, agentId);
   const schedules = useMemo(
     () => schedulesQuery.data ?? [],
     [schedulesQuery.data]
   );
   const allScheduleQueries = useAgentRunSchedulesForAgents(
-    agentexAPIBaseURL,
+    agentexClient,
     agents,
     scope === 'all'
   );
@@ -304,7 +304,7 @@ export function ScheduledTasksPage() {
 
   const baseItems = scope === 'all' ? allItems : currentItems;
   const detailQueries = useAgentRunScheduleDetailsForItems(
-    agentexAPIBaseURL,
+    agentexClient,
     baseItems
   );
   const schedulesWithLiveFields = baseItems.map((item, index) => ({
@@ -374,13 +374,13 @@ export function ScheduledTasksPage() {
             {scope === 'current' && selectedAgent && (
               <ScheduleComposer
                 agentId={selectedAgent.id}
-                baseURL={agentexAPIBaseURL}
+                agentexClient={agentexClient}
                 schedules={schedules}
               />
             )}
             <ScheduleViewTabs view={scheduleView} onChange={setScheduleView} />
             <ScheduleList
-              baseURL={agentexAPIBaseURL}
+              agentexClient={agentexClient}
               items={visibleItems}
               isLoading={isLoading}
               error={error}
@@ -479,18 +479,21 @@ function ScheduleViewTabs({
 
 function ScheduleComposer({
   agentId,
-  baseURL,
+  agentexClient,
   schedules,
 }: {
   agentId: string;
-  baseURL: string;
+  agentexClient: AgentexSDK;
   schedules: AgentRunSchedule[];
 }) {
   const [prompt, setPrompt] = useState('');
   const [cadence, setCadence] = useState<CadenceConfig>(DEFAULT_CADENCE);
   const [timezone, setTimezone] = useState(getBrowserTimezone);
   const [pendingName, setPendingName] = useState<string | null>(null);
-  const createSchedule = useCreateAgentRunSchedule({ baseURL, agentId });
+  const createSchedule = useCreateAgentRunSchedule({
+    agentexClient,
+    agentId,
+  });
 
   const handleReview = () => {
     if (!prompt.trim()) {
@@ -686,7 +689,7 @@ function TimezoneSelect({
 }
 
 function ScheduleList({
-  baseURL,
+  agentexClient,
   items,
   isLoading,
   error,
@@ -694,7 +697,7 @@ function ScheduleList({
   showAgentName,
   view,
 }: {
-  baseURL: string;
+  agentexClient: AgentexSDK;
   items: ScheduleListItem[];
   isLoading: boolean;
   error: Error | null;
@@ -724,7 +727,7 @@ function ScheduleList({
   if (view === 'upcoming') {
     return (
       <UpcomingScheduleList
-        baseURL={baseURL}
+        agentexClient={agentexClient}
         items={items}
         showAgentName={showAgentName}
       />
@@ -733,7 +736,7 @@ function ScheduleList({
 
   return (
     <AllSchedulesList
-      baseURL={baseURL}
+      agentexClient={agentexClient}
       items={items}
       showAgentName={showAgentName}
     />
@@ -741,11 +744,11 @@ function ScheduleList({
 }
 
 function UpcomingScheduleList({
-  baseURL,
+  agentexClient,
   items,
   showAgentName,
 }: {
-  baseURL: string;
+  agentexClient: AgentexSDK;
   items: ScheduleListItem[];
   showAgentName: boolean;
 }) {
@@ -763,7 +766,7 @@ function UpcomingScheduleList({
               {group.items.map(item => (
                 <UpcomingScheduleRow
                   key={`${item.schedule.id}-${item.runTime.toISOString()}`}
-                  baseURL={baseURL}
+                  agentexClient={agentexClient}
                   item={item}
                   showAgentName={showAgentName}
                 />
@@ -777,25 +780,29 @@ function UpcomingScheduleList({
 }
 
 function UpcomingScheduleRow({
-  baseURL,
+  agentexClient,
   item,
   showAgentName,
 }: {
-  baseURL: string;
+  agentexClient: AgentexSDK;
   item: UpcomingRunItem;
   showAgentName: boolean;
 }) {
   const { agentId, agentName, schedule } = item;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isRunModalOpen, setIsRunModalOpen] = useState(false);
-  const trigger = useScheduleAction({ baseURL, agentId, action: 'trigger' });
+  const trigger = useScheduleAction({
+    agentexClient,
+    agentId,
+    action: 'trigger',
+  });
   const skip = useScheduleAction({
-    baseURL,
+    agentexClient,
     agentId,
     action: 'skip',
   });
   const unskip = useScheduleAction({
-    baseURL,
+    agentexClient,
     agentId,
     action: 'unskip',
   });
@@ -867,7 +874,7 @@ function UpcomingScheduleRow({
           isOpen={isMenuOpen}
           setIsOpen={setIsMenuOpen}
           schedule={schedule}
-          baseURL={baseURL}
+          agentexClient={agentexClient}
           agentId={agentId}
           includeRunNow={false}
           scheduledTime={item.runTime.toISOString()}
@@ -972,11 +979,11 @@ function RunNowOption({
 }
 
 function AllSchedulesList({
-  baseURL,
+  agentexClient,
   items,
   showAgentName,
 }: {
-  baseURL: string;
+  agentexClient: AgentexSDK;
   items: ScheduleListItem[];
   showAgentName: boolean;
 }) {
@@ -988,7 +995,7 @@ function AllSchedulesList({
             key={schedule.id}
             agentId={agentId}
             agentName={agentName}
-            baseURL={baseURL}
+            agentexClient={agentexClient}
             schedule={schedule}
             showAgentName={showAgentName}
           />
@@ -1001,20 +1008,24 @@ function AllSchedulesList({
 function ScheduleRow({
   agentId,
   agentName,
-  baseURL,
+  agentexClient,
   schedule,
   showAgentName,
 }: {
   agentId: string;
   agentName: string;
-  baseURL: string;
+  agentexClient: AgentexSDK;
   schedule: AgentRunSchedule;
   showAgentName: boolean;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const pause = useScheduleAction({ baseURL, agentId, action: 'pause' });
-  const resume = useScheduleAction({ baseURL, agentId, action: 'resume' });
+  const pause = useScheduleAction({ agentexClient, agentId, action: 'pause' });
+  const resume = useScheduleAction({
+    agentexClient,
+    agentId,
+    action: 'resume',
+  });
   const isPaused = isSchedulePaused(schedule);
   const nextRun = getNextRun(schedule);
 
@@ -1052,7 +1063,7 @@ function ScheduleRow({
           isOpen={isMenuOpen}
           setIsOpen={setIsMenuOpen}
           schedule={schedule}
-          baseURL={baseURL}
+          agentexClient={agentexClient}
           agentId={agentId}
           onEdit={() => setIsEditing(true)}
           includeRunNow={true}
@@ -1062,7 +1073,7 @@ function ScheduleRow({
       {isEditing && (
         <EditScheduleModal
           agentId={agentId}
-          baseURL={baseURL}
+          agentexClient={agentexClient}
           schedule={schedule}
           onClose={() => setIsEditing(false)}
         />
@@ -1075,7 +1086,7 @@ function ScheduleOverflowMenu({
   isOpen,
   setIsOpen,
   schedule,
-  baseURL,
+  agentexClient,
   agentId,
   onEdit,
   includeRunNow,
@@ -1085,7 +1096,7 @@ function ScheduleOverflowMenu({
   isOpen: boolean;
   setIsOpen: (isOpen: boolean | ((isOpen: boolean) => boolean)) => void;
   schedule: AgentRunSchedule;
-  baseURL: string;
+  agentexClient: AgentexSDK;
   agentId: string;
   onEdit?: () => void;
   includeRunNow: boolean;
@@ -1095,21 +1106,29 @@ function ScheduleOverflowMenu({
   const menuRef = useCloseOnOutsideClick<HTMLDivElement>(isOpen, () =>
     setIsOpen(false)
   );
-  const pause = useScheduleAction({ baseURL, agentId, action: 'pause' });
-  const resume = useScheduleAction({ baseURL, agentId, action: 'resume' });
+  const pause = useScheduleAction({ agentexClient, agentId, action: 'pause' });
+  const resume = useScheduleAction({
+    agentexClient,
+    agentId,
+    action: 'resume',
+  });
   const skip = useScheduleAction({
-    baseURL,
+    agentexClient,
     agentId,
     action: 'skip',
   });
   const unskip = useScheduleAction({
-    baseURL,
+    agentexClient,
     agentId,
     action: 'unskip',
   });
-  const trigger = useScheduleAction({ baseURL, agentId, action: 'trigger' });
+  const trigger = useScheduleAction({
+    agentexClient,
+    agentId,
+    action: 'trigger',
+  });
   const deleteSchedule = useScheduleAction({
-    baseURL,
+    agentexClient,
     agentId,
     action: 'delete',
   });
@@ -1232,12 +1251,12 @@ function MenuButton({
 
 function EditScheduleModal({
   agentId,
-  baseURL,
+  agentexClient,
   schedule,
   onClose,
 }: {
   agentId: string;
-  baseURL: string;
+  agentexClient: AgentexSDK;
   schedule: AgentRunSchedule;
   onClose: () => void;
 }) {
@@ -1245,7 +1264,10 @@ function EditScheduleModal({
   const [prompt, setPrompt] = useState(schedule.initial_input.content);
   const [cadence, setCadence] = useState(() => scheduleToCadence(schedule));
   const [timezone, setTimezone] = useState(schedule.timezone);
-  const updateSchedule = useUpdateAgentRunSchedule({ baseURL, agentId });
+  const updateSchedule = useUpdateAgentRunSchedule({
+    agentexClient,
+    agentId,
+  });
 
   const handleSave = async () => {
     await updateSchedule.mutateAsync({

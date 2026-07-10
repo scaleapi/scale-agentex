@@ -7,12 +7,13 @@ import {
 
 import { toast } from '@/components/ui/toast';
 import {
-  agentRunSchedulesAPI,
   type AgentRunSchedule,
   type CreateAgentRunScheduleRequest,
+  normalizeAgentRunSchedule,
   type UpdateAgentRunScheduleRequest,
 } from '@/lib/agent-run-schedules';
 
+import type AgentexSDK from 'agentex';
 import type { Agent } from 'agentex/resources';
 
 export const scheduleKeys = {
@@ -26,7 +27,7 @@ export const scheduleKeys = {
 };
 
 type ScheduleMutationContext = {
-  baseURL: string;
+  agentexClient: AgentexSDK;
   agentId: string;
 };
 
@@ -46,22 +47,27 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Please try again.';
 }
 
-export function useAgentRunSchedules(baseURL: string, agentId: string | null) {
+export function useAgentRunSchedules(
+  agentexClient: AgentexSDK,
+  agentId: string | null
+) {
   return useQuery({
     queryKey: scheduleKeys.byAgentId(agentId),
     queryFn: async () => {
       if (!agentId) {
         return [];
       }
-      const response = await agentRunSchedulesAPI.list(baseURL, agentId);
-      return response.run_schedules;
+      const response = await agentexClient.agents.schedules.list(agentId, {
+        limit: 100,
+      });
+      return response.run_schedules.map(normalizeAgentRunSchedule);
     },
     enabled: !!agentId,
   });
 }
 
 export function useAgentRunSchedulesForAgents(
-  baseURL: string,
+  agentexClient: AgentexSDK,
   agents: Agent[],
   enabled: boolean
 ) {
@@ -69,8 +75,10 @@ export function useAgentRunSchedulesForAgents(
     queries: agents.map(agent => ({
       queryKey: scheduleKeys.byAgentId(agent.id),
       queryFn: async () => {
-        const response = await agentRunSchedulesAPI.list(baseURL, agent.id);
-        return response.run_schedules;
+        const response = await agentexClient.agents.schedules.list(agent.id, {
+          limit: 100,
+        });
+        return response.run_schedules.map(normalizeAgentRunSchedule);
       },
       enabled,
     })),
@@ -78,27 +86,34 @@ export function useAgentRunSchedulesForAgents(
 }
 
 export function useAgentRunScheduleDetailsForItems(
-  baseURL: string,
+  agentexClient: AgentexSDK,
   items: AgentRunScheduleListItem[]
 ) {
   return useQueries({
     queries: items.map(({ agentId, schedule }) => ({
       queryKey: scheduleKeys.detail(agentId, schedule.id),
-      queryFn: () => agentRunSchedulesAPI.get(baseURL, agentId, schedule.id),
+      queryFn: async () =>
+        normalizeAgentRunSchedule(
+          await agentexClient.agents.schedules.retrieve(schedule.id, {
+            agent_id: agentId,
+          })
+        ),
       staleTime: 30_000,
     })),
   });
 }
 
 export function useCreateAgentRunSchedule({
-  baseURL,
+  agentexClient,
   agentId,
 }: ScheduleMutationContext) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (payload: CreateAgentRunScheduleRequest) =>
-      agentRunSchedulesAPI.create(baseURL, agentId, payload),
+    mutationFn: async (payload: CreateAgentRunScheduleRequest) =>
+      normalizeAgentRunSchedule(
+        await agentexClient.agents.schedules.create(agentId, payload)
+      ),
     onSuccess: schedule => {
       queryClient.invalidateQueries({
         queryKey: scheduleKeys.byAgentId(agentId),
@@ -119,7 +134,7 @@ export function useCreateAgentRunSchedule({
 }
 
 export function useUpdateAgentRunSchedule({
-  baseURL,
+  agentexClient,
   agentId,
 }: ScheduleMutationContext) {
   const queryClient = useQueryClient();
@@ -131,7 +146,10 @@ export function useUpdateAgentRunSchedule({
     }: {
       scheduleId: string;
       payload: UpdateAgentRunScheduleRequest;
-    }) => agentRunSchedulesAPI.update(baseURL, agentId, scheduleId, payload),
+    }) =>
+      agentexClient.agents.schedules
+        .update(scheduleId, { agent_id: agentId, ...payload })
+        .then(normalizeAgentRunSchedule),
     onSuccess: schedule => {
       queryClient.invalidateQueries({
         queryKey: scheduleKeys.byAgentId(agentId),
@@ -152,7 +170,7 @@ export function useUpdateAgentRunSchedule({
 }
 
 export function useScheduleAction({
-  baseURL,
+  agentexClient,
   agentId,
   action,
 }: ScheduleMutationContext & {
@@ -171,33 +189,41 @@ export function useScheduleAction({
         typeof input === 'string' ? undefined : input.scheduledTime;
       switch (action) {
         case 'delete':
-          return agentRunSchedulesAPI.delete(baseURL, agentId, scheduleId);
+          return agentexClient.agents.schedules.delete(scheduleId, {
+            agent_id: agentId,
+          });
         case 'pause':
-          return agentRunSchedulesAPI.pause(baseURL, agentId, scheduleId);
+          return agentexClient.agents.schedules
+            .pause(scheduleId, { agent_id: agentId })
+            .then(normalizeAgentRunSchedule);
         case 'resume':
-          return agentRunSchedulesAPI.resume(baseURL, agentId, scheduleId);
+          return agentexClient.agents.schedules
+            .resume(scheduleId, { agent_id: agentId })
+            .then(normalizeAgentRunSchedule);
         case 'skip':
           if (!scheduledTime) {
             throw new Error('scheduledTime is required to skip a run');
           }
-          return agentRunSchedulesAPI.skip(
-            baseURL,
-            agentId,
-            scheduleId,
-            scheduledTime
-          );
+          return agentexClient.agents.schedules
+            .skip(scheduleId, {
+              agent_id: agentId,
+              scheduled_time: scheduledTime,
+            })
+            .then(normalizeAgentRunSchedule);
         case 'trigger':
-          return agentRunSchedulesAPI.trigger(baseURL, agentId, scheduleId);
+          return agentexClient.agents.schedules
+            .trigger(scheduleId, { agent_id: agentId })
+            .then(normalizeAgentRunSchedule);
         case 'unskip':
           if (!scheduledTime) {
             throw new Error('scheduledTime is required to unskip a run');
           }
-          return agentRunSchedulesAPI.unskip(
-            baseURL,
-            agentId,
-            scheduleId,
-            scheduledTime
-          );
+          return agentexClient.agents.schedules
+            .unskip(scheduleId, {
+              agent_id: agentId,
+              scheduled_time: scheduledTime,
+            })
+            .then(normalizeAgentRunSchedule);
       }
     },
     onSuccess: result => {
