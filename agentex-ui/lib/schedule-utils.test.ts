@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   cadenceToPayload,
+  describeCadence,
   generateScheduleName,
   normalizeScheduleName,
+  sanitizeScheduleNameInput,
   scheduleToCadence,
   type CadenceConfig,
 } from './schedule-utils';
@@ -33,6 +35,11 @@ describe('generateScheduleName', () => {
 describe('normalizeScheduleName', () => {
   it('keeps editable names within backend slug constraints', () => {
     expect(normalizeScheduleName('  Daily Summary!!! ')).toBe('daily-summary');
+  });
+
+  it('preserves a trailing hyphen while editing', () => {
+    expect(sanitizeScheduleNameInput('daily-')).toBe('daily-');
+    expect(sanitizeScheduleNameInput('Daily- Summary')).toBe('daily-summary');
   });
 });
 
@@ -121,5 +128,58 @@ describe('scheduleToCadence', () => {
       intervalValue: '2',
       intervalUnit: 'hours',
     });
+  });
+});
+
+describe('describeCadence', () => {
+  const schedule = {
+    id: 'schedule-id',
+    agent_id: 'agent-id',
+    name: 'schedule',
+    description: null,
+    cron_expression: '30 9 * * *',
+    interval_seconds: null,
+    timezone: 'UTC',
+    start_at: null,
+    end_at: null,
+    paused: false,
+    task_params: null,
+    task_metadata: null,
+    initial_input: { type: 'text', author: 'user', content: 'Run this' },
+    initial_input_method: 'send_message',
+    created_at: null,
+    updated_at: null,
+    state: 'ACTIVE',
+    next_action_times: [],
+    skipped_action_times: [],
+    last_action_time: null,
+    num_actions_taken: 0,
+  } satisfies AgentRunSchedule;
+
+  it('describes common cron cadences in plain language', () => {
+    expect(describeCadence(schedule)).toBe('Daily at 9:30 AM');
+    expect(
+      describeCadence({ ...schedule, cron_expression: '30 9 * * MON' })
+    ).toBe('Every Monday at 9:30 AM');
+    expect(
+      describeCadence({ ...schedule, cron_expression: '30 9 15 * *' })
+    ).toBe('Monthly on day 15 at 9:30 AM');
+  });
+
+  it('uses natural singular and plural interval units', () => {
+    expect(
+      describeCadence({
+        ...schedule,
+        cron_expression: null,
+        interval_seconds: 3600,
+      })
+    ).toBe('Every 1 hour');
+    expect(
+      describeCadence({
+        ...schedule,
+        cron_expression: null,
+        interval_seconds: 7200,
+      })
+    ).toBe('Every 2 hours');
   });
 });

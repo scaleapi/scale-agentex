@@ -122,7 +122,6 @@ export function useCreateAgentRunSchedule({
         scheduleKeys.detail(agentId, schedule.id),
         schedule
       );
-      toast.success('Scheduled task created');
     },
     onError: error => {
       toast.error({

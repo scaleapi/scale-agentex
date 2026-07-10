@@ -29,6 +29,14 @@ export function normalizeScheduleName(value: string): string {
     .replace(/-+$/g, '');
 }
 
+export function sanitizeScheduleNameInput(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/^-+/g, '')
+    .slice(0, 64);
+}
+
 export function generateScheduleName(
   prompt: string,
   existingSchedules: Pick<AgentRunSchedule, 'name'>[]
@@ -94,18 +102,68 @@ export function cadenceToPayload(
 export function describeCadence(schedule: AgentRunSchedule): string {
   if (schedule.interval_seconds != null) {
     if (schedule.interval_seconds % 86400 === 0) {
-      return `Every ${schedule.interval_seconds / 86400} day(s)`;
+      const days = schedule.interval_seconds / 86400;
+      return `Every ${days} ${days === 1 ? 'day' : 'days'}`;
     }
     if (schedule.interval_seconds % 3600 === 0) {
-      return `Every ${schedule.interval_seconds / 3600} hour(s)`;
+      const hours = schedule.interval_seconds / 3600;
+      return `Every ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
     }
     if (schedule.interval_seconds % 60 === 0) {
-      return `Every ${schedule.interval_seconds / 60} minute(s)`;
+      const minutes = schedule.interval_seconds / 60;
+      return `Every ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
     }
-    return `Every ${schedule.interval_seconds} second(s)`;
+    return `Every ${schedule.interval_seconds} ${
+      schedule.interval_seconds === 1 ? 'second' : 'seconds'
+    }`;
   }
 
-  return schedule.cron_expression ?? 'No cadence';
+  const [minute, hour, dayOfMonth, month, dayOfWeek] =
+    schedule.cron_expression?.split(' ') ?? [];
+  if (
+    minute == null ||
+    hour == null ||
+    dayOfMonth == null ||
+    month == null ||
+    dayOfWeek == null ||
+    !/^\d+$/.test(minute) ||
+    !/^\d+$/.test(hour) ||
+    month !== '*'
+  ) {
+    return schedule.cron_expression
+      ? `Cron schedule (${schedule.cron_expression})`
+      : 'No cadence';
+  }
+
+  const hourNumber = Number.parseInt(hour, 10);
+  const minuteNumber = Number.parseInt(minute, 10);
+  const period = hourNumber >= 12 ? 'PM' : 'AM';
+  const displayHour = hourNumber % 12 || 12;
+  const time = `${displayHour}:${String(minuteNumber).padStart(2, '0')} ${period}`;
+
+  if (dayOfWeek !== '*') {
+    const dayLabels: Record<string, string> = {
+      MON: 'Monday',
+      TUE: 'Tuesday',
+      WED: 'Wednesday',
+      THU: 'Thursday',
+      FRI: 'Friday',
+      SAT: 'Saturday',
+      SUN: 'Sunday',
+      'MON-FRI': 'weekday',
+    };
+    const days = dayOfWeek
+      .split(',')
+      .map(day => dayLabels[day] ?? day)
+      .join(', ');
+    return `Every ${days} at ${time}`;
+  }
+
+  if (dayOfMonth !== '*') {
+    return `Monthly on day ${dayOfMonth} at ${time}`;
+  }
+
+  return `Daily at ${time}`;
 }
 
 export function scheduleToCadence(schedule: AgentRunSchedule): CadenceConfig {

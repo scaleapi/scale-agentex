@@ -6,7 +6,11 @@ import { Loader2 } from 'lucide-react';
 import { useAgentexClient } from '@/components/providers';
 import { TaskButton } from '@/components/task-sidebar/task-button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
+import {
+  AppView,
+  ScheduleScope,
+  useSafeSearchParams,
+} from '@/hooks/use-safe-search-params';
 import { useInfiniteTasks } from '@/hooks/use-tasks';
 import { cn } from '@/lib/utils';
 
@@ -16,8 +20,10 @@ export type TaskSidebarBodyProps = {
 
 export const TaskSidebarBody = ({ className }: TaskSidebarBodyProps) => {
   const { agentexClient } = useAgentexClient();
-  const { agentName } = useSafeSearchParams();
+  const { agentName, scheduleScope, view } = useSafeSearchParams();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const showTasksAcrossAgents =
+    view === AppView.SCHEDULED_TASKS && scheduleScope === ScheduleScope.ALL;
 
   const {
     data,
@@ -27,7 +33,7 @@ export const TaskSidebarBody = ({ className }: TaskSidebarBodyProps) => {
     isFetchingNextPage,
   } = useInfiniteTasks(
     agentexClient,
-    agentName ? { agentName: agentName } : undefined
+    agentName && !showTasksAcrossAgents ? { agentName: agentName } : undefined
   );
 
   const tasks = useMemo(() => {

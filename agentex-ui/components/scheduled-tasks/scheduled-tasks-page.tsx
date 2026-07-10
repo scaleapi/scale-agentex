@@ -1,10 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
+  ArrowUp,
   Bot,
   CalendarClock,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clock3,
   Loader2,
   MoreHorizontal,
@@ -36,6 +41,7 @@ import {
 } from '@/hooks/use-agent-run-schedules';
 import { useAgents } from '@/hooks/use-agents';
 import {
+  ScheduleScope,
   SearchParamKey,
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
@@ -46,6 +52,7 @@ import {
   describeCadence,
   generateScheduleName,
   normalizeScheduleName,
+  sanitizeScheduleNameInput,
   scheduleToCadence,
   type CadenceConfig,
   type CadenceType,
@@ -55,7 +62,6 @@ import { cn } from '@/lib/utils';
 import type AgentexSDK from 'agentex';
 import type { Agent } from 'agentex/resources';
 
-type ScheduleScope = 'current' | 'all';
 type ScheduleView = 'upcoming' | 'all';
 
 type ScheduleListItem = {
@@ -69,14 +75,25 @@ type UpcomingRunItem = ScheduleListItem & {
   isSkipped: boolean;
 };
 
+type ScheduleCreationFeedback =
+  | {
+      status: 'pending';
+      title: string;
+      cadenceLabel: string;
+    }
+  | {
+      status: 'success';
+      schedule: AgentRunSchedule;
+    };
+
 const DAYS = [
+  ['SUN', 'Sunday'],
   ['MON', 'Monday'],
   ['TUE', 'Tuesday'],
   ['WED', 'Wednesday'],
   ['THU', 'Thursday'],
   ['FRI', 'Friday'],
   ['SAT', 'Saturday'],
-  ['SUN', 'Sunday'],
 ] as const;
 
 const COMMON_TIMEZONES = [
@@ -97,6 +114,14 @@ const COMMON_TIMEZONES = [
   'Australia/Sydney',
 ] as const;
 
+const DEFAULT_UPCOMING_RUN_LIMIT = 10;
+const DEFAULT_UPCOMING_RUNS_PER_SCHEDULE = 3;
+const TIME_OPTIONS = Array.from({ length: 24 * 4 }, (_, index) => {
+  const hour = Math.floor(index / 4);
+  const minute = (index % 4) * 15;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+});
+
 function getBrowserTimezone() {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
@@ -110,7 +135,7 @@ function getNextRunTime(schedule: AgentRunSchedule) {
   return getNextRun(schedule)?.getTime() ?? null;
 }
 
-function getVisibleUpcomingRuns(schedule: AgentRunSchedule) {
+function getUpcomingRuns(schedule: AgentRunSchedule) {
   const now = Date.now();
   const runItems = [
     ...schedule.next_action_times.map(nextRun => ({
@@ -135,13 +160,26 @@ function getVisibleUpcomingRuns(schedule: AgentRunSchedule) {
     }
   }
 
-  return Array.from(runsByTime.values())
-    .sort((a, b) => a.runTime.getTime() - b.runTime.getTime())
-    .slice(0, 5);
+  return Array.from(runsByTime.values()).sort(
+    (a, b) => a.runTime.getTime() - b.runTime.getTime()
+  );
 }
 
 function isSchedulePaused(schedule: AgentRunSchedule) {
   return schedule.state === 'PAUSED' || schedule.paused;
+}
+
+function getScheduleTitle(schedule: AgentRunSchedule) {
+  return schedule.name;
+}
+
+function describeRunCount(count: number) {
+  if (count === 0) return 'Never run';
+  return count === 1 ? '1 run' : `${count} runs`;
+}
+
+function formatTimezone(timezone: string) {
+  return timezone.replaceAll('_', ' ');
 }
 
 function sortScheduleItems(items: ScheduleListItem[], view: ScheduleView) {
@@ -169,6 +207,12 @@ function formatRunTime(date: Date) {
   });
 }
 
+function formatTimeValue(value: string) {
+  const [hourText = '0', minute = '00'] = value.split(':');
+  const hour = Number.parseInt(hourText, 10);
+  return `${hour % 12 || 12}:${minute} ${hour >= 12 ? 'PM' : 'AM'}`;
+}
+
 function formatRunDateTime(date: Date) {
   return date.toLocaleDateString(undefined, {
     month: 'short',
@@ -176,6 +220,36 @@ function formatRunDateTime(date: Date) {
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+function describeCadenceConfig(cadence: CadenceConfig) {
+  if (cadence.type === 'interval') {
+    return `Every ${cadence.intervalValue} ${cadence.intervalUnit}`;
+  }
+  const time = new Date(`2000-01-01T${cadence.time}:00`).toLocaleTimeString(
+    undefined,
+    {
+      hour: 'numeric',
+      minute: '2-digit',
+    }
+  );
+  if (cadence.type === 'weekly') {
+    const selectedDays = cadence.dayOfWeek.split(',');
+    const isWeekdays =
+      selectedDays.length === 5 &&
+      ['MON', 'TUE', 'WED', 'THU', 'FRI'].every(day =>
+        selectedDays.includes(day)
+      );
+    if (isWeekdays) return `Weekdays at ${time}`;
+    const dayLabels = selectedDays.map(
+      day => DAYS.find(([value]) => value === day)?.[1] ?? day
+    );
+    return `${dayLabels.join(', ')} at ${time}`;
+  }
+  if (cadence.type === 'monthly') {
+    return `Monthly on day ${cadence.dayOfMonth} at ${time}`;
+  }
+  return `Daily at ${time}`;
 }
 
 function getUpcomingGroup(date: Date) {
@@ -206,13 +280,34 @@ function formatUpcomingSubtitle(date: Date) {
   return formatRunDateTime(date);
 }
 
-function groupUpcomingRuns(items: ScheduleListItem[]) {
+function collectUpcomingRuns(items: ScheduleListItem[]) {
+  return items
+    .flatMap(item =>
+      getUpcomingRuns(item.schedule).map(run => ({ ...item, ...run }))
+    )
+    .sort((a, b) => a.runTime.getTime() - b.runTime.getTime());
+}
+
+function getDefaultUpcomingRuns(items: UpcomingRunItem[]) {
+  const countsBySchedule = new Map<string, number>();
+  const visibleRuns: UpcomingRunItem[] = [];
+
+  for (const item of items) {
+    const count = countsBySchedule.get(item.schedule.id) ?? 0;
+    if (count >= DEFAULT_UPCOMING_RUNS_PER_SCHEDULE) continue;
+    visibleRuns.push(item);
+    countsBySchedule.set(item.schedule.id, count + 1);
+    if (visibleRuns.length >= DEFAULT_UPCOMING_RUN_LIMIT) break;
+  }
+
+  return visibleRuns;
+}
+
+function groupUpcomingRuns(items: UpcomingRunItem[]) {
   const groups = new Map<string, UpcomingRunItem[]>();
   for (const item of items) {
-    for (const run of getVisibleUpcomingRuns(item.schedule)) {
-      const group = getUpcomingGroup(run.runTime);
-      groups.set(group, [...(groups.get(group) ?? []), { ...item, ...run }]);
-    }
+    const group = getUpcomingGroup(item.runTime);
+    groups.set(group, [...(groups.get(group) ?? []), item]);
   }
   return ['Today', 'Tomorrow', 'Later']
     .map(label => ({
@@ -234,6 +329,15 @@ function useCloseOnOutsideClick<T extends HTMLElement>(
     if (!isOpen) return;
 
     const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(
+          '[data-radix-popper-content-wrapper], [role="listbox"], [role="option"]'
+        )
+      ) {
+        return;
+      }
       if (!ref.current?.contains(event.target as Node)) {
         onClose();
       }
@@ -256,12 +360,11 @@ function useCloseOnOutsideClick<T extends HTMLElement>(
 }
 
 export function ScheduledTasksPage() {
-  const { agentName, updateParams } = useSafeSearchParams();
+  const { agentName, scheduleScope, updateParams } = useSafeSearchParams();
   const { agentexClient } = useAgentexClient();
   const { data: agents = [], isLoading: agentsLoading } =
     useAgents(agentexClient);
   const { data: agentByName } = useAgentByName(agentexClient, agentName);
-  const [scope, setScope] = useState<ScheduleScope>('current');
   const [scheduleView, setScheduleView] = useState<ScheduleView>('upcoming');
   const selectedAgent =
     agents.find(agent => agent.name === agentName) ?? agentByName ?? null;
@@ -275,7 +378,7 @@ export function ScheduledTasksPage() {
   const allScheduleQueries = useAgentRunSchedulesForAgents(
     agentexClient,
     agents,
-    scope === 'all'
+    scheduleScope === ScheduleScope.ALL
   );
 
   const currentItems = useMemo<ScheduleListItem[]>(
@@ -302,7 +405,8 @@ export function ScheduledTasksPage() {
     [agents, allScheduleQueries]
   );
 
-  const baseItems = scope === 'all' ? allItems : currentItems;
+  const baseItems =
+    scheduleScope === ScheduleScope.ALL ? allItems : currentItems;
   const detailQueries = useAgentRunScheduleDetailsForItems(
     agentexClient,
     baseItems
@@ -325,17 +429,17 @@ export function ScheduledTasksPage() {
   }, [scheduleView, schedulesWithLiveFields]);
 
   const isLoading =
-    scope === 'all'
+    scheduleScope === ScheduleScope.ALL
       ? agentsLoading || allScheduleQueries.some(query => query.isLoading)
       : schedulesQuery.isLoading;
   const error =
-    scope === 'all'
+    scheduleScope === ScheduleScope.ALL
       ? (allScheduleQueries.find(query => query.error)?.error ?? null)
       : schedulesQuery.error;
   const emptyMessage =
     scheduleView === 'upcoming'
       ? 'No upcoming scheduled runs'
-      : scope === 'all'
+      : scheduleScope === ScheduleScope.ALL
         ? 'No schedules across agents yet'
         : 'No scheduled tasks yet';
 
@@ -347,7 +451,7 @@ export function ScheduledTasksPage() {
             Scheduled Tasks
           </h1>
           <p className="text-muted-foreground text-sm">
-            {scope === 'all'
+            {scheduleScope === ScheduleScope.ALL
               ? 'Browse schedules across all agents.'
               : agentName
                 ? `Run ${agentName} automatically on a cadence.`
@@ -355,23 +459,30 @@ export function ScheduledTasksPage() {
           </p>
         </div>
         <ScheduleScopeSelector
-          scope={scope}
+          scope={scheduleScope}
           selectedAgent={selectedAgent}
           agents={agents}
-          onChange={setScope}
+          onChange={nextScope =>
+            updateParams({
+              [SearchParamKey.SCHEDULE_SCOPE]:
+                nextScope === ScheduleScope.ALL ? ScheduleScope.ALL : null,
+            })
+          }
           onSelectAgent={nextAgentName => {
-            setScope('current');
-            updateParams({ [SearchParamKey.AGENT_NAME]: nextAgentName });
+            updateParams({
+              [SearchParamKey.SCHEDULE_SCOPE]: null,
+              [SearchParamKey.AGENT_NAME]: nextAgentName,
+            });
           }}
         />
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-8 py-6">
-        {scope === 'current' && !selectedAgent ? (
+        {scheduleScope === ScheduleScope.CURRENT && !selectedAgent ? (
           <EmptyState message="Select an agent to create scheduled tasks." />
         ) : (
           <>
-            {scope === 'current' && selectedAgent && (
+            {scheduleScope === ScheduleScope.CURRENT && selectedAgent && (
               <ScheduleComposer
                 agentId={selectedAgent.id}
                 agentexClient={agentexClient}
@@ -385,7 +496,7 @@ export function ScheduledTasksPage() {
               isLoading={isLoading}
               error={error}
               emptyMessage={emptyMessage}
-              showAgentName={scope === 'all'}
+              showAgentName={scheduleScope === ScheduleScope.ALL}
               view={scheduleView}
             />
           </>
@@ -408,14 +519,15 @@ function ScheduleScopeSelector({
   onChange: (scope: ScheduleScope) => void;
   onSelectAgent: (agentName: string) => void;
 }) {
-  const value = scope === 'all' ? 'all' : selectedAgent?.name;
+  const value =
+    scope === ScheduleScope.ALL ? ScheduleScope.ALL : selectedAgent?.name;
 
   return (
     <Select
       {...(value ? { value } : {})}
       onValueChange={nextValue => {
-        if (nextValue === 'all') {
-          onChange('all');
+        if (nextValue === ScheduleScope.ALL) {
+          onChange(ScheduleScope.ALL);
           return;
         }
         onSelectAgent(nextValue);
@@ -428,7 +540,7 @@ function ScheduleScopeSelector({
         <SelectValue placeholder="Select an agent" />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="all">
+        <SelectItem value={ScheduleScope.ALL}>
           <span className="flex items-center gap-2">
             <CalendarClock className="size-4" />
             All agents
@@ -469,7 +581,7 @@ function ScheduleViewTabs({
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >
-            {option === 'upcoming' ? 'Upcoming' : 'All Schedules'}
+            {option === 'upcoming' ? 'Upcoming' : 'Schedules'}
           </button>
         ))}
       </div>
@@ -489,34 +601,48 @@ function ScheduleComposer({
   const [prompt, setPrompt] = useState('');
   const [cadence, setCadence] = useState<CadenceConfig>(DEFAULT_CADENCE);
   const [timezone, setTimezone] = useState(getBrowserTimezone);
-  const [pendingName, setPendingName] = useState<string | null>(null);
+  const [creationFeedback, setCreationFeedback] =
+    useState<ScheduleCreationFeedback | null>(null);
+  const [editingSchedule, setEditingSchedule] =
+    useState<AgentRunSchedule | null>(null);
+  const dismissCreationFeedback = useCallback(
+    () => setCreationFeedback(null),
+    []
+  );
   const createSchedule = useCreateAgentRunSchedule({
     agentexClient,
     agentId,
   });
 
-  const handleReview = () => {
-    if (!prompt.trim()) {
+  const handleCreate = async () => {
+    const submittedPrompt = prompt.trim();
+    if (!submittedPrompt) {
       toast.error('Enter a prompt to schedule');
       return;
     }
-    setPendingName(generateScheduleName(prompt, schedules));
-  };
-
-  const handleCreate = async () => {
-    if (!pendingName) return;
-    await createSchedule.mutateAsync({
-      name: pendingName,
-      timezone,
-      ...cadenceToPayload(cadence),
-      initial_input: {
-        type: 'text',
-        author: 'user',
-        content: prompt.trim(),
-      },
+    const name = generateScheduleName(submittedPrompt, schedules);
+    setCreationFeedback({
+      status: 'pending',
+      title: name,
+      cadenceLabel: `${describeCadenceConfig(cadence)} · ${formatTimezone(timezone)}`,
     });
     setPrompt('');
-    setPendingName(null);
+    try {
+      const schedule = await createSchedule.mutateAsync({
+        name,
+        timezone,
+        ...cadenceToPayload(cadence),
+        initial_input: {
+          type: 'text',
+          author: 'user',
+          content: submittedPrompt,
+        },
+      });
+      setCreationFeedback({ status: 'success', schedule });
+    } catch {
+      setCreationFeedback(null);
+      setPrompt(currentPrompt => currentPrompt || submittedPrompt);
+    }
   };
 
   return (
@@ -525,133 +651,368 @@ function ScheduleComposer({
         <textarea
           value={prompt}
           onChange={event => setPrompt(event.target.value)}
+          onKeyDown={event => {
+            if (
+              event.key === 'Enter' &&
+              !event.shiftKey &&
+              !event.nativeEvent.isComposing
+            ) {
+              event.preventDefault();
+              if (!createSchedule.isPending) {
+                void handleCreate();
+              }
+            }
+          }}
           placeholder="What should this agent do on a schedule?"
           className="min-h-20 resize-none border-0 bg-transparent text-sm leading-6 outline-none focus:border-0 focus:ring-0 focus:outline-none focus-visible:outline-none"
         />
         <div className="flex flex-wrap items-center gap-3">
-          <CadenceControls cadence={cadence} onChange={setCadence} />
-          <TimezoneSelect timezone={timezone} onChange={setTimezone} />
+          <CadencePicker
+            cadence={cadence}
+            onChange={setCadence}
+            timezone={timezone}
+            onTimezoneChange={setTimezone}
+          />
           <Button
-            onClick={handleReview}
+            onClick={() => void handleCreate()}
             disabled={!prompt.trim() || createSchedule.isPending}
             className="ml-auto rounded-full"
           >
-            Review Schedule
+            {createSchedule.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <ArrowUp className="size-4" />
+            )}
+            Schedule
           </Button>
         </div>
       </div>
       <p className="text-muted-foreground px-4 text-xs">
-        The schedule name is generated from the prompt and can be edited before
-        creation.
+        Press Enter to schedule. Use Shift + Enter for a new line. You can edit
+        the schedule afterward.
       </p>
-      {pendingName && (
-        <ConfirmScheduleModal
-          title="Create scheduled task"
-          name={pendingName}
-          setName={setPendingName}
-          prompt={prompt}
-          cadence={cadence}
-          timezone={timezone}
-          onCancel={() => setPendingName(null)}
-          onConfirm={handleCreate}
-          isSubmitting={createSchedule.isPending}
+      <ScheduleCreationStatus
+        feedback={creationFeedback}
+        onDismiss={dismissCreationFeedback}
+        onEdit={schedule => setEditingSchedule(schedule)}
+      />
+      {editingSchedule && (
+        <EditScheduleModal
+          agentId={agentId}
+          agentexClient={agentexClient}
+          schedule={editingSchedule}
+          onClose={() => setEditingSchedule(null)}
         />
       )}
     </section>
   );
 }
 
-function CadenceControls({
+function ScheduleCreationStatus({
+  feedback,
+  onDismiss,
+  onEdit,
+}: {
+  feedback: ScheduleCreationFeedback | null;
+  onDismiss: () => void;
+  onEdit: (schedule: AgentRunSchedule) => void;
+}) {
+  const reduceMotion = useReducedMotion();
+  const nextRun =
+    feedback?.status === 'success' ? getNextRun(feedback.schedule) : null;
+
+  useEffect(() => {
+    if (feedback?.status !== 'success') return;
+    const timeout = window.setTimeout(onDismiss, 10000);
+    return () => window.clearTimeout(timeout);
+  }, [feedback, onDismiss]);
+
+  return (
+    <AnimatePresence mode="wait">
+      {feedback && (
+        <motion.div
+          key={feedback.status}
+          initial={reduceMotion ? false : { opacity: 0, y: -8, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          {...(reduceMotion
+            ? {}
+            : { exit: { opacity: 0, y: -4, scale: 0.99 } })}
+          transition={{ duration: reduceMotion ? 0 : 0.2, ease: 'easeOut' }}
+          className={cn(
+            'border-border bg-card flex items-center gap-3 rounded-2xl border px-4 py-3 shadow-sm',
+            feedback.status === 'success' &&
+              'border-emerald-500/30 bg-emerald-500/5'
+          )}
+          aria-live="polite"
+        >
+          {feedback.status === 'pending' ? (
+            <motion.span
+              className="size-2.5 shrink-0 rounded-full bg-[#7C5CFF]"
+              animate={
+                reduceMotion
+                  ? false
+                  : { scale: [1, 1.35, 1], opacity: [0.7, 1, 0.7] }
+              }
+              transition={{
+                duration: 1.2,
+                repeat: Infinity,
+                ease: 'easeInOut',
+              }}
+            />
+          ) : (
+            <CheckCircle2 className="size-5 shrink-0 text-emerald-600" />
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium">
+              {feedback.status === 'pending'
+                ? `Scheduling “${feedback.title}”…`
+                : `Scheduled “${getScheduleTitle(feedback.schedule)}”`}
+            </div>
+            <div className="text-muted-foreground truncate text-xs">
+              {feedback.status === 'pending'
+                ? feedback.cadenceLabel
+                : nextRun
+                  ? `Next run ${formatUpcomingSubtitle(nextRun)}`
+                  : 'Schedule created successfully'}
+            </div>
+          </div>
+          {feedback.status === 'success' && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                onEdit(feedback.schedule);
+                onDismiss();
+              }}
+            >
+              <Pencil className="size-3.5" />
+              Edit
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onDismiss}
+            aria-label="Dismiss schedule status"
+          >
+            <X className="size-4" />
+          </Button>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+function CadencePicker({
   cadence,
   onChange,
+  timezone,
+  onTimezoneChange,
+  expanded = false,
 }: {
   cadence: CadenceConfig;
   onChange: (cadence: CadenceConfig) => void;
+  timezone: string;
+  onTimezoneChange: (timezone: string) => void;
+  expanded?: boolean;
 }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const pickerRef = useCloseOnOutsideClick<HTMLDivElement>(
+    !expanded && isOpen,
+    () => setIsOpen(false)
+  );
   const setField = <K extends keyof CadenceConfig>(
     key: K,
     value: CadenceConfig[K]
   ) => onChange({ ...cadence, [key]: value });
+  const selectedDays = cadence.dayOfWeek.split(',').filter(Boolean);
+  const summary = describeCadenceConfig(cadence);
+
+  const toggleDay = (day: string) => {
+    const nextDays = selectedDays.includes(day)
+      ? selectedDays.filter(selectedDay => selectedDay !== day)
+      : [...selectedDays, day];
+    if (nextDays.length === 0) return;
+    const orderedDays = DAYS.map(([value]) => value).filter(value =>
+      nextDays.includes(value)
+    );
+    setField('dayOfWeek', orderedDays.join(','));
+  };
 
   return (
-    <>
-      <Select
-        value={cadence.type}
-        onValueChange={value => setField('type', value as CadenceType)}
-      >
-        <SelectTrigger className="min-w-32">
-          <SelectValue />
+    <div ref={pickerRef} className="relative">
+      {!expanded && (
+        <Button
+          type="button"
+          variant="outline"
+          className="rounded-full"
+          onClick={() => setIsOpen(current => !current)}
+          aria-expanded={isOpen}
+        >
+          <Clock3 className="size-4" />
+          {summary}
+        </Button>
+      )}
+      {(expanded || isOpen) && (
+        <div
+          className={cn(
+            'bg-popover text-popover-foreground rounded-2xl border p-4',
+            expanded
+              ? 'relative w-full shadow-sm'
+              : 'absolute top-11 left-0 z-50 w-[min(30rem,calc(100vw-2rem))] shadow-xl'
+          )}
+        >
+          <div className="text-muted-foreground mb-3 text-xs font-semibold tracking-wide uppercase">
+            Cadence
+          </div>
+          <div className="bg-muted grid grid-cols-4 rounded-xl p-1">
+            {(['daily', 'weekly', 'monthly', 'interval'] as const).map(type => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => setField('type', type as CadenceType)}
+                className={cn(
+                  'rounded-lg px-3 py-2 text-sm font-medium capitalize transition-colors',
+                  cadence.type === type
+                    ? 'bg-white text-[#5B3FFF] shadow-sm dark:bg-slate-800 dark:text-[#A78BFA]'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {type}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-4 flex flex-col gap-4">
+            {cadence.type === 'weekly' && (
+              <div className="flex items-center justify-between gap-2">
+                {DAYS.map(([value, label]) => {
+                  const selected = selectedDays.includes(value);
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => toggleDay(value)}
+                      className={cn(
+                        'flex size-10 items-center justify-center rounded-full border text-sm font-semibold transition-colors',
+                        selected
+                          ? 'border-[#6F4DFF] bg-[#6F4DFF] text-white'
+                          : 'border-input text-muted-foreground hover:border-[#6F4DFF]/50'
+                      )}
+                      aria-label={label}
+                      aria-pressed={selected}
+                    >
+                      {label.charAt(0)}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {cadence.type === 'monthly' && (
+              <div className="flex items-center gap-3">
+                <span className="text-muted-foreground text-sm font-medium">
+                  Day
+                </span>
+                <input
+                  value={cadence.dayOfMonth}
+                  onChange={event => setField('dayOfMonth', event.target.value)}
+                  className="border-input bg-background h-10 w-20 rounded-xl border px-3 text-sm"
+                  aria-label="Day of month"
+                  inputMode="numeric"
+                />
+              </div>
+            )}
+
+            {cadence.type === 'interval' ? (
+              <div className="flex items-center gap-3">
+                <span className="text-muted-foreground text-sm font-medium">
+                  Every
+                </span>
+                <input
+                  value={cadence.intervalValue}
+                  onChange={event =>
+                    setField('intervalValue', event.target.value)
+                  }
+                  className="border-input bg-background h-10 w-20 rounded-xl border px-3 text-sm"
+                  aria-label="Interval value"
+                  inputMode="numeric"
+                />
+                <Select
+                  value={cadence.intervalUnit}
+                  onValueChange={value =>
+                    setField(
+                      'intervalUnit',
+                      value as CadenceConfig['intervalUnit']
+                    )
+                  }
+                >
+                  <SelectTrigger className="min-w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="minutes">Minutes</SelectItem>
+                    <SelectItem value="hours">Hours</SelectItem>
+                    <SelectItem value="days">Days</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <TimePicker
+                value={cadence.time}
+                onChange={value => setField('time', value)}
+              />
+            )}
+
+            <div className="flex items-center gap-3">
+              <span className="text-muted-foreground text-sm font-medium">
+                Timezone
+              </span>
+              <TimezoneSelect timezone={timezone} onChange={onTimezoneChange} />
+            </div>
+          </div>
+
+          <div className="border-border text-muted-foreground mt-4 border-t pt-3 text-sm">
+            Runs {summary.charAt(0).toLowerCase()}
+            {summary.slice(1)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TimePicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const options = useMemo(
+    () => Array.from(new Set([...TIME_OPTIONS, value])).sort(),
+    [value]
+  );
+
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-muted-foreground text-sm font-medium">Time</span>
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger
+          className="h-10 min-w-40 rounded-xl px-4"
+          aria-label="Schedule time"
+        >
+          <SelectValue>{formatTimeValue(value)}</SelectValue>
         </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="daily">Daily</SelectItem>
-          <SelectItem value="weekly">Weekly</SelectItem>
-          <SelectItem value="monthly">Monthly</SelectItem>
-          <SelectItem value="interval">Interval</SelectItem>
+        <SelectContent className="max-h-72">
+          {options.map(option => (
+            <SelectItem key={option} value={option}>
+              {formatTimeValue(option)}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
-
-      {cadence.type !== 'interval' ? (
-        <input
-          type="time"
-          value={cadence.time}
-          onChange={event => setField('time', event.target.value)}
-          className="border-input bg-background h-9 rounded-full border px-3 text-sm"
-          aria-label="Schedule time"
-        />
-      ) : (
-        <>
-          <input
-            value={cadence.intervalValue}
-            onChange={event => setField('intervalValue', event.target.value)}
-            className="border-input bg-background h-9 w-20 rounded-full border px-3 text-sm"
-            aria-label="Interval value"
-          />
-          <Select
-            value={cadence.intervalUnit}
-            onValueChange={value =>
-              setField('intervalUnit', value as CadenceConfig['intervalUnit'])
-            }
-          >
-            <SelectTrigger className="min-w-28">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="minutes">Minutes</SelectItem>
-              <SelectItem value="hours">Hours</SelectItem>
-              <SelectItem value="days">Days</SelectItem>
-            </SelectContent>
-          </Select>
-        </>
-      )}
-
-      {cadence.type === 'weekly' && (
-        <Select
-          value={cadence.dayOfWeek}
-          onValueChange={value => setField('dayOfWeek', value)}
-        >
-          <SelectTrigger className="min-w-36">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {DAYS.map(([value, label]) => (
-              <SelectItem key={value} value={value}>
-                {label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      )}
-
-      {cadence.type === 'monthly' && (
-        <input
-          value={cadence.dayOfMonth}
-          onChange={event => setField('dayOfMonth', event.target.value)}
-          className="border-input bg-background h-9 w-24 rounded-full border px-3 text-sm"
-          aria-label="Day of month"
-          placeholder="Day"
-        />
-      )}
-    </>
+    </div>
   );
 }
 
@@ -752,7 +1113,12 @@ function UpcomingScheduleList({
   items: ScheduleListItem[];
   showAgentName: boolean;
 }) {
-  const groupedItems = groupUpcomingRuns(items);
+  const [showAll, setShowAll] = useState(false);
+  const allRuns = useMemo(() => collectUpcomingRuns(items), [items]);
+  const defaultRuns = useMemo(() => getDefaultUpcomingRuns(allRuns), [allRuns]);
+  const visibleRuns = showAll ? allRuns : defaultRuns;
+  const groupedItems = groupUpcomingRuns(visibleRuns);
+  const hasMore = allRuns.length > defaultRuns.length;
 
   return (
     <section className="mx-auto w-full max-w-4xl">
@@ -775,6 +1141,28 @@ function UpcomingScheduleList({
           </div>
         ))}
       </div>
+      {hasMore && (
+        <div className="text-muted-foreground mt-6 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <span>
+            {showAll
+              ? `Showing all ${allRuns.length} available upcoming runs · maximum 10 per schedule`
+              : `Showing ${visibleRuns.length} of ${allRuns.length} upcoming runs · up to ${DEFAULT_UPCOMING_RUNS_PER_SCHEDULE} per schedule`}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-full"
+            onClick={() => setShowAll(current => !current)}
+          >
+            {showAll ? (
+              <ChevronUp className="size-4" />
+            ) : (
+              <ChevronDown className="size-4" />
+            )}
+            {showAll ? 'Show fewer' : 'View more upcoming runs'}
+          </Button>
+        </div>
+      )}
     </section>
   );
 }
@@ -791,6 +1179,7 @@ function UpcomingScheduleRow({
   const { agentId, agentName, schedule } = item;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isRunModalOpen, setIsRunModalOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const trigger = useScheduleAction({
     agentexClient,
     agentId,
@@ -808,80 +1197,93 @@ function UpcomingScheduleRow({
   });
 
   return (
-    <div className="relative flex items-center justify-between gap-4">
-      <span className="absolute top-2 -left-8 z-10 size-2 rounded-full bg-[#7C5CFF]" />
-      <div className="min-w-0">
-        <div className="truncate text-sm font-semibold">{schedule.name}</div>
-        <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-sm">
-          <span>{formatUpcomingSubtitle(item.runTime)}</span>
-          {showAgentName && <span>· {agentName}</span>}
-          {item.isSkipped && (
-            <span className="rounded-full bg-[#7C5CFF]/10 px-2 py-0.5 text-xs font-medium text-[#6F4DFF]">
-              Skipped
-            </span>
-          )}
+    <>
+      <div className="relative flex items-center justify-between gap-4">
+        <span className="absolute top-2 -left-8 z-10 size-2 rounded-full bg-[#7C5CFF]" />
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold">
+            {getScheduleTitle(schedule)}
+          </div>
+          <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-sm">
+            <span>{formatUpcomingSubtitle(item.runTime)}</span>
+            {showAgentName && <span>· {agentName}</span>}
+            {item.isSkipped && (
+              <span className="rounded-full bg-[#7C5CFF]/10 px-2 py-0.5 text-xs font-medium text-[#6F4DFF]">
+                Skipped
+              </span>
+            )}
+          </div>
         </div>
-      </div>
-      <div className="relative flex shrink-0 items-center gap-2">
-        {item.isSkipped ? (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              unskip.mutate({
-                scheduleId: schedule.id,
-                scheduledTime: item.runTime.toISOString(),
-              })
-            }
-            disabled={unskip.isPending}
-          >
-            Unskip
-          </Button>
-        ) : (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsRunModalOpen(true)}
-          >
-            <Play className="size-4" />
-            Run now
-          </Button>
-        )}
-        {isRunModalOpen && (
-          <RunNowModal
-            schedule={schedule}
-            runTime={item.runTime}
-            onClose={() => setIsRunModalOpen(false)}
-            onRunNow={() => {
-              setIsRunModalOpen(false);
-              trigger.mutate(schedule.id);
-            }}
-            onRunNowAndSkip={() => {
-              setIsRunModalOpen(false);
-              void (async () => {
-                await trigger.mutateAsync(schedule.id);
-                await skip.mutateAsync({
+        <div className="relative flex shrink-0 items-center gap-2">
+          {item.isSkipped ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                unskip.mutate({
                   scheduleId: schedule.id,
                   scheduledTime: item.runTime.toISOString(),
-                });
-              })().catch(() => undefined);
-            }}
-            isRunNowPending={trigger.isPending}
-            isRunNowAndSkipPending={trigger.isPending || skip.isPending}
+                })
+              }
+              disabled={unskip.isPending}
+            >
+              Unskip
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsRunModalOpen(true)}
+            >
+              <Play className="size-4" />
+              Run now
+            </Button>
+          )}
+          {isRunModalOpen && (
+            <RunNowModal
+              schedule={schedule}
+              runTime={item.runTime}
+              onClose={() => setIsRunModalOpen(false)}
+              onRunNow={() => {
+                setIsRunModalOpen(false);
+                trigger.mutate(schedule.id);
+              }}
+              onRunNowAndSkip={() => {
+                setIsRunModalOpen(false);
+                void (async () => {
+                  await trigger.mutateAsync(schedule.id);
+                  await skip.mutateAsync({
+                    scheduleId: schedule.id,
+                    scheduledTime: item.runTime.toISOString(),
+                  });
+                })().catch(() => undefined);
+              }}
+              isRunNowPending={trigger.isPending}
+              isRunNowAndSkipPending={trigger.isPending || skip.isPending}
+            />
+          )}
+          <ScheduleOverflowMenu
+            isOpen={isMenuOpen}
+            setIsOpen={setIsMenuOpen}
+            schedule={schedule}
+            agentexClient={agentexClient}
+            agentId={agentId}
+            onEdit={() => setIsEditing(true)}
+            showScheduleActions={false}
+            scheduledTime={item.runTime.toISOString()}
+            isSkipped={item.isSkipped}
           />
-        )}
-        <ScheduleOverflowMenu
-          isOpen={isMenuOpen}
-          setIsOpen={setIsMenuOpen}
-          schedule={schedule}
-          agentexClient={agentexClient}
-          agentId={agentId}
-          includeRunNow={false}
-          scheduledTime={item.runTime.toISOString()}
-          isSkipped={item.isSkipped}
-        />
+        </div>
       </div>
-    </div>
+      {isEditing && (
+        <EditScheduleModal
+          agentId={agentId}
+          agentexClient={agentexClient}
+          schedule={schedule}
+          onClose={() => setIsEditing(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -1032,11 +1434,14 @@ function ScheduleRow({
   return (
     <article className="border-border/70 relative flex items-center justify-between gap-4 border-b px-4 py-3 last:border-b-0">
       <div className="min-w-0">
-        <div className="truncate text-sm font-semibold">{schedule.name}</div>
+        <div className="truncate text-sm font-semibold">
+          {getScheduleTitle(schedule)}
+        </div>
         <div className="text-muted-foreground truncate text-sm">
           {describeCadence(schedule)}
+          {` · ${formatTimezone(schedule.timezone)}`}
           {showAgentName ? ` · ${agentName}` : ''}
-          {` · ${schedule.num_actions_taken} runs`}
+          {` · ${describeRunCount(schedule.num_actions_taken)}`}
         </div>
       </div>
       <div className="relative flex shrink-0 items-center justify-end gap-2">
@@ -1066,7 +1471,7 @@ function ScheduleRow({
           agentexClient={agentexClient}
           agentId={agentId}
           onEdit={() => setIsEditing(true)}
-          includeRunNow={true}
+          showScheduleActions={true}
           {...(nextRun ? { scheduledTime: nextRun.toISOString() } : {})}
         />
       </div>
@@ -1089,7 +1494,7 @@ function ScheduleOverflowMenu({
   agentexClient,
   agentId,
   onEdit,
-  includeRunNow,
+  showScheduleActions,
   scheduledTime,
   isSkipped = false,
 }: {
@@ -1099,10 +1504,11 @@ function ScheduleOverflowMenu({
   agentexClient: AgentexSDK;
   agentId: string;
   onEdit?: () => void;
-  includeRunNow: boolean;
+  showScheduleActions: boolean;
   scheduledTime?: string;
   isSkipped?: boolean;
 }) {
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const menuRef = useCloseOnOutsideClick<HTMLDivElement>(isOpen, () =>
     setIsOpen(false)
   );
@@ -1127,106 +1533,127 @@ function ScheduleOverflowMenu({
     agentId,
     action: 'trigger',
   });
-  const deleteSchedule = useScheduleAction({
-    agentexClient,
-    agentId,
-    action: 'delete',
-  });
   const isPaused = isSchedulePaused(schedule);
   const canSkip = scheduledTime != null && !isPaused;
 
   return (
-    <div ref={menuRef} className="relative">
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={() => setIsOpen(open => !open)}
-        aria-label={`Open actions for ${schedule.name}`}
-      >
-        <MoreHorizontal className="size-4" />
-      </Button>
-      {isOpen && (
-        <div className="bg-popover text-popover-foreground absolute top-10 right-0 z-50 min-w-48 rounded-md border p-1 shadow-lg">
-          {includeRunNow && (
-            <MenuButton
-              onClick={() => {
-                setIsOpen(false);
-                trigger.mutate(schedule.id);
-              }}
-              disabled={trigger.isPending}
-            >
-              <Play className="size-4" />
-              Run now
-            </MenuButton>
-          )}
-          {isSkipped ? (
-            <MenuButton
-              onClick={() => {
-                if (!scheduledTime) return;
-                setIsOpen(false);
-                unskip.mutate({ scheduleId: schedule.id, scheduledTime });
-              }}
-              disabled={unskip.isPending || !scheduledTime}
-            >
-              <Clock3 className="size-4" />
-              Unskip run
-            </MenuButton>
-          ) : (
-            <MenuButton
-              onClick={() => {
-                if (!scheduledTime) return;
-                setIsOpen(false);
-                skip.mutate({ scheduleId: schedule.id, scheduledTime });
-              }}
-              disabled={skip.isPending || !canSkip}
-            >
-              <Play className="size-4" />
-              Skip next run
-            </MenuButton>
-          )}
-          <MenuButton disabled title="Backend support needed">
-            <Clock3 className="size-4" />
-            Snooze
-          </MenuButton>
-          <MenuButton
-            onClick={() => {
-              setIsOpen(false);
-              if (isPaused) {
-                resume.mutate(schedule.id);
-              } else {
-                pause.mutate(schedule.id);
-              }
-            }}
-            disabled={pause.isPending || resume.isPending}
-          >
-            <PauseCircle className="size-4" />
-            {isPaused ? 'Resume' : 'Pause'}
-          </MenuButton>
-          {onEdit && (
-            <MenuButton
-              onClick={() => {
-                setIsOpen(false);
-                onEdit();
-              }}
-            >
-              <Pencil className="size-4" />
-              Edit
-            </MenuButton>
-          )}
-          <MenuButton
-            onClick={() => {
-              setIsOpen(false);
-              deleteSchedule.mutate(schedule.id);
-            }}
-            disabled={deleteSchedule.isPending}
-            className="text-destructive hover:text-destructive"
-          >
-            <Trash2 className="size-4" />
-            Delete
-          </MenuButton>
-        </div>
+    <>
+      <div ref={menuRef} className="relative">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setIsOpen(open => !open)}
+          aria-label={`Open actions for ${schedule.name}`}
+        >
+          <MoreHorizontal className="size-4" />
+        </Button>
+        {isOpen && (
+          <div className="bg-popover text-popover-foreground absolute top-10 right-0 z-50 min-w-48 rounded-md border p-1 shadow-lg">
+            {showScheduleActions && (
+              <MenuButton
+                onClick={() => {
+                  setIsOpen(false);
+                  trigger.mutate(schedule.id);
+                }}
+                disabled={trigger.isPending}
+              >
+                <Play className="size-4" />
+                Run now
+              </MenuButton>
+            )}
+            {isSkipped ? (
+              <MenuButton
+                onClick={() => {
+                  if (!scheduledTime) return;
+                  setIsOpen(false);
+                  unskip.mutate({ scheduleId: schedule.id, scheduledTime });
+                }}
+                disabled={unskip.isPending || !scheduledTime}
+              >
+                <Clock3 className="size-4" />
+                Unskip run
+              </MenuButton>
+            ) : (
+              <MenuButton
+                onClick={() => {
+                  if (!scheduledTime) return;
+                  setIsOpen(false);
+                  skip.mutate({ scheduleId: schedule.id, scheduledTime });
+                }}
+                disabled={skip.isPending || !canSkip}
+              >
+                <Play className="size-4" />
+                {showScheduleActions ? 'Skip next run' : 'Skip run'}
+              </MenuButton>
+            )}
+            {showScheduleActions && (
+              <MenuButton disabled title="Backend support needed">
+                <Clock3 className="size-4" />
+                Snooze
+              </MenuButton>
+            )}
+            {showScheduleActions && (
+              <>
+                <MenuButton
+                  onClick={() => {
+                    setIsOpen(false);
+                    if (isPaused) {
+                      resume.mutate(schedule.id);
+                    } else {
+                      pause.mutate(schedule.id);
+                    }
+                  }}
+                  disabled={pause.isPending || resume.isPending}
+                >
+                  <PauseCircle className="size-4" />
+                  {isPaused ? 'Resume' : 'Pause'}
+                </MenuButton>
+                {onEdit && (
+                  <MenuButton
+                    onClick={() => {
+                      setIsOpen(false);
+                      onEdit();
+                    }}
+                  >
+                    <Pencil className="size-4" />
+                    Edit
+                  </MenuButton>
+                )}
+                <MenuButton
+                  onClick={() => {
+                    setIsOpen(false);
+                    setIsDeleteConfirmOpen(true);
+                  }}
+                  className="text-destructive hover:text-destructive"
+                >
+                  <Trash2 className="size-4" />
+                  Delete
+                </MenuButton>
+              </>
+            )}
+            {!showScheduleActions && onEdit && (
+              <MenuButton
+                onClick={() => {
+                  setIsOpen(false);
+                  onEdit();
+                }}
+              >
+                <Pencil className="size-4" />
+                Edit schedule
+              </MenuButton>
+            )}
+          </div>
+        )}
+      </div>
+      {isDeleteConfirmOpen && (
+        <DeleteScheduleModal
+          agentId={agentId}
+          agentexClient={agentexClient}
+          schedule={schedule}
+          onClose={() => setIsDeleteConfirmOpen(false)}
+        />
       )}
-    </div>
+    </>
   );
 }
 
@@ -1249,6 +1676,68 @@ function MenuButton({
   );
 }
 
+function DeleteScheduleModal({
+  agentId,
+  agentexClient,
+  schedule,
+  onClose,
+  onDeleted,
+}: {
+  agentId: string;
+  agentexClient: AgentexSDK;
+  schedule: AgentRunSchedule;
+  onClose: () => void;
+  onDeleted?: () => void;
+}) {
+  const deleteSchedule = useScheduleAction({
+    agentexClient,
+    agentId,
+    action: 'delete',
+  });
+
+  return (
+    <BasicModal
+      title="Delete schedule?"
+      onClose={() => {
+        if (!deleteSchedule.isPending) onClose();
+      }}
+    >
+      <p className="text-muted-foreground text-sm leading-6">
+        Deleting <span className="font-medium">{schedule.name}</span>{' '}
+        permanently stops its future runs. Existing tasks are kept. This action
+        cannot be undone.
+      </p>
+      <div className="flex justify-end gap-2">
+        <Button
+          variant="outline"
+          onClick={onClose}
+          disabled={deleteSchedule.isPending}
+        >
+          Cancel
+        </Button>
+        <Button
+          variant="destructive"
+          disabled={deleteSchedule.isPending}
+          onClick={() => {
+            void deleteSchedule
+              .mutateAsync(schedule.id)
+              .then(() => {
+                onClose();
+                onDeleted?.();
+              })
+              .catch(() => undefined);
+          }}
+        >
+          {deleteSchedule.isPending && (
+            <Loader2 className="size-4 animate-spin" />
+          )}
+          Delete schedule
+        </Button>
+      </div>
+    </BasicModal>
+  );
+}
+
 function EditScheduleModal({
   agentId,
   agentexClient,
@@ -1264,17 +1753,21 @@ function EditScheduleModal({
   const [prompt, setPrompt] = useState(schedule.initial_input.content);
   const [cadence, setCadence] = useState(() => scheduleToCadence(schedule));
   const [timezone, setTimezone] = useState(schedule.timezone);
+  const [isActive, setIsActive] = useState(!isSchedulePaused(schedule));
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const updateSchedule = useUpdateAgentRunSchedule({
     agentexClient,
     agentId,
   });
 
   const handleSave = async () => {
+    const normalizedName = normalizeScheduleName(name);
     await updateSchedule.mutateAsync({
       scheduleId: schedule.id,
       payload: {
-        name,
+        name: normalizedName,
         timezone,
+        paused: !isActive,
         ...cadenceToPayload(cadence),
         initial_input: {
           type: 'text',
@@ -1287,81 +1780,85 @@ function EditScheduleModal({
   };
 
   return (
-    <BasicModal title="Edit scheduled task" onClose={onClose}>
-      <ScheduleNameInput name={name} setName={setName} />
-      <textarea
-        value={prompt}
-        onChange={event => setPrompt(event.target.value)}
-        className="border-input bg-background min-h-24 rounded-md border p-3 text-sm"
-      />
-      <div className="flex flex-wrap items-center gap-3">
-        <CadenceControls cadence={cadence} onChange={setCadence} />
-      </div>
-      <TimezoneSelect timezone={timezone} onChange={setTimezone} />
-      <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button
-          onClick={handleSave}
-          disabled={!name.trim() || !prompt.trim() || updateSchedule.isPending}
-        >
-          Save
-        </Button>
-      </div>
-    </BasicModal>
-  );
-}
-
-function ConfirmScheduleModal({
-  title,
-  name,
-  setName,
-  prompt,
-  cadence,
-  timezone,
-  onCancel,
-  onConfirm,
-  isSubmitting,
-}: {
-  title: string;
-  name: string;
-  setName: (name: string) => void;
-  prompt: string;
-  cadence: CadenceConfig;
-  timezone: string;
-  onCancel: () => void;
-  onConfirm: () => void;
-  isSubmitting: boolean;
-}) {
-  const cadencePreview = useMemo(() => cadenceToPayload(cadence), [cadence]);
-
-  return (
-    <BasicModal title={title} onClose={onCancel}>
-      <ScheduleNameInput name={name} setName={setName} />
-      <div className="bg-muted rounded-md p-3 text-sm">
-        <p className="font-medium">Prompt</p>
-        <p className="text-muted-foreground mt-1 whitespace-pre-wrap">
-          {prompt}
-        </p>
-      </div>
-      <div className="text-muted-foreground text-sm">
-        Cadence:{' '}
-        {'cron_expression' in cadencePreview
-          ? cadencePreview.cron_expression
-          : `Every ${cadencePreview.interval_seconds} seconds`}
-        {' · '}
-        {timezone}
-      </div>
-      <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button onClick={onConfirm} disabled={!name.trim() || isSubmitting}>
-          Create
-        </Button>
-      </div>
-    </BasicModal>
+    <>
+      <BasicModal title="Edit scheduled task" onClose={onClose}>
+        <ScheduleNameInput name={name} setName={setName} />
+        <textarea
+          value={prompt}
+          onChange={event => setPrompt(event.target.value)}
+          className="border-input bg-background min-h-24 rounded-md border p-3 text-sm"
+        />
+        <CadencePicker
+          cadence={cadence}
+          onChange={setCadence}
+          timezone={timezone}
+          onTimezoneChange={setTimezone}
+          expanded
+        />
+        <div className="border-border flex items-center justify-between rounded-xl border px-3 py-2.5">
+          <div>
+            <div className="text-sm font-medium">Schedule active</div>
+            <div className="text-muted-foreground text-xs">
+              Paused schedules do not create new runs.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsActive(current => !current)}
+            className={cn(
+              'flex h-6 w-11 items-center rounded-full p-0.5 transition-colors',
+              isActive ? 'bg-[#6F4DFF]' : 'bg-slate-200 dark:bg-slate-700'
+            )}
+            aria-label={isActive ? 'Pause schedule' : 'Activate schedule'}
+            aria-pressed={isActive}
+          >
+            <span
+              className={cn(
+                'bg-background size-5 rounded-full shadow-sm transition-transform',
+                isActive ? 'translate-x-5' : 'translate-x-0'
+              )}
+            />
+          </button>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <Button
+            variant="ghost"
+            className="text-destructive hover:text-destructive"
+            onClick={() => setIsDeleteConfirmOpen(true)}
+          >
+            <Trash2 className="size-4" />
+            Delete schedule…
+          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSave}
+              disabled={
+                !normalizeScheduleName(name) ||
+                !prompt.trim() ||
+                updateSchedule.isPending
+              }
+            >
+              {updateSchedule.isPending && (
+                <Loader2 className="size-4 animate-spin" />
+              )}
+              Save changes
+            </Button>
+          </div>
+        </div>
+      </BasicModal>
+      {isDeleteConfirmOpen && (
+        <DeleteScheduleModal
+          agentId={agentId}
+          agentexClient={agentexClient}
+          schedule={schedule}
+          onClose={() => setIsDeleteConfirmOpen(false)}
+          onDeleted={onClose}
+        />
+      )}
+    </>
   );
 }
 
@@ -1377,7 +1874,11 @@ function ScheduleNameInput({
       <span className="font-medium">Name</span>
       <input
         value={name}
-        onChange={event => setName(normalizeScheduleName(event.target.value))}
+        onChange={event =>
+          setName(sanitizeScheduleNameInput(event.target.value))
+        }
+        onBlur={() => setName(normalizeScheduleName(name))}
+        maxLength={64}
         className="border-input bg-background h-9 rounded-md border px-3"
       />
       <span className="text-muted-foreground text-xs">
