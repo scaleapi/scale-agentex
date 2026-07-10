@@ -31,23 +31,30 @@ export function useSafeSearchParams(): SafeSearchParams {
 
   const updateParams = useCallback(
     (updates: SearchParamUpdates, replace: boolean = false): void => {
-      const params = new URLSearchParams(searchParams.toString());
+      // Merge against the live URL, not the `searchParams` snapshot: the snapshot lags a
+      // render behind router navigations, so concurrent updates would clobber each other.
+      const live =
+        typeof window !== 'undefined'
+          ? window.location.search
+          : searchParams.toString();
+      const params = new URLSearchParams(live);
 
       Object.entries(updates).forEach(([key, value]) => {
         const paramKey = key as SearchParamKey;
-        if (value !== undefined) {
-          if (value === null) {
-            params.delete(paramKey);
-          } else {
-            params.set(paramKey, value);
-          }
+        if (value === undefined) return;
+        if (value === null) {
+          params.delete(paramKey);
+        } else {
+          params.set(paramKey, value);
         }
       });
 
+      const query = params.toString();
+      const url = query ? `${pathname}?${query}` : pathname;
       if (replace) {
-        router.replace(`${pathname}?${params.toString()}`);
+        router.replace(url);
       } else {
-        router.push(`${pathname}?${params.toString()}`);
+        router.push(url);
       }
     },
     [pathname, searchParams, router]
