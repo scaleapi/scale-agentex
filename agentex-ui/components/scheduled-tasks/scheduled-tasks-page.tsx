@@ -1016,6 +1016,7 @@ function ScheduleRow({
   const pause = useScheduleAction({ baseURL, agentId, action: 'pause' });
   const resume = useScheduleAction({ baseURL, agentId, action: 'resume' });
   const isPaused = isSchedulePaused(schedule);
+  const nextRun = getNextRun(schedule);
 
   return (
     <article className="border-border/70 relative flex items-center justify-between gap-4 border-b px-4 py-3 last:border-b-0">
@@ -1024,7 +1025,7 @@ function ScheduleRow({
         <div className="text-muted-foreground truncate text-sm">
           {describeCadence(schedule)}
           {showAgentName ? ` · ${agentName}` : ''}
-          {` · ${schedule.num_tasks_created} runs`}
+          {` · ${schedule.num_actions_taken} runs`}
         </div>
       </div>
       <div className="relative flex shrink-0 items-center justify-end gap-2">
@@ -1055,6 +1056,7 @@ function ScheduleRow({
           agentId={agentId}
           onEdit={() => setIsEditing(true)}
           includeRunNow={true}
+          {...(nextRun ? { scheduledTime: nextRun.toISOString() } : {})}
         />
       </div>
       {isEditing && (
@@ -1112,6 +1114,7 @@ function ScheduleOverflowMenu({
     action: 'delete',
   });
   const isPaused = isSchedulePaused(schedule);
+  const canSkip = scheduledTime != null && !isPaused;
 
   return (
     <div ref={menuRef} className="relative">
@@ -1152,17 +1155,14 @@ function ScheduleOverflowMenu({
           ) : (
             <MenuButton
               onClick={() => {
+                if (!scheduledTime) return;
                 setIsOpen(false);
-                skip.mutate(
-                  scheduledTime
-                    ? { scheduleId: schedule.id, scheduledTime }
-                    : schedule.id
-                );
+                skip.mutate({ scheduleId: schedule.id, scheduledTime });
               }}
-              disabled={skip.isPending}
+              disabled={skip.isPending || !canSkip}
             >
               <Play className="size-4" />
-              Skip run
+              Skip next run
             </MenuButton>
           )}
           <MenuButton disabled title="Backend support needed">

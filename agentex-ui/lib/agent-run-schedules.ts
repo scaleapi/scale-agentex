@@ -26,7 +26,6 @@ export type AgentRunSchedule = {
   skipped_action_times: string[];
   last_action_time: string | null;
   num_actions_taken: number;
-  num_tasks_created: number;
 };
 
 export type AgentRunScheduleListResponse = {
@@ -152,7 +151,7 @@ export const agentRunSchedulesAPI = {
     baseURL: string,
     agentId: string,
     scheduleId: string,
-    scheduledTime?: string
+    scheduledTime: string
   ) =>
     request<AgentRunSchedule>(
       baseURL,

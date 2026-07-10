@@ -49,14 +49,11 @@ def service():
     )
     schedule_repository = AsyncMock()
     agent_repository = AsyncMock()
-    task_repository = AsyncMock()
-    task_repository.count_by_agent_id_and_task_metadata.return_value = 0
     return AgentRunScheduleService(
         temporal_adapter=temporal_adapter,
         authorization_service=authorization_service,
         schedule_repository=schedule_repository,
         agent_repository=agent_repository,
-        task_repository=task_repository,
     )
 
 
@@ -510,20 +507,6 @@ class TestAgentRunScheduleServiceTrigger:
         temporal_id = build_run_schedule_temporal_id(row.id)
         service.temporal_adapter.unskip_schedule_action.assert_awaited_once_with(
             temporal_id, scheduled_time=scheduled_time
-        )
-
-    async def test_response_counts_tasks_created(self, service, agent):
-        row = _persisted(agent.id, _request())
-        service.schedule_repository.get_by_agent_id_and_id_or_raise.return_value = row
-        service.agent_repository.get.return_value = agent
-        service.task_repository.count_by_agent_id_and_task_metadata.return_value = 7
-
-        response = await service.get_schedule(agent.id, row.id)
-
-        assert response.num_tasks_created == 7
-        service.task_repository.count_by_agent_id_and_task_metadata.assert_awaited_once_with(
-            agent_id=agent.id,
-            task_metadata={"schedule_id": row.id},
         )
 
 

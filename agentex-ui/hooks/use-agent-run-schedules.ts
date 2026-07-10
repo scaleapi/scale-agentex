@@ -34,7 +34,7 @@ type ScheduleActionInput =
   | string
   | {
       scheduleId: string;
-      scheduledTime?: string;
+      scheduledTime: string;
     };
 
 export type AgentRunScheduleListItem = {
@@ -177,6 +177,9 @@ export function useScheduleAction({
         case 'resume':
           return agentRunSchedulesAPI.resume(baseURL, agentId, scheduleId);
         case 'skip':
+          if (!scheduledTime) {
+            throw new Error('scheduledTime is required to skip a run');
+          }
           return agentRunSchedulesAPI.skip(
             baseURL,
             agentId,

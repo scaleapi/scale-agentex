@@ -96,23 +96,6 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
             relationships=relationships,
         )
 
-    async def count_by_agent_id_and_task_metadata(
-        self, *, agent_id: str, task_metadata: dict
-    ) -> int:
-        """Count non-deleted tasks for an agent matching JSONB metadata."""
-        query = (
-            select(func.count(TaskORM.id))
-            .join(TaskAgentORM, TaskORM.id == TaskAgentORM.task_id)
-            .where(
-                TaskAgentORM.agent_id == agent_id,
-                TaskORM.task_metadata.contains(task_metadata),
-                TaskORM.status != TaskStatus.DELETED,
-            )
-        )
-        async with self.start_async_db_session(allow_writes=False) as session:
-            result = await session.execute(query)
-            return result.scalar_one()
-
     async def list_cleanup_candidate_ids(
         self,
         *,

@@ -99,7 +99,6 @@ describe('scheduleToCadence', () => {
     skipped_action_times: [],
     last_action_time: null,
     num_actions_taken: 0,
-    num_tasks_created: 0,
   } satisfies AgentRunSchedule;
 
   it('converts weekly cron to editable cadence config', () => {
