@@ -99,6 +99,8 @@ The installation was successful if you see help output after you run `agentex -h
 
 ## Setup
 
+> **OSS contributors:** Run `python scripts/agentex_dev_doctor.py` before `./dev.sh` to catch Docker/port/ECR issues ([#163](https://github.com/scaleapi/scale-agentex/issues/163)). See [docs/LOCAL_DEV.md](docs/LOCAL_DEV.md).
+
 Before you share your agents with other people (or your company), you'll want a fully isolated developer sandbox. This allows you to freely develop agents without affecting anyone else or be affected by anyone else.
 
 To do this, you just need to spin up the [Agentex Server](https://github.com/scaleapi/scale-agentex/tree/main/agentex) and a [Developer UI](https://github.com/scaleapi/scale-agentex/tree/main/agentex-ui) which allows you to interact with your agent nicely. This way you'll know how your agent feels in a simple UI.
