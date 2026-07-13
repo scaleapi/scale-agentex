@@ -175,7 +175,7 @@ function getScheduleTitle(schedule: AgentRunSchedule) {
 }
 
 function describeRunCount(count: number) {
-  if (count === 0) return 'Never run';
+  if (count === 0) return '0 runs';
   return count === 1 ? '1 run' : `${count} runs`;
 }
 
