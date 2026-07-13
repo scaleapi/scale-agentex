@@ -32,6 +32,7 @@ import {
 import { toast } from '@/components/ui/toast';
 import { useAgentByName } from '@/hooks/use-agent-by-name';
 import {
+  SCHEDULE_LIST_LIMIT,
   useAgentRunScheduleDetailsForItems,
   useAgentRunSchedules,
   useAgentRunSchedulesForAgents,
@@ -490,6 +491,10 @@ export function ScheduledTasksPage() {
               />
             )}
             <ScheduleViewTabs view={scheduleView} onChange={setScheduleView} />
+            <p className="text-muted-foreground mx-auto w-full max-w-4xl text-xs">
+              Currently showing up to {SCHEDULE_LIST_LIMIT} schedules per agent.
+              Support for additional schedules is coming soon.
+            </p>
             <ScheduleList
               agentexClient={agentexClient}
               items={visibleItems}
@@ -1041,7 +1046,7 @@ function TimezoneSelect({
       <SelectContent>
         {timezoneOptions.map(option => (
           <SelectItem key={option} value={option}>
-            {option.replace('_', ' ')}
+            {option.replaceAll('_', ' ')}
           </SelectItem>
         ))}
       </SelectContent>

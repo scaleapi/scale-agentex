@@ -26,6 +26,8 @@ export const scheduleKeys = {
     [...scheduleKeys.byAgentId(agentId), 'detail', scheduleId] as const,
 };
 
+export const SCHEDULE_LIST_LIMIT = 50;
+
 type ScheduleMutationContext = {
   agentexClient: AgentexSDK;
   agentId: string;
@@ -58,7 +60,7 @@ export function useAgentRunSchedules(
         return [];
       }
       const response = await agentexClient.agents.schedules.list(agentId, {
-        limit: 100,
+        limit: SCHEDULE_LIST_LIMIT,
       });
       return response.run_schedules.map(normalizeAgentRunSchedule);
     },
@@ -76,7 +78,7 @@ export function useAgentRunSchedulesForAgents(
       queryKey: scheduleKeys.byAgentId(agent.id),
       queryFn: async () => {
         const response = await agentexClient.agents.schedules.list(agent.id, {
-          limit: 100,
+          limit: SCHEDULE_LIST_LIMIT,
         });
         return response.run_schedules.map(normalizeAgentRunSchedule);
       },
