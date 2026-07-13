@@ -11,16 +11,19 @@ import { IconButton } from '@/components/ui/icon-button';
 import { AppView, useSafeSearchParams } from '@/hooks/use-safe-search-params';
 
 type ContentAreaProps = {
+  agentRunSchedulesEnabled: boolean;
   isTracesSidebarOpen: boolean;
   toggleTracesSidebar: () => void;
 };
 
 export function PrimaryContent({
+  agentRunSchedulesEnabled,
   isTracesSidebarOpen,
   toggleTracesSidebar,
 }: ContentAreaProps) {
   const { taskID, view } = useSafeSearchParams();
-  const isScheduledTasksView = view === AppView.SCHEDULED_TASKS;
+  const isScheduledTasksView =
+    agentRunSchedulesEnabled && view === AppView.SCHEDULED_TASKS;
 
   const [prompt, setPrompt] = useState<string>('');
   const [showScrollButton, setShowScrollButton] = useState(false);

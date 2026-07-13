@@ -15,12 +15,14 @@ import { IconButton } from '../ui/icon-button';
 import { ResizableSidebar } from '../ui/resizable-sidebar';
 
 export type TaskSidebarHeaderProps = {
+  agentRunSchedulesEnabled: boolean;
   toggleCollapse: () => void;
   handleNewChat: () => void;
   className?: string;
 };
 
 export function TaskSidebarHeader({
+  agentRunSchedulesEnabled,
   toggleCollapse,
   handleNewChat,
   className,
@@ -69,16 +71,18 @@ export function TaskSidebarHeader({
           <span className="text-xs/snug">⌘</span>K
         </kbd>
       </ResizableSidebar.Button>
-      <ResizableSidebar.Button
-        onClick={handleScheduledTasks}
-        isSelected={view === AppView.SCHEDULED_TASKS}
-        className="text-foreground flex items-center gap-2 p-2"
-        aria-label="Scheduled Tasks"
-        disableAnimation={true}
-      >
-        <CalendarClock className="size-5" />
-        Scheduled Tasks
-      </ResizableSidebar.Button>
+      {agentRunSchedulesEnabled && (
+        <ResizableSidebar.Button
+          onClick={handleScheduledTasks}
+          isSelected={view === AppView.SCHEDULED_TASKS}
+          className="text-foreground flex items-center gap-2 p-2"
+          aria-label="Scheduled Tasks"
+          disableAnimation={true}
+        >
+          <CalendarClock className="size-5" />
+          Scheduled Tasks
+        </ResizableSidebar.Button>
+      )}
     </div>
   );
 }

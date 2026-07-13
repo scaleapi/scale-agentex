@@ -1864,7 +1864,9 @@ function EditScheduleModal({
               Cancel
             </Button>
             <Button
-              onClick={handleSave}
+              onClick={() => {
+                void handleSave().catch(() => undefined);
+              }}
               disabled={
                 !normalizeScheduleName(name) ||
                 !prompt.trim() ||
