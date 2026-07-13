@@ -1587,9 +1587,9 @@ function ScheduleOverflowMenu({
               </MenuButton>
             )}
             {showScheduleActions && (
-              <MenuButton disabled title="Backend support needed">
+              <MenuButton disabled title="Snooze support is coming soon">
                 <Clock3 className="size-4" />
-                Snooze
+                Snooze — coming soon
               </MenuButton>
             )}
             {showScheduleActions && (
