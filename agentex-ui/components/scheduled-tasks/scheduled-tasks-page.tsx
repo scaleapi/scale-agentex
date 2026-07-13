@@ -52,6 +52,7 @@ import {
   DEFAULT_CADENCE,
   describeCadence,
   generateScheduleName,
+  getCadenceValidationError,
   normalizeScheduleName,
   sanitizeScheduleNameInput,
   scheduleToCadence,
@@ -618,11 +619,16 @@ function ScheduleComposer({
     agentexClient,
     agentId,
   });
+  const cadenceError = getCadenceValidationError(cadence);
 
   const handleCreate = async () => {
     const submittedPrompt = prompt.trim();
     if (!submittedPrompt) {
       toast.error('Enter a prompt to schedule');
+      return;
+    }
+    if (cadenceError) {
+      toast.error(cadenceError);
       return;
     }
     const name = generateScheduleName(submittedPrompt, schedules);
@@ -680,7 +686,9 @@ function ScheduleComposer({
           />
           <Button
             onClick={() => void handleCreate()}
-            disabled={!prompt.trim() || createSchedule.isPending}
+            disabled={
+              !prompt.trim() || !!cadenceError || createSchedule.isPending
+            }
             className="ml-auto rounded-full"
           >
             {createSchedule.isPending ? (
@@ -832,6 +840,7 @@ function CadencePicker({
   ) => onChange({ ...cadence, [key]: value });
   const selectedDays = cadence.dayOfWeek.split(',').filter(Boolean);
   const summary = describeCadenceConfig(cadence);
+  const validationError = getCadenceValidationError(cadence);
 
   const toggleDay = (day: string) => {
     const nextDays = selectedDays.includes(day)
@@ -977,9 +986,20 @@ function CadencePicker({
             </div>
           </div>
 
-          <div className="border-border text-muted-foreground mt-4 border-t pt-3 text-sm">
-            Runs {summary.charAt(0).toLowerCase()}
-            {summary.slice(1)}
+          <div
+            className={cn(
+              'border-border mt-4 border-t pt-3 text-sm',
+              validationError ? 'text-destructive' : 'text-muted-foreground'
+            )}
+          >
+            {validationError ? (
+              validationError
+            ) : (
+              <>
+                Runs {summary.charAt(0).toLowerCase()}
+                {summary.slice(1)}
+              </>
+            )}
           </div>
         </div>
       )}
@@ -1764,8 +1784,13 @@ function EditScheduleModal({
     agentexClient,
     agentId,
   });
+  const cadenceError = getCadenceValidationError(cadence);
 
   const handleSave = async () => {
+    if (cadenceError) {
+      toast.error(cadenceError);
+      return;
+    }
     const normalizedName = normalizeScheduleName(name);
     await updateSchedule.mutateAsync({
       scheduleId: schedule.id,
@@ -1843,6 +1868,7 @@ function EditScheduleModal({
               disabled={
                 !normalizeScheduleName(name) ||
                 !prompt.trim() ||
+                !!cadenceError ||
                 updateSchedule.isPending
               }
             >

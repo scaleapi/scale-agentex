@@ -62,13 +62,65 @@ export function generateScheduleName(
   return `${base.slice(0, 55)}-${Date.now().toString().slice(-8)}`;
 }
 
+export function getCadenceValidationError(
+  cadence: CadenceConfig
+): string | null {
+  if (cadence.type === 'interval') {
+    if (!/^\d+$/.test(cadence.intervalValue)) {
+      return 'Enter a whole-number interval.';
+    }
+    const value = Number(cadence.intervalValue);
+    if (!Number.isSafeInteger(value) || value < 1) {
+      return 'Interval must be at least 1.';
+    }
+    return null;
+  }
+
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(cadence.time)) {
+    return 'Select a valid time.';
+  }
+
+  if (cadence.type === 'weekly') {
+    const validDays = new Set([
+      'SUN',
+      'MON',
+      'TUE',
+      'WED',
+      'THU',
+      'FRI',
+      'SAT',
+    ]);
+    const days = cadence.dayOfWeek.split(',').filter(Boolean);
+    if (days.length === 0 || days.some(day => !validDays.has(day))) {
+      return 'Select at least one valid weekday.';
+    }
+  }
+
+  if (cadence.type === 'monthly') {
+    if (!/^\d+$/.test(cadence.dayOfMonth)) {
+      return 'Enter a whole-number day of month.';
+    }
+    const day = Number(cadence.dayOfMonth);
+    if (!Number.isInteger(day) || day < 1 || day > 31) {
+      return 'Day of month must be between 1 and 31.';
+    }
+  }
+
+  return null;
+}
+
 export function cadenceToPayload(
   cadence: CadenceConfig
 ):
   | { cron_expression: string; interval_seconds?: never }
   | { interval_seconds: number; cron_expression?: never } {
+  const validationError = getCadenceValidationError(cadence);
+  if (validationError) {
+    throw new Error(validationError);
+  }
+
   if (cadence.type === 'interval') {
-    const value = Math.max(1, Number.parseInt(cadence.intervalValue, 10) || 1);
+    const value = Number(cadence.intervalValue);
     const multiplier =
       cadence.intervalUnit === 'minutes'
         ? 60
@@ -89,10 +141,7 @@ export function cadenceToPayload(
   }
 
   if (cadence.type === 'monthly') {
-    const day = Math.min(
-      31,
-      Math.max(1, Number.parseInt(cadence.dayOfMonth, 10) || 1)
-    );
+    const day = Number(cadence.dayOfMonth);
     return { cron_expression: `${cronMinute} ${cronHour} ${day} * *` };
   }
 

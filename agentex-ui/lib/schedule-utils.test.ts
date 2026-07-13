@@ -4,6 +4,7 @@ import {
   cadenceToPayload,
   describeCadence,
   generateScheduleName,
+  getCadenceValidationError,
   normalizeScheduleName,
   sanitizeScheduleNameInput,
   scheduleToCadence,
@@ -80,6 +81,32 @@ describe('cadenceToPayload', () => {
         intervalUnit: 'hours',
       })
     ).toEqual({ interval_seconds: 7200 });
+  });
+
+  it('rejects malformed interval and monthly values instead of coercing them', () => {
+    const malformedInterval = {
+      ...base,
+      type: 'interval',
+      intervalValue: '1sss',
+    } satisfies CadenceConfig;
+    expect(getCadenceValidationError(malformedInterval)).toBe(
+      'Enter a whole-number interval.'
+    );
+    expect(() => cadenceToPayload(malformedInterval)).toThrow(
+      'Enter a whole-number interval.'
+    );
+
+    const invalidMonthDay = {
+      ...base,
+      type: 'monthly',
+      dayOfMonth: '32',
+    } satisfies CadenceConfig;
+    expect(getCadenceValidationError(invalidMonthDay)).toBe(
+      'Day of month must be between 1 and 31.'
+    );
+    expect(() => cadenceToPayload(invalidMonthDay)).toThrow(
+      'Day of month must be between 1 and 31.'
+    );
   });
 });
 
