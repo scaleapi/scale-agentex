@@ -1068,6 +1068,7 @@ class TestFilterRequestHeaders:
                 "x-api-key": "user-key",
                 "x-acting-user-api-key": "spoof",
                 "x-acting-user-cookie": "spoof-cookie",
+                "x-acting-user-authorization": "Bearer spoof",
                 "x-acting-as-agent": "spoof-agent",
                 "x-selected-account-id": "spoof-acct",
                 "x-trace-id": "trace-1",

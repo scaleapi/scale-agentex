@@ -4,6 +4,7 @@ import pytest
 from src.domain.delegation_headers import (
     ENV_SESSION_COOKIE_NAMES,
     HEADER_ACTING_USER_API_KEY,
+    HEADER_ACTING_USER_AUTHORIZATION,
     HEADER_ACTING_USER_COOKIE,
     build_delegation_headers,
     session_cookie_names_to_forward,
@@ -119,6 +120,51 @@ class TestBuildDelegationHeaders:
         )
         assert HEADER_ACTING_USER_API_KEY in headers
         assert HEADER_ACTING_USER_COOKIE not in headers
+
+    def test_bearer_delegation(self):
+        headers = build_delegation_headers(
+            _user_principal(),
+            {
+                "Authorization": "Bearer eyJ.oneauth.token",
+                "x-selected-account-id": "acct-3",
+            },
+        )
+        assert headers == {
+            HEADER_ACTING_USER_AUTHORIZATION: "Bearer eyJ.oneauth.token",
+            "x-selected-account-id": "acct-3",
+        }
+
+    def test_bearer_delegation_is_lowest_precedence(self):
+        """A bearer alongside an api key or cookie never wins — those flows are
+        unchanged, so only callers with a bearer and neither of the other two
+        (OneAuth) reach the new branch."""
+        api_key_wins = build_delegation_headers(
+            _user_principal(),
+            {"x-api-key": "user-key", "Authorization": "Bearer tok"},
+        )
+        assert api_key_wins == {HEADER_ACTING_USER_API_KEY: "user-key"}
+
+        cookie_wins = build_delegation_headers(
+            _user_principal(),
+            {"cookie": "_identityJwt=jwt", "Authorization": "Bearer tok"},
+        )
+        assert cookie_wins == {HEADER_ACTING_USER_COOKIE: "_identityJwt=jwt"}
+
+    def test_non_bearer_authorization_ignored(self):
+        assert (
+            build_delegation_headers(
+                _user_principal(),
+                {"Authorization": "Basic dXNlcjpwYXNz"},
+            )
+            == {}
+        )
+
+    def test_bearer_scheme_is_case_insensitive(self):
+        headers = build_delegation_headers(
+            _user_principal(),
+            {"authorization": "bearer lower.case.scheme"},
+        )
+        assert headers == {HEADER_ACTING_USER_AUTHORIZATION: "bearer lower.case.scheme"}
 
     def test_skips_when_no_principal(self):
         assert build_delegation_headers(None, {"x-api-key": "k"}) == {}
