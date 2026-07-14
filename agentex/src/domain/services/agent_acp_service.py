@@ -77,6 +77,7 @@ BLOCKED_HEADERS = frozenset(
         "x-agent-api-key",
         "x-acting-user-api-key",
         "x-acting-user-cookie",
+        "x-acting-user-authorization",
         "x-acting-as-agent",
         "x-selected-account-id",
     }
