@@ -96,15 +96,19 @@ def build_delegation_headers(
     cookie_header = normalized.get(HEADER_COOKIE)
     authorization = normalized.get(HEADER_AUTHORIZATION)
 
+    # Resolve the session cookie up front: a Cookie header carrying only
+    # non-allowlisted morsels (analytics, CSRF) yields nothing, and must not
+    # pre-empt a bearer that rides alongside it (browser OIDC callers send both).
+    session_cookie = (
+        _minimal_session_cookie(cookie_header, session_cookie_names_to_forward())
+        if cookie_header
+        else None
+    )
+
     result: dict[str, str] = {}
     if api_key:
         result[HEADER_ACTING_USER_API_KEY] = api_key
-    elif cookie_header:
-        session_cookie = _minimal_session_cookie(
-            cookie_header, session_cookie_names_to_forward()
-        )
-        if not session_cookie:
-            return {}
+    elif session_cookie:
         result[HEADER_ACTING_USER_COOKIE] = session_cookie
     elif authorization and authorization.lower().startswith(_BEARER_PREFIX):
         result[HEADER_ACTING_USER_AUTHORIZATION] = authorization

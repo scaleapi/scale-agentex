@@ -150,6 +150,15 @@ class TestBuildDelegationHeaders:
         )
         assert cookie_wins == {HEADER_ACTING_USER_COOKIE: "_identityJwt=jwt"}
 
+    def test_bearer_used_when_cookie_has_no_session_morsel(self):
+        """A browser OIDC caller sends analytics/CSRF cookies alongside the
+        bearer. The non-allowlisted Cookie header must not pre-empt the bearer."""
+        headers = build_delegation_headers(
+            _user_principal(),
+            {"cookie": "csrf=secret", "Authorization": "Bearer tok"},
+        )
+        assert headers == {HEADER_ACTING_USER_AUTHORIZATION: "Bearer tok"}
+
     def test_non_bearer_authorization_ignored(self):
         assert (
             build_delegation_headers(
