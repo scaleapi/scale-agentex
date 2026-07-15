@@ -212,6 +212,8 @@ export function describeCadence(schedule: AgentRunSchedule): string {
   }
 
   if (!schedule.cron_expression) return 'No cadence';
+  // UI-created schedules use simple crons that round-trip through this config.
+  // If complex external crons are supported, fall back to the raw expression.
   return describeCadenceConfig(scheduleToCadence(schedule));
 }
 
