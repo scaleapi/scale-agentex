@@ -20,6 +20,16 @@ export const DEFAULT_CADENCE: CadenceConfig = {
   intervalUnit: 'hours',
 };
 
+const WEEKDAY_LABELS: Record<string, string> = {
+  SUN: 'Sunday',
+  MON: 'Monday',
+  TUE: 'Tuesday',
+  WED: 'Wednesday',
+  THU: 'Thursday',
+  FRI: 'Friday',
+  SAT: 'Saturday',
+};
+
 export function normalizeScheduleName(value: string): string {
   return value
     .toLowerCase()
@@ -148,71 +158,61 @@ export function cadenceToPayload(
   return { cron_expression: `${cronMinute} ${cronHour} * * *` };
 }
 
+function formatInterval(value: number | string, unit: string) {
+  const numericValue = Number(value);
+  const singularUnit = unit.replace(/s$/, '');
+  const displayUnit = numericValue === 1 ? singularUnit : `${singularUnit}s`;
+  return `Every ${value} ${displayUnit}`;
+}
+
+function formatCadenceTime(value: string) {
+  const [hourText = '0', minute = '00'] = value.split(':');
+  const hour = Number.parseInt(hourText, 10);
+  return `${hour % 12 || 12}:${minute} ${hour >= 12 ? 'PM' : 'AM'}`;
+}
+
+export function describeCadenceConfig(cadence: CadenceConfig): string {
+  if (cadence.type === 'interval') {
+    return formatInterval(cadence.intervalValue, cadence.intervalUnit);
+  }
+
+  const time = formatCadenceTime(cadence.time);
+  if (cadence.type === 'weekly') {
+    const selectedDays = cadence.dayOfWeek.split(',');
+    const isWeekdays =
+      selectedDays.length === 5 &&
+      ['MON', 'TUE', 'WED', 'THU', 'FRI'].every(day =>
+        selectedDays.includes(day)
+      );
+    if (isWeekdays) return `Weekdays at ${time}`;
+    const dayLabels = selectedDays.map(day => WEEKDAY_LABELS[day] ?? day);
+    return `Every ${dayLabels.join(', ')} at ${time}`;
+  }
+  if (cadence.type === 'monthly') {
+    return `Monthly on day ${cadence.dayOfMonth} at ${time}`;
+  }
+  return `Daily at ${time}`;
+}
+
 export function describeCadence(schedule: AgentRunSchedule): string {
   if (schedule.interval_seconds != null) {
     if (schedule.interval_seconds % 86400 === 0) {
       const days = schedule.interval_seconds / 86400;
-      return `Every ${days} ${days === 1 ? 'day' : 'days'}`;
+      return formatInterval(days, 'days');
     }
     if (schedule.interval_seconds % 3600 === 0) {
       const hours = schedule.interval_seconds / 3600;
-      return `Every ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+      return formatInterval(hours, 'hours');
     }
     if (schedule.interval_seconds % 60 === 0) {
       const minutes = schedule.interval_seconds / 60;
-      return `Every ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+      return formatInterval(minutes, 'minutes');
     }
-    return `Every ${schedule.interval_seconds} ${
-      schedule.interval_seconds === 1 ? 'second' : 'seconds'
-    }`;
+    return formatInterval(schedule.interval_seconds, 'seconds');
   }
 
-  const [minute, hour, dayOfMonth, month, dayOfWeek] =
-    schedule.cron_expression?.split(' ') ?? [];
-  if (
-    minute == null ||
-    hour == null ||
-    dayOfMonth == null ||
-    month == null ||
-    dayOfWeek == null ||
-    !/^\d+$/.test(minute) ||
-    !/^\d+$/.test(hour) ||
-    month !== '*'
-  ) {
-    return schedule.cron_expression
-      ? `Cron schedule (${schedule.cron_expression})`
-      : 'No cadence';
-  }
-
-  const hourNumber = Number.parseInt(hour, 10);
-  const minuteNumber = Number.parseInt(minute, 10);
-  const period = hourNumber >= 12 ? 'PM' : 'AM';
-  const displayHour = hourNumber % 12 || 12;
-  const time = `${displayHour}:${String(minuteNumber).padStart(2, '0')} ${period}`;
-
-  if (dayOfWeek !== '*') {
-    const dayLabels: Record<string, string> = {
-      MON: 'Monday',
-      TUE: 'Tuesday',
-      WED: 'Wednesday',
-      THU: 'Thursday',
-      FRI: 'Friday',
-      SAT: 'Saturday',
-      SUN: 'Sunday',
-      'MON-FRI': 'weekday',
-    };
-    const days = dayOfWeek
-      .split(',')
-      .map(day => dayLabels[day] ?? day)
-      .join(', ');
-    return `Every ${days} at ${time}`;
-  }
-
-  if (dayOfMonth !== '*') {
-    return `Monthly on day ${dayOfMonth} at ${time}`;
-  }
-
-  return `Daily at ${time}`;
+  if (!schedule.cron_expression) return 'No cadence';
+  return describeCadenceConfig(scheduleToCadence(schedule));
 }
 
 export function scheduleToCadence(schedule: AgentRunSchedule): CadenceConfig {

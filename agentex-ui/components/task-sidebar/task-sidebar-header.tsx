@@ -79,8 +79,10 @@ export function TaskSidebarHeader({
           aria-label="Scheduled Tasks"
           disableAnimation={true}
         >
-          <CalendarClock className="size-5" />
-          Scheduled Tasks
+          <div className="flex items-center gap-2">
+            <CalendarClock className="size-5" />
+            Scheduled Tasks
+          </div>
         </ResizableSidebar.Button>
       )}
     </div>

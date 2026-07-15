@@ -119,6 +119,7 @@ export function useCreateAgentRunSchedule({
     onSuccess: schedule => {
       queryClient.invalidateQueries({
         queryKey: scheduleKeys.byAgentId(agentId),
+        exact: true,
       });
       queryClient.setQueryData(
         scheduleKeys.detail(agentId, schedule.id),
@@ -154,6 +155,7 @@ export function useUpdateAgentRunSchedule({
     onSuccess: schedule => {
       queryClient.invalidateQueries({
         queryKey: scheduleKeys.byAgentId(agentId),
+        exact: true,
       });
       queryClient.setQueryData(
         scheduleKeys.detail(agentId, schedule.id),
@@ -227,15 +229,23 @@ export function useScheduleAction({
             .then(normalizeAgentRunSchedule);
       }
     },
-    onSuccess: result => {
-      queryClient.invalidateQueries({
-        queryKey: scheduleKeys.byAgentId(agentId),
-      });
-      if ('id' in result) {
+    onSuccess: (result, input) => {
+      const scheduleId = typeof input === 'string' ? input : input.scheduleId;
+      if (action === 'delete') {
+        queryClient.removeQueries({
+          queryKey: scheduleKeys.detail(agentId, scheduleId),
+          exact: true,
+        });
+      } else if ('id' in result) {
         queryClient.invalidateQueries({
           queryKey: scheduleKeys.detail(agentId, result.id),
+          exact: true,
         });
       }
+      queryClient.invalidateQueries({
+        queryKey: scheduleKeys.byAgentId(agentId),
+        exact: true,
+      });
       toast.success(
         action === 'trigger'
           ? 'Scheduled task triggered'

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   cadenceToPayload,
   describeCadence,
+  describeCadenceConfig,
   generateScheduleName,
   getCadenceValidationError,
   normalizeScheduleName,
@@ -208,5 +209,18 @@ describe('describeCadence', () => {
         interval_seconds: 7200,
       })
     ).toBe('Every 2 hours');
+  });
+
+  it('uses the same singular interval formatting for editable cadence', () => {
+    expect(
+      describeCadenceConfig({
+        type: 'interval',
+        time: '09:00',
+        dayOfWeek: 'MON',
+        dayOfMonth: '1',
+        intervalValue: '1',
+        intervalUnit: 'minutes',
+      })
+    ).toBe('Every 1 minute');
   });
 });
