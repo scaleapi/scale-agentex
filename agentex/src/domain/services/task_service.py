@@ -354,13 +354,27 @@ class AgentTaskService:
     async def cancel_task(
         self, agent: AgentEntity, task: TaskEntity, acp_url: str
     ) -> TaskEntity:
-        """Cancel a running task"""
+        """Cancel a running (or interrupted) task."""
         await self.acp_client.cancel_task(agent=agent, task=task, acp_url=acp_url)
 
-        task = await self.task_repository.get(id=task.id)
-        task.status = TaskStatus.CANCELED
-        task.status_reason = "Task canceled by user"
-        return await self.task_repository.update(task)
+        # Compare-and-swap to CANCELED on the observed non-terminal source status
+        # (mirrors interrupt_task). If the task moved to another status during the
+        # ACP call (the agent completed/failed it, or it was concurrently modified),
+        # leave that status intact rather than clobbering it with CANCELED.
+        current = await self.task_repository.get(id=task.id)
+        if current.status not in (TaskStatus.RUNNING, TaskStatus.INTERRUPTED):
+            logger.info(
+                f"Cancel for task {task.id} not applied: task is no longer running "
+                f"(current status: {current.status}); leaving its status intact."
+            )
+            return current
+        updated = await self.transition_task_status(
+            task_id=task.id,
+            expected_status=current.status,
+            new_status=TaskStatus.CANCELED,
+            status_reason="Task canceled by user",
+        )
+        return updated if updated is not None else await self.task_repository.get(id=task.id)
 
     async def interrupt_task(
         self, agent: AgentEntity, task: TaskEntity, acp_url: str
