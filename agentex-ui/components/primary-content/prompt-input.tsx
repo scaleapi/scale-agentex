@@ -8,7 +8,7 @@ import { Prec } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import CodeMirror from '@uiw/react-codemirror';
 import { DataContent, TextContent } from 'agentex/resources';
-import { ArrowUp } from 'lucide-react';
+import { ArrowUp, Square, X } from 'lucide-react';
 
 import { useAgentexClient } from '@/components/providers';
 import { IconButton } from '@/components/ui/icon-button';
@@ -19,9 +19,13 @@ import {
   SearchParamKey,
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
-import { useSendMessage } from '@/hooks/use-task-messages';
+import {
+  useInterruptTurn,
+  useSendMessage,
+  useTaskMessages,
+} from '@/hooks/use-task-messages';
 import { useTask } from '@/hooks/use-tasks';
-import { TaskStatusEnum } from '@/lib/types';
+import { isTaskTerminalStatus } from '@/lib/types';
 
 type PromptInputProps = {
   prompt: string;
@@ -51,20 +55,32 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
   const [isSendingJSON, setIsSendingJSON] = useState(false);
   const [isTaskParamsOpen, setIsTaskParamsOpen] = useState(false);
   const [taskParams, setTaskParams] = useState('');
+  const [queuedMessage, setQueuedMessage] = useState<{
+    text: string;
+    isJson: boolean;
+  } | null>(null);
   const taskParamsViewRef = useRef<EditorView | null>(null);
 
   const { agentexClient } = useAgentexClient();
 
   const createTaskMutation = useCreateTask({ agentexClient });
   const sendMessageMutation = useSendMessage({ agentexClient });
+  const interruptTurnMutation = useInterruptTurn({ agentexClient });
   const { data: task } = useTask({ agentexClient, taskId: taskID ?? '' });
+  const { rpcStatus } = useTaskMessages({
+    agentexClient,
+    taskId: taskID ?? '',
+  });
+
+  const isStreaming = rpcStatus === 'pending';
 
   const textInputRef = useRef<HTMLTextAreaElement>(null);
   const codeMirrorViewRef = useRef<EditorView | null>(null);
+  const wasStreamingRef = useRef(false);
 
   const isTaskTerminal = useMemo(() => {
     if (!taskID || !task) return false;
-    return task.status != null && task.status !== TaskStatusEnum.RUNNING;
+    return isTaskTerminalStatus(task.status);
   }, [taskID, task]);
 
   const handleSetJson = useCallback(
@@ -101,14 +117,79 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
     [agentName, isClient, isTaskTerminal]
   );
 
+  const performSend = useCallback(
+    async (rawPrompt: string, asJson: boolean) => {
+      if (!agentName || !rawPrompt.trim()) return;
+
+      if (asJson) {
+        try {
+          JSON.parse(rawPrompt);
+        } catch {
+          toast.error('Invalid JSON');
+          return;
+        }
+      }
+
+      let currentTaskId = taskID;
+
+      if (!currentTaskId) {
+        let extraTaskParams: Record<string, unknown> = {};
+        if (taskParams.trim()) {
+          try {
+            extraTaskParams = JSON.parse(taskParams);
+          } catch {
+            toast.error('Invalid Task Parameters JSON');
+            return;
+          }
+        }
+
+        const task = await createTaskMutation.mutateAsync({
+          agentName: agentName,
+          params: {
+            ...extraTaskParams,
+            description: rawPrompt,
+            content: rawPrompt,
+          },
+        });
+        currentTaskId = task.id;
+        updateParams({ [SearchParamKey.TASK_ID]: currentTaskId });
+      }
+
+      const content: TextContent | DataContent = asJson
+        ? {
+            type: 'data',
+            author: 'user',
+            data: JSON.parse(rawPrompt) as Record<string, unknown>,
+          }
+        : {
+            type: 'text',
+            author: 'user',
+            format: 'plain',
+            attachments: [],
+            content: rawPrompt,
+          };
+
+      await sendMessageMutation.mutateAsync({
+        taskId: currentTaskId,
+        agentName,
+        content,
+      });
+    },
+    [
+      taskID,
+      agentName,
+      createTaskMutation,
+      updateParams,
+      sendMessageMutation,
+      taskParams,
+    ]
+  );
+
   const handleSendPrompt = useCallback(async () => {
     if (isDisabled || !prompt.trim() || !agentName) {
       toast.error('Please select an agent and enter a prompt');
       return;
     }
-
-    let currentTaskId = taskID;
-    const currentPrompt = prompt;
 
     if (isSendingJSON) {
       try {
@@ -119,62 +200,71 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
       }
     }
 
+    const text = prompt;
+    const asJson = isSendingJSON;
     setPrompt('');
+    await performSend(text, asJson);
+  }, [isDisabled, prompt, agentName, isSendingJSON, setPrompt, performSend]);
 
-    if (!currentTaskId) {
-      let extraTaskParams: Record<string, unknown> = {};
-      if (taskParams.trim()) {
-        try {
-          extraTaskParams = JSON.parse(taskParams);
-        } catch {
-          toast.error('Invalid Task Parameters JSON');
-          return;
-        }
+  const handleEnqueue = useCallback(() => {
+    if (!prompt.trim()) return;
+
+    if (isSendingJSON) {
+      try {
+        JSON.parse(prompt);
+      } catch {
+        toast.error('Invalid JSON');
+        return;
       }
-
-      const task = await createTaskMutation.mutateAsync({
-        agentName: agentName,
-        params: {
-          ...extraTaskParams,
-          description: prompt,
-          content: currentPrompt,
-        },
-      });
-      currentTaskId = task.id;
-      updateParams({ [SearchParamKey.TASK_ID]: currentTaskId });
     }
 
-    const content: TextContent | DataContent = isSendingJSON
-      ? {
-          type: 'data',
-          author: 'user',
-          data: JSON.parse(prompt) as Record<string, unknown>,
-        }
-      : {
-          type: 'text',
-          author: 'user',
-          format: 'plain',
-          attachments: [],
-          content: prompt as string,
-        };
+    setQueuedMessage({ text: prompt, isJson: isSendingJSON });
+    setPrompt('');
+  }, [prompt, isSendingJSON, setPrompt]);
 
-    await sendMessageMutation.mutateAsync({
-      taskId: currentTaskId,
-      agentName: agentName!,
-      content,
+  const handleInterrupt = useCallback(() => {
+    if (!taskID || !agentName) return;
+    sendMessageMutation.abortStream(taskID);
+    interruptTurnMutation.mutate({
+      taskId: taskID,
+      agentName,
+      reason: 'user_interrupt',
     });
-  }, [
-    isDisabled,
-    prompt,
-    taskID,
-    agentName,
-    createTaskMutation,
-    updateParams,
-    sendMessageMutation,
-    setPrompt,
-    isSendingJSON,
-    taskParams,
-  ]);
+  }, [taskID, agentName, sendMessageMutation, interruptTurnMutation]);
+
+  const handleComposerSubmit = useCallback(() => {
+    if (isStreaming) {
+      handleEnqueue();
+    } else {
+      handleSendPrompt();
+    }
+  }, [isStreaming, handleEnqueue, handleSendPrompt]);
+
+  useEffect(() => {
+    if (wasStreamingRef.current && !isStreaming && queuedMessage) {
+      const queued = queuedMessage;
+      setQueuedMessage(null);
+      performSend(queued.text, queued.isJson);
+    }
+    wasStreamingRef.current = isStreaming;
+  }, [isStreaming, queuedMessage, performSend]);
+
+  useEffect(() => {
+    if (!isStreaming) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        handleInterrupt();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isStreaming, handleInterrupt]);
+
+  const isStopMode = isStreaming && !prompt.trim();
+  const isPrimaryDisabled = isStopMode
+    ? isDisabled
+    : isDisabled || !prompt.trim();
 
   return (
     <div className="flex w-full max-w-3xl flex-col gap-2">
@@ -199,6 +289,19 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
           )}
         </div>
       )}
+      {queuedMessage && (
+        <div className="border-input bg-muted/40 text-muted-foreground ml-4 flex max-w-full items-center gap-2 self-start rounded-full border py-1 pr-1 pl-3 text-sm">
+          <span className="truncate">Queued: {queuedMessage.text}</span>
+          <IconButton
+            className="size-6 rounded-full"
+            iconSize="sm"
+            variant="ghost"
+            onClick={() => setQueuedMessage(null)}
+            icon={X}
+            aria-label="Remove queued message"
+          />
+        </div>
+      )}
       <div
         className={`border-input dark:bg-input ${isDisabled ? 'bg-muted scale-90 cursor-not-allowed' : 'scale-100'} flex w-full items-end justify-between rounded-4xl border py-2 pr-2 pl-6 shadow-sm transition-transform duration-300 disabled:cursor-not-allowed`}
       >
@@ -207,7 +310,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
             prompt={prompt}
             setPrompt={setPrompt}
             isDisabled={isDisabled}
-            handleSendPrompt={handleSendPrompt}
+            handleSendPrompt={handleComposerSubmit}
             codeMirrorViewRef={codeMirrorViewRef}
           />
         ) : (
@@ -217,16 +320,16 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
             isDisabled={isDisabled}
             isTaskTerminal={isTaskTerminal}
             taskStatus={task?.status}
-            handleSendPrompt={handleSendPrompt}
+            handleSendPrompt={handleComposerSubmit}
             inputRef={textInputRef}
           />
         )}
         <IconButton
           className="pointer-events-auto size-10 rounded-full"
-          onClick={handleSendPrompt}
-          disabled={isDisabled || !prompt.trim()}
-          icon={ArrowUp}
-          aria-label="Send Prompt"
+          onClick={isStopMode ? handleInterrupt : handleComposerSubmit}
+          disabled={isPrimaryDisabled}
+          icon={isStopMode ? Square : ArrowUp}
+          aria-label={isStopMode ? 'Stop' : 'Send Prompt'}
         />
       </div>
       <div

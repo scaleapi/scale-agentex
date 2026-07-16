@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 
 import {
   InfiniteData,
@@ -129,7 +129,20 @@ export function useSendMessage({
 }) {
   const queryClient = useQueryClient();
 
-  return useMutation({
+  // Keeps the sync `message/send` stream AbortController reachable so a Stop
+  // action can abort the in-flight streaming connection. Async agents have no
+  // local stream to abort; abortStream is a no-op for them.
+  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+
+  const abortStream = useCallback((taskId: string) => {
+    const controller = abortControllersRef.current.get(taskId);
+    if (controller) {
+      controller.abort();
+      abortControllersRef.current.delete(taskId);
+    }
+  }, []);
+
+  const mutation = useMutation({
     mutationFn: async ({ taskId, agentName, content }: SendMessageParams) => {
       const queryKey = taskMessagesKeys.byTaskId(taskId);
       const metaKey = taskMessagesMetaKeys.byTaskId(taskId);
@@ -217,44 +230,55 @@ export function useSendMessage({
           });
 
           const controller = new AbortController();
+          abortControllersRef.current.set(taskId, controller);
 
-          for await (const response of agentRPCWithStreaming(
-            agentexClient,
-            { agentName },
-            'message/send',
-            { task_id: taskId, content },
-            { signal: controller.signal }
-          )) {
-            if (response.error != null) {
+          try {
+            for await (const response of agentRPCWithStreaming(
+              agentexClient,
+              { agentName },
+              'message/send',
+              { task_id: taskId, content },
+              { signal: controller.signal }
+            )) {
+              if (response.error != null) {
+                queryClient.setQueryData<TaskMessagesMetadata>(metaKey, {
+                  deltaAccumulator: null,
+                  rpcStatus: 'error',
+                });
+                throw new Error(response.error.message);
+              }
+
+              const result = aggregateMessageEvents(
+                latestMessages,
+                latestDeltaAccumulator,
+                [response.result]
+              );
+
+              latestMessages = result.messages;
+              latestDeltaAccumulator = result.deltaAccumulator;
+
+              // Write streaming state to first page
+              queryClient.setQueryData<InfiniteData<TaskMessage[]>>(
+                queryKey,
+                old => updateFirstPage(old, () => latestMessages)
+              );
               queryClient.setQueryData<TaskMessagesMetadata>(metaKey, {
-                deltaAccumulator: null,
-                rpcStatus: 'error',
+                deltaAccumulator: latestDeltaAccumulator,
+                rpcStatus: 'pending',
               });
-              throw new Error(response.error.message);
+
+              if (response.result.type === 'done') {
+                queryClient.invalidateQueries({ queryKey: ['spans', taskId] });
+              }
             }
-
-            const result = aggregateMessageEvents(
-              latestMessages,
-              latestDeltaAccumulator,
-              [response.result]
-            );
-
-            latestMessages = result.messages;
-            latestDeltaAccumulator = result.deltaAccumulator;
-
-            // Write streaming state to first page
-            queryClient.setQueryData<InfiniteData<TaskMessage[]>>(
-              queryKey,
-              old => updateFirstPage(old, () => latestMessages)
-            );
-            queryClient.setQueryData<TaskMessagesMetadata>(metaKey, {
-              deltaAccumulator: latestDeltaAccumulator,
-              rpcStatus: 'pending',
-            });
-
-            if (response.result.type === 'done') {
-              queryClient.invalidateQueries({ queryKey: ['spans', taskId] });
+          } catch (streamError) {
+            // A user Stop aborts the controller; that is an expected end of the
+            // stream, not a failure. Any other error propagates to onError.
+            if (!controller.signal.aborted) {
+              throw streamError;
             }
+          } finally {
+            abortControllersRef.current.delete(taskId);
           }
 
           // Final reconciliation: refetch all loaded pages so the cache stays
@@ -264,9 +288,11 @@ export function useSendMessage({
           // when there are no active observers (e.g. component unmounted mid-stream).
           await queryClient.refetchQueries({ queryKey });
 
+          // On a Stop the shimmer must clear immediately (idle); a normal
+          // completion settles to success.
           queryClient.setQueryData<TaskMessagesMetadata>(metaKey, {
             deltaAccumulator: null,
-            rpcStatus: 'success',
+            rpcStatus: controller.signal.aborted ? 'idle' : 'success',
           });
 
           const latestData =
@@ -284,6 +310,63 @@ export function useSendMessage({
     onError: error => {
       toast.error({
         title: 'Failed to send message',
+        message: error instanceof Error ? error.message : 'Please try again.',
+      });
+    },
+  });
+
+  return Object.assign(mutation, { abortStream });
+}
+
+type InterruptTurnParams = {
+  taskId: string;
+  agentName: string;
+  reason?: string | null;
+};
+
+/**
+ * Thin adapter for the assumed `task/interrupt` shape. The typed SDK method is
+ * not generated yet, so this hits the REST route directly.
+ *
+ * TODO(AGX1-391): swap to the typed SDK method once the OpenAPI `task/interrupt`
+ * change lands, e.g. `agentexClient.tasks.interrupt(taskId, { reason })`, or the
+ * RPC form `agentRPCNonStreaming(agentexClient, { agentName }, 'task/interrupt',
+ * { task_id: taskId })`.
+ */
+async function interruptTaskAdapter(
+  agentexClient: AgentexSDK,
+  { taskId, reason }: InterruptTurnParams
+): Promise<void> {
+  await agentexClient.post(`/tasks/${taskId}/interrupt`, {
+    body: { reason: reason ?? null },
+  });
+}
+
+/**
+ * Interrupts the current turn without terminating the task. Forces the message
+ * meta cache to idle on settle so the thinking indicator clears. Does NOT abort
+ * the SSE task subscription — that stays live so later turns keep streaming.
+ */
+export function useInterruptTurn({
+  agentexClient,
+}: {
+  agentexClient: AgentexSDK;
+}) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (params: InterruptTurnParams) => {
+      return interruptTaskAdapter(agentexClient, params);
+    },
+    onSettled: (_data, _error, variables) => {
+      queryClient.setQueryData<TaskMessagesMetadata>(
+        taskMessagesMetaKeys.byTaskId(variables.taskId),
+        { deltaAccumulator: null, rpcStatus: 'idle' }
+      );
+    },
+    onError: error => {
+      toast.error({
+        title: 'Failed to stop the current turn',
         message: error instanceof Error ? error.message : 'Please try again.',
       });
     },
