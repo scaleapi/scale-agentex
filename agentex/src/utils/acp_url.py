@@ -3,12 +3,12 @@
 Agents register their ACP URL as ``http://host.docker.internal:<port>`` (the SDK
 default) so that a **Docker-based** backend can reach an agent process running on
 the host. When the backend itself runs directly on the host — i.e. the docker-free
-local dev mode (``./dev.sh local`` / ``python -m scripts.dev_local``) — ``host.docker.internal``
+local dev mode (``./dev.sh no-docker`` / ``python -m scripts.dev_nodocker``) — ``host.docker.internal``
 does not resolve, and every ACP call fails with
 ``[Errno 8] nodename nor servname provided, or not known``.
 
 The correct address depends on the *backend's* network topology, which only the
-backend knows. So the runner (``scripts.dev_local``) sets ``AGENTEX_ACP_HOST_OVERRIDE``
+backend knows. So the runner (``scripts.dev_nodocker``) sets ``AGENTEX_ACP_HOST_OVERRIDE``
 (to ``127.0.0.1``) and the backend rewrites the Docker-only sentinel host to that
 value wherever it dials an agent. When the env var is unset (Docker / staging /
 prod), this is a no-op and the stored URL is used verbatim.

@@ -95,7 +95,7 @@ dev = [
     { name = "ruff", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "vulture", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
 ]
-dev-local = [
+dev-no-docker = [
     { name = "greenlet", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "pgserver", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "redislite", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
@@ -152,7 +152,7 @@ dev = [
     { name = "ruff", specifier = ">=0.3.4" },
     { name = "vulture", specifier = ">=2.14" },
 ]
-dev-local = [
+dev-no-docker = [
     { name = "greenlet", specifier = ">=3.2.3" },
     { name = "pgserver", specifier = ">=0.1.4" },
     { name = "redislite", specifier = ">=6.2.912183" },

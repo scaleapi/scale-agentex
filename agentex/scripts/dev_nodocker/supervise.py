@@ -9,7 +9,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from scripts.dev_local.config import LOOPBACK, DevLocalConfig
+from scripts.dev_nodocker.config import LOOPBACK, DevNoDockerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ async def wait_for_port(
     return False
 
 
-async def run_migrations(cfg: DevLocalConfig, env: dict[str, str]) -> None:
+async def run_migrations(cfg: DevNoDockerConfig, env: dict[str, str]) -> None:
     """Run `alembic upgrade head` from the migrations dir (sync psycopg2 engine)."""
     migrations_dir = cfg.agentex_dir / "database" / "migrations"
     logger.info("Running database migrations ...")

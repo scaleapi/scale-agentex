@@ -47,3 +47,5 @@ next-env.d.ts
 .codeartifact-pip-conf
 
 docs/site/
+
+.dev-nodocker/

@@ -55,23 +55,23 @@ Other commands:
 ./dev.sh restart            # Restart all services
 ```
 
-Docker-free local mode (host processes + embedded datastores, no Docker):
+Docker-free mode (host processes + embedded datastores, no Docker):
 ```bash
-./dev.sh local              # whole stack without Docker (or: make dev-local)
-./dev.sh local --lean       # Postgres + Redis + API + MongoDB only
-./dev.sh local --mongo-uri <uri>  # use an external MongoDB instead of a local mongod
+./dev.sh no-docker              # whole stack without Docker (or: make dev-no-docker)
+./dev.sh no-docker --lean       # Postgres + Redis + API + MongoDB only
+./dev.sh no-docker --mongo-uri <uri>  # use an external MongoDB instead of a local mongod
 ```
 
-> **MongoDB is required for the full local stack** and is always started — the Temporal
+> **MongoDB is required for the full no-docker stack** and is always started — the Temporal
 > worker builds Mongo-backed repositories at startup, so a missing/unreachable Mongo
 > makes the runner fail fast (with an install message) rather than crash the worker.
-> `./dev.sh local` auto-installs `mongod`; `make dev-local` / direct `python -m
-> scripts.dev_local` do not, so install `mongod` yourself or pass `--mongo-uri <uri>` to
-> point at an external MongoDB. In local mode the Temporal UI is on :8233 (Docker mode
+> `./dev.sh no-docker` auto-installs `mongod`; `make dev-no-docker` / direct `python -m
+> scripts.dev_nodocker` do not, so install `mongod` yourself or pass `--mongo-uri <uri>` to
+> point at an external MongoDB. In no-docker mode the Temporal UI is on :8233 (Docker mode
 > uses :8080).
 >
 > Agents register their ACP URL as `host.docker.internal` (for a Docker backend), which
-> a host-process backend can't resolve. Local mode sets `AGENTEX_ACP_HOST_OVERRIDE=127.0.0.1`
+> a host-process backend can't resolve. No-docker mode sets `AGENTEX_ACP_HOST_OVERRIDE=127.0.0.1`
 > and the backend rewrites `host.docker.internal` → that value when dialing agents
 > (`src/utils/acp_url.py`, applied in the ACP request path + Temporal healthcheck), so
 > default-scaffolded agents work without manifest edits.

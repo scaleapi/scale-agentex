@@ -10,13 +10,13 @@ import signal
 from typing import Any
 from urllib.parse import urlsplit
 
-from scripts.dev_local.config import DB_NAME, LOOPBACK, DevLocalConfig
-from scripts.dev_local.supervise import spawn, terminate, wait_for_port
+from scripts.dev_nodocker.config import DB_NAME, LOOPBACK, DevNoDockerConfig
+from scripts.dev_nodocker.supervise import spawn, terminate, wait_for_port
 
 logger = logging.getLogger(__name__)
 
 
-def provision_postgres(cfg: DevLocalConfig) -> tuple[Any, str]:
+def provision_postgres(cfg: DevNoDockerConfig) -> tuple[Any, str]:
     """Start an embedded Postgres and ensure the application database (DB_NAME) exists.
 
     The returned socket-form `postgresql://` URL works for both the async app (asyncpg)
@@ -42,7 +42,7 @@ def provision_postgres(cfg: DevLocalConfig) -> tuple[Any, str]:
     return server, server.get_uri(database=DB_NAME)
 
 
-def provision_redis(cfg: DevLocalConfig) -> tuple[Any, str]:
+def provision_redis(cfg: DevNoDockerConfig) -> tuple[Any, str]:
     """Start an embedded real redis-server on a TCP port. Returns (server, url)."""
     import redislite
 
@@ -58,7 +58,7 @@ def provision_redis(cfg: DevLocalConfig) -> tuple[Any, str]:
     return server, f"redis://{LOOPBACK}:{port}/0"
 
 
-async def provision_temporal(cfg: DevLocalConfig) -> tuple[Any, str]:
+async def provision_temporal(cfg: DevNoDockerConfig) -> tuple[Any, str]:
     """Start the Temporal dev server (+ Web UI). Returns (env, address)."""
     from temporalio.testing import WorkflowEnvironment
 
@@ -84,7 +84,7 @@ async def provision_temporal(cfg: DevLocalConfig) -> tuple[Any, str]:
 
 
 async def provision_mongo(
-    cfg: DevLocalConfig,
+    cfg: DevNoDockerConfig,
 ) -> tuple[asyncio.subprocess.Process | None, str | None]:
     """Start a local mongod (or use an external URI). Returns (proc, uri).
 
@@ -152,7 +152,7 @@ async def provision_mongo(
 
 
 async def provision_otel(
-    cfg: DevLocalConfig,
+    cfg: DevNoDockerConfig,
 ) -> tuple[asyncio.subprocess.Process | None, str | None]:
     """Start the OpenTelemetry collector if present. Returns (proc, otlp_endpoint).
 
@@ -163,7 +163,7 @@ async def provision_otel(
     if not binary:
         logger.warning(
             "otel collector not found on PATH — skipping telemetry export (the app "
-            "runs fine without it). To enable it, start via `./dev.sh local` (installs "
+            "runs fine without it). To enable it, start via `./dev.sh no-docker` (installs "
             "the otelcol-contrib release binary automatically) or install it yourself "
             "from https://github.com/open-telemetry/opentelemetry-collector-releases/releases."
         )

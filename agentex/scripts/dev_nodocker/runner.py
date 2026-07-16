@@ -7,8 +7,13 @@ import logging
 import signal
 import sys
 
-from scripts.dev_local.config import LOOPBACK, DevLocalConfig, build_env, resolve_config
-from scripts.dev_local.services import (
+from scripts.dev_nodocker.config import (
+    LOOPBACK,
+    DevNoDockerConfig,
+    build_env,
+    resolve_config,
+)
+from scripts.dev_nodocker.services import (
     provision_mongo,
     provision_otel,
     provision_postgres,
@@ -16,7 +21,7 @@ from scripts.dev_local.services import (
     provision_temporal,
     teardown_redis,
 )
-from scripts.dev_local.supervise import (
+from scripts.dev_nodocker.supervise import (
     run_migrations,
     spawn,
     terminate,
@@ -26,7 +31,7 @@ from scripts.dev_local.supervise import (
 logger = logging.getLogger(__name__)
 
 
-async def run(cfg: DevLocalConfig) -> int:
+async def run(cfg: DevNoDockerConfig) -> int:
     if cfg.ephemeral:
         cfg.data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -146,7 +151,7 @@ async def run(cfg: DevLocalConfig) -> int:
 
 
 def _print_banner(
-    cfg: DevLocalConfig,
+    cfg: DevNoDockerConfig,
     mongo_uri: str | None,
     temporal_address: str | None,
     otel_endpoint: str | None,
@@ -157,7 +162,7 @@ def _print_banner(
         else "off"
     )
     print("\n" + "=" * 52, flush=True)
-    print("  agentex backend (local, no Docker)", flush=True)
+    print("  agentex backend (no Docker)", flush=True)
     print(f"  API:         http://localhost:{cfg.api_port}", flush=True)
     print(f"  Swagger:     http://localhost:{cfg.api_port}/swagger", flush=True)
     print("  Postgres:    embedded (socket)", flush=True)

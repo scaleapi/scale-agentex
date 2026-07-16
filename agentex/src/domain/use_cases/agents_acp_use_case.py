@@ -333,17 +333,19 @@ class AgentsACPUseCase(TaskMessageMixin):
         raw = acp_url_override
 
         # Prefer the production deployment's URL when there's no explicit override.
-        if raw is None and agent.production_deployment_id:
+        # Use truthiness (not `is None`) so an empty-string acp_url falls through
+        # to the agent's own URL instead of being dialed as "".
+        if not raw and agent.production_deployment_id:
             deployment = await self.deployment_repo.get(
                 id=agent.production_deployment_id
             )
             raw = deployment.acp_url
 
         # Legacy fallback to the agent's own URL.
-        if raw is None:
+        if not raw:
             raw = agent.acp_url
 
-        if raw is None:
+        if not raw:
             raise ClientError(f"Agent {agent.id} does not have an ACP URL configured")
 
         return resolve_acp_url(raw)

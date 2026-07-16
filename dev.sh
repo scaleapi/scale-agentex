@@ -5,12 +5,13 @@
 # Delegates to existing Makefiles - this is an orchestration layer, not a replacement
 #
 # Usage:
-#   ./dev.sh          Start all services (Docker backend + frontend)
-#   ./dev.sh local    Start all services WITHOUT Docker (embedded pg/redis, local temporal/mongo/otel)
-#   ./dev.sh setup    Install all prerequisites (macOS)
-#   ./dev.sh stop     Stop all services
-#   ./dev.sh logs     Show logs
-#   ./dev.sh status   Check status of services
+#   ./dev.sh              Start all services (Docker backend + frontend)
+#   ./dev.sh docker       Same as above (explicit Docker mode)
+#   ./dev.sh no-docker    Start all services WITHOUT Docker (embedded pg/redis, local temporal/mongo/otel)
+#   ./dev.sh setup        Install all prerequisites (macOS)
+#   ./dev.sh stop         Stop all services
+#   ./dev.sh logs         Show logs
+#   ./dev.sh status       Check status of services
 #
 
 set -e
@@ -19,7 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="$SCRIPT_DIR/.dev-logs"
 BACKEND_PID_FILE="$LOG_DIR/backend.pid"
 FRONTEND_PID_FILE="$LOG_DIR/frontend.pid"
-MODE_FILE="$LOG_DIR/mode"  # records "docker" or "local" so stop/status know how to act
+MODE_FILE="$LOG_DIR/mode"  # records "docker" or "nodocker" so stop/status know how to act
 
 # Colors for output
 RED='\033[0;31m'
@@ -169,7 +170,7 @@ install_prerequisites() {
     echo ""
     echo "You can now run:"
     echo "  ./dev.sh              # Start the development environment (Docker)"
-    echo "  ./dev.sh local        # Start without Docker (embedded services)"
+    echo "  ./dev.sh no-docker    # Start without Docker (embedded services)"
     echo ""
     echo "Once running, create your first agent:"
     echo "  agentex init          # Create a new agent"
@@ -218,7 +219,7 @@ require_docker() {
     # the user chooses Docker Desktop or Rancher).
     if ! docker info &> /dev/null; then
         log_error "Docker daemon is not running. Please start Docker Desktop or Rancher Desktop."
-        log_info "Tip: run './dev.sh local' to start the backend WITHOUT Docker."
+        log_info "Tip: run './dev.sh no-docker' to start the backend WITHOUT Docker."
         exit 1
     fi
 }
@@ -273,7 +274,7 @@ install_otel_collector() {
     log_success "otel collector installed to $dest/otelcol-contrib"
 }
 
-ensure_local_service_binaries() {
+ensure_nodocker_service_binaries() {
     # `local` mode runs Postgres/Redis/Temporal with no install (bundled /
     # auto-downloaded). MongoDB is REQUIRED for the full stack (the Temporal worker
     # needs it) so we always ensure it and FAIL FAST if we can't. The OTel collector is
@@ -352,19 +353,19 @@ start_backend() {
     cd "$SCRIPT_DIR"
 }
 
-start_backend_local() {
-    log_info "Starting backend services (local, no Docker)..."
+start_backend_nodocker() {
+    log_info "Starting backend services (no Docker)..."
 
     cd "$SCRIPT_DIR/agentex"
 
     # Run the docker-free runner DIRECTLY via `uv run` (not `make`) so a SIGTERM
     # from `./dev.sh stop` is forwarded straight to the Python supervisor, which
-    # tears down the embedded datastores cleanly. --group dev-local pulls
+    # tears down the embedded datastores cleanly. --group dev-no-docker pulls
     # pgserver/redislite/greenlet.
-    uv run --group dev-local python -m scripts.dev_local "$@" > "$LOG_DIR/backend.log" 2>&1 &
+    uv run --group dev-no-docker python -m scripts.dev_nodocker "$@" > "$LOG_DIR/backend.log" 2>&1 &
     local pid=$!
     echo $pid > "$BACKEND_PID_FILE"
-    echo "local" > "$MODE_FILE"
+    echo "nodocker" > "$MODE_FILE"
 
     log_success "Backend starting (PID: $pid)"
     log_info "Backend logs: tail -f $LOG_DIR/backend.log"
@@ -435,7 +436,7 @@ wait_for_backend() {
     log_info "Check logs with: ./dev.sh logs"
 }
 
-# Echo the recorded backend mode ("docker" or "local"), defaulting to docker.
+# Echo the recorded backend mode ("docker" or "nodocker"), defaulting to docker.
 current_mode() {
     if [ -f "$MODE_FILE" ]; then cat "$MODE_FILE"; else echo "docker"; fi
 }
@@ -456,7 +457,7 @@ stop_services() {
     local mode
     mode=$(current_mode)
 
-    if [ "$mode" = "local" ]; then
+    if [ "$mode" = "nodocker" ]; then
         if [ -f "$BACKEND_PID_FILE" ]; then
             local backend_pid
             backend_pid=$(cat "$BACKEND_PID_FILE")
@@ -514,7 +515,7 @@ show_status() {
 
     # Check backend
     echo -n "Backend ($mode): "
-    if [ "$mode" = "local" ]; then
+    if [ "$mode" = "nodocker" ]; then
         if [ -f "$BACKEND_PID_FILE" ] && kill -0 "$(cat "$BACKEND_PID_FILE")" 2>/dev/null; then
             echo -e "${GREEN}Running${NC}"
         else
@@ -540,7 +541,7 @@ show_status() {
 
     # Temporal UI port differs: local dev server uses 8233, Docker UI uses 8080.
     local temporal_ui="http://localhost:8080"
-    [ "$mode" = "local" ] && temporal_ui="http://localhost:8233"
+    [ "$mode" = "nodocker" ] && temporal_ui="http://localhost:8233"
 
     echo ""
     echo "=== URLs ==="
@@ -598,11 +599,11 @@ start_all() {
     echo ""
 }
 
-# The dev_local runner accepts only optional flags — never a positional argument. Catch a
-# stray word up front (almost always a top-level subcommand mistakenly typed after `local`,
-# e.g. `./dev.sh local status`) with a clear hint, instead of forwarding it into the
+# The dev_nodocker runner accepts only optional flags — never a positional argument. Catch a
+# stray word up front (almost always a top-level subcommand mistakenly typed after `no-docker`,
+# e.g. `./dev.sh no-docker status`) with a clear hint, instead of forwarding it into the
 # backgrounded runner where argparse rejects it and the error is buried in backend.log.
-validate_local_args() {
+validate_nodocker_args() {
     local expect_value=false arg
     for arg in "$@"; do
         if [ "$expect_value" = true ]; then
@@ -618,32 +619,32 @@ validate_local_args() {
                 : # some other flag (boolean, --opt=value, -h) — let the runner validate it
                 ;;
             *)
-                log_error "'$arg' is not a valid option for './dev.sh local'."
+                log_error "'$arg' is not a valid option for './dev.sh no-docker'."
                 case "$arg" in
-                    start|setup|stop|logs|status|restart|help)
-                        log_info "Did you mean './dev.sh $arg'? (start/setup/stop/logs/status/restart/help run on their own, not after 'local'.)"
+                    start|docker|setup|stop|logs|status|restart|help)
+                        log_info "Did you mean './dev.sh $arg'? (start/docker/setup/stop/logs/status/restart/help run on their own, not after 'no-docker'.)"
                         ;;
                 esac
-                log_info "Run './dev.sh help' for local flags (e.g. --lean, --no-temporal, --mongo-uri <uri>)."
+                log_info "Run './dev.sh help' for no-docker flags (e.g. --lean, --no-temporal, --mongo-uri <uri>)."
                 exit 1
                 ;;
         esac
     done
 }
 
-start_all_local() {
-    validate_local_args "$@"            # fail fast on a stray positional before any side effects
-    ensure_prerequisites                # no Docker requirement in local mode
-    ensure_local_service_binaries "$@"  # ensure mongod (required) + otel (optional); honors --mongo-uri/--lean
+start_all_nodocker() {
+    validate_nodocker_args "$@"            # fail fast on a stray positional before any side effects
+    ensure_prerequisites                # no Docker requirement in no-docker mode
+    ensure_nodocker_service_binaries "$@"  # ensure mongod (required) + otel (optional); honors --mongo-uri/--lean
     setup_log_dir
 
     echo ""
     echo "========================================"
-    echo "   Starting Agentex Development Env (Local, no Docker)   "
+    echo "   Starting Agentex Development Env (no Docker)   "
     echo "========================================"
     echo ""
 
-    start_backend_local "$@"
+    start_backend_nodocker "$@"
     start_frontend
 
     echo ""
@@ -679,12 +680,12 @@ start_all_local() {
 
 # Main command router
 case "${1:-start}" in
-    start|"")
+    start|docker|"")
         start_all
         ;;
-    local)
-        shift  # drop the 'local' subcommand so only flags reach dev_local.py
-        start_all_local "$@"
+    no-docker)
+        shift  # drop the 'no-docker' subcommand so only flags reach dev_nodocker
+        start_all_nodocker "$@"
         ;;
     setup)
         install_prerequisites
@@ -705,8 +706,8 @@ case "${1:-start}" in
         restart_mode=$(current_mode)
         stop_services
         sleep 2
-        if [ "$restart_mode" = "local" ]; then
-            start_all_local
+        if [ "$restart_mode" = "nodocker" ]; then
+            start_all_nodocker
         else
             start_all
         fi
@@ -717,18 +718,19 @@ case "${1:-start}" in
         echo "Usage: $0 [command]"
         echo ""
         echo "Commands:"
-        echo "  (none)    Start everything with Docker (auto-installs prerequisites if needed)"
-        echo "  local     Start everything WITHOUT Docker (embedded pg/redis + Temporal + MongoDB + OTel)"
-        echo "            MongoDB is required for the full stack and is auto-installed; OTel is optional."
-        echo "            Flags pass through to the runner, e.g.:"
-        echo "              ./dev.sh local --full        # whole stack (default)"
-        echo "              ./dev.sh local --lean        # Postgres + Redis + API + MongoDB only"
-        echo "              ./dev.sh local --no-temporal # skip Temporal + worker"
-        echo "  setup     Just install prerequisites without starting"
-        echo "  stop      Stop all services (Docker or local)"
-        echo "  restart   Restart all services"
-        echo "  logs      Show logs (logs backend|frontend|all)"
-        echo "  status    Check service status"
+        echo "  (none)     Start everything with Docker (auto-installs prerequisites if needed)"
+        echo "  docker     Start everything with Docker (explicit; same as no command)"
+        echo "  no-docker  Start everything WITHOUT Docker (embedded pg/redis + Temporal + MongoDB + OTel)"
+        echo "             MongoDB is required for the full stack and is auto-installed; OTel is optional."
+        echo "             Flags pass through to the runner, e.g.:"
+        echo "               ./dev.sh no-docker --full        # whole stack (default)"
+        echo "               ./dev.sh no-docker --lean        # Postgres + Redis + API + MongoDB only"
+        echo "               ./dev.sh no-docker --no-temporal # skip Temporal + worker"
+        echo "  setup      Just install prerequisites without starting"
+        echo "  stop       Stop all services (Docker or no-docker)"
+        echo "  restart    Restart all services"
+        echo "  logs       Show logs (logs backend|frontend|all)"
+        echo "  status     Check service status"
         echo ""
         ;;
     *)

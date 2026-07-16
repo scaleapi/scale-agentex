@@ -43,7 +43,7 @@ dev = [
     "vulture>=2.14",
     "ruff>=0.3.4",
 ]
-dev-local = [
+dev-no-docker = [
     "pgserver>=0.1.4",
     "redislite>=6.2.912183",
     # SQLAlchemy's async engine needs greenlet at runtime. SQLAlchemy auto-installs
@@ -60,7 +60,7 @@ test = [
     "factory-boy>=3.3.0,<4", # for test data factories
     "greenlet>=3.2.3",
     "asyncpg>=0.29.0",
-    # Embedded datastores for dev_local.py tests (no testcontainers/docker needed)
+    # Embedded datastores for dev_nodocker tests (no testcontainers/docker needed)
     "pgserver>=0.1.4",
     "redislite>=6.2.912183",
 ]

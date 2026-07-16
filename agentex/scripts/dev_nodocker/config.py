@@ -8,7 +8,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-# scripts/dev_local/config.py -> agentex is three parents up; the runner launches
+# scripts/dev_nodocker/config.py -> agentex is three parents up; the runner launches
 # uvicorn/alembic/the worker from there.
 AGENTEX_DIR = Path(__file__).resolve().parents[2]
 
@@ -25,7 +25,7 @@ DB_NAME = "agentex"
 
 
 @dataclass
-class DevLocalConfig:
+class DevNoDockerConfig:
     agentex_dir: Path
     data_dir: Path
     ephemeral: bool
@@ -58,7 +58,7 @@ class DevLocalConfig:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="dev_local",
+        prog="dev_nodocker",
         description="Run the full agentex backend locally without Docker.",
     )
     # Everything is on by default; --no-<svc> opts out.
@@ -127,7 +127,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--data-dir",
         default=None,
-        help="Directory for persistent datastore data (default <agentex>/.dev-local). Ignored with --ephemeral.",
+        help="Directory for persistent datastore data (default <agentex>/.dev-nodocker). Ignored with --ephemeral.",
     )
     p.add_argument(
         "--ephemeral",
@@ -139,26 +139,26 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def resolve_config(
     argv: list[str] | None = None, *, agentex_dir: Path = AGENTEX_DIR
-) -> DevLocalConfig:
-    """Parse argv into a DevLocalConfig. Pure: no filesystem side effects."""
+) -> DevNoDockerConfig:
+    """Parse argv into a DevNoDockerConfig. Pure: no filesystem side effects."""
     parser = build_arg_parser()
     args = parser.parse_args(argv)
 
     if args.ephemeral:
         # Per-process-unique so a hard-killed run can't leave a pgserver orphan that the
         # next --ephemeral run re-attaches to (which would defeat "fresh state every run").
-        data_dir = Path(tempfile.gettempdir()) / f"agentex-dev-local-{os.getpid()}"
+        data_dir = Path(tempfile.gettempdir()) / f"agentex-dev-nodocker-{os.getpid()}"
     elif args.data_dir:
         data_dir = Path(args.data_dir).expanduser().resolve()
     else:
-        data_dir = agentex_dir / ".dev-local"
+        data_dir = agentex_dir / ".dev-nodocker"
 
     # --lean forces the optional services off; --full is a no-op (they're already on).
     # MongoDB is always started — the stack requires it — so --lean does not touch it.
     temporal = args.temporal and not args.lean
     otel = args.otel and not args.lean
 
-    return DevLocalConfig(
+    return DevNoDockerConfig(
         agentex_dir=agentex_dir,
         data_dir=data_dir,
         ephemeral=args.ephemeral,

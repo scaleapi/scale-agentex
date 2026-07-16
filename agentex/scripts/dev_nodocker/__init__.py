@@ -1,6 +1,6 @@
 """Run the agentex backend locally as host processes, with no Docker.
 
-The engine behind `./dev.sh local` / `make dev-local`: it provisions embedded datastores,
+The engine behind `./dev.sh no-docker` / `make dev-no-docker`: it provisions embedded datastores,
 runs migrations, and supervises uvicorn (plus a Temporal worker), tearing everything down
 on Ctrl-C / SIGTERM. Postgres/Redis/Temporal need no system install (bundled /
 auto-downloaded). MongoDB is REQUIRED for the full stack — the Temporal worker builds
@@ -13,15 +13,15 @@ Modules: `config` (pure, unit-testable), `services` (provisioning), `supervise`
 (subprocess plumbing), `runner` (orchestration).
 """
 
-from scripts.dev_local.config import (
+from scripts.dev_nodocker.config import (
     LOOPBACK,
-    DevLocalConfig,
+    DevNoDockerConfig,
     build_arg_parser,
     build_env,
     resolve_config,
 )
-from scripts.dev_local.runner import main, run
-from scripts.dev_local.services import (
+from scripts.dev_nodocker.runner import main, run
+from scripts.dev_nodocker.services import (
     provision_mongo,
     provision_otel,
     provision_postgres,
@@ -29,11 +29,11 @@ from scripts.dev_local.services import (
     provision_temporal,
     teardown_redis,
 )
-from scripts.dev_local.supervise import run_migrations, wait_for_health
+from scripts.dev_nodocker.supervise import run_migrations, wait_for_health
 
 __all__ = [
     "LOOPBACK",
-    "DevLocalConfig",
+    "DevNoDockerConfig",
     "build_arg_parser",
     "resolve_config",
     "build_env",

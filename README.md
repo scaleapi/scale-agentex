@@ -108,7 +108,7 @@ To do this, you just need to spin up the [Agentex Server](https://github.com/sca
 Just run one command — no Docker required:
 
 ```bash
-./dev.sh local
+./dev.sh no-docker
 ```
 
 That's it. This will automatically:
@@ -119,9 +119,9 @@ That's it. This will automatically:
   dev server, a local MongoDB, and an optional OTel collector
 - Wait for everything to be healthy
 
-> Prefer containers? `./dev.sh` runs the same stack with Docker instead (needs Docker
-> Desktop or Rancher Desktop) — see [Other commands](#other-commands) below. See
-> [Docker-free local mode](#docker-free-local-mode) for `local` flags and details.
+> Prefer containers? `./dev.sh` (or `./dev.sh docker`) runs the same stack with Docker
+> instead (needs Docker Desktop or Rancher Desktop) — see [Other commands](#other-commands)
+> below. See [Docker-free mode](#docker-free-mode) for `no-docker` flags and details.
 
 Once ready:
 | Service | URL |
@@ -142,31 +142,31 @@ Once ready:
 ./dev.sh restart   # Restart all services
 ```
 
-#### Docker-free local mode
+#### Docker-free mode
 
-`./dev.sh local` accepts flags to trim the stack:
+`./dev.sh no-docker` accepts flags to trim the stack:
 
 ```bash
-./dev.sh local                # whole stack, no Docker
-./dev.sh local --lean         # Postgres + Redis + API + MongoDB only (no Temporal/OTel)
-./dev.sh local --no-temporal  # skip Temporal + the worker
-./dev.sh local --mongo-uri <uri>  # use an external MongoDB instead of a local mongod
+./dev.sh no-docker                # whole stack, no Docker
+./dev.sh no-docker --lean         # Postgres + Redis + API + MongoDB only (no Temporal/OTel)
+./dev.sh no-docker --no-temporal  # skip Temporal + the worker
+./dev.sh no-docker --mongo-uri <uri>  # use an external MongoDB instead of a local mongod
 ```
 
-> **MongoDB is required for the full local stack** and is always started. The Temporal
-> worker needs it, so `./dev.sh local` auto-installs `mongod` (via Homebrew) and startup
+> **MongoDB is required for the full no-docker stack** and is always started. The Temporal
+> worker needs it, so `./dev.sh no-docker` auto-installs `mongod` (via Homebrew) and startup
 > **fails fast** with an install message if it can't be made available. Point at an
 > existing MongoDB with `--mongo-uri <uri>` to skip the local `mongod`. The OTel
-> collector is optional; if it's absent the runner continues without telemetry. In local
-> mode the Temporal UI is at http://localhost:8233 (not :8080). Same `stop` / `status` /
+> collector is optional; if it's absent the runner continues without telemetry. In
+> no-docker mode the Temporal UI is at http://localhost:8233 (not :8080). Same `stop` / `status` /
 > `logs` / `restart` commands apply.
 
-**Connecting agents in local mode.** Agents scaffolded by `agentex init` register their
+**Connecting agents in no-docker mode.** Agents scaffolded by `agentex init` register their
 ACP URL as `http://host.docker.internal:<port>` (so a *Docker* backend can reach an
-agent on the host). A host-process backend can't resolve that name, so local mode sets
+agent on the host). A host-process backend can't resolve that name, so no-docker mode sets
 `AGENTEX_ACP_HOST_OVERRIDE=127.0.0.1` and the backend automatically rewrites
 `host.docker.internal` → `127.0.0.1` when dialing agents (and their healthchecks). So a
-default-scaffolded agent works with `./dev.sh local` **without editing its manifest**.
+default-scaffolded agent works with `./dev.sh no-docker` **without editing its manifest**.
 (You can still set `local_development.agent.host_address: localhost` in the manifest if
 you prefer; both work.)
 
