@@ -267,7 +267,7 @@ class TestTasksUseCaseStatusTransitions:
         )
         await tasks_use_case.complete_task(id=task.id)
 
-        with pytest.raises(ClientError, match="not running"):
+        with pytest.raises(ClientError, match="Only running"):
             await tasks_use_case.interrupt_task(id=task.id)
 
     async def test_cannot_interrupt_already_interrupted_task(
@@ -280,7 +280,7 @@ class TestTasksUseCaseStatusTransitions:
         )
         await tasks_use_case.interrupt_task(id=task.id)
 
-        with pytest.raises(ClientError, match="not running"):
+        with pytest.raises(ClientError, match="Only running"):
             await tasks_use_case.interrupt_task(id=task.id)
 
     async def test_interrupt_requires_id_or_name(self, tasks_use_case):
@@ -357,7 +357,7 @@ class TestTasksUseCaseStatusTransitions:
         await tasks_use_case.complete_task(id=task.id)
 
         # When / Then
-        with pytest.raises(ClientError, match="not running"):
+        with pytest.raises(ClientError, match="Only running"):
             await tasks_use_case.terminate_task(id=task.id)
 
     async def test_cannot_transition_failed_task(
@@ -372,7 +372,7 @@ class TestTasksUseCaseStatusTransitions:
         await tasks_use_case.fail_task(id=task.id)
 
         # When / Then
-        with pytest.raises(ClientError, match="not running"):
+        with pytest.raises(ClientError, match="Only running"):
             await tasks_use_case.complete_task(id=task.id)
 
     async def test_cannot_transition_canceled_task(
@@ -387,7 +387,7 @@ class TestTasksUseCaseStatusTransitions:
         await tasks_use_case.cancel_task(id=task.id)
 
         # When / Then
-        with pytest.raises(ClientError, match="not running"):
+        with pytest.raises(ClientError, match="Only running"):
             await tasks_use_case.complete_task(id=task.id)
 
     async def test_cannot_transition_terminated_task(
@@ -402,7 +402,7 @@ class TestTasksUseCaseStatusTransitions:
         await tasks_use_case.terminate_task(id=task.id)
 
         # When / Then
-        with pytest.raises(ClientError, match="not running"):
+        with pytest.raises(ClientError, match="Only running"):
             await tasks_use_case.complete_task(id=task.id)
 
     async def test_cannot_transition_timed_out_task(
@@ -417,7 +417,7 @@ class TestTasksUseCaseStatusTransitions:
         await tasks_use_case.timeout_task(id=task.id)
 
         # When / Then
-        with pytest.raises(ClientError, match="not running"):
+        with pytest.raises(ClientError, match="Only running"):
             await tasks_use_case.complete_task(id=task.id)
 
     async def test_cannot_transition_deleted_task(
