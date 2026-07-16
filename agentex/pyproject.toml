@@ -24,7 +24,7 @@ dependencies = [
     "websockets~=14.2",
     "pymongo>=4.13.0,<5",
     "httpx[http2]>=0.27.2",
-    "ddtrace>=3.13.0",
+    "ddtrace>=4.8.2",  # >=4.8.2 clears CVE-2026-50271 (HIGH: W3C baggage header parsing DoS). Floor kept at the patched minimum so a re-resolve can't regress below it.
     "json_log_formatter>=1.1.1",
     "datadog>=0.52.1",
     "opentelemetry-api>=1.28.0",
