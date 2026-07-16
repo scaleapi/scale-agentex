@@ -20,6 +20,10 @@ class TaskStatus(str, Enum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     RUNNING = "RUNNING"
+    # Non-terminal resting state: the current turn was stopped by the user and the
+    # task is waiting for the next message. Distinct from RUNNING (a turn is
+    # actively in flight) and from the terminal statuses below.
+    INTERRUPTED = "INTERRUPTED"
     TERMINATED = "TERMINATED"
     TIMED_OUT = "TIMED_OUT"
     DELETED = "DELETED"

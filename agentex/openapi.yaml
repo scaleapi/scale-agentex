@@ -754,6 +754,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /tasks/{task_id}/interrupt:
+    post:
+      tags:
+      - Tasks
+      summary: Interrupt Task
+      description: Stop the in-flight turn without terminating the task. Transitions
+        a running task to the non-terminal INTERRUPTED status; the task stays continuable
+        and the next message or event resumes it.
+      operationId: interrupt_task_tasks__task_id__interrupt_post
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Task Id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/TaskStatusReasonRequest'
+              - type: 'null'
+              title: Request
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /tasks/{task_id}/terminate:
     post:
       tags:
@@ -4247,11 +4284,13 @@ components:
       - task/create
       - message/send
       - task/cancel
+      - task/interrupt
       title: AgentRPCMethod
     AgentRPCParams:
       anyOf:
       - $ref: '#/components/schemas/CreateTaskRequest'
       - $ref: '#/components/schemas/CancelTaskRequest'
+      - $ref: '#/components/schemas/InterruptTaskRequest'
       - $ref: '#/components/schemas/SendMessageRequest'
       - $ref: '#/components/schemas/SendEventRequest'
       title: AgentRPCParams
@@ -5569,6 +5608,24 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    InterruptTaskRequest:
+      properties:
+        task_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Task Id
+          description: The ID of the task to interrupt. Either this or task_name must
+            be provided.
+        task_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Task Name
+          description: The name of the task to interrupt. Either this or task_id must
+            be provided.
+      type: object
+      title: InterruptTaskRequest
     ListCheckpointsRequest:
       properties:
         thread_id:
@@ -6743,6 +6800,7 @@ components:
       - COMPLETED
       - FAILED
       - RUNNING
+      - INTERRUPTED
       - TERMINATED
       - TIMED_OUT
       - DELETED

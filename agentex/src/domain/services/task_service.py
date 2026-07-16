@@ -362,6 +362,47 @@ class AgentTaskService:
         task.status_reason = "Task canceled by user"
         return await self.task_repository.update(task)
 
+    async def interrupt_task(
+        self, agent: AgentEntity, task: TaskEntity, acp_url: str
+    ) -> TaskEntity:
+        """Interrupt a running task without terminating it.
+
+        Mirrors cancel_task but transitions to the NON-terminal INTERRUPTED
+        status so the task stays continuable. The pod-forward is best-effort:
+        interrupt semantics live agent-side (for async agents the pod stops the
+        in-flight turn; for sync agents the real interrupt is the client tearing
+        down the streaming connection and the agent may not implement a handler
+        at all), so a forwarding failure must not prevent the platform from
+        recording the status transition. This never calls _transition_to_terminal.
+        """
+        try:
+            await self.acp_client.interrupt_task(
+                agent=agent, task=task, acp_url=acp_url
+            )
+        except Exception as e:
+            logger.warning(
+                f"Best-effort interrupt forward to ACP failed for task {task.id}: {e}"
+            )
+
+        task = await self.task_repository.get(id=task.id)
+        task.status = TaskStatus.INTERRUPTED
+        task.status_reason = "Task interrupted by user"
+        return await self.task_repository.update(task)
+
+    async def resume_interrupted_task(self, task_id: str) -> TaskEntity | None:
+        """Atomically resume an INTERRUPTED task back to RUNNING on next-turn start.
+
+        Non-terminal transition (INTERRUPTED -> RUNNING). Returns None if the task
+        was not INTERRUPTED (e.g. it was concurrently canceled), so callers can
+        keep the task as-is rather than clobbering a terminal status.
+        """
+        return await self.transition_task_status(
+            task_id=task_id,
+            expected_status=TaskStatus.INTERRUPTED,
+            new_status=TaskStatus.RUNNING,
+            status_reason="Task resumed on next turn",
+        )
+
     async def create_event_and_forward_to_acp(
         self,
         agent: AgentEntity,

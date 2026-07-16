@@ -30,6 +30,7 @@ class AgentRPCMethod(str, Enum):
     TASK_CREATE = "task/create"
     MESSAGE_SEND = "message/send"
     TASK_CANCEL = "task/cancel"
+    TASK_INTERRUPT = "task/interrupt"
 
 
 class AgentInputType(str, Enum):

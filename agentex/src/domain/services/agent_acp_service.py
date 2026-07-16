@@ -13,6 +13,7 @@ from src.domain.entities.agents_rpc import (
     AgentRPCMethod,
     CancelTaskParams,
     CreateTaskParams,
+    InterruptTaskParams,
     SendEventParams,
     SendMessageParams,
 )
@@ -77,7 +78,6 @@ BLOCKED_HEADERS = frozenset(
         "x-agent-api-key",
         "x-acting-user-api-key",
         "x-acting-user-cookie",
-        "x-acting-user-authorization",
         "x-acting-as-agent",
         "x-selected-account-id",
     }
@@ -409,6 +409,21 @@ class AgentACPService(TaskMessageMixin):
             method=AgentRPCMethod.TASK_CANCEL,
             params=params,
             request_id=f"{AgentRPCMethod.TASK_CANCEL}-{task.id}",  # Use cancel-specific request ID
+            default_headers=headers,
+        )
+
+    async def interrupt_task(
+        self, agent: AgentEntity, task: TaskEntity, acp_url: str
+    ) -> dict[str, Any]:
+        """Forward a task/interrupt to the agent pod (non-terminal stop of the
+        in-flight turn). Same HTTP JSON-RPC transport as cancel_task."""
+        params = InterruptTaskParams(agent=agent, task=task)
+        headers = await self.get_headers(agent)
+        return await self._call_jsonrpc(
+            url=acp_url,
+            method=AgentRPCMethod.TASK_INTERRUPT,
+            params=params,
+            request_id=f"{AgentRPCMethod.TASK_INTERRUPT}-{task.id}",  # Use interrupt-specific request ID
             default_headers=headers,
         )
 

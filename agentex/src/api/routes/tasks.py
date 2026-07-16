@@ -276,6 +276,30 @@ async def cancel_task(
 
 
 @router.post(
+    "/{task_id}/interrupt",
+    response_model=Task,
+    summary="Interrupt Task",
+    description=(
+        "Stop the in-flight turn without terminating the task. Transitions a "
+        "running task to the non-terminal INTERRUPTED status; the task stays "
+        "continuable and the next message or event resumes it."
+    ),
+)
+async def interrupt_task(
+    # Interrupt is non-terminal (the task remains continuable), so it authorizes
+    # the editor-allowed ``update`` action — matching the RPC task/interrupt
+    # path — rather than the owner-only ``cancel`` used by the sibling cancel route.
+    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.update),
+    task_use_case: DTaskUseCase,
+    request: TaskStatusReasonRequest | None = None,
+) -> Task:
+    updated = await task_use_case.interrupt_task(
+        id=task_id, reason=request.reason if request else None
+    )
+    return Task.model_validate(updated)
+
+
+@router.post(
     "/{task_id}/terminate",
     response_model=Task,
     summary="Terminate Task",

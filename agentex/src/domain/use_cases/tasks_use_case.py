@@ -132,6 +132,11 @@ class TasksUseCase:
 
         return task_entity
 
+    # Non-terminal statuses a task can be transitioned to a terminal status from.
+    # RUNNING is the normal case; INTERRUPTED is also valid so an interrupted
+    # (paused, still-continuable) task can still be canceled/completed/etc later.
+    _TERMINAL_TRANSITION_SOURCES = (TaskStatus.RUNNING, TaskStatus.INTERRUPTED)
+
     async def _transition_to_terminal(
         self,
         target_status: TaskStatus,
@@ -139,7 +144,47 @@ class TasksUseCase:
         name: str | None = None,
         reason: str | None = None,
     ) -> TaskEntity:
-        """Atomically transition a running task to a terminal status."""
+        """Atomically transition a running or interrupted task to a terminal status."""
+        if not id and not name:
+            raise ClientError("Either id or name must be provided")
+
+        task_entity = await self.task_service.get_task(id=id, name=name)
+        if task_entity.status == TaskStatus.DELETED:
+            raise ItemDoesNotExist(f"Task {id or name} not found")
+        if task_entity.status not in self._TERMINAL_TRANSITION_SOURCES:
+            raise ClientError(
+                f"Task {task_entity.id} is not running (current status: {task_entity.status}). "
+                f"Only running tasks can have their status updated."
+            )
+
+        # Compare-and-swap on the observed non-terminal source status (RUNNING or
+        # INTERRUPTED) so a concurrent modification is still detected as a lost race.
+        expected_status = task_entity.status
+        status_reason = reason or f"Task {target_status.value.lower()}"
+        updated = await self.task_service.transition_task_status(
+            task_id=task_entity.id,
+            expected_status=expected_status,
+            new_status=target_status,
+            status_reason=status_reason,
+        )
+        if updated is None:
+            raise ClientError(
+                f"Task {task_entity.id} status was concurrently modified. "
+                f"Please retry the request."
+            )
+        return updated
+
+    async def interrupt_task(
+        self, id: str | None = None, name: str | None = None, reason: str | None = None
+    ) -> TaskEntity:
+        """Interrupt a running task without terminating it.
+
+        This is the non-terminal counterpart to the terminal-transition methods
+        (cancel/complete/fail/...): it transitions RUNNING -> INTERRUPTED via a
+        compare-and-swap and deliberately does NOT go through
+        _transition_to_terminal. The task stays continuable; the next message or
+        event resumes it back to RUNNING.
+        """
         if not id and not name:
             raise ClientError("Either id or name must be provided")
 
@@ -149,14 +194,14 @@ class TasksUseCase:
         if task_entity.status != TaskStatus.RUNNING:
             raise ClientError(
                 f"Task {task_entity.id} is not running (current status: {task_entity.status}). "
-                f"Only running tasks can have their status updated."
+                f"Only running tasks can be interrupted."
             )
 
-        status_reason = reason or f"Task {target_status.value.lower()}"
+        status_reason = reason or "Task interrupted"
         updated = await self.task_service.transition_task_status(
             task_id=task_entity.id,
             expected_status=TaskStatus.RUNNING,
-            new_status=target_status,
+            new_status=TaskStatus.INTERRUPTED,
             status_reason=status_reason,
         )
         if updated is None:
