@@ -10,14 +10,14 @@ import signal
 from typing import Any
 from urllib.parse import urlsplit
 
-from scripts.dev_local.config import LOOPBACK, DevLocalConfig
+from scripts.dev_local.config import DB_NAME, LOOPBACK, DevLocalConfig
 from scripts.dev_local.supervise import spawn, terminate, wait_for_port
 
 logger = logging.getLogger(__name__)
 
 
 def provision_postgres(cfg: DevLocalConfig) -> tuple[Any, str]:
-    """Start an embedded Postgres and ensure the 'agentex' database exists.
+    """Start an embedded Postgres and ensure the application database (DB_NAME) exists.
 
     The returned socket-form `postgresql://` URL works for both the async app (asyncpg)
     and alembic (psycopg2) — adjust_db_url normalizes the scheme for each.
@@ -33,12 +33,13 @@ def provision_postgres(cfg: DevLocalConfig) -> tuple[Any, str]:
     )
 
     # psql() doesn't stop-on-error and CREATE DATABASE can't be IF NOT EXISTS, so guard.
-    existing = server.psql("SELECT 1 FROM pg_database WHERE datname = 'agentex';")
+    # DB_NAME is a trusted constant (not user input), so interpolating it is safe here.
+    existing = server.psql(f"SELECT 1 FROM pg_database WHERE datname = '{DB_NAME}';")
     if "(1 row)" not in existing:
-        server.psql("CREATE DATABASE agentex;")
-        logger.info("Created database 'agentex'.")
+        server.psql(f"CREATE DATABASE {DB_NAME};")
+        logger.info("Created database '%s'.", DB_NAME)
 
-    return server, server.get_uri(database="agentex")
+    return server, server.get_uri(database=DB_NAME)
 
 
 def provision_redis(cfg: DevLocalConfig) -> tuple[Any, str]:

@@ -17,6 +17,12 @@ AGENTEX_DIR = Path(__file__).resolve().parents[2]
 # purpose — see runner.run; banner URLs say "localhost" for readability.)
 LOOPBACK = "127.0.0.1"
 
+# Name of both the Postgres and Mongo databases the local stack creates. A constant, not
+# an env var: the runner creates the database and hands the matching DATABASE_URL /
+# MONGODB_DATABASE_NAME to the app, so the two only need to agree — there's nothing for an
+# operator to tune.
+DB_NAME = "agentex"
+
 
 @dataclass
 class DevLocalConfig:
@@ -186,7 +192,7 @@ def build_env(
     env["ENVIRONMENT"] = "development"
     env["DATABASE_URL"] = database_url
     env["REDIS_URL"] = redis_url
-    env["MONGODB_DATABASE_NAME"] = "agentex"
+    env["MONGODB_DATABASE_NAME"] = DB_NAME
 
     # Agents register their ACP URL at host.docker.internal (SDK default, for a Docker
     # backend); that name doesn't resolve for this host-process backend, so have it dial

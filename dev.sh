@@ -598,7 +598,41 @@ start_all() {
     echo ""
 }
 
+# The dev_local runner accepts only optional flags — never a positional argument. Catch a
+# stray word up front (almost always a top-level subcommand mistakenly typed after `local`,
+# e.g. `./dev.sh local status`) with a clear hint, instead of forwarding it into the
+# backgrounded runner where argparse rejects it and the error is buried in backend.log.
+validate_local_args() {
+    local expect_value=false arg
+    for arg in "$@"; do
+        if [ "$expect_value" = true ]; then
+            expect_value=false          # this token is the value for the preceding option
+            continue
+        fi
+        case "$arg" in
+            # Options that consume the next token as their value.
+            --mongo-uri|--port|--redis-port|--temporal-port|--ui-port|--mongo-port|--otel-port|--data-dir)
+                expect_value=true
+                ;;
+            -*)
+                : # some other flag (boolean, --opt=value, -h) — let the runner validate it
+                ;;
+            *)
+                log_error "'$arg' is not a valid option for './dev.sh local'."
+                case "$arg" in
+                    start|setup|stop|logs|status|restart|help)
+                        log_info "Did you mean './dev.sh $arg'? (start/setup/stop/logs/status/restart/help run on their own, not after 'local'.)"
+                        ;;
+                esac
+                log_info "Run './dev.sh help' for local flags (e.g. --lean, --no-temporal, --mongo-uri <uri>)."
+                exit 1
+                ;;
+        esac
+    done
+}
+
 start_all_local() {
+    validate_local_args "$@"            # fail fast on a stray positional before any side effects
     ensure_prerequisites                # no Docker requirement in local mode
     ensure_local_service_binaries "$@"  # ensure mongod (required) + otel (optional); honors --mongo-uri/--lean
     setup_log_dir
