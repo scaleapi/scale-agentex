@@ -153,8 +153,8 @@ class TasksUseCase:
             raise ItemDoesNotExist(f"Task {id or name} not found")
         if task_entity.status not in self._TERMINAL_TRANSITION_SOURCES:
             raise ClientError(
-                f"Task {task_entity.id} is not running (current status: {task_entity.status}). "
-                f"Only running tasks can have their status updated."
+                f"Task {task_entity.id} cannot be transitioned (current status: {task_entity.status}). "
+                f"Only running or interrupted tasks can have their status updated."
             )
 
         # Compare-and-swap on the observed non-terminal source status (RUNNING or

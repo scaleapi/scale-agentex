@@ -384,10 +384,24 @@ class AgentTaskService:
                 f"Best-effort interrupt forward to ACP failed for task {task.id}: {e}"
             )
 
-        task = await self.task_repository.get(id=task.id)
-        task.status = TaskStatus.INTERRUPTED
-        task.status_reason = "Task interrupted by user"
-        return await self.task_repository.update(task)
+        # Compare-and-swap RUNNING -> INTERRUPTED (mirrors resume_interrupted_task).
+        # If the CAS misses, the task moved to another status during the ACP call
+        # (the agent completed/failed it, or it was concurrently canceled); leave
+        # that status intact rather than clobbering a terminal status with the
+        # non-terminal INTERRUPTED.
+        updated = await self.transition_task_status(
+            task_id=task.id,
+            expected_status=TaskStatus.RUNNING,
+            new_status=TaskStatus.INTERRUPTED,
+            status_reason="Task interrupted by user",
+        )
+        if updated is not None:
+            return updated
+        logger.info(
+            f"Interrupt for task {task.id} not applied: task is no longer RUNNING; "
+            f"leaving its current status intact."
+        )
+        return await self.task_repository.get(id=task.id)
 
     async def resume_interrupted_task(self, task_id: str) -> TaskEntity | None:
         """Atomically resume an INTERRUPTED task back to RUNNING on next-turn start.
