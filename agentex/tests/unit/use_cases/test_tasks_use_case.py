@@ -155,6 +155,139 @@ class TestTasksUseCaseStatusTransitions:
         assert updated.status == TaskStatus.TIMED_OUT
         assert updated.status_reason == "Task timed_out"
 
+    # --- Non-terminal interrupt (RUNNING <-> INTERRUPTED) ---
+
+    async def test_interrupt_running_task_is_non_terminal(
+        self, tasks_use_case, task_service, agent_repository, sample_agent
+    ):
+        """Interrupt transitions RUNNING -> INTERRUPTED, a non-terminal status."""
+        # Given
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent, task_name="interrupt-test"
+        )
+        assert task.status == TaskStatus.RUNNING
+
+        # When
+        updated = await tasks_use_case.interrupt_task(
+            id=task.id, reason="User hit stop"
+        )
+
+        # Then
+        assert updated.status == TaskStatus.INTERRUPTED
+        assert updated.status_reason == "User hit stop"
+
+    async def test_interrupt_default_reason(
+        self, tasks_use_case, task_service, agent_repository, sample_agent
+    ):
+        """Interrupt without an explicit reason uses the default."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent, task_name="interrupt-default-reason-test"
+        )
+
+        updated = await tasks_use_case.interrupt_task(id=task.id)
+
+        assert updated.status == TaskStatus.INTERRUPTED
+        assert updated.status_reason == "Task interrupted"
+
+    async def test_interrupted_task_can_resume_to_running(
+        self, tasks_use_case, task_service, agent_repository, sample_agent
+    ):
+        """INTERRUPTED -> RUNNING on next-turn start (resume_interrupted_task)."""
+        # Given an interrupted task
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent, task_name="interrupt-resume-test"
+        )
+        await tasks_use_case.interrupt_task(id=task.id)
+
+        # When the next turn starts
+        resumed = await task_service.resume_interrupted_task(task.id)
+
+        # Then it is RUNNING again
+        assert resumed is not None
+        assert resumed.status == TaskStatus.RUNNING
+
+    async def test_resume_non_interrupted_task_is_noop(
+        self, tasks_use_case, task_service, agent_repository, sample_agent
+    ):
+        """Resuming a task that is not INTERRUPTED must not clobber its status."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent, task_name="interrupt-resume-noop-test"
+        )
+        # RUNNING (not INTERRUPTED): the compare-and-swap misses, returns None.
+        resumed = await task_service.resume_interrupted_task(task.id)
+        assert resumed is None
+
+    async def test_interrupted_task_can_transition_to_terminal(
+        self, tasks_use_case, task_service, agent_repository, sample_agent
+    ):
+        """An INTERRUPTED task is still transition-eligible: it can be canceled
+        (terminal-from-INTERRUPTED) later."""
+        # Given an interrupted task
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent, task_name="interrupt-then-cancel-test"
+        )
+        interrupted = await tasks_use_case.interrupt_task(id=task.id)
+        assert interrupted.status == TaskStatus.INTERRUPTED
+
+        # When the interrupted task is canceled
+        canceled = await tasks_use_case.cancel_task(
+            id=task.id, reason="User canceled after interrupt"
+        )
+
+        # Then the terminal transition succeeds from INTERRUPTED
+        assert canceled.status == TaskStatus.CANCELED
+        assert canceled.status_reason == "User canceled after interrupt"
+
+    async def test_interrupted_task_can_be_completed(
+        self, tasks_use_case, task_service, agent_repository, sample_agent
+    ):
+        """terminal-from-INTERRUPTED also works for complete()."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent, task_name="interrupt-then-complete-test"
+        )
+        await tasks_use_case.interrupt_task(id=task.id)
+
+        completed = await tasks_use_case.complete_task(id=task.id, reason="done")
+
+        assert completed.status == TaskStatus.COMPLETED
+
+    async def test_cannot_interrupt_non_running_task(
+        self, tasks_use_case, task_service, agent_repository, sample_agent
+    ):
+        """A task that is not RUNNING cannot be interrupted."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent, task_name="interrupt-non-running-test"
+        )
+        await tasks_use_case.complete_task(id=task.id)
+
+        with pytest.raises(ClientError, match="Only running"):
+            await tasks_use_case.interrupt_task(id=task.id)
+
+    async def test_cannot_interrupt_already_interrupted_task(
+        self, tasks_use_case, task_service, agent_repository, sample_agent
+    ):
+        """Interrupt is only valid from RUNNING; a second interrupt is rejected."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent, task_name="interrupt-twice-test"
+        )
+        await tasks_use_case.interrupt_task(id=task.id)
+
+        with pytest.raises(ClientError, match="Only running"):
+            await tasks_use_case.interrupt_task(id=task.id)
+
+    async def test_interrupt_requires_id_or_name(self, tasks_use_case):
+        """Interrupt with neither id nor name raises."""
+        with pytest.raises(ClientError, match="Either id or name"):
+            await tasks_use_case.interrupt_task()
+
     # --- Default reason for each transition ---
 
     @pytest.mark.parametrize(
@@ -224,7 +357,7 @@ class TestTasksUseCaseStatusTransitions:
         await tasks_use_case.complete_task(id=task.id)
 
         # When / Then
-        with pytest.raises(ClientError, match="not running"):
+        with pytest.raises(ClientError, match="Only running"):
             await tasks_use_case.terminate_task(id=task.id)
 
     async def test_cannot_transition_failed_task(
@@ -239,7 +372,7 @@ class TestTasksUseCaseStatusTransitions:
         await tasks_use_case.fail_task(id=task.id)
 
         # When / Then
-        with pytest.raises(ClientError, match="not running"):
+        with pytest.raises(ClientError, match="Only running"):
             await tasks_use_case.complete_task(id=task.id)
 
     async def test_cannot_transition_canceled_task(
@@ -254,7 +387,7 @@ class TestTasksUseCaseStatusTransitions:
         await tasks_use_case.cancel_task(id=task.id)
 
         # When / Then
-        with pytest.raises(ClientError, match="not running"):
+        with pytest.raises(ClientError, match="Only running"):
             await tasks_use_case.complete_task(id=task.id)
 
     async def test_cannot_transition_terminated_task(
@@ -269,7 +402,7 @@ class TestTasksUseCaseStatusTransitions:
         await tasks_use_case.terminate_task(id=task.id)
 
         # When / Then
-        with pytest.raises(ClientError, match="not running"):
+        with pytest.raises(ClientError, match="Only running"):
             await tasks_use_case.complete_task(id=task.id)
 
     async def test_cannot_transition_timed_out_task(
@@ -284,7 +417,7 @@ class TestTasksUseCaseStatusTransitions:
         await tasks_use_case.timeout_task(id=task.id)
 
         # When / Then
-        with pytest.raises(ClientError, match="not running"):
+        with pytest.raises(ClientError, match="Only running"):
             await tasks_use_case.complete_task(id=task.id)
 
     async def test_cannot_transition_deleted_task(
