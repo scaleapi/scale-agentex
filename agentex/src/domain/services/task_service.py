@@ -379,42 +379,17 @@ class AgentTaskService:
     async def interrupt_task(
         self, agent: AgentEntity, task: TaskEntity, acp_url: str
     ) -> TaskEntity:
-        """Interrupt a running task without terminating it.
+        """Forward a task/interrupt to the agent (courier only; no status write).
 
-        Mirrors cancel_task but transitions to the NON-terminal INTERRUPTED
-        status so the task stays continuable. The pod-forward is best-effort:
-        interrupt semantics live agent-side (for async agents the pod stops the
-        in-flight turn; for sync agents the real interrupt is the client tearing
-        down the streaming connection and the agent may not implement a handler
-        at all), so a forwarding failure must not prevent the platform from
-        recording the status transition. This never calls _transition_to_terminal.
+        Interrupt is a COOPERATIVE action, unlike cancel. The control plane only
+        forwards the request to the agent pod (same as event/send); the agent is
+        responsible for stopping its in-flight turn and then recording INTERRUPTED
+        via the REST POST /tasks/{id}/interrupt route (like the other task-state
+        routes). The control plane never writes status here — so an agent that does
+        not implement interrupt simply keeps running and its status stays honest.
+        Resume back to RUNNING is owned by the control plane (see _get_or_create_task).
         """
-        try:
-            await self.acp_client.interrupt_task(
-                agent=agent, task=task, acp_url=acp_url
-            )
-        except Exception as e:
-            logger.warning(
-                f"Best-effort interrupt forward to ACP failed for task {task.id}: {e}"
-            )
-
-        # Compare-and-swap RUNNING -> INTERRUPTED (mirrors resume_interrupted_task).
-        # If the CAS misses, the task moved to another status during the ACP call
-        # (the agent completed/failed it, or it was concurrently canceled); leave
-        # that status intact rather than clobbering a terminal status with the
-        # non-terminal INTERRUPTED.
-        updated = await self.transition_task_status(
-            task_id=task.id,
-            expected_status=TaskStatus.RUNNING,
-            new_status=TaskStatus.INTERRUPTED,
-            status_reason="Task interrupted by user",
-        )
-        if updated is not None:
-            return updated
-        logger.info(
-            f"Interrupt for task {task.id} not applied: task is no longer RUNNING; "
-            f"leaving its current status intact."
-        )
+        await self.acp_client.interrupt_task(agent=agent, task=task, acp_url=acp_url)
         return await self.task_repository.get(id=task.id)
 
     async def resume_interrupted_task(self, task_id: str) -> TaskEntity | None:

@@ -302,6 +302,17 @@ class AgentsACPUseCase(TaskMessageMixin):
             resumed = await self.task_service.resume_interrupted_task(task.id)
             if resumed is not None:
                 task = resumed
+            else:
+                # The INTERRUPTED -> RUNNING CAS missed: the task moved out of
+                # INTERRUPTED concurrently (e.g. a cancel/complete). Refetch and
+                # reject if it is now terminal, rather than starting a turn against
+                # a terminal task. (RUNNING here means another turn already resumed
+                # it, which is fine to proceed with.)
+                task = await self.task_service.get_task(id=task.id)
+                if task.status not in (TaskStatus.RUNNING, TaskStatus.INTERRUPTED):
+                    raise ClientError(
+                        f"Task {task.id} is {task.status.value} and cannot accept new turns."
+                    )
 
         # If task exists and params provided, update them
         if task and task_params is not None:
