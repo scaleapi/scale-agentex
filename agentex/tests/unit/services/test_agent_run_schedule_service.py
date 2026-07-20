@@ -1,3 +1,4 @@
+import asyncio
 import re
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, PropertyMock
@@ -270,7 +271,7 @@ class TestAgentRunScheduleServiceList:
 
     async def test_list_does_not_fan_out_to_temporal(self, service, agent):
         # The list path must not issue a describe RPC per row (would scale list
-        # latency with the number of schedules). State comes from the row instead.
+        # latency with the number of schedules) unless explicitly requested.
         rows = [
             _persisted(agent.id, _request(name="sched-a")),
             _persisted(agent.id, _request(name="sched-b")),
@@ -281,6 +282,57 @@ class TestAgentRunScheduleServiceList:
         await service.list_schedules(agent.id, authorized_schedule_ids=None)
 
         service.temporal_adapter.describe_schedule.assert_not_called()
+
+    async def test_list_can_include_live_temporal_fields(self, service, agent):
+        rows = [
+            _persisted(agent.id, _request(name="sched-a")),
+            _persisted(agent.id, _request(name="sched-b")),
+        ]
+        service.schedule_repository.list_by_agent_id.return_value = rows
+        service.agent_repository.get.return_value = agent
+
+        result = await service.list_schedules(
+            agent.id,
+            authorized_schedule_ids=None,
+            include_live=True,
+        )
+
+        assert result.total == 2
+        assert service.temporal_adapter.describe_schedule.await_count == 2
+        service.temporal_adapter.describe_schedule.assert_any_await(
+            build_run_schedule_temporal_id(rows[0].id)
+        )
+        service.temporal_adapter.describe_schedule.assert_any_await(
+            build_run_schedule_temporal_id(rows[1].id)
+        )
+
+    async def test_live_enrichment_uses_bounded_concurrency(self, service, agent):
+        rows = [
+            _persisted(agent.id, _request(name=f"sched-{index}")) for index in range(12)
+        ]
+        service.schedule_repository.list_by_agent_id.return_value = rows
+        service.agent_repository.get.return_value = agent
+        active_calls = 0
+        max_active_calls = 0
+
+        async def describe_with_delay(_schedule_id):
+            nonlocal active_calls, max_active_calls
+            active_calls += 1
+            max_active_calls = max(max_active_calls, active_calls)
+            await asyncio.sleep(0.01)
+            active_calls -= 1
+            raise RuntimeError("not found yet")
+
+        service.temporal_adapter.describe_schedule.side_effect = describe_with_delay
+
+        result = await service.list_schedules(
+            agent.id,
+            authorized_schedule_ids=None,
+            include_live=True,
+        )
+
+        assert result.total == 12
+        assert 1 < max_active_calls <= 10
 
 
 @pytest.mark.unit

@@ -3344,6 +3344,15 @@ paths:
           minimum: 1
           default: 100
           title: Limit
+      - name: include_live
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Include live Temporal state and upcoming action times.
+          default: false
+          title: Include Live
+        description: Include live Temporal state and upcoming action times.
       responses:
         '200':
           description: Successful Response

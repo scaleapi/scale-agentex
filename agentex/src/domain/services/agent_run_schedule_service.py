@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime
 from typing import Annotated, Any, cast
 from uuid import uuid4
@@ -38,6 +39,7 @@ logger = make_logger(__name__)
 # these schedules within the shared Temporal namespace and keeps the id stable
 # and small (the row id is the only thing the workflow needs).
 RUN_SCHEDULE_TEMPORAL_ID_PREFIX = "agent-run-schedule"
+MAX_LIVE_ENRICHMENT_CONCURRENCY = 10
 
 # Registered (class) name of the workflow each fire starts. Referenced by name so
 # the API/service layer doesn't import the Temporal workflow definition.
@@ -160,6 +162,7 @@ class AgentRunScheduleService:
         agent_id: str,
         authorized_schedule_ids: list[str] | None = None,
         limit: int = 100,
+        include_live: bool = False,
     ) -> AgentRunScheduleListResponse:
         # Fetch without a DB limit so the authorization filter below runs against
         # the full set, then truncate to ``limit`` after filtering. Applying the
@@ -178,23 +181,39 @@ class AgentRunScheduleService:
             else None
         )
         agent = await self.agent_repository.get(id=agent_id)
-        items: list[AgentRunScheduleResponse] = []
+        visible_rows: list[AgentRunScheduleEntity] = []
         for row in rows:
-            if len(items) >= limit:
+            if len(visible_rows) >= limit:
                 break
             selector = build_run_schedule_authz_selector(agent_id, row.id)
             if authorized is not None and selector not in authorized:
                 continue
-            temporal_id = build_run_schedule_temporal_id(row.id)
-            # Serve the list from Postgres only — no per-row Temporal describe.
-            # Fanning out one RPC per row (up to the route's limit of 1000) makes
-            # list latency scale with Temporal round-trips; live fields are
-            # available on the single-schedule GET instead.
-            items.append(
+            visible_rows.append(row)
+
+        if not include_live:
+            items = [
                 await self._to_response(
-                    row, agent=agent, temporal_id=temporal_id, include_live=False
+                    row,
+                    agent=agent,
+                    temporal_id=build_run_schedule_temporal_id(row.id),
+                    include_live=False,
                 )
-            )
+                for row in visible_rows
+            ]
+            return AgentRunScheduleListResponse(run_schedules=items, total=len(items))
+
+        semaphore = asyncio.Semaphore(MAX_LIVE_ENRICHMENT_CONCURRENCY)
+
+        async def enrich(row: AgentRunScheduleEntity) -> AgentRunScheduleResponse:
+            async with semaphore:
+                return await self._to_response(
+                    row,
+                    agent=agent,
+                    temporal_id=build_run_schedule_temporal_id(row.id),
+                    include_live=True,
+                )
+
+        items = await asyncio.gather(*(enrich(row) for row in visible_rows))
         return AgentRunScheduleListResponse(run_schedules=items, total=len(items))
 
     async def get_schedule(

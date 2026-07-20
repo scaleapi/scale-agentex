@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Query, Request
 
@@ -106,7 +106,11 @@ async def list_run_schedules(
     agent_id: str,
     run_schedules_use_case: DAgentRunSchedulesUseCase,
     authorized_schedule_ids: DAuthorizedResourceIds(AgentexResourceType.schedule),
-    limit: int = Query(default=100, ge=1, le=1000),
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    include_live: Annotated[
+        bool,
+        Query(description="Include live Temporal state and upcoming action times."),
+    ] = False,
 ) -> AgentRunScheduleListResponse:
     """List an agent's run schedules, filtered to those the caller owns.
 
@@ -117,6 +121,7 @@ async def list_run_schedules(
         agent_id,
         authorized_schedule_ids=authorized_schedule_ids,
         limit=limit,
+        include_live=include_live,
     )
 
 
