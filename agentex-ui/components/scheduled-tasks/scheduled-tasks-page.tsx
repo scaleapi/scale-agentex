@@ -94,7 +94,7 @@ export function ScheduledTasksPage() {
       baseItems.filter(
         item =>
           !isSchedulePaused(item.schedule) &&
-          getNextRunTime(item.schedule) == null
+          item.schedule.live_data_available === false
       ).length,
     [baseItems]
   );

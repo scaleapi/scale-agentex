@@ -1,7 +1,7 @@
 import asyncio
 import re
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock
 from uuid import uuid4
 
 import pytest
@@ -298,6 +298,9 @@ class TestAgentRunScheduleServiceList:
         )
 
         assert result.total == 2
+        assert all(
+            schedule.live_data_available is False for schedule in result.run_schedules
+        )
         assert service.temporal_adapter.describe_schedule.await_count == 2
         service.temporal_adapter.describe_schedule.assert_any_await(
             build_run_schedule_temporal_id(rows[0].id)
@@ -333,6 +336,36 @@ class TestAgentRunScheduleServiceList:
 
         assert result.total == 12
         assert 1 < max_active_calls <= 10
+
+    async def test_live_enrichment_waits_for_all_rows_before_raising(
+        self, service, agent
+    ):
+        rows = [
+            _persisted(agent.id, _request(name="bad")),
+            _persisted(agent.id, _request(name="slow")),
+        ]
+        service.schedule_repository.list_by_agent_id.return_value = rows
+        service.agent_repository.get.return_value = agent
+        completed_rows: list[str] = []
+
+        async def convert_row(row, **_kwargs):
+            if row.name == "slow":
+                await asyncio.sleep(0.01)
+            completed_rows.append(row.name)
+            if row.name == "bad":
+                raise ValueError("invalid stored schedule")
+            return MagicMock()
+
+        service._to_response = AsyncMock(side_effect=convert_row)
+
+        with pytest.raises(ValueError, match="invalid stored schedule"):
+            await service.list_schedules(
+                agent.id,
+                authorized_schedule_ids=None,
+                include_live=True,
+            )
+
+        assert completed_rows == ["bad", "slow"]
 
 
 @pytest.mark.unit

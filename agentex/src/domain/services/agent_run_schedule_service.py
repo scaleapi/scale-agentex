@@ -213,7 +213,14 @@ class AgentRunScheduleService:
                     include_live=True,
                 )
 
-        items = await asyncio.gather(*(enrich(row) for row in visible_rows))
+        results = await asyncio.gather(
+            *(enrich(row) for row in visible_rows),
+            return_exceptions=True,
+        )
+        errors = [result for result in results if isinstance(result, BaseException)]
+        if errors:
+            raise errors[0]
+        items = [cast(AgentRunScheduleResponse, result) for result in results]
         return AgentRunScheduleListResponse(run_schedules=items, total=len(items))
 
     async def get_schedule(
@@ -466,6 +473,7 @@ class AgentRunScheduleService:
         skipped_action_times: list[datetime] = []
         last_action_time: datetime | None = None
         num_actions_taken = 0
+        live_data_available: bool | None = None
 
         # Live Temporal fields are best-effort and opt-in. ``include_live=False``
         # (list path) skips the describe RPC entirely and serves state from the
@@ -476,12 +484,14 @@ class AgentRunScheduleService:
             try:
                 description = await self.temporal_adapter.describe_schedule(temporal_id)
                 live = self._extract_live_fields(description)
+                live_data_available = True
                 state = live["state"]
                 next_action_times = live["next_action_times"]
                 skipped_action_times = live["skipped_action_times"]
                 last_action_time = live["last_action_time"]
                 num_actions_taken = live["num_actions_taken"]
             except Exception as exc:
+                live_data_available = False
                 logger.warning(
                     "run_schedule_describe_failed",
                     extra={
@@ -512,6 +522,7 @@ class AgentRunScheduleService:
             updated_at=entity.updated_at,
             state=state,
             next_action_times=next_action_times,
+            live_data_available=live_data_available,
             skipped_action_times=skipped_action_times,
             last_action_time=last_action_time,
             num_actions_taken=num_actions_taken,

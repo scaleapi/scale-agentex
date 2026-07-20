@@ -31,6 +31,7 @@ describe('useAgentRunSchedules', () => {
           initial_input: { content: 'Summarize updates' },
           initial_input_method: 'event/send',
           next_action_times: ['2026-07-21T13:00:00Z'],
+          live_data_available: true,
         },
       ],
       total: 1,
@@ -56,6 +57,7 @@ describe('useAgentRunSchedules', () => {
     expect(result.current.data?.[0]?.next_action_times).toEqual([
       '2026-07-21T13:00:00Z',
     ]);
+    expect(result.current.data?.[0]?.live_data_available).toBe(true);
   });
 });
 

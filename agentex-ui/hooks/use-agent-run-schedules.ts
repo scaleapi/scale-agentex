@@ -31,6 +31,7 @@ const SCHEDULE_LIST_QUERY = {
   limit: SCHEDULE_LIST_LIMIT,
   include_live: true,
 };
+const SCHEDULE_LIST_STALE_TIME = 30_000;
 
 type ScheduleMutationContext = {
   agentexClient: AgentexSDK;
@@ -65,6 +66,7 @@ export function useAgentRunSchedules(
       return response.run_schedules.map(normalizeAgentRunSchedule);
     },
     enabled: !!agentId,
+    staleTime: SCHEDULE_LIST_STALE_TIME,
   });
 }
 
@@ -84,6 +86,7 @@ export function useAgentRunSchedulesForAgents(
         return response.run_schedules.map(normalizeAgentRunSchedule);
       },
       enabled,
+      staleTime: SCHEDULE_LIST_STALE_TIME,
     })),
   });
 }

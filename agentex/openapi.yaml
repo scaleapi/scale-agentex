@@ -4486,6 +4486,13 @@ components:
           type: array
           title: Next Action Times
           description: Upcoming scheduled fire times.
+        live_data_available:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Live Data Available
+          description: Whether requested live Temporal fields were retrieved successfully.
+            Null when live enrichment was not requested.
         skipped_action_times:
           items:
             type: string

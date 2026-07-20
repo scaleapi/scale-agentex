@@ -151,6 +151,13 @@ class AgentRunScheduleResponse(BaseModel):
     next_action_times: list[datetime] = Field(
         default_factory=list, description="Upcoming scheduled fire times."
     )
+    live_data_available: bool | None = Field(
+        None,
+        description=(
+            "Whether requested live Temporal fields were retrieved successfully. "
+            "Null when live enrichment was not requested."
+        ),
+    )
     skipped_action_times: list[datetime] = Field(
         default_factory=list, description="Skipped one-off scheduled fire times."
     )
