@@ -19,6 +19,8 @@ class TaskStatus(str, Enum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     RUNNING = "RUNNING"
+    # Non-terminal: current turn stopped by the user, task still continuable.
+    INTERRUPTED = "INTERRUPTED"
     TERMINATED = "TERMINATED"
     TIMED_OUT = "TIMED_OUT"
     DELETED = "DELETED"

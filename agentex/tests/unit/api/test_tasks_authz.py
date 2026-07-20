@@ -192,6 +192,50 @@ class TestPerRpcOperationRouting:
             (AgentexResourceType.task, "task-cancel", AuthorizedOperationType.cancel)
         ]
 
+    async def test_task_interrupt_with_task_id_uses_update(self):
+        # Interrupt is non-terminal, so it maps to ``update`` (editor-allowed),
+        # NOT the owner-only ``cancel`` that task/cancel uses.
+        from src.api.routes.agents import _authorize_rpc_request
+        from src.api.schemas.agents import AgentRPCMethod
+
+        authorization = MagicMock()
+        calls = self._capture_check(authorization)
+        task_service = MagicMock()
+        request = MagicMock()
+        request.method = AgentRPCMethod.TASK_INTERRUPT
+        request.params = MagicMock(task_id="task-int", task_name=None)
+
+        await _authorize_rpc_request(request, authorization, task_service)
+
+        assert calls == [
+            (AgentexResourceType.task, "task-int", AuthorizedOperationType.update)
+        ]
+
+    async def test_task_interrupt_with_task_name_uses_update(self):
+        from src.api.routes.agents import _authorize_rpc_request
+        from src.api.schemas.agents import AgentRPCMethod
+
+        authorization = MagicMock()
+        calls = self._capture_check(authorization)
+        task_service = MagicMock()
+        task_service.get_task = AsyncMock(
+            return_value=MagicMock(id="task-int-resolved")
+        )
+        request = MagicMock()
+        request.method = AgentRPCMethod.TASK_INTERRUPT
+        request.params = MagicMock(task_id=None, task_name="interrupt-task")
+
+        await _authorize_rpc_request(request, authorization, task_service)
+
+        task_service.get_task.assert_awaited_once_with(name="interrupt-task")
+        assert calls == [
+            (
+                AgentexResourceType.task,
+                "task-int-resolved",
+                AuthorizedOperationType.update,
+            )
+        ]
+
     async def test_unwired_method_fails_closed_with_not_implemented(self):
         # Fail-closed default: any AgentRPCMethod not explicitly wired in
         # _authorize_rpc_request must raise rather than silently pass through
@@ -235,6 +279,49 @@ class TestRestCancelRouteRequiresOwner:
         assert (
             authorization.check.await_args.kwargs["operation"]
             == AuthorizedOperationType.cancel
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestRestInterruptRouteRequiresUpdate:
+    """The REST ``POST /tasks/{id}/interrupt`` route authorizes the editor-allowed
+    ``update`` action (interrupt is non-terminal), distinct from the owner-only
+    ``cancel`` used by the sibling cancel route."""
+
+    async def test_rest_interrupt_route_checks_update_operation(self):
+        import inspect
+
+        from src.api.routes.tasks import interrupt_task
+
+        annotation = inspect.signature(interrupt_task).parameters["task_id"].annotation
+        dep = _dep_callable(annotation)
+
+        authorization = MagicMock()
+        authorization.check = AsyncMock(return_value=True)
+        repos = (MagicMock(), MagicMock(), MagicMock())
+
+        result = await dep(authorization, *repos, "task-i")
+
+        assert result == "task-i"
+        assert (
+            authorization.check.await_args.kwargs["operation"]
+            == AuthorizedOperationType.update
+        )
+
+
+def test_sync_acp_type_permits_task_interrupt():
+    """task/interrupt must be allowed for SYNC, ASYNC and AGENTIC agents. The
+    SYNC allow-list historically only permitted MESSAGE_SEND and TASK_CREATE."""
+    from src.domain.entities.agents import ACPType
+    from src.domain.entities.agents_rpc import (
+        ACP_TYPE_TO_ALLOWED_RPC_METHODS,
+        AgentRPCMethod,
+    )
+
+    for acp_type in (ACPType.SYNC, ACPType.ASYNC, ACPType.AGENTIC):
+        assert (
+            AgentRPCMethod.TASK_INTERRUPT in ACP_TYPE_TO_ALLOWED_RPC_METHODS[acp_type]
         )
 
 

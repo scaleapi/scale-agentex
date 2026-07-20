@@ -1,3 +1,4 @@
+import { importJWK, SignJWT, type JWK } from 'jose';
 import NextAuth, { type NextAuthConfig } from 'next-auth';
 import { getToken } from 'next-auth/jwt';
 
@@ -114,54 +115,57 @@ export async function oidcEndSessionEndpoint(): Promise<string | undefined> {
   return typeof endpoint === 'string' && endpoint ? endpoint : undefined;
 }
 
-// ─── private_key_jwt helpers (WebCrypto only — OSS-clean, no deps) ───
-function base64url(bytes: Uint8Array): string {
-  let bin = '';
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
+// ─── private_key_jwt helpers (JOSE) ───
 
-async function importEs256Key(jwk: JsonWebKey): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
-    'jwk',
-    jwk,
-    { name: 'ECDSA', namedCurve: 'P-256' },
-    false,
-    ['sign']
+/**
+ * Derive the JWS alg for a private JWK: respect an explicit `alg`, else EC by curve
+ * (ES256/384/512) and RSA → RS256. Throws on key types we don't sign with.
+ */
+function signingAlgForJwk(jwk: JWK): string {
+  if (jwk.alg) return jwk.alg;
+  if (jwk.kty === 'EC') {
+    const alg = { 'P-256': 'ES256', 'P-384': 'ES384', 'P-521': 'ES512' }[
+      jwk.crv ?? ''
+    ];
+    if (!alg)
+      throw new Error(
+        `Unsupported EC curve for private_key_jwt: ${jwk.crv ?? 'unknown'}`
+      );
+    return alg;
+  }
+  if (jwk.kty === 'RSA') return 'RS256';
+  throw new Error(
+    `Unsupported key type for private_key_jwt: ${jwk.kty ?? 'unknown'} (expected EC or RSA)`
   );
 }
 
-/** Sign an RFC 7523 client_assertion for the private_key_jwt refresh call. */
+/** Import a private JWK as a signing key. Supports EC (ES256/384/512) and RSA (RS256/384/512/PS*). */
+async function importClientPrivateKey(jwk: JWK): Promise<CryptoKey> {
+  return (await importJWK(jwk, signingAlgForJwk(jwk))) as CryptoKey;
+}
+
+/** Sign an RFC 7523 client_assertion for the private_key_jwt refresh call (alg derived from key). */
 async function signClientAssertion(
   clientId: string,
   tokenEndpoint: string,
   jwkJson: string
 ): Promise<string> {
-  const jwk = JSON.parse(jwkJson) as JsonWebKey & { kid?: string };
-  const key = await importEs256Key(jwk);
-  const now = Math.floor(Date.now() / 1000);
-  const header = {
-    alg: 'ES256',
-    typ: 'JWT',
-    ...(jwk.kid ? { kid: jwk.kid } : {}),
-  };
-  const payload = {
-    iss: clientId,
-    sub: clientId,
-    aud: tokenEndpoint,
-    jti: crypto.randomUUID(),
-    iat: now,
-    exp: now + 60,
-  };
-  const enc = (o: unknown) =>
-    base64url(new TextEncoder().encode(JSON.stringify(o)));
-  const input = `${enc(header)}.${enc(payload)}`;
-  const sig = await crypto.subtle.sign(
-    { name: 'ECDSA', hash: 'SHA-256' },
-    key,
-    new TextEncoder().encode(input)
-  );
-  return `${input}.${base64url(new Uint8Array(sig))}`;
+  const jwk = JSON.parse(jwkJson) as JWK;
+  const alg = signingAlgForJwk(jwk);
+  const key = await importJWK(jwk, alg);
+  return new SignJWT({})
+    .setProtectedHeader({
+      alg,
+      typ: 'JWT',
+      ...(jwk.kid ? { kid: jwk.kid } : {}),
+    })
+    .setIssuer(clientId)
+    .setSubject(clientId)
+    .setAudience(tokenEndpoint)
+    .setJti(crypto.randomUUID())
+    .setIssuedAt()
+    .setExpirationTime('60s')
+    .sign(key);
 }
 
 function buildProvider(id: string) {
@@ -176,7 +180,7 @@ function buildProvider(id: string) {
     checks: ['pkce', 'state'] as ('pkce' | 'state')[],
   };
   if (privateKeyJwk && privateKeyJwk.trim().length > 0) {
-    const jwk = JSON.parse(privateKeyJwk) as JsonWebKey & { kid?: string };
+    const jwk = JSON.parse(privateKeyJwk) as JWK;
     return {
       ...base,
       client: { token_endpoint_auth_method: 'private_key_jwt' },
@@ -184,7 +188,7 @@ function buildProvider(id: string) {
       // refresh signer). `key` is a Promise<CryptoKey> resolved before @auth/core reads it.
       token: {
         clientPrivateKey: {
-          key: importEs256Key(jwk) as unknown as CryptoKey,
+          key: importClientPrivateKey(jwk) as unknown as CryptoKey,
           ...(jwk.kid ? { kid: jwk.kid } : {}),
         },
       },

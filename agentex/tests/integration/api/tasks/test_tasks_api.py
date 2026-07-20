@@ -156,6 +156,7 @@ class TestTasksAPIIntegration:
                     "COMPLETED",
                     "FAILED",
                     "RUNNING",
+                    "INTERRUPTED",
                     "TERMINATED",
                     "TIMED_OUT",
                 ]
@@ -1607,6 +1608,72 @@ class TestTasksAPIIntegration:
         task_data = response.json()
         assert task_data["status"] == "CANCELED"
         assert task_data["status_reason"] == "User requested cancellation"
+
+    async def test_interrupt_task_endpoint(self, isolated_client, test_task):
+        """POST /tasks/{task_id}/interrupt transitions RUNNING to the non-terminal
+        INTERRUPTED status (task stays continuable)."""
+        # When
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/interrupt",
+            json={"reason": "User hit stop"},
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "INTERRUPTED"
+        assert task_data["status_reason"] == "User hit stop"
+
+    async def test_interrupt_task_default_reason(self, isolated_client, test_task):
+        """POST /tasks/{task_id}/interrupt without a reason uses the default."""
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/interrupt",
+        )
+
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "INTERRUPTED"
+        assert task_data["status_reason"] == "Task interrupted"
+
+    async def test_interrupted_task_stays_transition_eligible(
+        self, isolated_client, test_task
+    ):
+        """An interrupted task is non-terminal: it can still be canceled
+        afterwards (terminal-from-INTERRUPTED)."""
+        # Given - interrupt the running task
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/interrupt",
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "INTERRUPTED"
+
+        # When - cancel the interrupted task
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/cancel",
+            json={"reason": "canceled after interrupt"},
+        )
+
+        # Then - the terminal transition succeeds from INTERRUPTED
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "CANCELED"
+        assert task_data["status_reason"] == "canceled after interrupt"
+
+    async def test_cannot_interrupt_completed_task(self, isolated_client, test_task):
+        """A terminal (completed) task cannot be interrupted."""
+        # Given - complete the task first
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/complete",
+        )
+        assert response.status_code == 200
+
+        # When - try to interrupt the completed task
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/interrupt",
+        )
+
+        # Then - rejected
+        assert response.status_code == 400
 
     async def test_terminate_task_endpoint(self, isolated_client, test_task):
         """Test POST /tasks/{task_id}/terminate transitions RUNNING to TERMINATED"""

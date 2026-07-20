@@ -478,6 +478,30 @@ async def _authorize_rpc_request(
                 raise ValueError(
                     "Either task_id or task_name must be provided for task/cancel"
                 )
+
+        case AgentRPCMethod.TASK_INTERRUPT:
+            # Interrupt is non-terminal (the task stays continuable), so it maps
+            # to ``update`` rather than the owner-only ``cancel`` used above.
+            task_id = request.params.task_id
+            task_name = request.params.task_name
+
+            if task_id is not None:
+                await check_task_or_collapse_to_404(
+                    authorization_service,
+                    task_id,
+                    AuthorizedOperationType.update,
+                )
+            elif task_name is not None:
+                existing_task = await task_service.get_task(name=task_name)
+                await check_task_or_collapse_to_404(
+                    authorization_service,
+                    existing_task.id,
+                    AuthorizedOperationType.update,
+                )
+            else:
+                raise ValueError(
+                    "Either task_id or task_name must be provided for task/interrupt"
+                )
         case _:
             raise NotImplementedError(
                 f"_authorize_rpc_request has no case for {request.method}; "
