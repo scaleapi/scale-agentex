@@ -40,6 +40,15 @@ logger = make_logger(__name__)
 # and small (the row id is the only thing the workflow needs).
 RUN_SCHEDULE_TEMPORAL_ID_PREFIX = "agent-run-schedule"
 MAX_LIVE_ENRICHMENT_CONCURRENCY = 10
+# Hard ceiling on how many rows a single ``include_live`` list request will
+# enrich with a Temporal describe. The route allows ``limit`` up to 1000; without
+# this cap a caller passing ``limit=1000&include_live=true`` would fan out ~1000
+# describe RPCs in one request (bounded only by the concurrency semaphore, so
+# ~100 sequential batches) and risk a gateway/client timeout. Rows beyond the cap
+# are returned with ``live_data_available=None`` (unknown) rather than a describe,
+# which the client renders without a false "unavailable" notice. Comfortably above
+# the UI's per-agent page size so interactive lists are always fully enriched.
+MAX_LIVE_ENRICHMENT_ROWS = 200
 
 # Registered (class) name of the workflow each fire starts. Referenced by name so
 # the API/service layer doesn't import the Temporal workflow definition.
@@ -202,19 +211,37 @@ class AgentRunScheduleService:
             ]
             return AgentRunScheduleListResponse(run_schedules=items, total=len(items))
 
+        # Only enrich up to the fan-out ceiling; defer the rest to the DB-only
+        # response so a large ``limit`` can't turn one list request into hundreds
+        # of Temporal round-trips. Deferred rows keep ``live_data_available=None``.
+        live_rows = visible_rows[:MAX_LIVE_ENRICHMENT_ROWS]
+        deferred_rows = visible_rows[MAX_LIVE_ENRICHMENT_ROWS:]
+        if deferred_rows:
+            logger.warning(
+                "run_schedule_live_enrichment_capped",
+                extra={
+                    "agent_id": agent_id,
+                    "enriched": len(live_rows),
+                    "deferred": len(deferred_rows),
+                },
+            )
+
         semaphore = asyncio.Semaphore(MAX_LIVE_ENRICHMENT_CONCURRENCY)
 
-        async def enrich(row: AgentRunScheduleEntity) -> AgentRunScheduleResponse:
+        async def enrich(
+            row: AgentRunScheduleEntity, include_live: bool
+        ) -> AgentRunScheduleResponse:
             async with semaphore:
                 return await self._to_response(
                     row,
                     agent=agent,
                     temporal_id=build_run_schedule_temporal_id(row.id),
-                    include_live=True,
+                    include_live=include_live,
                 )
 
         results = await asyncio.gather(
-            *(enrich(row) for row in visible_rows),
+            *(enrich(row, include_live=True) for row in live_rows),
+            *(enrich(row, include_live=False) for row in deferred_rows),
             return_exceptions=True,
         )
         errors = [result for result in results if isinstance(result, BaseException)]

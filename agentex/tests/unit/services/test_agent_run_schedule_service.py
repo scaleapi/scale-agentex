@@ -337,6 +337,35 @@ class TestAgentRunScheduleServiceList:
         assert result.total == 12
         assert 1 < max_active_calls <= 10
 
+    async def test_live_enrichment_caps_describe_fan_out(
+        self, service, agent, monkeypatch
+    ):
+        # Rows beyond the fan-out ceiling are served DB-only (no describe RPC) so a
+        # large ``limit`` can't turn one list request into unbounded Temporal calls.
+        monkeypatch.setattr(
+            "src.domain.services.agent_run_schedule_service.MAX_LIVE_ENRICHMENT_ROWS",
+            2,
+        )
+        rows = [
+            _persisted(agent.id, _request(name=f"sched-{index}")) for index in range(5)
+        ]
+        service.schedule_repository.list_by_agent_id.return_value = rows
+        service.agent_repository.get.return_value = agent
+
+        result = await service.list_schedules(
+            agent.id,
+            authorized_schedule_ids=None,
+            include_live=True,
+        )
+
+        # Every requested row is still returned, in order.
+        assert result.total == 5
+        # Only the first two rows triggered a describe; the rest are unknown (None),
+        # not a false ``live_data_available=False``.
+        assert service.temporal_adapter.describe_schedule.await_count == 2
+        live_flags = [schedule.live_data_available for schedule in result.run_schedules]
+        assert live_flags == [False, False, None, None, None]
+
     async def test_live_enrichment_waits_for_all_rows_before_raising(
         self, service, agent
     ):
