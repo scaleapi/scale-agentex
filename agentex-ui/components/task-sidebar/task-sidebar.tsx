@@ -13,13 +13,18 @@ import {
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
 
-export function TaskSidebar() {
+type TaskSidebarProps = {
+  agentRunSchedulesEnabled: boolean;
+};
+
+export function TaskSidebar({ agentRunSchedulesEnabled }: TaskSidebarProps) {
   const { updateParams } = useSafeSearchParams();
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
 
   const handleNewChat = useCallback(() => {
     updateParams({
       [SearchParamKey.TASK_ID]: null,
+      [SearchParamKey.VIEW]: null,
     });
   }, [updateParams]);
 
@@ -56,6 +61,7 @@ export function TaskSidebar() {
       )}
     >
       <TaskSidebarHeader
+        agentRunSchedulesEnabled={agentRunSchedulesEnabled}
         toggleCollapse={toggleCollapse}
         handleNewChat={handleNewChat}
       />

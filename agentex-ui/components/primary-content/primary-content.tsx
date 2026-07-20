@@ -6,19 +6,24 @@ import { ArrowDown } from 'lucide-react';
 import { ChatView } from '@/components/primary-content/chat-view';
 import { HomeView } from '@/components/primary-content/home-view';
 import { PromptInput } from '@/components/primary-content/prompt-input';
+import { ScheduledTasksPage } from '@/components/scheduled-tasks/scheduled-tasks-page';
 import { IconButton } from '@/components/ui/icon-button';
-import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
+import { AppView, useSafeSearchParams } from '@/hooks/use-safe-search-params';
 
 type ContentAreaProps = {
+  agentRunSchedulesEnabled: boolean;
   isTracesSidebarOpen: boolean;
   toggleTracesSidebar: () => void;
 };
 
 export function PrimaryContent({
+  agentRunSchedulesEnabled,
   isTracesSidebarOpen,
   toggleTracesSidebar,
 }: ContentAreaProps) {
-  const { taskID } = useSafeSearchParams();
+  const { taskID, view } = useSafeSearchParams();
+  const isScheduledTasksView =
+    agentRunSchedulesEnabled && view === AppView.SCHEDULED_TASKS;
 
   const [prompt, setPrompt] = useState<string>('');
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -56,20 +61,24 @@ export function PrimaryContent({
   }, [scrollContainerRef]);
 
   useEffect(() => {
-    if (scrollContainerRef.current && taskID) {
+    if (scrollContainerRef.current && taskID && !isScheduledTasksView) {
       setTimeout(() => {
         scrollToBottom();
       }, 150);
     }
-  }, [scrollToBottom, taskID]);
+  }, [scrollToBottom, taskID, isScheduledTasksView]);
 
   return (
     <motion.div
       layout
-      className={`relative flex h-full flex-1 flex-col ${!taskID ? 'justify-center' : 'justify-between'}`}
+      className={`relative flex h-full flex-1 flex-col ${
+        !taskID && !isScheduledTasksView ? 'justify-center' : 'justify-between'
+      }`}
       transition={{ duration: 0.25, ease: 'easeInOut' }}
     >
-      {taskID ? (
+      {isScheduledTasksView ? (
+        <ScheduledTasksPage />
+      ) : taskID ? (
         <ChatView
           taskID={taskID}
           isTracesSidebarOpen={isTracesSidebarOpen}
@@ -81,26 +90,28 @@ export function PrimaryContent({
         <HomeView />
       )}
 
-      <motion.div
-        layout="position"
-        className="relative flex w-full justify-center px-4 py-4 sm:px-6 md:px-8"
-        transition={{
-          layout: {
-            type: 'spring',
-            damping: 40,
-            stiffness: 300,
-            mass: 0.8,
-          },
-        }}
-      >
-        <AnimatePresence>
-          {taskID && showScrollButton && (
-            <ScrollToBottomButton scrollToBottom={scrollToBottom} />
-          )}
-        </AnimatePresence>
+      {!isScheduledTasksView && (
+        <motion.div
+          layout="position"
+          className="relative flex w-full justify-center px-4 py-4 sm:px-6 md:px-8"
+          transition={{
+            layout: {
+              type: 'spring',
+              damping: 40,
+              stiffness: 300,
+              mass: 0.8,
+            },
+          }}
+        >
+          <AnimatePresence>
+            {taskID && showScrollButton && (
+              <ScrollToBottomButton scrollToBottom={scrollToBottom} />
+            )}
+          </AnimatePresence>
 
-        <PromptInput prompt={prompt} setPrompt={setPrompt} />
-      </motion.div>
+          <PromptInput prompt={prompt} setPrompt={setPrompt} />
+        </motion.div>
+      )}
     </motion.div>
   );
 }

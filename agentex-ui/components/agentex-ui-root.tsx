@@ -16,7 +16,13 @@ import {
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
 
-export function AgentexUIRoot() {
+type AgentexUIRootProps = {
+  agentRunSchedulesEnabled: boolean;
+};
+
+export function AgentexUIRoot({
+  agentRunSchedulesEnabled,
+}: AgentexUIRootProps) {
   const { agentName, taskID, sgpAccountID, updateParams } =
     useSafeSearchParams();
   const [isTracesSidebarOpen, setIsTracesSidebarOpen] = useState(false);
@@ -84,6 +90,7 @@ export function AgentexUIRoot() {
     (taskId: string | null) => {
       updateParams({
         [SearchParamKey.TASK_ID]: taskId,
+        [SearchParamKey.VIEW]: null,
       });
     },
     [updateParams]
@@ -115,8 +122,9 @@ export function AgentexUIRoot() {
   return (
     <>
       <div className="fixed inset-0 flex w-full">
-        <TaskSidebar />
+        <TaskSidebar agentRunSchedulesEnabled={agentRunSchedulesEnabled} />
         <PrimaryContent
+          agentRunSchedulesEnabled={agentRunSchedulesEnabled}
           isTracesSidebarOpen={isTracesSidebarOpen}
           toggleTracesSidebar={() =>
             setIsTracesSidebarOpen(!isTracesSidebarOpen)

@@ -1,26 +1,41 @@
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 
-import { PanelLeftClose, MessageSquarePlus } from 'lucide-react';
+import { CalendarClock, PanelLeftClose, MessageSquarePlus } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import {
+  AppView,
+  SearchParamKey,
+  useSafeSearchParams,
+} from '@/hooks/use-safe-search-params';
 import { cn } from '@/lib/utils';
 
 import { IconButton } from '../ui/icon-button';
 import { ResizableSidebar } from '../ui/resizable-sidebar';
 
 export type TaskSidebarHeaderProps = {
+  agentRunSchedulesEnabled: boolean;
   toggleCollapse: () => void;
   handleNewChat: () => void;
   className?: string;
 };
 
 export function TaskSidebarHeader({
+  agentRunSchedulesEnabled,
   toggleCollapse,
   handleNewChat,
   className,
 }: TaskSidebarHeaderProps) {
   const router = useRouter();
+  const { view, updateParams } = useSafeSearchParams();
+
+  const handleScheduledTasks = () => {
+    updateParams({
+      [SearchParamKey.TASK_ID]: null,
+      [SearchParamKey.VIEW]: AppView.SCHEDULED_TASKS,
+    });
+  };
 
   return (
     <div className={cn('flex flex-col gap-4 px-2', className)}>
@@ -56,6 +71,20 @@ export function TaskSidebarHeader({
           <span className="text-xs/snug">⌘</span>K
         </kbd>
       </ResizableSidebar.Button>
+      {agentRunSchedulesEnabled && (
+        <ResizableSidebar.Button
+          onClick={handleScheduledTasks}
+          isSelected={view === AppView.SCHEDULED_TASKS}
+          className="text-foreground flex items-center gap-2 p-2"
+          aria-label="Scheduled Tasks"
+          disableAnimation={true}
+        >
+          <div className="flex items-center gap-2">
+            <CalendarClock className="size-5" />
+            Scheduled Tasks
+          </div>
+        </ResizableSidebar.Button>
+      )}
     </div>
   );
 }
