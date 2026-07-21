@@ -28,6 +28,9 @@ WHITELISTED_ROUTES: set[str] = {
     "/readyz",
     "/ping",
     "/echo",
+    # Slack can't present an SGP principal; the url_verification handshake must
+    # reach /slack/events without credentials.
+    "/slack",
 }
 
 DROP_HEADERS: set[str] = {
