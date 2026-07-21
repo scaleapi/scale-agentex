@@ -2536,6 +2536,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /slack/events:
+    post:
+      tags:
+      - Slack
+      summary: Slack Events API ingress
+      operationId: slack_events_slack_events_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Slack Events Slack Events Post
   /tracker/{tracker_id}:
     get:
       tags:
