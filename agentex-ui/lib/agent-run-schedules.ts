@@ -23,6 +23,7 @@ export type AgentRunSchedule = {
   updated_at: string | null;
   state: 'ACTIVE' | 'PAUSED';
   next_action_times: string[];
+  live_data_available: boolean | null;
   skipped_action_times: string[];
   last_action_time: string | null;
   num_actions_taken: number;
@@ -69,6 +70,7 @@ type AgentRunScheduleResponse = {
   updated_at?: string | null;
   state?: 'ACTIVE' | 'PAUSED';
   next_action_times?: string[];
+  live_data_available?: boolean | null;
   skipped_action_times?: string[];
   last_action_time?: string | null;
   num_actions_taken?: number;
@@ -100,6 +102,7 @@ export function normalizeAgentRunSchedule(
     updated_at: schedule.updated_at ?? null,
     state: schedule.state ?? 'ACTIVE',
     next_action_times: schedule.next_action_times ?? [],
+    live_data_available: schedule.live_data_available ?? null,
     skipped_action_times: schedule.skipped_action_times ?? [],
     last_action_time: schedule.last_action_time ?? null,
     num_actions_taken: schedule.num_actions_taken ?? 0,

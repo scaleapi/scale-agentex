@@ -27,6 +27,11 @@ export const scheduleKeys = {
 };
 
 export const SCHEDULE_LIST_LIMIT = 50;
+const SCHEDULE_LIST_QUERY = {
+  limit: SCHEDULE_LIST_LIMIT,
+  include_live: true,
+};
+const SCHEDULE_LIST_STALE_TIME = 30_000;
 
 type ScheduleMutationContext = {
   agentexClient: AgentexSDK;
@@ -39,11 +44,6 @@ type ScheduleActionInput =
       scheduleId: string;
       scheduledTime: string;
     };
-
-export type AgentRunScheduleListItem = {
-  agentId: string;
-  schedule: AgentRunSchedule;
-};
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Please try again.';
@@ -59,12 +59,14 @@ export function useAgentRunSchedules(
       if (!agentId) {
         return [];
       }
-      const response = await agentexClient.agents.schedules.list(agentId, {
-        limit: SCHEDULE_LIST_LIMIT,
-      });
+      const response = await agentexClient.agents.schedules.list(
+        agentId,
+        SCHEDULE_LIST_QUERY
+      );
       return response.run_schedules.map(normalizeAgentRunSchedule);
     },
     enabled: !!agentId,
+    staleTime: SCHEDULE_LIST_STALE_TIME,
   });
 }
 
@@ -77,30 +79,14 @@ export function useAgentRunSchedulesForAgents(
     queries: agents.map(agent => ({
       queryKey: scheduleKeys.byAgentId(agent.id),
       queryFn: async () => {
-        const response = await agentexClient.agents.schedules.list(agent.id, {
-          limit: SCHEDULE_LIST_LIMIT,
-        });
+        const response = await agentexClient.agents.schedules.list(
+          agent.id,
+          SCHEDULE_LIST_QUERY
+        );
         return response.run_schedules.map(normalizeAgentRunSchedule);
       },
       enabled,
-    })),
-  });
-}
-
-export function useAgentRunScheduleDetailsForItems(
-  agentexClient: AgentexSDK,
-  items: AgentRunScheduleListItem[]
-) {
-  return useQueries({
-    queries: items.map(({ agentId, schedule }) => ({
-      queryKey: scheduleKeys.detail(agentId, schedule.id),
-      queryFn: async () =>
-        normalizeAgentRunSchedule(
-          await agentexClient.agents.schedules.retrieve(schedule.id, {
-            agent_id: agentId,
-          })
-        ),
-      staleTime: 30_000,
+      staleTime: SCHEDULE_LIST_STALE_TIME,
     })),
   });
 }

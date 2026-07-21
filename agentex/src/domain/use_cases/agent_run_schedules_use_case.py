@@ -42,11 +42,13 @@ class AgentRunSchedulesUseCase:
         agent_id: str,
         authorized_schedule_ids: list[str] | None = None,
         limit: int = 100,
+        include_live: bool = False,
     ) -> AgentRunScheduleListResponse:
         return await self.run_schedule_service.list_schedules(
             agent_id,
             authorized_schedule_ids=authorized_schedule_ids,
             limit=limit,
+            include_live=include_live,
         )
 
     async def get_schedule(

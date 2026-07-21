@@ -27,7 +27,6 @@ import {
 import { useAgentByName } from '@/hooks/use-agent-by-name';
 import {
   SCHEDULE_LIST_LIMIT,
-  useAgentRunScheduleDetailsForItems,
   useAgentRunSchedules,
   useAgentRunSchedulesForAgents,
 } from '@/hooks/use-agent-run-schedules';
@@ -90,30 +89,27 @@ export function ScheduledTasksPage() {
 
   const baseItems =
     scheduleScope === ScheduleScope.ALL ? allItems : currentItems;
-  const detailQueries = useAgentRunScheduleDetailsForItems(
-    agentexClient,
-    baseItems
-  );
-  const schedulesWithLiveFields = useMemo(
+  const unavailableLiveDataCount = useMemo(
     () =>
-      baseItems.map((item, index) => ({
-        ...item,
-        schedule: detailQueries[index]?.data ?? item.schedule,
-      })),
-    [baseItems, detailQueries]
+      baseItems.filter(
+        item =>
+          !isSchedulePaused(item.schedule) &&
+          item.schedule.live_data_available === false
+      ).length,
+    [baseItems]
   );
 
   const visibleItems = useMemo(() => {
     const scopedItems =
       scheduleView === 'upcoming'
-        ? schedulesWithLiveFields.filter(
+        ? baseItems.filter(
             item =>
               !isSchedulePaused(item.schedule) &&
               getNextRunTime(item.schedule) != null
           )
-        : schedulesWithLiveFields;
+        : baseItems;
     return sortScheduleItems(scopedItems, scheduleView);
-  }, [scheduleView, schedulesWithLiveFields]);
+  }, [baseItems, scheduleView]);
 
   const isLoading =
     scheduleScope === ScheduleScope.ALL
@@ -181,6 +177,17 @@ export function ScheduledTasksPage() {
               Currently showing up to {SCHEDULE_LIST_LIMIT} schedules per agent.
               Support for additional schedules is coming soon.
             </p>
+            {scheduleView === 'upcoming' && unavailableLiveDataCount > 0 && (
+              <p
+                className="border-border bg-muted/40 text-muted-foreground mx-auto w-full max-w-4xl rounded-lg border px-4 py-3 text-xs"
+                role="status"
+              >
+                Next-run data is temporarily unavailable for{' '}
+                {unavailableLiveDataCount}{' '}
+                {unavailableLiveDataCount === 1 ? 'schedule' : 'schedules'}.
+                Their definitions remain available under Schedules.
+              </p>
+            )}
             <ScheduleList
               agentexClient={agentexClient}
               items={visibleItems}
