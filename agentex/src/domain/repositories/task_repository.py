@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends
 from sqlalchemy import cast, distinct, func, select, update
@@ -245,6 +245,42 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
                 update(TaskORM)
                 .where(TaskORM.id == task_id)
                 .values(params=merged)
+                .returning(TaskORM)
+            )
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            await session.commit()
+            if row is None:
+                return None
+            return TaskEntity.model_validate(row)
+
+    async def update_mutable_fields(
+        self, task_id: str, fields: dict[str, Any]
+    ) -> TaskEntity | None:
+        """Atomically set only the given scalar columns on a single task row.
+
+        Unlike ``update`` (a whole-row ``session.merge`` of a possibly-stale
+        entity, which rewrites every column and can clobber a concurrently
+        changed ``status``/``params``), this issues a single
+        ``UPDATE ... SET <only these columns> WHERE id = :id RETURNING *``.
+        Touching only the supplied columns means a concurrent status transition
+        or param merge is never reverted. Returns the updated entity, or
+        ``None`` if no task with ``task_id`` exists.
+
+        ``fields`` values are applied verbatim, so passing ``current_state=None``
+        clears the column (callers distinguish "clear" from "omit" upstream).
+        """
+        if not fields:
+            return await self.get(id=task_id)
+
+        async with (
+            self.start_async_db_session(True) as session,
+            async_sql_exception_handler(),
+        ):
+            stmt = (
+                update(TaskORM)
+                .where(TaskORM.id == task_id)
+                .values(**fields)
                 .returning(TaskORM)
             )
             result = await session.execute(stmt)

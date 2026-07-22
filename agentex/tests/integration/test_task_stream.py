@@ -260,19 +260,21 @@ class TestTaskEventStream:
                 pass
 
         stream_task = asyncio.create_task(collect_stream_events())
+        # Let the subscription establish before the update; the stream is
+        # tail-only, so an event published before we subscribe would be missed.
         await asyncio.sleep(0.1)
 
         updated_task = await tasks_use_case.update_mutable_fields_on_task(
             id=task.id, current_state="awaiting_input"
         )
 
-        await asyncio.sleep(0.5)
-
-        stream_task.cancel()
+        # Wait until the collector sees task_updated (it breaks on it) rather
+        # than guessing a fixed delay; the timeout is only a failure ceiling.
         try:
-            await stream_task
-        except asyncio.CancelledError:
-            pass
+            async with asyncio.timeout(5):
+                await stream_task
+        except (TimeoutError, asyncio.CancelledError):
+            stream_task.cancel()
 
         task_updated_events = [
             e for e in stream_events if e.get("type") == "task_updated"
