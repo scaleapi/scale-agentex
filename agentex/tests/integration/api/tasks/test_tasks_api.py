@@ -686,7 +686,8 @@ class TestTasksAPIIntegration:
     async def test_update_task_current_state(
         self, isolated_client, isolated_repositories
     ):
-        """PUT /tasks/{id} writes current_state; null/omitted leaves it unset."""
+        """PUT /tasks/{id} writes current_state; explicit null clears it while an
+        omitted field leaves it untouched; point-read is source of truth."""
         agent_repo = isolated_repositories["agent_repository"]
         agent = AgentEntity(
             id=orm_id(),
@@ -723,12 +724,143 @@ class TestTasksAPIIntegration:
         assert response.status_code == 200
         assert response.json()["current_state"] == "awaiting_input"
 
-        # Updating only task_metadata leaves current_state untouched (no clobber).
+        # Updating only task_metadata (current_state omitted) does not clobber it.
         response = await isolated_client.put(
             f"/tasks/{created_task.id}", json={"task_metadata": {"k": "v"}}
         )
         assert response.status_code == 200
         assert response.json()["current_state"] == "awaiting_input"
+
+        # Explicit null clears the label (distinct from omitting the field).
+        response = await isolated_client.put(
+            f"/tasks/{created_task.id}", json={"current_state": None}
+        )
+        assert response.status_code == 200
+        assert response.json()["current_state"] is None
+        response = await isolated_client.get(f"/tasks/{created_task.id}")
+        assert response.json()["current_state"] is None
+
+    async def test_update_task_current_state_and_metadata_together(
+        self, isolated_client, isolated_repositories
+    ):
+        """current_state + task_metadata in one PUT both persist (single write),
+        without clobbering status."""
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="current-state-combined-agent",
+            description="Agent for combined update testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="task-for-combined-update",
+            status=TaskStatus.RUNNING,
+            status_reason="Test task for combined update",
+        )
+        created_task = await task_repo.create(agent_id=agent.id, task=task)
+
+        response = await isolated_client.put(
+            f"/tasks/{created_task.id}",
+            json={"current_state": "step_2", "task_metadata": {"stage": "two"}},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["current_state"] == "step_2"
+        assert body["task_metadata"] == {"stage": "two"}
+        assert body["status"] == "RUNNING"
+
+    async def test_update_task_current_state_by_name(
+        self, isolated_client, isolated_repositories
+    ):
+        """PUT /tasks/name/{name} forwards current_state too."""
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="current-state-by-name-agent",
+            description="Agent for by-name current_state testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="task-for-current-state-by-name",
+            status=TaskStatus.RUNNING,
+            status_reason="Test task for by-name current_state",
+        )
+        await task_repo.create(agent_id=agent.id, task=task)
+
+        response = await isolated_client.put(
+            "/tasks/name/task-for-current-state-by-name",
+            json={"current_state": "working"},
+        )
+        assert response.status_code == 200
+        assert response.json()["current_state"] == "working"
+
+    async def test_update_task_current_state_empty_string(
+        self, isolated_client, isolated_repositories
+    ):
+        """Empty string is a valid label distinct from null (guards against a
+        future falsy check treating "" as "unset")."""
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="current-state-empty-agent",
+            description="Agent for empty-string current_state testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="task-for-current-state-empty",
+            status=TaskStatus.RUNNING,
+            status_reason="Test task for empty current_state",
+        )
+        created_task = await task_repo.create(agent_id=agent.id, task=task)
+
+        response = await isolated_client.put(
+            f"/tasks/{created_task.id}", json={"current_state": ""}
+        )
+        assert response.status_code == 200
+        assert response.json()["current_state"] == ""
+
+    async def test_update_task_current_state_too_long_rejected(
+        self, isolated_client, isolated_repositories
+    ):
+        """current_state exceeding the max length is rejected with 422."""
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="current-state-toolong-agent",
+            description="Agent for max-length current_state testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="task-for-current-state-toolong",
+            status=TaskStatus.RUNNING,
+            status_reason="Test task for over-long current_state",
+        )
+        created_task = await task_repo.create(agent_id=agent.id, task=task)
+
+        response = await isolated_client.put(
+            f"/tasks/{created_task.id}", json={"current_state": "x" * 256}
+        )
+        assert response.status_code == 422
 
     async def test_update_task_request_ignores_unknown_fields(
         self, isolated_client, isolated_repositories

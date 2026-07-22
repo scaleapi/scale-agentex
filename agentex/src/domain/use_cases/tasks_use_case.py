@@ -11,6 +11,15 @@ from src.utils.logging import make_logger
 logger = make_logger(__name__)
 
 
+class _Unset:
+    """Sentinel distinguishing "field omitted" from "field explicitly set to null"
+    in a PATCH-style update, so an explicit null can clear a column while an
+    omitted field is left untouched."""
+
+
+UNSET: Any = _Unset()
+
+
 class TasksUseCase:
     """
     Use case for managing tasks. Handles CRUD operations and delegates task operations to ACP servers.
@@ -95,12 +104,19 @@ class TasksUseCase:
         name: str | None = None,
         task_metadata: dict[str, Any] | None = None,
         merge_params: dict[str, Any] | None = None,
-        current_state: str | None = None,
+        current_state: str | None | _Unset = UNSET,
     ) -> TaskEntity:
-        """Update mutable fields on a task entity. This is used by our API since not all fields should be mutable."""
+        """Update mutable fields on a task entity. This is used by our API since not all fields should be mutable.
+
+        ``current_state`` uses the UNSET sentinel so an explicit null clears the
+        column while an omitted field leaves it untouched. ``task_metadata`` keeps
+        its legacy semantics (``None`` means "not supplied").
+        """
 
         if not id and not name:
             raise ClientError("Either id or name must be provided")
+
+        current_state_supplied = not isinstance(current_state, _Unset)
 
         # todo: make this a transaction?
         task_entity = await self.task_service.get_task(id=id, name=name)
@@ -111,15 +127,17 @@ class TasksUseCase:
                 raise ItemDoesNotExist(f"Task {name} not found")
 
         # No-op if no mutable field was supplied.
-        if task_metadata is None and merge_params is None and current_state is None:
+        if (
+            task_metadata is None
+            and merge_params is None
+            and not current_state_supplied
+        ):
             return task_entity
 
         # `merge_params` is a separate atomic JSONB shallow-merge so concurrent
-        # callers don't overwrite each other's fields (vs reading→mutating→writing
-        # the whole params dict on task_entity). Run it first so the refreshed
-        # entity it returns becomes the base we apply `task_metadata` on top of;
-        # otherwise the `task_entity = merged` reassignment would discard an
-        # in-memory metadata change made before the merge.
+        # callers don't overwrite each other's fields. Run it first so the
+        # refreshed entity it returns becomes the value we return if no scalar
+        # field updates follow.
         if merge_params:
             merged = await self.task_service.merge_task_params(
                 task_entity.id, merge_params
@@ -127,16 +145,21 @@ class TasksUseCase:
             if merged is not None:
                 task_entity = merged
 
-        # Apply the whole-row field updates (task_metadata, current_state) in a
-        # single update_task write so they emit one task_updated event rather than
-        # two. current_state rides the same publish that already powers reactive
-        # task_updated delivery to stream consumers.
-        if task_metadata is not None or current_state is not None:
-            if task_metadata is not None:
-                task_entity.task_metadata = task_metadata
-            if current_state is not None:
-                task_entity.current_state = current_state
-            task_entity = await self.task_service.update_task(task=task_entity)
+        # Apply task_metadata/current_state via a single column-scoped atomic
+        # update — one task_updated publish, and (unlike a whole-row merge) no
+        # risk of clobbering a concurrently changed status/params. current_state
+        # rides that publish, powering reactive delivery to stream consumers.
+        fields: dict[str, Any] = {}
+        if task_metadata is not None:
+            fields["task_metadata"] = task_metadata
+        if current_state_supplied:
+            fields["current_state"] = current_state
+        if fields:
+            updated = await self.task_service.update_mutable_fields(
+                task_entity.id, fields
+            )
+            if updated is not None:
+                task_entity = updated
 
         return task_entity
 

@@ -6591,6 +6591,7 @@ components:
         current_state:
           anyOf:
           - type: string
+            maxLength: 255
           - type: 'null'
           title: Opaque label mirroring the agent's StateMachine current state; null
             when the agent does not emit one. Orthogonal to 'status'.
@@ -6820,6 +6821,7 @@ components:
         current_state:
           anyOf:
           - type: string
+            maxLength: 255
           - type: 'null'
           title: Opaque label mirroring the agent's StateMachine current state; null
             when the agent does not emit one. Orthogonal to 'status'.
@@ -7411,8 +7413,10 @@ components:
         current_state:
           anyOf:
           - type: string
+            maxLength: 255
           - type: 'null'
-          title: If provided, replaces the task's current_state label.
+          title: If provided, replaces the task's current_state label; pass null to
+            clear it, omit to leave it unchanged.
       type: object
       title: UpdateTaskRequest
     ValidationError:

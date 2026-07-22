@@ -68,7 +68,10 @@ class TaskEntity(BaseModel):
     )
     current_state: str | None = Field(
         None,
-        title="Opaque label mirroring the agent's StateMachine current state",
+        title=(
+            "Opaque label mirroring the agent's StateMachine current state; "
+            "null when the agent does not emit one. Orthogonal to 'status'."
+        ),
     )
 
     # allow extra fields for agents relationships

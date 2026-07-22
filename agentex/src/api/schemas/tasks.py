@@ -7,6 +7,11 @@ from pydantic import Field
 from src.api.schemas.agents import Agent
 from src.utils.model_utils import BaseModel
 
+# Upper bound on the opaque `current_state` label. Kept in sync with the
+# `TaskORM.current_state` column width (String(255)); a state label is short and
+# the value rides every task_updated SSE payload, so it is capped.
+CURRENT_STATE_MAX_LENGTH = 255
+
 
 class TaskRelationships(str, Enum):
     """Task relationships that can be loaded"""
@@ -65,6 +70,7 @@ class Task(BaseModel):
     )
     current_state: str | None = Field(
         None,
+        max_length=CURRENT_STATE_MAX_LENGTH,
         title=(
             "Opaque label mirroring the agent's StateMachine current state; "
             "null when the agent does not emit one. Orthogonal to 'status'."
@@ -96,7 +102,11 @@ class UpdateTaskRequest(BaseModel):
     )
     current_state: str | None = Field(
         None,
-        title="If provided, replaces the task's current_state label.",
+        max_length=CURRENT_STATE_MAX_LENGTH,
+        title=(
+            "If provided, replaces the task's current_state label; "
+            "pass null to clear it, omit to leave it unchanged."
+        ),
     )
 
 

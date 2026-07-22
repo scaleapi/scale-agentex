@@ -964,6 +964,62 @@ class TestAgentTaskService:
         assert event_data["type"] == "task_updated"
         assert event_data["task"]["current_state"] == "working"
 
+    async def test_update_mutable_fields_persists_and_publishes(
+        self, task_service, agent_repository, sample_agent, redis_stream_repository
+    ):
+        """update_mutable_fields writes only the given columns and publishes a
+        task_updated event carrying them."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        created_task = await task_service.create_task(
+            agent=sample_agent, task_name="task-for-mutable-fields"
+        )
+
+        redis_stream_repository.send_data = AsyncMock()
+        result = await task_service.update_mutable_fields(
+            created_task.id,
+            {"current_state": "working", "task_metadata": {"a": 1}},
+        )
+
+        assert result.current_state == "working"
+        assert result.task_metadata == {"a": 1}
+        retrieved = await task_service.get_task(id=created_task.id)
+        assert retrieved.current_state == "working"
+        assert retrieved.task_metadata == {"a": 1}
+
+        redis_stream_repository.send_data.assert_called_once()
+        event_data = redis_stream_repository.send_data.call_args[0][1]
+        assert event_data["type"] == "task_updated"
+        assert event_data["task"]["current_state"] == "working"
+
+    async def test_update_mutable_fields_does_not_clobber_status(
+        self, task_service, agent_repository, sample_agent, redis_stream_repository
+    ):
+        """Regression (blocker): a current_state write must not revert a status
+        changed by another writer. update_mutable_fields is column-scoped, so a
+        task that went terminal is not resurrected to its earlier status."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        created_task = await task_service.create_task(
+            agent=sample_agent, task_name="task-for-noclobber"
+        )
+
+        # Another writer moves the task to a terminal status.
+        await task_service.transition_task_status(
+            task_id=created_task.id,
+            expected_status=TaskStatus.RUNNING,
+            new_status=TaskStatus.COMPLETED,
+            status_reason="done",
+        )
+
+        redis_stream_repository.send_data = AsyncMock()
+        result = await task_service.update_mutable_fields(
+            created_task.id, {"current_state": "late"}
+        )
+
+        assert result.current_state == "late"
+        assert result.status == TaskStatus.COMPLETED
+        retrieved = await task_service.get_task(id=created_task.id)
+        assert retrieved.status == TaskStatus.COMPLETED
+
     async def test_get_task_preserves_task_metadata(
         self, task_service, agent_repository, sample_agent
     ):

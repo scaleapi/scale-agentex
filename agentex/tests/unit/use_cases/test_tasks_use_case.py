@@ -3,6 +3,7 @@ Unit tests for TasksUseCase - status transition logic via explicit status
 methods (complete_task, fail_task, etc.) and metadata updates.
 """
 
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -591,6 +592,101 @@ class TestTasksUseCaseMetadataUpdate:
         # Then
         assert updated.task_metadata == {"stage": "tuned"}
         assert updated.params == {"model": "gpt-4", "temperature": 0.7}
+
+    async def test_update_current_state(
+        self, tasks_use_case, task_service, agent_repository, sample_agent
+    ):
+        """current_state persists and leaves status/task_metadata untouched."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent,
+            task_name="current-state-test",
+            task_metadata={"keep": "me"},
+        )
+
+        updated = await tasks_use_case.update_mutable_fields_on_task(
+            id=task.id, current_state="working"
+        )
+
+        assert updated.current_state == "working"
+        assert updated.status == TaskStatus.RUNNING
+        assert updated.task_metadata == {"keep": "me"}
+
+    async def test_update_current_state_noop_when_omitted(
+        self, tasks_use_case, task_service, agent_repository, sample_agent
+    ):
+        """Omitting current_state (the UNSET default) leaves it untouched."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent, task_name="current-state-omitted-test"
+        )
+        await tasks_use_case.update_mutable_fields_on_task(
+            id=task.id, current_state="set-once"
+        )
+
+        # A later metadata-only update must not clear current_state.
+        updated = await tasks_use_case.update_mutable_fields_on_task(
+            id=task.id, task_metadata={"a": 1}
+        )
+
+        assert updated.current_state == "set-once"
+
+    async def test_update_current_state_clears_on_explicit_null(
+        self, tasks_use_case, task_service, agent_repository, sample_agent
+    ):
+        """Passing current_state=None explicitly clears the label (vs omitting)."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent, task_name="current-state-clear-test"
+        )
+        await tasks_use_case.update_mutable_fields_on_task(
+            id=task.id, current_state="working"
+        )
+
+        cleared = await tasks_use_case.update_mutable_fields_on_task(
+            id=task.id, current_state=None
+        )
+
+        assert cleared.current_state is None
+
+    async def test_update_current_state_and_metadata_single_atomic_write(
+        self, tasks_use_case, task_service, agent_repository, sample_agent
+    ):
+        """Supplying current_state + task_metadata together persists both via a
+        single atomic write (one publish), and does not clobber status."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent, task_name="current-state-combined-test"
+        )
+
+        spy = AsyncMock(wraps=task_service.update_mutable_fields)
+        task_service.update_mutable_fields = spy
+
+        updated = await tasks_use_case.update_mutable_fields_on_task(
+            id=task.id,
+            task_metadata={"stage": "two"},
+            current_state="working",
+        )
+
+        spy.assert_awaited_once()
+        assert updated.current_state == "working"
+        assert updated.task_metadata == {"stage": "two"}
+        assert updated.status == TaskStatus.RUNNING
+
+    async def test_update_current_state_on_deleted_task_raises(
+        self, tasks_use_case, task_service, agent_repository, sample_agent
+    ):
+        """Updating current_state on a deleted task raises not found."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent, task_name="current-state-deleted-test"
+        )
+        await tasks_use_case.delete_task(id=task.id)
+
+        with pytest.raises(ItemDoesNotExist):
+            await tasks_use_case.update_mutable_fields_on_task(
+                id=task.id, current_state="working"
+            )
 
     async def test_update_metadata_on_deleted_task_raises(
         self, tasks_use_case, task_service, agent_repository, sample_agent
