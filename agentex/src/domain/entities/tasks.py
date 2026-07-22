@@ -66,6 +66,10 @@ class TaskEntity(BaseModel):
         None,
         title="Task metadata",
     )
+    current_state: str | None = Field(
+        None,
+        title="Opaque label mirroring the agent's StateMachine current state",
+    )
 
     # allow extra fields for agents relationships
     model_config = ConfigDict(extra="allow")
@@ -84,4 +88,5 @@ def convert_task_to_entity(task: Task) -> TaskEntity:
         cleaned_at=task.cleaned_at,
         params=task.params,
         task_metadata=task.task_metadata,
+        current_state=task.current_state,
     )

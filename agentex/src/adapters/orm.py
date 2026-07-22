@@ -75,6 +75,10 @@ class TaskORM(BaseORM):
     cleaned_at = Column(DateTime(timezone=True), nullable=True)
     params = Column(JSONB, nullable=True)
     task_metadata = Column(JSONB, nullable=True)
+    # Opaque, framework-agnostic label mirroring an agent's StateMachine current
+    # state. Written best-effort by the agent on each transition; reconciled on
+    # read. Orthogonal to `status` (Temporal workflow lifecycle).
+    current_state = Column(String, nullable=True)
     # Many-to-Many relationship with agents
     agents = relationship("AgentORM", secondary="task_agents", back_populates="tasks")
 

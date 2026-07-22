@@ -683,6 +683,85 @@ class TestTasksAPIIntegration:
         assert response_data["task_metadata"]["configuration"]["version"] == "2.0.0"
         assert response_data["task_metadata"]["metrics"]["complexity_score"] == 75
 
+    async def test_update_task_current_state(
+        self, isolated_client, isolated_repositories
+    ):
+        """PUT /tasks/{id} writes current_state; null/omitted leaves it unset."""
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="current-state-agent",
+            description="Agent for current_state update testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="task-for-current-state",
+            status=TaskStatus.RUNNING,
+            status_reason="Test task for current_state",
+        )
+        created_task = await task_repo.create(agent_id=agent.id, task=task)
+
+        # Fresh task: current_state present in response and null by default.
+        response = await isolated_client.get(f"/tasks/{created_task.id}")
+        assert response.status_code == 200
+        assert response.json()["current_state"] is None
+
+        # Setting current_state persists and echoes back.
+        response = await isolated_client.put(
+            f"/tasks/{created_task.id}", json={"current_state": "awaiting_input"}
+        )
+        assert response.status_code == 200
+        assert response.json()["current_state"] == "awaiting_input"
+
+        # Point-read reflects the committed value (source of truth).
+        response = await isolated_client.get(f"/tasks/{created_task.id}")
+        assert response.status_code == 200
+        assert response.json()["current_state"] == "awaiting_input"
+
+        # Updating only task_metadata leaves current_state untouched (no clobber).
+        response = await isolated_client.put(
+            f"/tasks/{created_task.id}", json={"task_metadata": {"k": "v"}}
+        )
+        assert response.status_code == 200
+        assert response.json()["current_state"] == "awaiting_input"
+
+    async def test_update_task_request_ignores_unknown_fields(
+        self, isolated_client, isolated_repositories
+    ):
+        """Guards the extra="ignore" assumption a newer SDK relies on: a payload
+        carrying fields the server doesn't model must 200 (drop them), not 422.
+        Breaks loudly if UpdateTaskRequest ever switches to extra="forbid"."""
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="unknown-fields-agent",
+            description="Agent for unknown-field compat testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="task-for-unknown-fields",
+            status=TaskStatus.RUNNING,
+            status_reason="Test task for unknown-field compat",
+        )
+        created_task = await task_repo.create(agent_id=agent.id, task=task)
+
+        response = await isolated_client.put(
+            f"/tasks/{created_task.id}",
+            json={"current_state": "working", "field_from_a_newer_sdk": "ignored"},
+        )
+        assert response.status_code == 200
+        assert response.json()["current_state"] == "working"
+
     async def test_update_task_endpoint_validation(
         self, isolated_client, isolated_repositories
     ):

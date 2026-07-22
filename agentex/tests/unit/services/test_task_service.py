@@ -938,6 +938,32 @@ class TestAgentTaskService:
         assert event_data["type"] == "task_updated"
         assert event_data["task"]["task_metadata"] == updated_metadata
 
+    async def test_update_task_current_state_publishes_stream_event(
+        self, task_service, agent_repository, sample_agent, redis_stream_repository
+    ):
+        """update_task persists current_state and carries it on the published
+        task_updated event, so subscribed clients see the new state."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        created_task = await task_service.create_task(
+            agent=sample_agent, task_name="task-for-current-state"
+        )
+
+        created_task.current_state = "working"
+        redis_stream_repository.send_data = AsyncMock()
+
+        result = await task_service.update_task(created_task)
+
+        assert result.current_state == "working"
+        retrieved_task = await task_service.get_task(id=created_task.id)
+        assert retrieved_task.current_state == "working"
+
+        redis_stream_repository.send_data.assert_called_once()
+        call_args = redis_stream_repository.send_data.call_args
+        assert call_args[0][0] == f"task:{created_task.id}"
+        event_data = call_args[0][1]
+        assert event_data["type"] == "task_updated"
+        assert event_data["task"]["current_state"] == "working"
+
     async def test_get_task_preserves_task_metadata(
         self, task_service, agent_repository, sample_agent
     ):

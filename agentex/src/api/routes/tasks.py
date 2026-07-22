@@ -196,6 +196,7 @@ async def update_task(
         id=task_id,
         task_metadata=request.task_metadata,
         merge_params=request.merge_params,
+        current_state=request.current_state,
     )
     return Task.model_validate(updated_task_entity)
 
@@ -217,6 +218,7 @@ async def update_task_by_name(
         name=task_name,
         task_metadata=request.task_metadata,
         merge_params=request.merge_params,
+        current_state=request.current_state,
     )
     return Task.model_validate(updated_task_entity)
 

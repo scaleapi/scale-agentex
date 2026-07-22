@@ -63,6 +63,13 @@ class Task(BaseModel):
         None,
         title="Task metadata",
     )
+    current_state: str | None = Field(
+        None,
+        title=(
+            "Opaque label mirroring the agent's StateMachine current state; "
+            "null when the agent does not emit one. Orthogonal to 'status'."
+        ),
+    )
 
 
 class TaskResponse(Task):
@@ -86,6 +93,10 @@ class UpdateTaskRequest(BaseModel):
             "Top-level keys overwrite; pass full nested objects to change "
             "subfields."
         ),
+    )
+    current_state: str | None = Field(
+        None,
+        title="If provided, replaces the task's current_state label.",
     )
 
 

@@ -6588,6 +6588,12 @@ components:
             type: object
           - type: 'null'
           title: Task metadata
+        current_state:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Opaque label mirroring the agent's StateMachine current state; null
+            when the agent does not emit one. Orthogonal to 'status'.
       type: object
       required:
       - id
@@ -6811,6 +6817,12 @@ components:
             type: object
           - type: 'null'
           title: Task metadata
+        current_state:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Opaque label mirroring the agent's StateMachine current state; null
+            when the agent does not emit one. Orthogonal to 'status'.
         agents:
           anyOf:
           - items:
@@ -7396,6 +7408,11 @@ components:
           - type: 'null'
           title: Optional shallow-merge patch applied to the task's params column.
             Top-level keys overwrite; pass full nested objects to change subfields.
+        current_state:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: If provided, replaces the task's current_state label.
       type: object
       title: UpdateTaskRequest
     ValidationError:

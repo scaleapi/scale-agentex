@@ -95,6 +95,7 @@ class TasksUseCase:
         name: str | None = None,
         task_metadata: dict[str, Any] | None = None,
         merge_params: dict[str, Any] | None = None,
+        current_state: str | None = None,
     ) -> TaskEntity:
         """Update mutable fields on a task entity. This is used by our API since not all fields should be mutable."""
 
@@ -109,8 +110,8 @@ class TasksUseCase:
             else:
                 raise ItemDoesNotExist(f"Task {name} not found")
 
-        # No-op if neither field was supplied.
-        if task_metadata is None and merge_params is None:
+        # No-op if no mutable field was supplied.
+        if task_metadata is None and merge_params is None and current_state is None:
             return task_entity
 
         # `merge_params` is a separate atomic JSONB shallow-merge so concurrent
@@ -126,8 +127,15 @@ class TasksUseCase:
             if merged is not None:
                 task_entity = merged
 
-        if task_metadata is not None:
-            task_entity.task_metadata = task_metadata
+        # Apply the whole-row field updates (task_metadata, current_state) in a
+        # single update_task write so they emit one task_updated event rather than
+        # two. current_state rides the same publish that already powers reactive
+        # task_updated delivery to stream consumers.
+        if task_metadata is not None or current_state is not None:
+            if task_metadata is not None:
+                task_entity.task_metadata = task_metadata
+            if current_state is not None:
+                task_entity.current_state = current_state
             task_entity = await self.task_service.update_task(task=task_entity)
 
         return task_entity
