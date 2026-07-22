@@ -1,6 +1,6 @@
 [project]
 name = "agentex"
-version = "0.1.0"
+version = "0.2.0"
 description = "agentex workspace"
 authors = [{ name = "Felix Su", email = "felix.su@scale.com" }]
 readme = "README.md"
