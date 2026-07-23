@@ -96,7 +96,7 @@ class TestAgentRegisterOnCreate:
         # what makes a registration failure abort the request cleanly.
         observed = {}
 
-        async def _record_existence(resource, parent=None):
+        async def _record_existence(resource, parent=None, *, principal_context=None):
             observed["row_exists_at_register"] = await _agent_exists(
                 agent_repo, resource.selector
             )
@@ -263,6 +263,72 @@ class TestAgentRegisterOnCreate:
         authorization_service.deregister_resource.assert_not_awaited()
         authorization_service.grant.assert_not_awaited()
         authorization_service.revoke.assert_not_awaited()
+
+    async def test_create_falls_back_to_body_principal_when_middleware_missing(
+        self,
+    ):
+        # Pod self-registration via whitelisted /agents/register clears the
+        # middleware principal, so the SDK ships the manifest-declared identity
+        # in the request body. The use case must accept that body principal so
+        # ownership is still minted from the manifest identity — otherwise the
+        # agent registers but has no owner tuple and is invisible to the UI.
+        agent_repo = Mock()
+        agent_repo.get = AsyncMock(side_effect=ItemDoesNotExist("absent"))
+        agent_repo.create = AsyncMock(side_effect=lambda item: item)
+        use_case, authorization_service = _build_use_case(
+            agent_repository=agent_repo,
+            principal=_principal(user_id=None, service_account_id=None),
+        )
+
+        # Dict shape matches what /v1/authn returns and what the SDK decodes
+        # from AUTH_PRINCIPAL_B64 (see scale-agentex-python registration.py).
+        body_principal = {
+            "service_account_id": "sa-from-manifest",
+            "account_id": "acct-1",
+        }
+
+        agent = await use_case.register_agent(
+            name=f"dw-body-fallback-{uuid4().hex[:8]}",
+            description="body principal fallback",
+            acp_url="http://new-acp",
+            body_principal_context=body_principal,
+        )
+
+        authorization_service.register_resource.assert_awaited_once()
+        call = authorization_service.register_resource.call_args
+        registered_resource: AgentexResource = call.args[0]
+        assert registered_resource.type == AgentexResourceType.agent
+        assert registered_resource.selector == agent.id
+        # The body principal must be forwarded to the gateway so it doesn't
+        # fall back to the (unset) middleware principal.
+        assert call.kwargs.get("principal_context") == body_principal
+
+    async def test_middleware_principal_takes_precedence_over_body(self):
+        # An authenticated caller (via CLI/UI) sets the middleware principal.
+        # Even if a body principal is also sent, the authenticated identity
+        # from the middleware must win — the body is only a fallback for the
+        # whitelisted pod path.
+        agent_repo = Mock()
+        agent_repo.get = AsyncMock(side_effect=ItemDoesNotExist("absent"))
+        agent_repo.create = AsyncMock(side_effect=lambda item: item)
+        middleware_principal = _principal(user_id="user-from-middleware")
+        use_case, authorization_service = _build_use_case(
+            agent_repository=agent_repo,
+            principal=middleware_principal,
+        )
+
+        body_principal = {"service_account_id": "sa-should-not-win"}
+
+        await use_case.register_agent(
+            name=f"dw-middleware-wins-{uuid4().hex[:8]}",
+            description="middleware principal wins",
+            acp_url="http://new-acp",
+            body_principal_context=body_principal,
+        )
+
+        authorization_service.register_resource.assert_awaited_once()
+        call = authorization_service.register_resource.call_args
+        assert call.kwargs.get("principal_context") is middleware_principal
 
 
 @pytest.mark.integration
