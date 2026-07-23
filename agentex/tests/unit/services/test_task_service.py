@@ -941,8 +941,7 @@ class TestAgentTaskService:
     async def test_update_task_current_state_publishes_stream_event(
         self, task_service, agent_repository, sample_agent, redis_stream_repository
     ):
-        """update_task persists current_state and carries it on the published
-        task_updated event, so subscribed clients see the new state."""
+        """update_task persists current_state and carries it on the task_updated event."""
         await create_or_get_agent(agent_repository, sample_agent)
         created_task = await task_service.create_task(
             agent=sample_agent, task_name="task-for-current-state"
@@ -967,8 +966,7 @@ class TestAgentTaskService:
     async def test_update_mutable_fields_persists_and_publishes(
         self, task_service, agent_repository, sample_agent, redis_stream_repository
     ):
-        """update_mutable_fields writes only the given columns and publishes a
-        task_updated event carrying them."""
+        """update_mutable_fields persists the given columns and publishes task_updated."""
         await create_or_get_agent(agent_repository, sample_agent)
         created_task = await task_service.create_task(
             agent=sample_agent, task_name="task-for-mutable-fields"
@@ -994,10 +992,9 @@ class TestAgentTaskService:
     async def test_update_mutable_fields_leaves_status_untouched(
         self, task_service, agent_repository, sample_agent, redis_stream_repository
     ):
-        """The primitive is column-scoped: writing current_state does not touch
-        status. (The use-case-level clobber regression — a stale read racing a
-        status transition — is guarded in test_tasks_use_case.py; this only pins
-        that the repository UPDATE sets no columns beyond those supplied.)"""
+        """The primitive is column-scoped: writing current_state leaves status untouched
+        (the use-case stale-read clobber regression is guarded in test_tasks_use_case.py).
+        """
         await create_or_get_agent(agent_repository, sample_agent)
         created_task = await task_service.create_task(
             agent=sample_agent, task_name="task-for-noclobber"

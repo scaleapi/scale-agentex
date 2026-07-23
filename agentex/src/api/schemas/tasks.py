@@ -7,9 +7,7 @@ from pydantic import Field
 from src.api.schemas.agents import Agent
 from src.utils.model_utils import BaseModel
 
-# Upper bound on the opaque `current_state` label. Kept in sync with the
-# `TaskORM.current_state` column width (String(255)); a state label is short and
-# the value rides every task_updated SSE payload, so it is capped.
+# Bound on the current_state label; mirrors the String(255) column width.
 CURRENT_STATE_MAX_LENGTH = 255
 
 
@@ -68,9 +66,7 @@ class Task(BaseModel):
         None,
         title="Task metadata",
     )
-    # No max_length on this response field on purpose: input is already bounded
-    # by UpdateTaskRequest + the String(255) column, and enforcing the bound on
-    # the read path would turn a future column-widening into a 500 on every read.
+    # No bound on the read path: enforcing it would 500 if the column is ever widened (writes are already bounded).
     current_state: str | None = Field(
         None,
         title=(

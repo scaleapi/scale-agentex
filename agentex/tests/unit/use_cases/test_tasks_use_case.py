@@ -642,8 +642,7 @@ class TestTasksUseCaseMetadataUpdate:
         was_set = await tasks_use_case.update_mutable_fields_on_task(
             id=task.id, current_state="working"
         )
-        # Confirm it was actually set, so the clear below is a real transition
-        # (not a null→null no-op that would pass trivially).
+        # Confirm it was set, so the clear below is a real transition (not a trivial null→null).
         assert was_set.current_state == "working"
 
         cleared = await tasks_use_case.update_mutable_fields_on_task(
@@ -655,8 +654,7 @@ class TestTasksUseCaseMetadataUpdate:
     async def test_update_current_state_and_metadata_single_atomic_write(
         self, tasks_use_case, task_service, agent_repository, sample_agent
     ):
-        """Supplying current_state + task_metadata together persists both via a
-        single atomic write (one publish), and does not clobber status."""
+        """current_state + task_metadata together persist via one atomic write (one publish)."""
         await create_or_get_agent(agent_repository, sample_agent)
         task = await task_service.create_task(
             agent=sample_agent, task_name="current-state-combined-test"
@@ -679,20 +677,15 @@ class TestTasksUseCaseMetadataUpdate:
     async def test_update_current_state_does_not_clobber_concurrent_status(
         self, tasks_use_case, task_service, task_repository, agent_repository, sample_agent
     ):
-        """Regression (round-one blocker): a current_state write must not revert a
-        status changed concurrently. Reproduces the exact staleness the old
-        whole-row-merge path needed — the use case reads the entity while RUNNING,
-        the task goes COMPLETED before the write lands, and the write must keep
-        COMPLETED. Fails on the old update_task/merge path (reverts to RUNNING),
-        passes on the column-scoped update.
+        """Regression: a stale RUNNING read racing a COMPLETED transition must not revert
+        status on the current_state write. Fails on the old whole-row merge, passes column-scoped.
         """
         await create_or_get_agent(agent_repository, sample_agent)
         task = await task_service.create_task(
             agent=sample_agent, task_name="current-state-clobber-test"
         )
 
-        # Snapshot the entity as the use case would have read it, BEFORE the
-        # concurrent transition — this is the stale read the bug wrote back.
+        # Snapshot the entity BEFORE the transition — the stale read the old bug wrote back.
         stale_entity = await task_service.get_task(id=task.id)
         assert stale_entity.status == TaskStatus.RUNNING
 

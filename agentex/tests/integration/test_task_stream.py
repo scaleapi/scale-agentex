@@ -233,8 +233,7 @@ class TestTaskEventStream:
     async def test_current_state_update_triggers_stream_event(
         self, test_agent_and_task, tasks_use_case, streams_use_case
     ):
-        """current_state rides the existing task_updated event, so a client
-        subscribed to the task stream is pushed the new state reactively."""
+        """current_state rides the existing task_updated event (reactive push to subscribers)."""
         _agent, task = test_agent_and_task
 
         stream_events = []
@@ -260,23 +259,20 @@ class TestTaskEventStream:
                 pass
 
         stream_task = asyncio.create_task(collect_stream_events())
-        # Let the subscription establish before the update; the stream is
-        # tail-only, so an event published before we subscribe would be missed.
+        # Let the tail-only subscription establish before the update, or the event is missed.
         await asyncio.sleep(0.1)
 
         updated_task = await tasks_use_case.update_mutable_fields_on_task(
             id=task.id, current_state="awaiting_input"
         )
 
-        # Wait until the collector sees task_updated (it breaks on it) rather
-        # than guessing a fixed delay; the timeout is only a failure ceiling.
+        # Wait for the collector to see task_updated (it breaks on it); timeout is only a ceiling.
         try:
             async with asyncio.timeout(5):
                 await stream_task
         except (TimeoutError, asyncio.CancelledError):
             stream_task.cancel()
-            # Re-await so the task's own cancellation cleanup runs and no
-            # "Task exception was never retrieved" warning leaks at teardown.
+            # Re-await so cancellation cleanup runs and no dangling-task warning leaks at teardown.
             await asyncio.gather(stream_task, return_exceptions=True)
 
         task_updated_events = [
