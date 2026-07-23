@@ -112,7 +112,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "aiodocker", specifier = ">=0.23.0,<0.24" },
-    { name = "aiohttp", specifier = ">=3.10.9,<4" },
+    { name = "aiohttp", specifier = ">=3.14.1,<4" },
     { name = "alembic", specifier = ">=1.13.3,<2" },
     { name = "asyncpg", specifier = ">=0.29.0,<0.30" },
     { name = "datadog", specifier = ">=0.52.1" },
