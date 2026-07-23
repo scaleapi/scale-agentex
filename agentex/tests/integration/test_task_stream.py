@@ -275,6 +275,9 @@ class TestTaskEventStream:
                 await stream_task
         except (TimeoutError, asyncio.CancelledError):
             stream_task.cancel()
+            # Re-await so the task's own cancellation cleanup runs and no
+            # "Task exception was never retrieved" warning leaks at teardown.
+            await asyncio.gather(stream_task, return_exceptions=True)
 
         task_updated_events = [
             e for e in stream_events if e.get("type") == "task_updated"

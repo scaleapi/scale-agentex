@@ -264,11 +264,15 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
         changed ``status``/``params``), this issues a single
         ``UPDATE ... SET <only these columns> WHERE id = :id RETURNING *``.
         Touching only the supplied columns means a concurrent status transition
-        or param merge is never reverted. Returns the updated entity, or
-        ``None`` if no task with ``task_id`` exists.
+        or param merge is never reverted. With a non-empty ``fields`` this returns
+        the updated entity, or ``None`` if no task with ``task_id`` exists.
 
         ``fields`` values are applied verbatim, so passing ``current_state=None``
         clears the column (callers distinguish "clear" from "omit" upstream).
+
+        An empty ``fields`` is a defensive no-op that returns the current task
+        (raising ``ItemDoesNotExist`` if absent); the sole caller never reaches it,
+        as it gates the call behind a non-empty field set.
         """
         if not fields:
             return await self.get(id=task_id)

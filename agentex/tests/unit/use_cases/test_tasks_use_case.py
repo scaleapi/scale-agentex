@@ -639,9 +639,12 @@ class TestTasksUseCaseMetadataUpdate:
         task = await task_service.create_task(
             agent=sample_agent, task_name="current-state-clear-test"
         )
-        await tasks_use_case.update_mutable_fields_on_task(
+        was_set = await tasks_use_case.update_mutable_fields_on_task(
             id=task.id, current_state="working"
         )
+        # Confirm it was actually set, so the clear below is a real transition
+        # (not a null→null no-op that would pass trivially).
+        assert was_set.current_state == "working"
 
         cleared = await tasks_use_case.update_mutable_fields_on_task(
             id=task.id, current_state=None
@@ -672,6 +675,48 @@ class TestTasksUseCaseMetadataUpdate:
         assert updated.current_state == "working"
         assert updated.task_metadata == {"stage": "two"}
         assert updated.status == TaskStatus.RUNNING
+
+    async def test_update_current_state_does_not_clobber_concurrent_status(
+        self, tasks_use_case, task_service, task_repository, agent_repository, sample_agent
+    ):
+        """Regression (round-one blocker): a current_state write must not revert a
+        status changed concurrently. Reproduces the exact staleness the old
+        whole-row-merge path needed — the use case reads the entity while RUNNING,
+        the task goes COMPLETED before the write lands, and the write must keep
+        COMPLETED. Fails on the old update_task/merge path (reverts to RUNNING),
+        passes on the column-scoped update.
+        """
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent, task_name="current-state-clobber-test"
+        )
+
+        # Snapshot the entity as the use case would have read it, BEFORE the
+        # concurrent transition — this is the stale read the bug wrote back.
+        stale_entity = await task_service.get_task(id=task.id)
+        assert stale_entity.status == TaskStatus.RUNNING
+
+        # Another writer moves the task to a terminal status after that read.
+        await task_service.transition_task_status(
+            task_id=task.id,
+            expected_status=TaskStatus.RUNNING,
+            new_status=TaskStatus.COMPLETED,
+            status_reason="done",
+        )
+
+        # Force the use case to operate on the stale (pre-transition) read.
+        task_service.get_task = AsyncMock(return_value=stale_entity)
+
+        updated = await tasks_use_case.update_mutable_fields_on_task(
+            id=task.id, current_state="late"
+        )
+
+        # The write set current_state without reverting the terminal status.
+        assert updated.current_state == "late"
+        assert updated.status == TaskStatus.COMPLETED
+        persisted = await task_repository.get(id=task.id)
+        assert persisted.status == TaskStatus.COMPLETED
+        assert persisted.current_state == "late"
 
     async def test_update_current_state_on_deleted_task_raises(
         self, tasks_use_case, task_service, agent_repository, sample_agent
