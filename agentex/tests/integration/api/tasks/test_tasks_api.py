@@ -686,8 +686,7 @@ class TestTasksAPIIntegration:
     async def test_update_task_current_state(
         self, isolated_client, isolated_repositories
     ):
-        """PUT /tasks/{id} writes current_state; explicit null clears it while an
-        omitted field leaves it untouched; point-read is source of truth."""
+        """PUT current_state: explicit null clears, omitted leaves it, point-read reconciles."""
         agent_repo = isolated_repositories["agent_repository"]
         agent = AgentEntity(
             id=orm_id(),
@@ -743,8 +742,7 @@ class TestTasksAPIIntegration:
     async def test_update_task_current_state_and_metadata_together(
         self, isolated_client, isolated_repositories
     ):
-        """current_state + task_metadata in one PUT both persist (single write),
-        without clobbering status."""
+        """current_state + task_metadata in one PUT both persist without clobbering status."""
         agent_repo = isolated_repositories["agent_repository"]
         agent = AgentEntity(
             id=orm_id(),
@@ -807,8 +805,7 @@ class TestTasksAPIIntegration:
     async def test_update_task_current_state_empty_string(
         self, isolated_client, isolated_repositories
     ):
-        """Empty string is a valid label distinct from null (guards against a
-        future falsy check treating "" as "unset")."""
+        """Empty string is a valid label distinct from null (guards a falsy-check regression)."""
         agent_repo = isolated_repositories["agent_repository"]
         agent = AgentEntity(
             id=orm_id(),
@@ -865,9 +862,7 @@ class TestTasksAPIIntegration:
     async def test_update_task_request_ignores_unknown_fields(
         self, isolated_client, isolated_repositories
     ):
-        """Guards the extra="ignore" assumption a newer SDK relies on: a payload
-        carrying fields the server doesn't model must 200 (drop them), not 422.
-        Breaks loudly if UpdateTaskRequest ever switches to extra="forbid"."""
+        """Unknown fields are ignored (200, not 422) — guards the extra="ignore" SDK-compat assumption."""
         agent_repo = isolated_repositories["agent_repository"]
         agent = AgentEntity(
             id=orm_id(),

@@ -257,22 +257,11 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
     async def update_mutable_fields(
         self, task_id: str, fields: dict[str, Any]
     ) -> TaskEntity | None:
-        """Atomically set only the given scalar columns on a single task row.
-
-        Unlike ``update`` (a whole-row ``session.merge`` of a possibly-stale
-        entity, which rewrites every column and can clobber a concurrently
-        changed ``status``/``params``), this issues a single
-        ``UPDATE ... SET <only these columns> WHERE id = :id RETURNING *``.
-        Touching only the supplied columns means a concurrent status transition
-        or param merge is never reverted. With a non-empty ``fields`` this returns
-        the updated entity, or ``None`` if no task with ``task_id`` exists.
-
-        ``fields`` values are applied verbatim, so passing ``current_state=None``
-        clears the column (callers distinguish "clear" from "omit" upstream).
-
-        An empty ``fields`` is a defensive no-op that returns the current task
-        (raising ``ItemDoesNotExist`` if absent); the sole caller never reaches it,
-        as it gates the call behind a non-empty field set.
+        """Atomically ``UPDATE ... SET <only the given columns> WHERE id`` — column-scoped,
+        so (unlike ``update``'s whole-row merge) it can't clobber a concurrently changed
+        ``status``/``params``. Values apply verbatim (``current_state=None`` clears). Returns
+        the updated entity, or ``None`` if the task doesn't exist. Empty ``fields`` is an
+        unreachable defensive no-op (the sole caller gates on a non-empty set).
         """
         if not fields:
             return await self.get(id=task_id)

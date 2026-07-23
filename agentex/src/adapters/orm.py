@@ -75,11 +75,7 @@ class TaskORM(BaseORM):
     cleaned_at = Column(DateTime(timezone=True), nullable=True)
     params = Column(JSONB, nullable=True)
     task_metadata = Column(JSONB, nullable=True)
-    # Opaque, framework-agnostic label mirroring an agent's StateMachine current
-    # state. Written best-effort by the agent on each transition; reconciled on
-    # read. Orthogonal to `status` (Temporal workflow lifecycle). Bounded: a
-    # state label is short, and the value is echoed onto every task_updated SSE
-    # payload, so we cap it to avoid unbounded stream amplification.
+    # Opaque agent-state label, orthogonal to `status`; capped since it rides every task_updated SSE payload.
     current_state = Column(String(255), nullable=True)
     # Many-to-Many relationship with agents
     agents = relationship("AgentORM", secondary="task_agents", back_populates="tasks")

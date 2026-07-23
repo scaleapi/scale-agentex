@@ -245,14 +245,8 @@ class AgentTaskService:
     async def update_mutable_fields(
         self, task_id: str, fields: dict[str, Any]
     ) -> TaskEntity | None:
-        """Atomically update only the given scalar columns on a task, then
-        publish a task_updated event.
-
-        Column-scoped (see ``TaskRepository.update_mutable_fields``) so it cannot
-        clobber a concurrently changed ``status``/``params`` — unlike
-        ``update_task``'s whole-row merge, which the status-writing callers
-        (delete/fail/forward) still rely on. Returns the updated entity, or
-        ``None`` if the task no longer exists.
+        """Column-scoped atomic update of the given columns, then publish task_updated.
+        Returns the updated entity, or ``None`` if the task no longer exists.
         """
         updated_task = await self.task_repository.update_mutable_fields(
             task_id, fields

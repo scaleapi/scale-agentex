@@ -18,10 +18,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Opaque label mirroring an agent's StateMachine current state. Nullable and
-    # additive; agents opt in by emitting it. Metadata-only add, non-blocking.
-    # Idempotent (IF NOT EXISTS) so re-running on an environment that already has
-    # the column is a no-op. Width matches TaskORM.current_state (String(255)).
+    # Nullable additive column; idempotent, metadata-only, non-blocking.
     op.execute(
         "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS current_state VARCHAR(255)"
     )

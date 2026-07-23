@@ -12,9 +12,7 @@ logger = make_logger(__name__)
 
 
 class _Unset:
-    """Sentinel distinguishing "field omitted" from "field explicitly set to null"
-    in a PATCH-style update, so an explicit null can clear a column while an
-    omitted field is left untouched."""
+    """Sentinel: PATCH field omitted (untouched) vs. explicitly null (cleared)."""
 
 
 UNSET: Any = _Unset()
@@ -106,11 +104,8 @@ class TasksUseCase:
         merge_params: dict[str, Any] | None = None,
         current_state: str | None | _Unset = UNSET,
     ) -> TaskEntity:
-        """Update mutable fields on a task entity. This is used by our API since not all fields should be mutable.
-
-        ``current_state`` uses the UNSET sentinel so an explicit null clears the
-        column while an omitted field leaves it untouched. ``task_metadata`` keeps
-        its legacy semantics (``None`` means "not supplied").
+        """Update mutable fields on a task. ``current_state`` uses the UNSET sentinel
+        (explicit null clears, omitted leaves it); ``task_metadata`` None means "not supplied".
         """
 
         if not id and not name:
@@ -134,10 +129,7 @@ class TasksUseCase:
         ):
             return task_entity
 
-        # `merge_params` is a separate atomic JSONB shallow-merge so concurrent
-        # callers don't overwrite each other's fields. Run it first so the
-        # refreshed entity it returns becomes the value we return if no scalar
-        # field updates follow.
+        # Atomic JSONB shallow-merge; run first so its refreshed entity is the fallback return.
         if merge_params:
             merged = await self.task_service.merge_task_params(
                 task_entity.id, merge_params
@@ -145,10 +137,7 @@ class TasksUseCase:
             if merged is not None:
                 task_entity = merged
 
-        # Apply task_metadata/current_state via a single column-scoped atomic
-        # update — one task_updated publish, and (unlike a whole-row merge) no
-        # risk of clobbering a concurrently changed status/params. current_state
-        # rides that publish, powering reactive delivery to stream consumers.
+        # Single column-scoped write → one task_updated publish, no whole-row clobber.
         fields: dict[str, Any] = {}
         if task_metadata is not None:
             fields["task_metadata"] = task_metadata
@@ -159,11 +148,7 @@ class TasksUseCase:
                 task_entity.id, fields
             )
             if updated is None:
-                # The row vanished between the initial read and the write. No live
-                # hard-delete path reaches here today (delete is a soft status
-                # update, already guarded above), so this is defensive — but raise
-                # rather than return stale data, matching the not-found contract
-                # above and the sibling terminal-transition methods.
+                # Row vanished mid-flight (defensive; no live hard-delete path). Raise, don't return stale.
                 raise ItemDoesNotExist(f"Task {id or name} not found")
             task_entity = updated
 

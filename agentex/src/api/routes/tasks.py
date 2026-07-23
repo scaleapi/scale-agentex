@@ -196,8 +196,7 @@ async def update_task(
         id=task_id,
         task_metadata=request.task_metadata,
         merge_params=request.merge_params,
-        # Pass through only when the client actually sent the key, so an explicit
-        # null clears the label while an omitted field leaves it untouched.
+        # Forward only when the client sent the key: explicit null clears, omitted leaves unchanged.
         current_state=(
             request.current_state
             if "current_state" in request.model_fields_set
@@ -224,8 +223,7 @@ async def update_task_by_name(
         name=task_name,
         task_metadata=request.task_metadata,
         merge_params=request.merge_params,
-        # Pass through only when the client actually sent the key, so an explicit
-        # null clears the label while an omitted field leaves it untouched.
+        # Forward only when the client sent the key: explicit null clears, omitted leaves unchanged.
         current_state=(
             request.current_state
             if "current_state" in request.model_fields_set
