@@ -96,7 +96,7 @@ class TestAgentRegisterOnCreate:
         # what makes a registration failure abort the request cleanly.
         observed = {}
 
-        async def _record_existence(resource, parent=None):
+        async def _record_existence(resource, parent=None, *, principal_context=None):
             observed["row_exists_at_register"] = await _agent_exists(
                 agent_repo, resource.selector
             )
