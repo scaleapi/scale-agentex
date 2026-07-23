@@ -6591,7 +6591,6 @@ components:
         current_state:
           anyOf:
           - type: string
-            maxLength: 255
           - type: 'null'
           title: Opaque label mirroring the agent's StateMachine current state; null
             when the agent does not emit one. Orthogonal to 'status'.
@@ -6821,7 +6820,6 @@ components:
         current_state:
           anyOf:
           - type: string
-            maxLength: 255
           - type: 'null'
           title: Opaque label mirroring the agent's StateMachine current state; null
             when the agent does not emit one. Orthogonal to 'status'.

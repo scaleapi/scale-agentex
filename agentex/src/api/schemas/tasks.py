@@ -68,9 +68,11 @@ class Task(BaseModel):
         None,
         title="Task metadata",
     )
+    # No max_length on this response field on purpose: input is already bounded
+    # by UpdateTaskRequest + the String(255) column, and enforcing the bound on
+    # the read path would turn a future column-widening into a 500 on every read.
     current_state: str | None = Field(
         None,
-        max_length=CURRENT_STATE_MAX_LENGTH,
         title=(
             "Opaque label mirroring the agent's StateMachine current state; "
             "null when the agent does not emit one. Orthogonal to 'status'."

@@ -991,12 +991,13 @@ class TestAgentTaskService:
         assert event_data["type"] == "task_updated"
         assert event_data["task"]["current_state"] == "working"
 
-    async def test_update_mutable_fields_does_not_clobber_status(
+    async def test_update_mutable_fields_leaves_status_untouched(
         self, task_service, agent_repository, sample_agent, redis_stream_repository
     ):
-        """Regression (blocker): a current_state write must not revert a status
-        changed by another writer. update_mutable_fields is column-scoped, so a
-        task that went terminal is not resurrected to its earlier status."""
+        """The primitive is column-scoped: writing current_state does not touch
+        status. (The use-case-level clobber regression — a stale read racing a
+        status transition — is guarded in test_tasks_use_case.py; this only pins
+        that the repository UPDATE sets no columns beyond those supplied.)"""
         await create_or_get_agent(agent_repository, sample_agent)
         created_task = await task_service.create_task(
             agent=sample_agent, task_name="task-for-noclobber"

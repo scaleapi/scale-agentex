@@ -158,8 +158,14 @@ class TasksUseCase:
             updated = await self.task_service.update_mutable_fields(
                 task_entity.id, fields
             )
-            if updated is not None:
-                task_entity = updated
+            if updated is None:
+                # The row vanished between the initial read and the write. No live
+                # hard-delete path reaches here today (delete is a soft status
+                # update, already guarded above), so this is defensive — but raise
+                # rather than return stale data, matching the not-found contract
+                # above and the sibling terminal-transition methods.
+                raise ItemDoesNotExist(f"Task {id or name} not found")
+            task_entity = updated
 
         return task_entity
 
