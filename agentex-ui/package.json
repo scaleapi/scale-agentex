@@ -70,8 +70,8 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "@vitejs/plugin-react": "^5.1.4",
     "vite": "^7.3.2",
-    "@vitest/coverage-v8": "^4.0.6",
-    "@vitest/ui": "^4.0.6",
+    "@vitest/coverage-v8": "^4.1.8",
+    "@vitest/ui": "^4.1.8",
     "eslint": "9.32.0",
     "eslint-config-next": "15.4.5",
     "eslint-config-prettier": "^9.1.0",
@@ -80,6 +80,6 @@
     "jsdom": "^27.1.0",
     "prettier": "^3.4.2",
     "prettier-plugin-tailwindcss": "^0.7.1",
-    "vitest": "^4.0.6"
+    "vitest": "^4.1.8"
   }
 }
