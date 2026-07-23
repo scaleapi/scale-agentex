@@ -123,6 +123,9 @@ async def run(cfg: DevNoDockerConfig) -> int:
                 "A managed process exited unexpectedly: %s. Shutting down.",
                 ", ".join(dead) or "?",
             )
+            # Non-zero so callers ($?, make dev-no-docker, CI) detect the crash;
+            # a signal-driven shutdown (stop set) is the clean path and returns 0.
+            return 1
         return 0
     finally:
         # Tear down consumers (worker, api) first, then services in reverse.
