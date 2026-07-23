@@ -220,6 +220,9 @@ async def register_agent(
             acp_type=request.acp_type,
             registration_metadata=request.registration_metadata,
             agent_input_type=request.agent_input_type,
+            # Same fallback as check/grant above: the use case prefers the
+            # middleware principal and only reads this on the whitelisted path.
+            body_principal_context=request.principal_context,
         )
         if enforce_ownership:
             await authorization_service.grant(

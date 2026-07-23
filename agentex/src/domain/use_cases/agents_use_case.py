@@ -57,7 +57,11 @@ class AgentsUseCase:
                 "authorization deregister failed for agent %s; swallowed", agent_id
             )
 
-    async def _register_in_auth(self, agent_id: str) -> bool:
+    async def _register_in_auth(
+        self,
+        agent_id: str,
+        body_principal_context: Any = None,
+    ) -> bool:
         """Register a newly created agent in the authorization graph.
 
         Called before the row is persisted so a failure aborts the create with no
@@ -67,28 +71,49 @@ class AgentsUseCase:
         ownership and there is nothing to attribute it to. Returns whether a
         register call was actually made so compensation can avoid deregistering
         a resource it never registered.
+
+        Prefer the middleware-derived principal (an authenticated user or service
+        account). The whitelisted ``/agents/register`` path clears the middleware
+        principal; the pod SDK ships the manifest-declared identity in the request
+        body instead, and ``body_principal_context`` carries that through so
+        ownership can still be minted from the manifest identity. Mirrors the
+        route-layer fallback the ``register_agent`` route applies to
+        ``check``/``grant``.
         """
         principal_context = self.authorization_service.principal_context
-        # principal_context is `Any` (a dict from /v1/authn), not a typed model,
-        # so attribute access via getattr always yields None and silently skips
-        # the Spark resource registration. Read from the dict (fall back to attr
-        # access for any object-shaped principal).
-        if isinstance(principal_context, dict):
-            user_id = principal_context.get("user_id")
-            service_account_id = principal_context.get("service_account_id")
-        else:
-            user_id = getattr(principal_context, "user_id", None)
-            service_account_id = getattr(principal_context, "service_account_id", None)
-        if user_id is None and service_account_id is None:
+        if not self._has_resolvable_creator(principal_context):
+            principal_context = body_principal_context
+        if not self._has_resolvable_creator(principal_context):
             logger.warning(
                 "Skipping authorization registration for agent: no creator resolvable",
                 extra={"agent_id": agent_id},
             )
             return False
         await self.authorization_service.register_resource(
-            AgentexResource.agent(agent_id)
+            AgentexResource.agent(agent_id),
+            principal_context=principal_context,
         )
         return True
+
+    @staticmethod
+    def _has_resolvable_creator(principal_context: Any) -> bool:
+        """Whether a creator identity (user or service account) is present.
+
+        ``principal_context`` is ``Any`` (dict from ``/v1/authn`` or an object
+        for tests), so attribute access via getattr on a dict always yields
+        None. Read from the dict when applicable, fall back to attr access.
+        """
+        if principal_context is None:
+            return False
+        if isinstance(principal_context, dict):
+            return bool(
+                principal_context.get("user_id")
+                or principal_context.get("service_account_id")
+            )
+        return bool(
+            getattr(principal_context, "user_id", None)
+            or getattr(principal_context, "service_account_id", None)
+        )
 
     async def register_agent(
         self,
@@ -99,6 +124,7 @@ class AgentsUseCase:
         acp_type: ACPType = ACPType.ASYNC,
         registration_metadata: dict[str, Any] | None = None,
         agent_input_type: AgentInputType | None = None,
+        body_principal_context: Any = None,
     ) -> AgentEntity:
         deployment_id = (registration_metadata or {}).get("deployment_id")
 
@@ -208,7 +234,9 @@ class AgentsUseCase:
             # failure here aborts the create with no orphaned row. Only the
             # genuine-create path registers — the update paths above must not,
             # or re-registering would rewrite the owner to the current caller.
-            registered_in_auth = await self._register_in_auth(agent.id)
+            registered_in_auth = await self._register_in_auth(
+                agent.id, body_principal_context=body_principal_context
+            )
             # This is a problem only if multiple pods spin up and then make a request all at the same time.
             # In that case, the first pod will create the agent and the rest should succeed silently
             try:
