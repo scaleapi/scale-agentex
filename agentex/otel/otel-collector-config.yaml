@@ -1,5 +1,10 @@
 # OpenTelemetry Collector configuration for local development
-# Receives OTLP metrics and exports to console + Prometheus
+# Receives OTLP metrics + traces and exports to console + Prometheus.
+#
+# For the Datadog fan-out variant (exports to Datadog in addition to the LGTM
+# path -- used during the ddtrace -> LGTM migration so Datadog keeps receiving
+# telemetry once the app stops emitting via ddtrace directly), see
+# otel-collector-config.datadog.yaml.
 
 receivers:
   otlp:
@@ -39,3 +44,7 @@ service:
       receivers: [otlp]
       processors: [batch]
       exporters: [debug, prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
