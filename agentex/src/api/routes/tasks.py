@@ -17,6 +17,7 @@ from src.api.schemas.tasks import (
     TaskResponse,
     TaskStatus,
     TaskStatusReasonRequest,
+    TaskSummary,
     UpdateTaskRequest,
 )
 from src.domain.entities.tasks import TaskStatus as DomainTaskStatus
@@ -73,9 +74,12 @@ async def get_task_by_name(
 
 @router.get(
     "",
-    response_model=list[TaskResponse],
+    response_model=list[TaskSummary],
     summary="List Tasks",
-    description="List all tasks.",
+    description=(
+        "List tasks. Returns a lean summary per task and omits `params`; "
+        "fetch GET /tasks/{task_id} for the full record including `params`."
+    ),
 )
 async def list_tasks(
     task_use_case: DTaskUseCase,
@@ -143,7 +147,7 @@ async def list_tasks(
         order_direction=order_direction,
         relationships=relationships,
     )
-    return [TaskResponse.model_validate(task_entity) for task_entity in task_entities]
+    return [TaskSummary.model_validate(task_entity) for task_entity in task_entities]
 
 
 @router.delete(

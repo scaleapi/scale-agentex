@@ -555,7 +555,8 @@ paths:
       tags:
       - Tasks
       summary: List Tasks
-      description: List all tasks.
+      description: List tasks. Returns a lean summary per task and omits `params`;
+        fetch GET /tasks/{task_id} for the full record including `params`.
       operationId: list_tasks_tasks_get
       parameters:
       - name: agent_id
@@ -641,7 +642,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/TaskResponse'
+                  $ref: '#/components/schemas/TaskSummary'
                 title: Response List Tasks Tasks Get
         '422':
           description: Validation Error
@@ -6845,6 +6846,68 @@ components:
           title: Optional reason for the status change
       type: object
       title: TaskStatusReasonRequest
+    TaskSummary:
+      properties:
+        id:
+          type: string
+          title: Unique Task ID
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Unique name of the task
+        status:
+          anyOf:
+          - $ref: '#/components/schemas/TaskStatus'
+          - type: 'null'
+          title: The current status of the task
+        status_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: The reason for the current task status
+        created_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: The timestamp when the task was created
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: The timestamp when the task was last updated
+        cleaned_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: The timestamp when the task's content was cleaned for retention compliance;
+            null when active
+        task_metadata:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task metadata
+        agents:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/Agent'
+            type: array
+          - type: 'null'
+          title: Agents associated with this task (only populated when 'agents' view
+            is requested)
+      type: object
+      required:
+      - id
+      title: TaskSummary
+      description: 'Lean list-response shape. Omits `params` (the arbitrary create-time
+
+        payload, which can carry per-caller secrets and PII); fetch GET /tasks/{id}
+
+        for the full record.'
     TextContent:
       properties:
         type:
