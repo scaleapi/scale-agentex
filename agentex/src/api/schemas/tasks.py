@@ -6,9 +6,7 @@ from pydantic import Field
 
 from src.api.schemas.agents import Agent
 from src.utils.model_utils import BaseModel
-
-# Bound on the current_state label; mirrors the String(255) column width.
-CURRENT_STATE_MAX_LENGTH = 255
+from src.utils.task_constants import CURRENT_STATE_MAX_LENGTH
 
 
 class TaskRelationships(str, Enum):

@@ -675,7 +675,12 @@ class TestTasksUseCaseMetadataUpdate:
         assert updated.status == TaskStatus.RUNNING
 
     async def test_update_current_state_does_not_clobber_concurrent_status(
-        self, tasks_use_case, task_service, task_repository, agent_repository, sample_agent
+        self,
+        tasks_use_case,
+        task_service,
+        task_repository,
+        agent_repository,
+        sample_agent,
     ):
         """Regression: a stale RUNNING read racing a COMPLETED transition must not revert
         status on the current_state write. Fails on the old whole-row merge, passes column-scoped.

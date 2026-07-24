@@ -250,9 +250,7 @@ class AgentTaskService:
         """Column-scoped atomic update of the given columns, then publish task_updated.
         Returns the updated entity, or ``None`` if the task no longer exists.
         """
-        updated_task = await self.task_repository.update_mutable_fields(
-            task_id, fields
-        )
+        updated_task = await self.task_repository.update_mutable_fields(task_id, fields)
         if updated_task is None:
             return None
 
