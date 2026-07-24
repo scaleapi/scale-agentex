@@ -11,6 +11,13 @@ from src.utils.logging import make_logger
 logger = make_logger(__name__)
 
 
+class _Unset:
+    """Sentinel for partial updates: field omitted (untouched) vs. explicitly null (cleared)."""
+
+
+UNSET: Any = _Unset()
+
+
 class TasksUseCase:
     """
     Use case for managing tasks. Handles CRUD operations and delegates task operations to ACP servers.
@@ -95,11 +102,16 @@ class TasksUseCase:
         name: str | None = None,
         task_metadata: dict[str, Any] | None = None,
         merge_params: dict[str, Any] | None = None,
+        current_state: str | None | _Unset = UNSET,
     ) -> TaskEntity:
-        """Update mutable fields on a task entity. This is used by our API since not all fields should be mutable."""
+        """Update mutable fields on a task. ``current_state`` uses the UNSET sentinel
+        (explicit null clears, omitted leaves it); ``task_metadata`` None means "not supplied".
+        """
 
         if not id and not name:
             raise ClientError("Either id or name must be provided")
+
+        current_state_supplied = not isinstance(current_state, _Unset)
 
         # todo: make this a transaction?
         task_entity = await self.task_service.get_task(id=id, name=name)
@@ -109,16 +121,15 @@ class TasksUseCase:
             else:
                 raise ItemDoesNotExist(f"Task {name} not found")
 
-        # No-op if neither field was supplied.
-        if task_metadata is None and merge_params is None:
+        # No-op if no mutable field was supplied.
+        if (
+            task_metadata is None
+            and merge_params is None
+            and not current_state_supplied
+        ):
             return task_entity
 
-        # `merge_params` is a separate atomic JSONB shallow-merge so concurrent
-        # callers don't overwrite each other's fields (vs reading→mutating→writing
-        # the whole params dict on task_entity). Run it first so the refreshed
-        # entity it returns becomes the base we apply `task_metadata` on top of;
-        # otherwise the `task_entity = merged` reassignment would discard an
-        # in-memory metadata change made before the merge.
+        # Atomic JSONB shallow-merge; run first so its refreshed entity is the fallback return.
         if merge_params:
             merged = await self.task_service.merge_task_params(
                 task_entity.id, merge_params
@@ -126,9 +137,20 @@ class TasksUseCase:
             if merged is not None:
                 task_entity = merged
 
+        # Single column-scoped write → one task_updated publish, no whole-row clobber.
+        fields: dict[str, Any] = {}
         if task_metadata is not None:
-            task_entity.task_metadata = task_metadata
-            task_entity = await self.task_service.update_task(task=task_entity)
+            fields["task_metadata"] = task_metadata
+        if current_state_supplied:
+            fields["current_state"] = current_state
+        if fields:
+            updated = await self.task_service.update_mutable_fields(
+                task_entity.id, fields
+            )
+            if updated is None:
+                # Row vanished mid-flight (defensive; no live hard-delete path). Raise, don't return stale.
+                raise ItemDoesNotExist(f"Task {id or name} not found")
+            task_entity = updated
 
         return task_entity
 

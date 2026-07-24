@@ -938,6 +938,86 @@ class TestAgentTaskService:
         assert event_data["type"] == "task_updated"
         assert event_data["task"]["task_metadata"] == updated_metadata
 
+    async def test_update_task_current_state_publishes_stream_event(
+        self, task_service, agent_repository, sample_agent, redis_stream_repository
+    ):
+        """update_task persists current_state and carries it on the task_updated event."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        created_task = await task_service.create_task(
+            agent=sample_agent, task_name="task-for-current-state"
+        )
+
+        created_task.current_state = "working"
+        redis_stream_repository.send_data = AsyncMock()
+
+        result = await task_service.update_task(created_task)
+
+        assert result.current_state == "working"
+        retrieved_task = await task_service.get_task(id=created_task.id)
+        assert retrieved_task.current_state == "working"
+
+        redis_stream_repository.send_data.assert_called_once()
+        call_args = redis_stream_repository.send_data.call_args
+        assert call_args[0][0] == f"task:{created_task.id}"
+        event_data = call_args[0][1]
+        assert event_data["type"] == "task_updated"
+        assert event_data["task"]["current_state"] == "working"
+
+    async def test_update_mutable_fields_persists_and_publishes(
+        self, task_service, agent_repository, sample_agent, redis_stream_repository
+    ):
+        """update_mutable_fields persists the given columns and publishes task_updated."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        created_task = await task_service.create_task(
+            agent=sample_agent, task_name="task-for-mutable-fields"
+        )
+
+        redis_stream_repository.send_data = AsyncMock()
+        result = await task_service.update_mutable_fields(
+            created_task.id,
+            {"current_state": "working", "task_metadata": {"a": 1}},
+        )
+
+        assert result.current_state == "working"
+        assert result.task_metadata == {"a": 1}
+        retrieved = await task_service.get_task(id=created_task.id)
+        assert retrieved.current_state == "working"
+        assert retrieved.task_metadata == {"a": 1}
+
+        redis_stream_repository.send_data.assert_called_once()
+        event_data = redis_stream_repository.send_data.call_args[0][1]
+        assert event_data["type"] == "task_updated"
+        assert event_data["task"]["current_state"] == "working"
+
+    async def test_update_mutable_fields_leaves_status_untouched(
+        self, task_service, agent_repository, sample_agent, redis_stream_repository
+    ):
+        """The primitive is column-scoped: writing current_state leaves status untouched
+        (the use-case stale-read clobber regression is guarded in test_tasks_use_case.py).
+        """
+        await create_or_get_agent(agent_repository, sample_agent)
+        created_task = await task_service.create_task(
+            agent=sample_agent, task_name="task-for-noclobber"
+        )
+
+        # Another writer moves the task to a terminal status.
+        await task_service.transition_task_status(
+            task_id=created_task.id,
+            expected_status=TaskStatus.RUNNING,
+            new_status=TaskStatus.COMPLETED,
+            status_reason="done",
+        )
+
+        redis_stream_repository.send_data = AsyncMock()
+        result = await task_service.update_mutable_fields(
+            created_task.id, {"current_state": "late"}
+        )
+
+        assert result.current_state == "late"
+        assert result.status == TaskStatus.COMPLETED
+        retrieved = await task_service.get_task(id=created_task.id)
+        assert retrieved.status == TaskStatus.COMPLETED
+
     async def test_get_task_preserves_task_metadata(
         self, task_service, agent_repository, sample_agent
     ):

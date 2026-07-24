@@ -242,6 +242,32 @@ class AgentTaskService:
 
         return updated_task
 
+    async def update_mutable_fields(
+        self, task_id: str, fields: dict[str, Any]
+    ) -> TaskEntity | None:
+        """Column-scoped atomic update of the given columns, then publish task_updated.
+        Returns the updated entity, or ``None`` if the task no longer exists.
+        """
+        updated_task = await self.task_repository.update_mutable_fields(task_id, fields)
+        if updated_task is None:
+            return None
+
+        try:
+            topic = get_task_event_stream_topic(task_id=task_id)
+            await self.stream_repository.send_data(
+                topic,
+                TaskStreamTaskUpdatedEventEntity(
+                    type="task_updated", task=updated_task
+                ).model_dump(mode="json"),
+            )
+            logger.info(f"task_updated event published to topic: {topic}")
+        except Exception as e:
+            logger.error(
+                f"Error sending task_updated event to stream: {e}", exc_info=True
+            )
+
+        return updated_task
+
     async def merge_task_params(self, task_id: str, patch: dict) -> TaskEntity | None:
         """Atomically shallow-merge ``patch`` into ``tasks.params``. Returns
         the updated entity, or ``None`` if no task with ``task_id`` exists.
@@ -374,7 +400,11 @@ class AgentTaskService:
             new_status=TaskStatus.CANCELED,
             status_reason="Task canceled by user",
         )
-        return updated if updated is not None else await self.task_repository.get(id=task.id)
+        return (
+            updated
+            if updated is not None
+            else await self.task_repository.get(id=task.id)
+        )
 
     async def interrupt_task(
         self, agent: AgentEntity, task: TaskEntity, acp_url: str
