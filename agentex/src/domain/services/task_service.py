@@ -248,9 +248,7 @@ class AgentTaskService:
         """Column-scoped atomic update of the given columns, then publish task_updated.
         Returns the updated entity, or ``None`` if the task no longer exists.
         """
-        updated_task = await self.task_repository.update_mutable_fields(
-            task_id, fields
-        )
+        updated_task = await self.task_repository.update_mutable_fields(task_id, fields)
         if updated_task is None:
             return None
 
@@ -402,7 +400,11 @@ class AgentTaskService:
             new_status=TaskStatus.CANCELED,
             status_reason="Task canceled by user",
         )
-        return updated if updated is not None else await self.task_repository.get(id=task.id)
+        return (
+            updated
+            if updated is not None
+            else await self.task_repository.get(id=task.id)
+        )
 
     async def interrupt_task(
         self, agent: AgentEntity, task: TaskEntity, acp_url: str

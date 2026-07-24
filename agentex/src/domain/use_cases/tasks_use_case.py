@@ -12,7 +12,7 @@ logger = make_logger(__name__)
 
 
 class _Unset:
-    """Sentinel: PATCH field omitted (untouched) vs. explicitly null (cleared)."""
+    """Sentinel for partial updates: field omitted (untouched) vs. explicitly null (cleared)."""
 
 
 UNSET: Any = _Unset()
