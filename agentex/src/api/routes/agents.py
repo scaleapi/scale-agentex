@@ -1,4 +1,5 @@
 import secrets
+import time
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -43,6 +44,10 @@ from src.utils.authorization_shortcuts import (
     DAuthorizedResourceIds,
 )
 from src.utils.logging import make_logger
+from src.utils.rpc_metrics import (
+    RPC_STATUS_OK,
+    record_rpc_request,
+)
 from src.utils.task_authorization import check_task_or_collapse_to_404
 
 logger = make_logger(__name__)
@@ -549,6 +554,7 @@ async def _handle_sync_rpc(
     request_headers: dict[str, str] | None = None,
 ) -> AgentRPCResponse:
     """Handle synchronous JSON-RPC requests."""
+    start = time.perf_counter()
     try:
         result_entity = await agents_acp_use_case.handle_rpc_request(
             agent_id=agent_id,
@@ -580,6 +586,11 @@ async def _handle_sync_rpc(
         # else:
         #     raise ValueError(f"Unsupported method: {request.method}")
         # logger.info(f"AgentRPCResponse Result: {result}")
+        record_rpc_request(
+            method=request.method.value,
+            streaming=False,
+            duration_s=time.perf_counter() - start,
+        )
         return AgentRPCResponse.model_validate(
             {
                 "id": request.id,
@@ -591,10 +602,24 @@ async def _handle_sync_rpc(
     except ValidationError as e:
         logger.error(f"Validation error in RPC request: {e}", exc_info=True)
         error = JSONRPCError(code=-32602, message=f"Invalid parameters: {e}")
+        record_rpc_request(
+            method=request.method.value,
+            streaming=False,
+            duration_s=time.perf_counter() - start,
+            status_code=str(error.code),
+            error_type=type(e).__name__,
+        )
         return AgentRPCResponse(id=request.id, error=error.model_dump(), result=None)
     except Exception as e:
         logger.error(f"Error handling JSON-RPC request: {e}", exc_info=True)
         error = JSONRPCError(code=-32603, message=str(e))
+        record_rpc_request(
+            method=request.method.value,
+            streaming=False,
+            duration_s=time.perf_counter() - start,
+            status_code=str(error.code),
+            error_type=type(e).__name__,
+        )
         return AgentRPCResponse(id=request.id, error=error.model_dump(), result=None)
 
 
@@ -608,6 +633,8 @@ async def _handle_streaming_rpc(
     """Handle streaming JSON-RPC requests."""
 
     async def rpc_response_generator():
+        start = time.perf_counter()
+        error_type: str | None = None
         result_entity_async_iterator = None
         try:
             result_entity_async_iterator = await agents_acp_use_case.handle_rpc_request(
@@ -640,6 +667,7 @@ async def _handle_streaming_rpc(
 
         except Exception as e:
             logger.error(f"Error in streaming RPC response: {e}", exc_info=True)
+            error_type = type(e).__name__
             # Yield error response
             error_response = AgentRPCResponse(
                 id=request.id,
@@ -648,6 +676,13 @@ async def _handle_streaming_rpc(
             )
             yield error_response.model_dump_json().encode() + b"\n"
         finally:
+            record_rpc_request(
+                method=request.method.value,
+                streaming=True,
+                duration_s=time.perf_counter() - start,
+                status_code=RPC_STATUS_OK if error_type is None else "-32603",
+                error_type=error_type,
+            )
             # CRITICAL: Ensure the async iterator is properly closed
             # This ensures HTTP connections are released back to the pool
             if result_entity_async_iterator is not None and hasattr(
