@@ -20,11 +20,8 @@ export function createTaskName(
     return displayName;
   }
 
-  if (
-    task?.params?.description &&
-    typeof task.params.description === 'string'
-  ) {
-    return task.params.description;
+  if (typeof task?.name === 'string' && task.name) {
+    return task.name;
   }
 
   return 'Unnamed task';
