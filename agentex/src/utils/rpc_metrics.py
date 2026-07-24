@@ -15,6 +15,17 @@ excluded from metric attributes; they belong on spans and logs only.
 JSON-RPC status note: RPC-level failures return HTTP 200 with a ``JSONRPCError``
 in the body, so ``rpc.response.status_code`` carries the JSON-RPC error code
 (e.g. ``-32603``), not the HTTP status. Success is recorded as ``ok``.
+
+``task/create`` doubles as the workflow-level entry point for an agent
+invocation, so it additionally emits ``gen_ai.workflow.duration`` labeled with
+the OTel GenAI operation name (``invoke_workflow``) — workflow-level duration
+stays directly queryable instead of being inferable only from RPC duration.
+The GenAI semconv pairs ``gen_ai.workflow.duration`` with ``invoke_workflow``;
+``invoke_agent`` is reserved for ``gen_ai.invoke_agent.duration``, which the
+agent loop itself will emit — keeping the two operation names distinct means a
+query on either name never mixes gateway workflow duration with in-pod agent
+invocation duration. (These metrics are Development stability in the GenAI
+semconv; names may still evolve upstream.)
 """
 
 from __future__ import annotations
@@ -33,6 +44,14 @@ RPC_SYSTEM = "jsonrpc"
 
 # JSON-RPC status for a successful call (there is no success code in the spec).
 RPC_STATUS_OK = "ok"
+
+# Methods that mark the workflow-level entry point of an agent invocation, and
+# the OTel GenAI operation name each one is recorded under. Only these methods
+# emit ``gen_ai.workflow.duration``; the value must stay a bounded set of
+# semconv-style operation names, never a per-request identifier.
+WORKFLOW_OPERATION_BY_METHOD = {
+    "task/create": "invoke_workflow",
+}
 
 # Bucket boundaries (seconds) for the request-duration histogram: the OTel HTTP
 # semconv boundaries extended upward, because streaming responses are timed
@@ -61,12 +80,14 @@ _DURATION_BUCKET_BOUNDARIES_S = (
 _duration_histogram: Histogram | None = None
 _request_counter: Counter | None = None
 _error_counter: Counter | None = None
+_workflow_duration_histogram: Histogram | None = None
 _instruments_initialized = False
 
 
 def _ensure_instruments() -> None:
     """Create OTel instruments on first use. No-op if OTel is not configured."""
     global _duration_histogram, _request_counter, _error_counter
+    global _workflow_duration_histogram
     global _instruments_initialized
 
     if _instruments_initialized:
@@ -94,6 +115,16 @@ def _ensure_instruments() -> None:
         name="agentex.rpc.errors",
         description="Agent JSON-RPC requests that returned a JSONRPCError",
         unit="{error}",
+    )
+    _workflow_duration_histogram = meter.create_histogram(
+        name="gen_ai.workflow.duration",
+        description=(
+            "Duration of the workflow-level agent invocation entry point, "
+            "tagged with the GenAI operation name (e.g. invoke_workflow for "
+            "task/create)"
+        ),
+        unit="s",
+        explicit_bucket_boundaries_advisory=_DURATION_BUCKET_BOUNDARIES_S,
     )
 
 
@@ -137,6 +168,15 @@ def record_rpc_request(
             _request_counter.add(1, attributes)
         if _error_counter is not None and status_code != RPC_STATUS_OK:
             _error_counter.add(1, attributes)
+
+        workflow_operation = WORKFLOW_OPERATION_BY_METHOD.get(method)
+        if workflow_operation is not None and _workflow_duration_histogram is not None:
+            workflow_attributes: dict[str, str] = {
+                "gen_ai.operation.name": workflow_operation,
+            }
+            if error_type is not None:
+                workflow_attributes["error.type"] = error_type
+            _workflow_duration_histogram.record(duration_s, workflow_attributes)
 
         # One structured completion line per RPC, carrying the terminal fields
         # the observability contract requires on logs (status, error.type,

@@ -3,6 +3,8 @@
 Same operational contract as the other metric emitters: the unconfigured path
 must be a harmless no-op, emission failures must never propagate into the RPC
 path, and the configured path must record the expected names and attributes.
+Also covers the workflow-level GenAI histogram, which only workflow
+entry-point methods (task/create) may emit.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ def _patched_instruments(stack: ExitStack, **overrides):
         "_duration_histogram": None,
         "_request_counter": None,
         "_error_counter": None,
+        "_workflow_duration_histogram": None,
     }
     state.update(overrides)
     for name, value in state.items():
@@ -105,3 +108,48 @@ def test_error_counter_on_failure():
     }
     requests.add.assert_called_once_with(1, expected_attributes)
     errors.add.assert_called_once_with(1, expected_attributes)
+
+
+@pytest.mark.unit
+def test_otel_workflow_histogram_for_task_create():
+    workflow_histogram = MagicMock()
+    with ExitStack() as stack:
+        _patched_instruments(stack, _workflow_duration_histogram=workflow_histogram)
+        rpc_metrics.record_rpc_request(
+            method="task/create", streaming=False, duration_s=0.5
+        )
+
+    workflow_histogram.record.assert_called_once_with(
+        0.5, {"gen_ai.operation.name": "invoke_workflow"}
+    )
+
+
+@pytest.mark.unit
+def test_otel_workflow_histogram_records_error_type_on_failure():
+    workflow_histogram = MagicMock()
+    with ExitStack() as stack:
+        _patched_instruments(stack, _workflow_duration_histogram=workflow_histogram)
+        rpc_metrics.record_rpc_request(
+            method="task/create",
+            streaming=False,
+            duration_s=0.3,
+            status_code="-32603",
+            error_type="ValueError",
+        )
+
+    workflow_histogram.record.assert_called_once_with(
+        0.3,
+        {"gen_ai.operation.name": "invoke_workflow", "error.type": "ValueError"},
+    )
+
+
+@pytest.mark.unit
+def test_otel_workflow_histogram_not_recorded_for_non_workflow_method():
+    workflow_histogram = MagicMock()
+    with ExitStack() as stack:
+        _patched_instruments(stack, _workflow_duration_histogram=workflow_histogram)
+        rpc_metrics.record_rpc_request(
+            method="message/send", streaming=True, duration_s=0.1
+        )
+
+    workflow_histogram.record.assert_not_called()
