@@ -74,6 +74,49 @@ class TaskResponse(Task):
     )
 
 
+class TaskSummary(BaseModel):
+    """Lean list-response shape. Omits `params` (the arbitrary create-time
+    payload, which can carry per-caller secrets and PII); fetch GET /tasks/{id}
+    for the full record."""
+
+    id: str = Field(
+        ...,
+        title="Unique Task ID",
+    )
+    name: str | None = Field(
+        None,
+        title="Unique name of the task",
+    )
+    status: TaskStatus | None = Field(
+        None,
+        title="The current status of the task",
+    )
+    status_reason: str | None = Field(
+        None,
+        title="The reason for the current task status",
+    )
+    created_at: datetime | None = Field(
+        None,
+        title="The timestamp when the task was created",
+    )
+    updated_at: datetime | None = Field(
+        None,
+        title="The timestamp when the task was last updated",
+    )
+    cleaned_at: datetime | None = Field(
+        None,
+        title="The timestamp when the task's content was cleaned for retention compliance; null when active",
+    )
+    task_metadata: dict[str, Any] | None = Field(
+        None,
+        title="Task metadata",
+    )
+    agents: list["Agent"] | None = Field(
+        default=None,
+        title="Agents associated with this task (only populated when 'agents' view is requested)",
+    )
+
+
 class UpdateTaskRequest(BaseModel):
     task_metadata: dict[str, Any] | None = Field(
         None,
