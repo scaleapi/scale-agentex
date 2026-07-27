@@ -1,8 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { Bot, CalendarClock, Loader2 } from 'lucide-react';
+import { Bot, CalendarClock, ChevronDown, Loader2, Search } from 'lucide-react';
 
 import { useAgentexClient } from '@/components/providers';
 import { AllSchedulesList } from '@/components/scheduled-tasks/all-schedules-list';
@@ -17,13 +17,6 @@ import {
   sortScheduleItems,
 } from '@/components/scheduled-tasks/schedule-helpers';
 import { UpcomingScheduleList } from '@/components/scheduled-tasks/upcoming-schedule-list';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { useAgentByName } from '@/hooks/use-agent-by-name';
 import {
   SCHEDULE_LIST_LIMIT,
@@ -217,43 +210,130 @@ function ScheduleScopeSelector({
   onChange: (scope: ScheduleScope) => void;
   onSelectAgent: (agentName: string) => void;
 }) {
-  const value =
-    scope === ScheduleScope.ALL ? ScheduleScope.ALL : selectedAgent?.name;
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
+  const filteredAgents = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return agents;
+    return agents.filter(agent =>
+      agent.name.toLowerCase().includes(normalizedQuery)
+    );
+  }, [agents, query]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+        setQuery('');
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsOpen(false);
+        setQuery('');
+      }
+    };
+
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [isOpen]);
+
+  const selectScope = (nextScope: ScheduleScope) => {
+    onChange(nextScope);
+    setIsOpen(false);
+    setQuery('');
+  };
+
+  const selectAgent = (agentName: string) => {
+    onSelectAgent(agentName);
+    setIsOpen(false);
+    setQuery('');
+  };
 
   return (
-    <Select
-      {...(value ? { value } : {})}
-      onValueChange={nextValue => {
-        if (nextValue === ScheduleScope.ALL) {
-          onChange(ScheduleScope.ALL);
-          return;
-        }
-        onSelectAgent(nextValue);
-      }}
-    >
-      <SelectTrigger
-        className="max-w-80 min-w-64"
+    <div ref={containerRef} className="relative max-w-80 min-w-64">
+      <button
+        type="button"
+        className="border-input focus-visible:border-primary-foreground focus-visible:ring-primary-foreground/50 flex h-9 w-full items-center justify-between gap-2 rounded-full border bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-[3px]"
         aria-label="Schedule agent scope"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen(current => !current)}
       >
-        <SelectValue placeholder="Select an agent" />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={ScheduleScope.ALL}>
-          <span className="flex items-center gap-2">
-            <CalendarClock className="size-4" />
-            All agents
+        <span className="flex min-w-0 items-center gap-2">
+          {scope === ScheduleScope.ALL ? (
+            <CalendarClock className="size-4 shrink-0" />
+          ) : (
+            <Bot className="size-4 shrink-0" />
+          )}
+          <span className="truncate">
+            {scope === ScheduleScope.ALL
+              ? 'All agents'
+              : (selectedAgent?.name ?? 'Select an agent')}
           </span>
-        </SelectItem>
-        {agents.map(agent => (
-          <SelectItem key={agent.id} value={agent.name}>
-            <span className="flex items-center gap-2">
-              <Bot className="size-4" />
-              {agent.name}
-            </span>
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+        </span>
+        <ChevronDown className="text-muted-foreground size-4 shrink-0" />
+      </button>
+      {isOpen && (
+        <div className="bg-popover text-popover-foreground absolute right-0 z-50 mt-1 w-full min-w-72 rounded-md border p-1 shadow-md">
+          <div className="relative p-1">
+            <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
+            <input
+              autoFocus
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder="Search agents"
+              aria-label="Search agents"
+              className="border-input bg-background focus-visible:border-primary-foreground focus-visible:ring-primary-foreground/50 h-9 w-full rounded-md border pr-3 pl-9 text-sm outline-none focus-visible:ring-[3px]"
+            />
+          </div>
+          <div
+            className="max-h-64 overflow-y-auto p-1"
+            role="listbox"
+            aria-label="Schedule agent scope"
+          >
+            <button
+              type="button"
+              role="option"
+              aria-selected={scope === ScheduleScope.ALL}
+              onClick={() => selectScope(ScheduleScope.ALL)}
+              className="hover:bg-muted focus:bg-muted flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none"
+            >
+              <CalendarClock className="size-4" />
+              All agents
+            </button>
+            {filteredAgents.map(agent => (
+              <button
+                key={agent.id}
+                type="button"
+                role="option"
+                aria-selected={
+                  scope === ScheduleScope.CURRENT &&
+                  selectedAgent?.id === agent.id
+                }
+                onClick={() => selectAgent(agent.name)}
+                className="hover:bg-muted focus:bg-muted flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none"
+              >
+                <Bot className="size-4" />
+                <span className="truncate">{agent.name}</span>
+              </button>
+            ))}
+            {filteredAgents.length === 0 && (
+              <p className="text-muted-foreground px-2 py-3 text-center text-sm">
+                No agents found
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
