@@ -213,6 +213,7 @@ function ScheduleScopeSelector({
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const filteredAgents = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     if (!normalizedQuery) return agents;
@@ -234,6 +235,7 @@ function ScheduleScopeSelector({
       if (event.key === 'Escape') {
         setIsOpen(false);
         setQuery('');
+        triggerRef.current?.focus();
       }
     };
 
@@ -249,17 +251,20 @@ function ScheduleScopeSelector({
     onChange(nextScope);
     setIsOpen(false);
     setQuery('');
+    triggerRef.current?.focus();
   };
 
   const selectAgent = (agentName: string) => {
     onSelectAgent(agentName);
     setIsOpen(false);
     setQuery('');
+    triggerRef.current?.focus();
   };
 
   return (
     <div ref={containerRef} className="relative max-w-80 min-w-64">
       <button
+        ref={triggerRef}
         type="button"
         className="border-input focus-visible:border-primary-foreground focus-visible:ring-primary-foreground/50 flex h-9 w-full items-center justify-between gap-2 rounded-full border bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-[3px]"
         aria-label="Schedule agent scope"
@@ -325,7 +330,7 @@ function ScheduleScopeSelector({
                 <span className="truncate">{agent.name}</span>
               </button>
             ))}
-            {filteredAgents.length === 0 && (
+            {query.trim() && filteredAgents.length === 0 && (
               <p className="text-muted-foreground px-2 py-3 text-center text-sm">
                 No agents found
               </p>
