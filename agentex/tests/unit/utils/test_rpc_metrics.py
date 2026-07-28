@@ -74,12 +74,12 @@ def test_otel_emission_names_and_attributes():
         )
 
     expected_attributes = {
-        "rpc.system.name": "jsonrpc",
+        "rpc.system": "jsonrpc",
         "rpc.method": "message/send",
-        "rpc.response.status_code": "ok",
         "streaming": True,
     }
-    # Duration is recorded in seconds on the OTel side.
+    # Duration is recorded in seconds on the OTel side. Success omits
+    # rpc.jsonrpc.error_code, per the RPC semconv.
     histogram.record.assert_called_once_with(2.0, expected_attributes)
     requests.add.assert_called_once_with(1, expected_attributes)
     errors.add.assert_not_called()
@@ -95,14 +95,14 @@ def test_error_counter_on_failure():
             method="message/send",
             streaming=False,
             duration_s=0.4,
-            status_code="-32603",
+            error_code=-32603,
             error_type="ValueError",
         )
 
     expected_attributes = {
-        "rpc.system.name": "jsonrpc",
+        "rpc.system": "jsonrpc",
         "rpc.method": "message/send",
-        "rpc.response.status_code": "-32603",
+        "rpc.jsonrpc.error_code": -32603,
         "streaming": False,
         "error.type": "ValueError",
     }
@@ -133,7 +133,7 @@ def test_otel_workflow_histogram_records_error_type_on_failure():
             method="task/create",
             streaming=False,
             duration_s=0.3,
-            status_code="-32603",
+            error_code=-32603,
             error_type="ValueError",
         )
 

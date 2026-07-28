@@ -7,14 +7,16 @@ cheap no-op. Unlike ``src/utils/db_metrics.py`` / ``src/utils/cache_metrics.py``
 there is no StatsD dual-emit: these series are new, so nothing on the Datadog
 side consumes them — OTel-only until a consumer appears.
 
-Metric attributes follow the OTel RPC semantic conventions (``rpc.system.name``,
-``rpc.method``, ``rpc.response.status_code``, ``error.type``) plus ``streaming``.
+Metric attributes follow the OTel RPC semantic conventions (``rpc.system``,
+``rpc.method``, ``rpc.jsonrpc.error_code``, ``error.type``) plus ``streaming``.
 High-cardinality identifiers (task id, agent id, request id) are deliberately
 excluded from metric attributes; they belong on spans and logs only.
 
 JSON-RPC status note: RPC-level failures return HTTP 200 with a ``JSONRPCError``
-in the body, so ``rpc.response.status_code`` carries the JSON-RPC error code
-(e.g. ``-32603``), not the HTTP status. Success is recorded as ``ok``.
+in the body, so failures carry ``rpc.jsonrpc.error_code`` (the JSON-RPC error
+code, e.g. ``-32603``) rather than an HTTP status. Per the RPC semconv the
+attribute is only set when the call failed; success omits it, and error rate is
+read from the dedicated ``agentex.rpc.errors`` counter.
 
 ``task/create`` doubles as the workflow-level entry point for an agent
 invocation, so it additionally emits ``gen_ai.workflow.duration`` labeled with
@@ -41,9 +43,6 @@ if TYPE_CHECKING:
 logger = make_logger(__name__)
 
 RPC_SYSTEM = "jsonrpc"
-
-# JSON-RPC status for a successful call (there is no success code in the spec).
-RPC_STATUS_OK = "ok"
 
 # Methods that mark the workflow-level entry point of an agent invocation, and
 # the OTel GenAI operation name each one is recorded under. Only these methods
@@ -132,7 +131,7 @@ def record_rpc_request(
     method: str,
     streaming: bool,
     duration_s: float,
-    status_code: str = RPC_STATUS_OK,
+    error_code: int | None = None,
     error_type: str | None = None,
 ) -> None:
     """
@@ -143,8 +142,9 @@ def record_rpc_request(
         streaming: Whether the response was streamed (NDJSON) or a single body.
         duration_s: Seconds from dispatch to completion. For streaming
             responses this covers the whole stream, not just the handler return.
-        status_code: ``RPC_STATUS_OK`` or the JSON-RPC error code as a string
-            (e.g. "-32602").
+        error_code: JSON-RPC error code (e.g. -32602) when the call failed;
+            ``None`` on success. Sets the ``rpc.jsonrpc.error_code`` attribute
+            and drives the error counter.
         error_type: Exception class name for failures; omitted on success.
 
     Never raises: emission failures (an OTel SDK fault) are swallowed so
@@ -153,12 +153,15 @@ def record_rpc_request(
     try:
         _ensure_instruments()
 
-        attributes: dict[str, str | bool] = {
-            "rpc.system.name": RPC_SYSTEM,
+        failed = error_code is not None
+        attributes: dict[str, str | bool | int] = {
+            "rpc.system": RPC_SYSTEM,
             "rpc.method": method,
-            "rpc.response.status_code": status_code,
             "streaming": streaming,
         }
+        # rpc.jsonrpc.error_code is set only on failure, per the RPC semconv.
+        if error_code is not None:
+            attributes["rpc.jsonrpc.error_code"] = error_code
         if error_type is not None:
             attributes["error.type"] = error_type
 
@@ -166,7 +169,7 @@ def record_rpc_request(
             _duration_histogram.record(duration_s, attributes)
         if _request_counter is not None:
             _request_counter.add(1, attributes)
-        if _error_counter is not None and status_code != RPC_STATUS_OK:
+        if _error_counter is not None and failed:
             _error_counter.add(1, attributes)
 
         workflow_operation = WORKFLOW_OPERATION_BY_METHOD.get(method)
@@ -184,7 +187,7 @@ def record_rpc_request(
         # per-request log-fields context (see add_log_fields).
         completion_fields: dict[str, str | bool | float] = {
             "rpc.method": method,
-            "status": status_code,
+            "status": "ok" if error_code is None else str(error_code),
             "streaming": streaming,
             "duration_ms": round(duration_s * 1000.0, 3),
         }

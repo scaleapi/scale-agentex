@@ -45,7 +45,6 @@ from src.utils.authorization_shortcuts import (
 )
 from src.utils.logging import make_logger
 from src.utils.rpc_metrics import (
-    RPC_STATUS_OK,
     record_rpc_request,
 )
 from src.utils.task_authorization import check_task_or_collapse_to_404
@@ -606,7 +605,7 @@ async def _handle_sync_rpc(
             method=request.method.value,
             streaming=False,
             duration_s=time.perf_counter() - start,
-            status_code=str(error.code),
+            error_code=error.code,
             error_type=type(e).__name__,
         )
         return AgentRPCResponse(id=request.id, error=error.model_dump(), result=None)
@@ -617,7 +616,7 @@ async def _handle_sync_rpc(
             method=request.method.value,
             streaming=False,
             duration_s=time.perf_counter() - start,
-            status_code=str(error.code),
+            error_code=error.code,
             error_type=type(e).__name__,
         )
         return AgentRPCResponse(id=request.id, error=error.model_dump(), result=None)
@@ -680,7 +679,7 @@ async def _handle_streaming_rpc(
                 method=request.method.value,
                 streaming=True,
                 duration_s=time.perf_counter() - start,
-                status_code=RPC_STATUS_OK if error_type is None else "-32603",
+                error_code=None if error_type is None else -32603,
                 error_type=error_type,
             )
             # CRITICAL: Ensure the async iterator is properly closed
