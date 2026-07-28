@@ -137,11 +137,14 @@ export function EditScheduleModal({
     <>
       <BasicModal title="Edit scheduled task" onClose={onClose}>
         <ScheduleNameInput name={name} setName={setName} />
-        <textarea
-          value={prompt}
-          onChange={event => setPrompt(event.target.value)}
-          className="border-input bg-background min-h-24 rounded-md border p-3 text-sm"
-        />
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium">Prompt</span>
+          <textarea
+            value={prompt}
+            onChange={event => setPrompt(event.target.value)}
+            className="border-input bg-background min-h-24 rounded-md border p-3 text-sm"
+          />
+        </label>
         <CadencePicker
           cadence={cadence}
           onChange={setCadence}
