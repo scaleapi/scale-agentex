@@ -304,12 +304,14 @@ class AgentACPService(TaskMessageMixin):
         task: TaskEntity,
         acp_url: str,
         params: dict[str, Any] | None = None,
+        end_user_id: str | None = None,
     ) -> dict[str, Any]:
         """Create a new task"""
         params = CreateTaskParams(
             agent=agent,
             task=task,
             params=params,
+            end_user_id=end_user_id,
         )
         headers = await self.get_headers(agent)
         return await self._call_jsonrpc(
@@ -326,6 +328,7 @@ class AgentACPService(TaskMessageMixin):
         task: TaskEntity,
         content: TaskMessageContentEntity,
         acp_url: str,
+        end_user_id: str | None = None,
     ) -> TaskMessageContentEntity:
         """Send a message to a running task"""
         params = SendMessageParams(
@@ -333,6 +336,7 @@ class AgentACPService(TaskMessageMixin):
             task=task,
             content=content,
             stream=False,
+            end_user_id=end_user_id,
         )
         headers = await self.get_headers(agent)
         lock_key = hash((agent.id, task.id))
@@ -357,6 +361,7 @@ class AgentACPService(TaskMessageMixin):
         task: TaskEntity,
         content: TaskMessageContentEntity,
         acp_url: str,
+        end_user_id: str | None = None,
     ) -> AsyncIterator[TaskMessageUpdateEntity]:
         """Send a message to a running task and stream the response"""
         params = SendMessageParams(
@@ -364,6 +369,7 @@ class AgentACPService(TaskMessageMixin):
             task=task,
             content=content,
             stream=True,
+            end_user_id=end_user_id,
         )
         headers = await self.get_headers(agent)
         lock_key = hash((agent.id, task.id))
@@ -398,10 +404,14 @@ class AgentACPService(TaskMessageMixin):
                 yield self._parse_task_message_update(chunk)
 
     async def cancel_task(
-        self, agent: AgentEntity, task: TaskEntity, acp_url: str
+        self,
+        agent: AgentEntity,
+        task: TaskEntity,
+        acp_url: str,
+        end_user_id: str | None = None,
     ) -> dict[str, Any]:
         """Cancel a running task"""
-        params = CancelTaskParams(agent=agent, task=task)
+        params = CancelTaskParams(agent=agent, task=task, end_user_id=end_user_id)
         headers = await self.get_headers(agent)
         return await self._call_jsonrpc(
             url=acp_url,
@@ -418,6 +428,7 @@ class AgentACPService(TaskMessageMixin):
         task: TaskEntity,
         acp_url: str,
         request_headers: dict[str, str] | None = None,
+        end_user_id: str | None = None,
     ) -> dict[str, Any]:
         """Send an event to a running task"""
 
@@ -426,6 +437,7 @@ class AgentACPService(TaskMessageMixin):
             task=task,
             event=event,
             request=None,
+            end_user_id=end_user_id,
         )
 
         headers = await self.get_headers(agent, request_headers)

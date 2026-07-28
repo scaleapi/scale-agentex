@@ -1035,6 +1035,161 @@ class TestAgentsACPUseCase:
         assert second.id == first.id
         assert second.task_metadata == {"created_by_user_id": "user-a"}
 
+    async def test_handle_task_create_forwards_end_user_id(
+        self, agents_acp_use_case, mock_http_gateway, agent_repository, sample_agent
+    ):
+        """end_user_id reaches the agent in the ACP payload, where the SDK stamps it
+        onto trace spans."""
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        from src.api.schemas.agents_rpc import CreateTaskRequest
+
+        async def mock_async_call(*args, **kwargs):
+            payload = kwargs.get("payload", {})
+            return {
+                "jsonrpc": "2.0",
+                "result": {"status": "created"},
+                "id": payload.get("id", ""),
+            }
+
+        mock_http_gateway.async_call.side_effect = mock_async_call
+
+        import uuid
+
+        await agents_acp_use_case._handle_task_create(
+            agent=sample_agent,
+            params=CreateTaskRequest(
+                name=f"test-task-euid-{uuid.uuid4().hex[:8]}",
+                end_user_id="user-a",
+            ),
+            acp_url=sample_agent.acp_url,
+        )
+
+        sent_payload = mock_http_gateway.async_call.call_args.kwargs["payload"]
+        assert sent_payload["params"]["end_user_id"] == "user-a"
+
+    async def test_handle_task_create_forwards_none_when_end_user_id_absent(
+        self, agents_acp_use_case, mock_http_gateway, agent_repository, sample_agent
+    ):
+        """end_user_id is optional; omitting it must not fail or invent a value."""
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        from src.api.schemas.agents_rpc import CreateTaskRequest
+
+        async def mock_async_call(*args, **kwargs):
+            payload = kwargs.get("payload", {})
+            return {
+                "jsonrpc": "2.0",
+                "result": {"status": "created"},
+                "id": payload.get("id", ""),
+            }
+
+        mock_http_gateway.async_call.side_effect = mock_async_call
+
+        import uuid
+
+        await agents_acp_use_case._handle_task_create(
+            agent=sample_agent,
+            params=CreateTaskRequest(name=f"test-task-noeuid-{uuid.uuid4().hex[:8]}"),
+            acp_url=sample_agent.acp_url,
+        )
+
+        sent_payload = mock_http_gateway.async_call.call_args.kwargs["payload"]
+        assert sent_payload["params"]["end_user_id"] is None
+
+    async def test_handle_message_send_forwards_end_user_id(
+        self,
+        agents_acp_use_case,
+        mock_http_gateway,
+        agent_repository,
+        sample_agent,
+        sample_text_content,
+    ):
+        """message/send is the case task_metadata cannot serve: it is only accepted at
+        task creation, so a one-shot sync agent had no way to attribute a caller."""
+        await create_or_get_agent(agent_repository, sample_agent)
+
+        captured_payloads = []
+
+        def create_mock_stream(*args, **kwargs):
+            payload = kwargs.get("payload", {})
+            captured_payloads.append(payload)
+            return AsyncStreamMock(
+                [
+                    {
+                        "jsonrpc": "2.0",
+                        "result": {
+                            "type": "full",
+                            "index": 0,
+                            "content": {
+                                "type": "text",
+                                "author": "agent",
+                                "style": "static",
+                                "format": "plain",
+                                "content": "ok",
+                                "attachments": None,
+                            },
+                        },
+                        "id": payload.get("id", ""),
+                    },
+                ]
+            )
+
+        mock_http_gateway.stream_call = create_mock_stream
+
+        await agents_acp_use_case._handle_message_send_sync(
+            agent=sample_agent,
+            params=SendMessageRequestEntity(
+                task_id=None,
+                content=sample_text_content,
+                stream=False,
+                end_user_id="user-a",
+            ),
+            acp_url=sample_agent.acp_url,
+        )
+
+        assert len(captured_payloads) == 1
+        assert captured_payloads[0]["params"]["end_user_id"] == "user-a"
+
+    async def test_handle_event_send_forwards_end_user_id(
+        self,
+        agents_acp_use_case,
+        mock_http_gateway,
+        agent_repository,
+        task_service,
+        sample_agent,
+        sample_text_content,
+    ):
+        """Every subsequent turn carries its own end_user_id, so attribution follows the
+        current caller rather than whoever created the task."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        created_task = await task_service.create_task(
+            agent=sample_agent, task_name=f"euid-event-task-{uuid4().hex[:8]}"
+        )
+
+        async def mock_async_call(*args, **kwargs):
+            payload = kwargs.get("payload", {})
+            return {
+                "jsonrpc": "2.0",
+                "result": {"status": "event_sent"},
+                "id": payload.get("id", ""),
+            }
+
+        mock_http_gateway.async_call.side_effect = mock_async_call
+
+        await agents_acp_use_case._handle_event_send(
+            agent=sample_agent,
+            params=SendEventRequest(
+                task_id=created_task.id,
+                content=sample_text_content,
+                end_user_id="user-b",
+            ),
+            acp_url=sample_agent.acp_url,
+        )
+
+        sent_payload = mock_http_gateway.async_call.call_args.kwargs["payload"]
+        assert sent_payload["params"]["end_user_id"] == "user-b"
+
     #
     async def test_handle_message_send_sync_error_handling(
         self,

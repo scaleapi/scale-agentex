@@ -13,6 +13,17 @@ from src.utils.model_utils import BaseModel
 
 logger = make_logger(__name__)
 
+# Bounded because the value is forwarded to the agent on every call and, for
+# Temporal agents, copied into activity headers and therefore into workflow
+# history repeatedly.
+END_USER_ID_MAX_LENGTH = 256
+END_USER_ID_DESCRIPTION = (
+    "Opaque identifier for the end user this call is made on behalf of. Not "
+    "persisted on the task row, so supply it on every call that should be "
+    "attributed. Forwarded to the agent inside the ACP payload, which stamps it "
+    "onto the agent's trace spans as __end_user_id__."
+)
+
 
 class AgentRPCMethod(str, Enum):
     EVENT_SEND = "event/send"
@@ -34,6 +45,11 @@ class CreateTaskRequest(BaseModel):
             "Forwarded to the agent inside the ACP payload for backward compatibility."
         ),
     )
+    end_user_id: str | None = Field(
+        None,
+        max_length=END_USER_ID_MAX_LENGTH,
+        description=END_USER_ID_DESCRIPTION,
+    )
 
 
 class CancelTaskRequest(BaseModel):
@@ -44,6 +60,11 @@ class CancelTaskRequest(BaseModel):
     task_name: str | None = Field(
         None,
         description="The name of the task to cancel. Either this or task_id must be provided.",
+    )
+    end_user_id: str | None = Field(
+        None,
+        max_length=END_USER_ID_MAX_LENGTH,
+        description=END_USER_ID_DESCRIPTION,
     )
 
     @model_validator(mode="after")
@@ -70,6 +91,11 @@ class SendMessageRequest(BaseModel):
         None,
         description="The parameters for the task (only used when creating new tasks)",
     )
+    end_user_id: str | None = Field(
+        None,
+        max_length=END_USER_ID_MAX_LENGTH,
+        description=END_USER_ID_DESCRIPTION,
+    )
 
     @model_validator(mode="after")
     def validate_task_identifiers(self):
@@ -87,6 +113,11 @@ class SendEventRequest(BaseModel):
     )
     content: TaskMessageContent | None = Field(
         None, description="The content to send to the event"
+    )
+    end_user_id: str | None = Field(
+        None,
+        max_length=END_USER_ID_MAX_LENGTH,
+        description=END_USER_ID_DESCRIPTION,
     )
 
     @model_validator(mode="after")

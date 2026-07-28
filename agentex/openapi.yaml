@@ -4075,6 +4075,16 @@ components:
           title: Task Name
           description: The name of the task to cancel. Either this or task_id must
             be provided.
+        end_user_id:
+          anyOf:
+          - type: string
+            maxLength: 256
+          - type: 'null'
+          title: End User Id
+          description: Opaque identifier for the end user this call is made on behalf
+            of. Not persisted on the task row, so supply it on every call that should
+            be attributed. Forwarded to the agent inside the ACP payload, which stamps
+            it onto the agent's trace spans as __end_user_id__.
       type: object
       title: CancelTaskRequest
     CheckpointListItem:
@@ -4520,6 +4530,16 @@ components:
           description: Caller-provided metadata to persist on the task row. Only applied
             at task creation; ignored if a task with this name already exists. Forwarded
             to the agent inside the ACP payload for backward compatibility.
+        end_user_id:
+          anyOf:
+          - type: string
+            maxLength: 256
+          - type: 'null'
+          title: End User Id
+          description: Opaque identifier for the end user this call is made on behalf
+            of. Not persisted on the task row, so supply it on every call that should
+            be attributed. Forwarded to the agent inside the ACP payload, which stamps
+            it onto the agent's trace spans as __end_user_id__.
       type: object
       title: CreateTaskRequest
     DataContent:
@@ -5610,6 +5630,16 @@ components:
           - $ref: '#/components/schemas/TaskMessageContent'
           - type: 'null'
           description: The content to send to the event
+        end_user_id:
+          anyOf:
+          - type: string
+            maxLength: 256
+          - type: 'null'
+          title: End User Id
+          description: Opaque identifier for the end user this call is made on behalf
+            of. Not persisted on the task row, so supply it on every call that should
+            be attributed. Forwarded to the agent inside the ACP payload, which stamps
+            it onto the agent's trace spans as __end_user_id__.
       type: object
       title: SendEventRequest
     SendMessageRequest:
@@ -5641,6 +5671,16 @@ components:
           - type: 'null'
           title: Task Params
           description: The parameters for the task (only used when creating new tasks)
+        end_user_id:
+          anyOf:
+          - type: string
+            maxLength: 256
+          - type: 'null'
+          title: End User Id
+          description: Opaque identifier for the end user this call is made on behalf
+            of. Not persisted on the task row, so supply it on every call that should
+            be attributed. Forwarded to the agent inside the ACP payload, which stamps
+            it onto the agent's trace spans as __end_user_id__.
       type: object
       required:
       - content

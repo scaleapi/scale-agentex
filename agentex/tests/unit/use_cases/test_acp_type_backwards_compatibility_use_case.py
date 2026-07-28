@@ -129,6 +129,7 @@ class TestACPTypeBackwardsCompatibility:
             task=task,
             acp_url=agentic_agent.acp_url,
             params={"test": "params"},
+            end_user_id=None,
         )
         assert result == task
 
@@ -229,6 +230,7 @@ class TestACPTypeBackwardsCompatibility:
             task=task,
             acp_url=async_agent.acp_url,
             params={"test": "params"},
+            end_user_id=None,
         )
         assert result == task
 

@@ -4,6 +4,8 @@ from typing import Any, Self
 from pydantic import BaseModel, Field, model_validator
 
 from src.api.schemas.agents_rpc import (
+    END_USER_ID_DESCRIPTION,
+    END_USER_ID_MAX_LENGTH,
     AgentRPCRequest,
     CancelTaskRequest,
     CreateTaskRequest,
@@ -30,6 +32,12 @@ class AgentRPCMethod(str, Enum):
     EVENT_SEND = "event/send"
 
 
+ACP_END_USER_ID_DESCRIPTION = (
+    "The end user this call was made on behalf of, when the caller supplied one. "
+    "The agent SDK stamps it onto trace spans as __end_user_id__."
+)
+
+
 class CreateTaskParams(BaseModel):
     """Parameters for task/create method"""
 
@@ -42,6 +50,7 @@ class CreateTaskParams(BaseModel):
         None,
         description="The parameters for the task as inputted by the user",
     )
+    end_user_id: str | None = Field(None, description=ACP_END_USER_ID_DESCRIPTION)
 
 
 class SendMessageParams(BaseModel):
@@ -58,6 +67,7 @@ class SendMessageParams(BaseModel):
     stream: bool = Field(
         False, description="Whether to stream the message to the agent"
     )
+    end_user_id: str | None = Field(None, description=ACP_END_USER_ID_DESCRIPTION)
 
 
 class SendEventParams(BaseModel):
@@ -73,6 +83,7 @@ class SendEventParams(BaseModel):
         None,
         description="Additional request context including headers",
     )
+    end_user_id: str | None = Field(None, description=ACP_END_USER_ID_DESCRIPTION)
 
 
 class CancelTaskParams(BaseModel):
@@ -83,6 +94,7 @@ class CancelTaskParams(BaseModel):
         description="The agent that the task was sent to",
     )
     task: TaskEntity = Field(..., description="The task that was cancelled")
+    end_user_id: str | None = Field(None, description=ACP_END_USER_ID_DESCRIPTION)
 
 
 ACP_TYPE_TO_ALLOWED_RPC_METHODS = {
@@ -113,6 +125,11 @@ class CreateTaskRequestEntity(BaseModel):
             "Forwarded to the agent inside the ACP payload for backward compatibility."
         ),
     )
+    end_user_id: str | None = Field(
+        None,
+        max_length=END_USER_ID_MAX_LENGTH,
+        description=END_USER_ID_DESCRIPTION,
+    )
 
 
 class CancelTaskRequestEntity(BaseModel):
@@ -123,6 +140,11 @@ class CancelTaskRequestEntity(BaseModel):
     task_name: str | None = Field(
         None,
         description="The name of the task to cancel. Either this or task_id must be provided.",
+    )
+    end_user_id: str | None = Field(
+        None,
+        max_length=END_USER_ID_MAX_LENGTH,
+        description=END_USER_ID_DESCRIPTION,
     )
 
     @model_validator(mode="after")
@@ -149,6 +171,11 @@ class SendMessageRequestEntity(BaseModel):
         None,
         description="The parameters for the task (only used when creating new tasks)",
     )
+    end_user_id: str | None = Field(
+        None,
+        max_length=END_USER_ID_MAX_LENGTH,
+        description=END_USER_ID_DESCRIPTION,
+    )
 
     @model_validator(mode="after")
     def validate_task_identifiers(self):
@@ -166,6 +193,11 @@ class SendEventRequestEntity(BaseModel):
     )
     content: TaskMessageContentEntity | None = Field(
         None, description="The content to send to the event"
+    )
+    end_user_id: str | None = Field(
+        None,
+        max_length=END_USER_ID_MAX_LENGTH,
+        description=END_USER_ID_DESCRIPTION,
     )
 
     @model_validator(mode="after")
@@ -193,6 +225,7 @@ class AgentRPCRequestEntity(JSONRPCRequest):
                 name=request.params.root.name,
                 params=request.params.root.params,
                 task_metadata=request.params.root.task_metadata,
+                end_user_id=request.params.root.end_user_id,
             )
         elif request.method == AgentRPCMethod.TASK_CANCEL and isinstance(
             request.params.root, CancelTaskRequest
@@ -200,6 +233,7 @@ class AgentRPCRequestEntity(JSONRPCRequest):
             params = CancelTaskRequestEntity(
                 task_id=request.params.root.task_id,
                 task_name=request.params.root.task_name,
+                end_user_id=request.params.root.end_user_id,
             )
         elif request.method == AgentRPCMethod.MESSAGE_SEND:
             content_entity = convert_task_message_content_to_entity(
@@ -211,6 +245,7 @@ class AgentRPCRequestEntity(JSONRPCRequest):
                 content=content_entity,
                 stream=request.params.root.stream,
                 task_params=request.params.root.task_params,
+                end_user_id=request.params.root.end_user_id,
             )
         elif request.method == AgentRPCMethod.EVENT_SEND:
             if request.params.root.content is not None:
@@ -223,6 +258,7 @@ class AgentRPCRequestEntity(JSONRPCRequest):
                 task_id=request.params.root.task_id,
                 task_name=request.params.root.task_name,
                 content=content_entity,
+                end_user_id=request.params.root.end_user_id,
             )
         else:
             logger.error(f"Invalid method from request: {request}")

@@ -78,6 +78,7 @@ class AgentTaskService:
         agent: AgentEntity,
         task_name: str | None = None,
         task_params: dict[str, Any] | None = None,
+        end_user_id: str | None = None,
     ) -> TaskEntity:
         """
         Create a new task record in the repository with single agent (maintains existing interface).
@@ -105,6 +106,7 @@ class AgentTaskService:
                 task=task_entity,
                 acp_url=agent.acp_url,
                 params=task_params,
+                end_user_id=end_user_id,
             )
             return task_entity
         except Exception as e:
@@ -118,6 +120,7 @@ class AgentTaskService:
         task: TaskEntity,
         task_params: dict[str, Any] | None = None,
         acp_url: str | None = None,
+        end_user_id: str | None = None,
     ) -> None:
         try:
             await self.acp_client.create_task(
@@ -125,6 +128,7 @@ class AgentTaskService:
                 task=task,
                 acp_url=acp_url or agent.acp_url,
                 params=task_params,
+                end_user_id=end_user_id,
             )
         except Exception as e:
             logger.error(f"Error creating task in ACP: {e}")
@@ -257,6 +261,7 @@ class AgentTaskService:
         task: TaskEntity,
         content: TaskMessageContentEntity,
         acp_url: str,
+        end_user_id: str | None = None,
     ) -> TaskMessageContentEntity:
         """Send a message to a running task"""
         return await self.acp_client.send_message(
@@ -264,6 +269,7 @@ class AgentTaskService:
             task=task,
             content=content,
             acp_url=acp_url,
+            end_user_id=end_user_id,
         )
 
     async def send_message_stream(
@@ -272,6 +278,7 @@ class AgentTaskService:
         task: TaskEntity,
         content: TaskMessageContentEntity,
         acp_url: str,
+        end_user_id: str | None = None,
     ) -> AsyncIterator[TaskMessageUpdateEntity]:
         """Send a message to a running task and stream the response"""
         logger.info(f"TaskService: Sending message stream for task {task.id}")
@@ -280,14 +287,21 @@ class AgentTaskService:
             task=task,
             content=content,
             acp_url=acp_url,
+            end_user_id=end_user_id,
         ):
             yield chunk
 
     async def cancel_task(
-        self, agent: AgentEntity, task: TaskEntity, acp_url: str
+        self,
+        agent: AgentEntity,
+        task: TaskEntity,
+        acp_url: str,
+        end_user_id: str | None = None,
     ) -> TaskEntity:
         """Cancel a running task"""
-        await self.acp_client.cancel_task(agent=agent, task=task, acp_url=acp_url)
+        await self.acp_client.cancel_task(
+            agent=agent, task=task, acp_url=acp_url, end_user_id=end_user_id
+        )
 
         task = await self.task_repository.get(id=task.id)
         task.status = TaskStatus.CANCELED
@@ -301,6 +315,7 @@ class AgentTaskService:
         acp_url: str,
         content: TaskMessageContentEntity | None = None,
         request_headers: dict[str, str] | None = None,
+        end_user_id: str | None = None,
     ) -> EventEntity:
         """Create an event and forward it to the ACP server"""
         event = await self.event_repository.create(
@@ -315,6 +330,7 @@ class AgentTaskService:
             task=task,
             acp_url=acp_url,
             request_headers=request_headers,
+            end_user_id=end_user_id,
         )
         return event
 

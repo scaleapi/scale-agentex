@@ -427,6 +427,7 @@ class AgentsACPUseCase(TaskMessageMixin):
                 task=task,
                 task_params=params.params,
                 acp_url=acp_url,
+                end_user_id=params.end_user_id,
             )
         return task
 
@@ -503,6 +504,7 @@ class AgentsACPUseCase(TaskMessageMixin):
             task=task,
             content=params.content,
             acp_url=acp_url,
+            end_user_id=params.end_user_id,
         ):
             logger.debug(
                 f"[message_send_stream] Received message chunk: {task_message_update}"
@@ -656,6 +658,7 @@ class AgentsACPUseCase(TaskMessageMixin):
                 task=task,
                 content=params.content,
                 acp_url=acp_url,
+                end_user_id=params.end_user_id,
             ):
                 logger.debug(
                     f"[message_send_stream] Received message chunk type: {type(task_message_update).__name__}"
@@ -799,6 +802,7 @@ class AgentsACPUseCase(TaskMessageMixin):
             agent=agent,
             task=task,
             acp_url=acp_url,
+            end_user_id=params.end_user_id,
         )
 
     async def _handle_event_send(
@@ -834,6 +838,7 @@ class AgentsACPUseCase(TaskMessageMixin):
             content=params.content,
             acp_url=acp_url,
             request_headers=request_headers,
+            end_user_id=params.end_user_id,
         )
         return event_entity
 

@@ -281,6 +281,7 @@ class TestAgentTaskService:
             task=result,  # Use the actual created task
             acp_url=sample_agent.acp_url,
             params=task_params,
+            end_user_id=None,
         )
 
     async def test_create_task_and_forward_sync_agent_skips_acp(
@@ -544,6 +545,7 @@ class TestAgentTaskService:
             task=sample_task,
             content=sample_message_content,
             acp_url=acp_url,
+            end_user_id=None,
         )
 
     #
@@ -625,7 +627,7 @@ class TestAgentTaskService:
 
         # Verify ACP client was called to cancel the task
         mock_acp_client.cancel_task.assert_called_once_with(
-            agent=sample_agent, task=created_task, acp_url=acp_url
+            agent=sample_agent, task=created_task, acp_url=acp_url, end_user_id=None
         )
 
         # Verify task status is updated in the database
@@ -675,6 +677,7 @@ class TestAgentTaskService:
             task=created_task,
             acp_url=acp_url,
             request_headers=None,
+            end_user_id=None,
         )
 
     async def test_create_event_and_forward_to_acp_with_headers(
@@ -721,6 +724,7 @@ class TestAgentTaskService:
             task=created_task,
             acp_url=acp_url,
             request_headers=request_headers,
+            end_user_id=None,
         )
 
     async def test_create_task_with_task_metadata(
