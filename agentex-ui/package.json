@@ -57,6 +57,7 @@
   "overrides": {
     "cross-spawn": "^7.0.5",
     "postcss": "^8.5.10",
+    "sharp": "^0.35.0",
     "tar": "^7.5.16"
   },
   "devDependencies": {
