@@ -164,6 +164,9 @@ services:
       - REDIS_URL=redis://agentex-redis:6379
       - MONGODB_URI=mongodb://agentex-mongodb:27017
       - MONGODB_DATABASE_NAME=agentex
+      # Storage backend per document store (mongodb|postgres), e.g. `TASK_STATE_STORAGE_PHASE=postgres ./dev.sh`.
+      - TASK_STATE_STORAGE_PHASE=${TASK_STATE_STORAGE_PHASE:-mongodb}
+      - TASK_MESSAGE_STORAGE_PHASE=${TASK_MESSAGE_STORAGE_PHASE:-mongodb}
       - WATCHFILES_FORCE_POLLING=true
       - ENABLE_HEALTH_CHECK_WORKFLOW=true
       # Disabled by default; enable when testing, e.g. `ENABLE_AGENT_RUN_SCHEDULES=true ./dev.sh`.
@@ -238,6 +241,8 @@ services:
       - REDIS_URL=redis://agentex-redis:6379
       - MONGODB_URI=mongodb://agentex-mongodb:27017
       - MONGODB_DATABASE_NAME=agentex
+      - TASK_STATE_STORAGE_PHASE=${TASK_STATE_STORAGE_PHASE:-mongodb}
+      - TASK_MESSAGE_STORAGE_PHASE=${TASK_MESSAGE_STORAGE_PHASE:-mongodb}
       - AGENTEX_SERVER_TASK_QUEUE=agentex-server
       - RETENTION_CLEANUP_ENABLED=${RETENTION_CLEANUP_ENABLED:-false}
       - RETENTION_CLEANUP_AGENT_ALLOWLIST=${RETENTION_CLEANUP_AGENT_ALLOWLIST:-}

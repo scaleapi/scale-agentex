@@ -68,12 +68,25 @@ class EnvVarKeys(str, Enum):
     RETENTION_CLEANUP_MAX_IN_FLIGHT = "RETENTION_CLEANUP_MAX_IN_FLIGHT"
     RETENTION_CLEANUP_DRY_RUN = "RETENTION_CLEANUP_DRY_RUN"
     RETENTION_CLEANUP_STALE_RUNNING_DAYS = "RETENTION_CLEANUP_STALE_RUNNING_DAYS"
+    TASK_STATE_STORAGE_PHASE = "TASK_STATE_STORAGE_PHASE"
+    TASK_MESSAGE_STORAGE_PHASE = "TASK_MESSAGE_STORAGE_PHASE"
 
 
 class Environment(str, Enum):
     DEV = "development"
     STAGING = "staging"
     PROD = "production"
+
+
+class StoragePhase(str, Enum):
+    """Which backend serves a document store (task state, task messages).
+
+    A future data-migration effort would define its own additional phases;
+    new values are additive, not breaking.
+    """
+
+    MONGODB = "mongodb"
+    POSTGRES = "postgres"
 
 
 refreshed_environment_variables = None
@@ -171,6 +184,19 @@ class EnvironmentVariables(BaseModel):
     # are treated as abandoned and become eligible for cleanup. 0 disables the
     # override (RUNNING tasks are never cleaned), preserving prior behavior.
     RETENTION_CLEANUP_STALE_RUNNING_DAYS: int = 0
+    # Storage backend per document store. The mongodb default keeps existing
+    # deployments unchanged; postgres serves that store from the relational
+    # database instead.
+    TASK_STATE_STORAGE_PHASE: StoragePhase = StoragePhase.MONGODB
+    TASK_MESSAGE_STORAGE_PHASE: StoragePhase = StoragePhase.MONGODB
+
+    @property
+    def mongodb_required(self) -> bool:
+        """True while any document store still needs a MongoDB connection."""
+        return not (
+            self.TASK_STATE_STORAGE_PHASE == StoragePhase.POSTGRES
+            and self.TASK_MESSAGE_STORAGE_PHASE == StoragePhase.POSTGRES
+        )
 
     @classmethod
     def refresh(cls, force_refresh: bool = False) -> EnvironmentVariables | None:
@@ -292,6 +318,12 @@ class EnvironmentVariables(BaseModel):
             ),
             RETENTION_CLEANUP_STALE_RUNNING_DAYS=int(
                 os.environ.get(EnvVarKeys.RETENTION_CLEANUP_STALE_RUNNING_DAYS, "0")
+            ),
+            TASK_STATE_STORAGE_PHASE=os.environ.get(
+                EnvVarKeys.TASK_STATE_STORAGE_PHASE, StoragePhase.MONGODB
+            ),
+            TASK_MESSAGE_STORAGE_PHASE=os.environ.get(
+                EnvVarKeys.TASK_MESSAGE_STORAGE_PHASE, StoragePhase.MONGODB
             ),
         )
         refreshed_environment_variables = environment_variables

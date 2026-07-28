@@ -37,7 +37,7 @@ from src.domain.repositories.deployment_repository import DeploymentRepository
 from src.domain.repositories.event_repository import EventRepository
 from src.domain.repositories.task_message_repository import TaskMessageRepository
 from src.domain.repositories.task_repository import TaskRepository
-from src.domain.repositories.task_state_repository import TaskStateRepository
+from src.domain.repositories.task_state_repository import get_task_state_repository
 from src.domain.services.agent_acp_service import AgentACPService
 from src.domain.services.authorization_service import AuthorizationService
 from src.domain.services.task_message_service import TaskMessageService
@@ -113,7 +113,9 @@ def build_acp_use_case_for_principal(
     task_repository = TaskRepository(rw_session_maker, ro_session_maker)
     event_repository = EventRepository(rw_session_maker, ro_session_maker)
 
-    task_state_repository = TaskStateRepository(global_dependencies.mongodb_database)
+    # Resolved through the shared selector (not constructed by hand) so the
+    # worker honors TASK_STATE_STORAGE_PHASE the same way the API does.
+    task_state_repository = get_task_state_repository()
     task_message_repository = TaskMessageRepository(
         global_dependencies.mongodb_database
     )
