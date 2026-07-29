@@ -41,16 +41,22 @@ class AgentsUseCase:
         self.temporal_adapter = temporal_adapter
         self.authorization_service = authorization_service
 
-    async def _safe_deregister(self, agent_id: str) -> None:
+    async def _safe_deregister(
+        self, agent_id: str, principal_context: Any = None
+    ) -> None:
         """Best-effort removal of an agent from the authorization graph.
 
         Swallows and logs any failure so a compensating/post-delete deregister
         never masks the in-flight error (create) or fails a delete that already
-        succeeded.
+        succeeded. ``principal_context`` should be the same resolved principal
+        that was used for the preceding ``register_resource`` call so that
+        register and deregister are symmetric on all paths (including the
+        whitelisted pod path where the middleware principal is None).
         """
         try:
             await self.authorization_service.deregister_resource(
-                AgentexResource.agent(agent_id)
+                AgentexResource.agent(agent_id),
+                principal_context=principal_context,
             )
         except Exception:
             logger.exception(
@@ -61,16 +67,16 @@ class AgentsUseCase:
         self,
         agent_id: str,
         body_principal_context: Any = None,
-    ) -> bool:
+    ) -> tuple[bool, Any]:
         """Register a newly created agent in the authorization graph.
 
         Called before the row is persisted so a failure aborts the create with no
         orphaned row; the _safe_deregister compensation undoes it. Skipped with a
         warning when no creator identity is resolvable on the principal context:
         an agent has no parent edge, so the principal is the sole anchor for
-        ownership and there is nothing to attribute it to. Returns whether a
-        register call was actually made so compensation can avoid deregistering
-        a resource it never registered.
+        ownership and there is nothing to attribute it to. Returns a tuple of
+        (registered, resolved_principal_context) so the caller can pass the same
+        principal to _safe_deregister — keeping register and deregister symmetric.
 
         Prefer the middleware-derived principal (an authenticated user or service
         account). The whitelisted ``/agents/register`` path clears the middleware
@@ -88,12 +94,12 @@ class AgentsUseCase:
                 "Skipping authorization registration for agent: no creator resolvable",
                 extra={"agent_id": agent_id},
             )
-            return False
+            return False, None
         await self.authorization_service.register_resource(
             AgentexResource.agent(agent_id),
             principal_context=principal_context,
         )
-        return True
+        return True, principal_context
 
     @staticmethod
     def _has_resolvable_creator(principal_context: Any) -> bool:
@@ -234,7 +240,7 @@ class AgentsUseCase:
             # failure here aborts the create with no orphaned row. Only the
             # genuine-create path registers — the update paths above must not,
             # or re-registering would rewrite the owner to the current caller.
-            registered_in_auth = await self._register_in_auth(
+            registered_in_auth, resolved_principal = await self._register_in_auth(
                 agent.id, body_principal_context=body_principal_context
             )
             # This is a problem only if multiple pods spin up and then make a request all at the same time.
@@ -249,11 +255,15 @@ class AgentsUseCase:
                 # registration and re-fetch the persisted agent so downstream
                 # code (complete_deployment_registration) uses the correct agent_id
                 if registered_in_auth:
-                    await self._safe_deregister(agent.id)
+                    await self._safe_deregister(
+                        agent.id, principal_context=resolved_principal
+                    )
                 agent = await self.agent_repo.get(name=name)
             except Exception:
                 if registered_in_auth:
-                    await self._safe_deregister(agent.id)
+                    await self._safe_deregister(
+                        agent.id, principal_context=resolved_principal
+                    )
                 raise
         await self.complete_deployment_registration(
             agent, acp_url, registration_metadata
@@ -304,7 +314,7 @@ class AgentsUseCase:
         # Record ownership before persisting, same as register_agent's genuine
         # create branch. The early return above for an existing agent means we
         # only ever register on a true first-time build create.
-        registered_in_auth = await self._register_in_auth(agent.id)
+        registered_in_auth, resolved_principal = await self._register_in_auth(agent.id)
         # If multiple builds for the same new agent race, the first wins and the
         # rest re-fetch the persisted row instead of erroring.
         try:
@@ -315,11 +325,15 @@ class AgentsUseCase:
             )
             # undo our ownership registration from _register_in_auth
             if registered_in_auth:
-                await self._safe_deregister(agent.id)
+                await self._safe_deregister(
+                    agent.id, principal_context=resolved_principal
+                )
             agent = await self.agent_repo.get(name=name)
         except Exception:
             if registered_in_auth:
-                await self._safe_deregister(agent.id)
+                await self._safe_deregister(
+                    agent.id, principal_context=resolved_principal
+                )
             raise
         return agent
 

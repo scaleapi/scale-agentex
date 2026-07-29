@@ -199,6 +199,37 @@ class TestAgentRegisterOnCreate:
         compensated = authorization_service.deregister_resource.call_args.args[0]
         assert compensated.selector == registered.selector
 
+    async def test_duplicate_compensates_with_body_principal_on_whitelisted_path(self):
+        # Whitelisted path: middleware principal is None, body principal used for
+        # register. Compensation deregister must forward the same body principal —
+        # not None — so register and deregister are symmetric.
+        existing = _existing_agent(f"dw-dup-body-{uuid4().hex[:8]}")
+        agent_repo = Mock()
+        agent_repo.get = AsyncMock(side_effect=[ItemDoesNotExist("absent"), existing])
+        agent_repo.create = AsyncMock(side_effect=DuplicateItemError("exists"))
+        use_case, authorization_service = _build_use_case(
+            agent_repository=agent_repo,
+            principal=_principal(user_id=None, service_account_id=None),
+        )
+
+        body_principal = {
+            "service_account_id": "sa-from-manifest",
+            "account_id": "acct-1",
+        }
+
+        result = await use_case.register_agent(
+            name=existing.name,
+            description="dup on whitelisted path",
+            acp_url="http://new-acp",
+            body_principal_context=body_principal,
+        )
+
+        assert result.id == existing.id
+        authorization_service.register_resource.assert_awaited_once()
+        authorization_service.deregister_resource.assert_awaited_once()
+        deregister_call = authorization_service.deregister_resource.call_args
+        assert deregister_call.kwargs.get("principal_context") == body_principal
+
     async def test_update_path_does_not_register(self):
         # register_agent called with an agent_id is an update, not a create: it
         # must NOT register, or ownership would be rewritten to the caller.
