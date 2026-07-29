@@ -278,6 +278,10 @@ class AgentACPService(TaskMessageMixin):
         agent: AgentEntity,
         request_headers: dict[str, str] | None = None,
     ) -> dict[str, str]:
+        # Fall back to inbound request headers when callers don't pass them, so
+        # allowlisted client x-* headers are forwarded to the agent.
+        if request_headers is None:
+            request_headers = dict(self._request.headers)
         filtered_request_headers = filter_request_headers(request_headers)
         delegation_headers = self.get_delegation_headers(agent)
         auth_headers = await self.get_agent_auth_headers(agent)
