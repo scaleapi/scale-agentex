@@ -48,8 +48,10 @@ async function proxy(
       duplex: 'half',
     });
   } catch (error) {
-    // The disconnect above aborts `req.signal`, which rejects the fetch — not an upstream failure.
-    if (req.signal.aborted) return new Response(null, { status: 499 });
+    // The disconnect above rejects the fetch with the signal's abort reason itself, so identity —
+    // not `error.name` — separates it from a transport failure that coincides with a disconnect.
+    // Next's reason is a `ResponseAborted`, so an `AbortError` check would never fire.
+    if (error === req.signal.reason) return new Response(null, { status: 499 });
     throw error;
   }
 
