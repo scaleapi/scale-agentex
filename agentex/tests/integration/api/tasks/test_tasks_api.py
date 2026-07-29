@@ -141,6 +141,10 @@ class TestTasksAPIIntegration:
         for task in tasks:
             assert "id" in task and isinstance(task["id"], str)
 
+            # The list is a lean summary and must never carry `params` (the
+            # arbitrary create-time payload that can hold secrets/PII).
+            assert "params" not in task
+
             # Check if this is our test task
             if task["id"] == test_task.id:
                 found_test_task = True
@@ -499,32 +503,24 @@ class TestTasksAPIIntegration:
         assert response.status_code == 404
 
     #
-    async def test_list_tasks_includes_params_in_response(
+    async def test_list_tasks_omits_params_in_response(
         self, isolated_client, test_task_with_params
     ):
-        """Test that list tasks endpoint includes params field in response"""
+        """The list summary must omit `params` even when the task has them
+        (they can carry secrets/PII); fetch a single task for the full record."""
         # When - Request all tasks
         response = await isolated_client.get("/tasks")
 
-        # Then - Should succeed and include params in response
+        # Then - The task is present but its params are not serialized
         assert response.status_code == 200
         tasks = response.json()
         assert isinstance(tasks, list)
 
-        # Find our test task with params
         params_task = next(
             (task for task in tasks if task["id"] == test_task_with_params.id), None
         )
-        assert params_task is not None, "Task with params should be in the list"
-
-        # Verify params field exists and has correct structure
-        assert "params" in params_task
-        assert params_task["params"] is not None
-        assert params_task["params"]["model"] == "gpt-4"
-        assert params_task["params"]["temperature"] == 0.8
-        assert params_task["params"]["max_tokens"] == 2000
-        assert params_task["params"]["nested"]["setting"] == "value"
-        assert params_task["params"]["nested"]["numbers"] == [1, 2, 3]
+        assert params_task is not None, "Task should be in the list"
+        assert "params" not in params_task
 
     #
     async def test_get_task_by_id_includes_params_in_response(
@@ -579,26 +575,22 @@ class TestTasksAPIIntegration:
         assert task_data["params"]["nested"]["numbers"] == [1, 2, 3]
 
     #
-    async def test_list_tasks_handles_null_params_correctly(
+    async def test_list_tasks_omits_params_for_null_params_task(
         self, isolated_client, test_task
     ):
-        """Test that list tasks handles tasks with null params correctly"""
+        """A task created without params also has no `params` key in the list."""
         # When - Request all tasks (test_task has null params)
         response = await isolated_client.get("/tasks")
 
-        # Then - Should succeed and handle null params
+        # Then - The task is present with no params field
         assert response.status_code == 200
         tasks = response.json()
 
-        # Find our test task without params
         null_params_task = next(
             (task for task in tasks if task["id"] == test_task.id), None
         )
         assert null_params_task is not None
-
-        # Verify params field exists and is null
-        assert "params" in null_params_task
-        assert null_params_task["params"] is None
+        assert "params" not in null_params_task
 
     #
     async def test_get_task_by_id_handles_null_params_correctly(
