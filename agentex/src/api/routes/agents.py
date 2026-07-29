@@ -1,5 +1,4 @@
 import secrets
-import time
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -45,7 +44,7 @@ from src.utils.authorization_shortcuts import (
 )
 from src.utils.logging import make_logger
 from src.utils.rpc_metrics import (
-    record_rpc_request,
+    rpc_request_timing,
 )
 from src.utils.task_authorization import check_task_or_collapse_to_404
 
@@ -553,73 +552,62 @@ async def _handle_sync_rpc(
     request_headers: dict[str, str] | None = None,
 ) -> AgentRPCResponse:
     """Handle synchronous JSON-RPC requests."""
-    start = time.perf_counter()
-    try:
-        result_entity = await agents_acp_use_case.handle_rpc_request(
-            agent_id=agent_id,
-            agent_name=agent_name,
-            method=request.method,
-            params=request.params,
-            request_headers=request_headers,
-        )
+    with rpc_request_timing(request.method.value, streaming=False) as rpc_call:
+        try:
+            result_entity = await agents_acp_use_case.handle_rpc_request(
+                agent_id=agent_id,
+                agent_name=agent_name,
+                method=request.method,
+                params=request.params,
+                request_headers=request_headers,
+            )
 
-        if isinstance(result_entity, AsyncIterator):
-            raise ValueError(f"Expected non-async iterator, got {type(result_entity)}")
+            if isinstance(result_entity, AsyncIterator):
+                raise ValueError(
+                    f"Expected non-async iterator, got {type(result_entity)}"
+                )
 
-        if isinstance(result_entity, list):
-            serialized_result = [item.model_dump() for item in result_entity]
-        else:
-            serialized_result = result_entity.model_dump()
+            if isinstance(result_entity, list):
+                serialized_result = [item.model_dump() for item in result_entity]
+            else:
+                serialized_result = result_entity.model_dump()
 
-        # if request.method == AgentRPCMethod.MESSAGE_SEND:
-        #     if isinstance(result_entity, list):
-        #         result = [TaskMessage.model_validate(task_message_entity) for task_message_entity in result_entity]
-        #     else:
-        #         raise ValueError(f"Expected list of TaskMessage entities, got {type(result_entity)}")
-        # elif request.method == AgentRPCMethod.TASK_CREATE:
-        #     result = Task.model_validate(result_entity)
-        # elif request.method == AgentRPCMethod.TASK_CANCEL:
-        #     result = Task.model_validate(result_entity)
-        # elif request.method == AgentRPCMethod.EVENT_SEND:
-        #     result = Event.model_validate(result_entity)
-        # else:
-        #     raise ValueError(f"Unsupported method: {request.method}")
-        # logger.info(f"AgentRPCResponse Result: {result}")
-        record_rpc_request(
-            method=request.method.value,
-            streaming=False,
-            duration_s=time.perf_counter() - start,
-        )
-        return AgentRPCResponse.model_validate(
-            {
-                "id": request.id,
-                "result": serialized_result,
-                "error": None,
-            }
-        )
+            # if request.method == AgentRPCMethod.MESSAGE_SEND:
+            #     if isinstance(result_entity, list):
+            #         result = [TaskMessage.model_validate(task_message_entity) for task_message_entity in result_entity]
+            #     else:
+            #         raise ValueError(f"Expected list of TaskMessage entities, got {type(result_entity)}")
+            # elif request.method == AgentRPCMethod.TASK_CREATE:
+            #     result = Task.model_validate(result_entity)
+            # elif request.method == AgentRPCMethod.TASK_CANCEL:
+            #     result = Task.model_validate(result_entity)
+            # elif request.method == AgentRPCMethod.EVENT_SEND:
+            #     result = Event.model_validate(result_entity)
+            # else:
+            #     raise ValueError(f"Unsupported method: {request.method}")
+            # logger.info(f"AgentRPCResponse Result: {result}")
+            return AgentRPCResponse.model_validate(
+                {
+                    "id": request.id,
+                    "result": serialized_result,
+                    "error": None,
+                }
+            )
 
-    except ValidationError as e:
-        logger.error(f"Validation error in RPC request: {e}", exc_info=True)
-        error = JSONRPCError(code=-32602, message=f"Invalid parameters: {e}")
-        record_rpc_request(
-            method=request.method.value,
-            streaming=False,
-            duration_s=time.perf_counter() - start,
-            error_code=error.code,
-            error_type=type(e).__name__,
-        )
-        return AgentRPCResponse(id=request.id, error=error.model_dump(), result=None)
-    except Exception as e:
-        logger.error(f"Error handling JSON-RPC request: {e}", exc_info=True)
-        error = JSONRPCError(code=-32603, message=str(e))
-        record_rpc_request(
-            method=request.method.value,
-            streaming=False,
-            duration_s=time.perf_counter() - start,
-            error_code=error.code,
-            error_type=type(e).__name__,
-        )
-        return AgentRPCResponse(id=request.id, error=error.model_dump(), result=None)
+        except ValidationError as e:
+            logger.error(f"Validation error in RPC request: {e}", exc_info=True)
+            error = JSONRPCError(code=-32602, message=f"Invalid parameters: {e}")
+            rpc_call.fail(error.code, e)
+            return AgentRPCResponse(
+                id=request.id, error=error.model_dump(), result=None
+            )
+        except Exception as e:
+            logger.error(f"Error handling JSON-RPC request: {e}", exc_info=True)
+            error = JSONRPCError(code=-32603, message=str(e))
+            rpc_call.fail(error.code, e)
+            return AgentRPCResponse(
+                id=request.id, error=error.model_dump(), result=None
+            )
 
 
 async def _handle_streaming_rpc(
@@ -632,66 +620,60 @@ async def _handle_streaming_rpc(
     """Handle streaming JSON-RPC requests."""
 
     async def rpc_response_generator():
-        start = time.perf_counter()
-        error_type: str | None = None
-        result_entity_async_iterator = None
-        try:
-            result_entity_async_iterator = await agents_acp_use_case.handle_rpc_request(
-                agent_id=agent_id,
-                agent_name=agent_name,
-                method=request.method,
-                params=request.params,
-                request_headers=request_headers,
-            )
-
-            if not isinstance(result_entity_async_iterator, AsyncIterator):
-                raise ValueError(
-                    f"Expected AsyncIterator, got {type(result_entity_async_iterator)}"
+        with rpc_request_timing(request.method.value, streaming=True) as rpc_call:
+            result_entity_async_iterator = None
+            try:
+                result_entity_async_iterator = (
+                    await agents_acp_use_case.handle_rpc_request(
+                        agent_id=agent_id,
+                        agent_name=agent_name,
+                        method=request.method,
+                        params=request.params,
+                        request_headers=request_headers,
+                    )
                 )
 
-            # At this point we know it's an AsyncIterator[TaskMessage]
-            async for task_message_update_entity in result_entity_async_iterator:
-                logger.debug(
-                    f"Streaming message chunk type: {type(task_message_update_entity).__name__}"
-                )
-                rpc_response = AgentRPCResponse.model_validate(
-                    {
-                        "id": request.id,
-                        "result": task_message_update_entity.model_dump(),
-                        "error": None,
-                    }
-                )
-                # Yield JSON bytes with newline for NDJSON format
-                yield rpc_response.model_dump_json().encode() + b"\n"
+                if not isinstance(result_entity_async_iterator, AsyncIterator):
+                    raise ValueError(
+                        f"Expected AsyncIterator, got {type(result_entity_async_iterator)}"
+                    )
 
-        except Exception as e:
-            logger.error(f"Error in streaming RPC response: {e}", exc_info=True)
-            error_type = type(e).__name__
-            # Yield error response
-            error_response = AgentRPCResponse(
-                id=request.id,
-                result=None,
-                error=JSONRPCError(code=-32603, message=str(e)).model_dump(),
-            )
-            yield error_response.model_dump_json().encode() + b"\n"
-        finally:
-            record_rpc_request(
-                method=request.method.value,
-                streaming=True,
-                duration_s=time.perf_counter() - start,
-                error_code=None if error_type is None else -32603,
-                error_type=error_type,
-            )
-            # CRITICAL: Ensure the async iterator is properly closed
-            # This ensures HTTP connections are released back to the pool
-            if result_entity_async_iterator is not None and hasattr(
-                result_entity_async_iterator, "aclose"
-            ):
-                try:
-                    await result_entity_async_iterator.aclose()
-                    logger.debug("Closed streaming iterator properly")
-                except Exception as e:
-                    logger.warning(f"Error closing streaming iterator: {e}")
+                # At this point we know it's an AsyncIterator[TaskMessage]
+                async for task_message_update_entity in result_entity_async_iterator:
+                    logger.debug(
+                        f"Streaming message chunk type: {type(task_message_update_entity).__name__}"
+                    )
+                    rpc_response = AgentRPCResponse.model_validate(
+                        {
+                            "id": request.id,
+                            "result": task_message_update_entity.model_dump(),
+                            "error": None,
+                        }
+                    )
+                    # Yield JSON bytes with newline for NDJSON format
+                    yield rpc_response.model_dump_json().encode() + b"\n"
+
+            except Exception as e:
+                logger.error(f"Error in streaming RPC response: {e}", exc_info=True)
+                rpc_call.fail(-32603, e)
+                # Yield error response
+                error_response = AgentRPCResponse(
+                    id=request.id,
+                    result=None,
+                    error=JSONRPCError(code=-32603, message=str(e)).model_dump(),
+                )
+                yield error_response.model_dump_json().encode() + b"\n"
+            finally:
+                # CRITICAL: Ensure the async iterator is properly closed
+                # This ensures HTTP connections are released back to the pool
+                if result_entity_async_iterator is not None and hasattr(
+                    result_entity_async_iterator, "aclose"
+                ):
+                    try:
+                        await result_entity_async_iterator.aclose()
+                        logger.debug("Closed streaming iterator properly")
+                    except Exception as e:
+                        logger.warning(f"Error closing streaming iterator: {e}")
 
     return StreamingResponse(
         rpc_response_generator(),

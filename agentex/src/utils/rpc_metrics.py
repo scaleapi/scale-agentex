@@ -32,12 +32,17 @@ semconv; names may still evolve upstream.)
 
 from __future__ import annotations
 
+import time
+from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from src.utils.logging import make_logger
 from src.utils.otel_metrics import get_meter
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from opentelemetry.metrics import Counter, Histogram
 
 logger = make_logger(__name__)
@@ -196,3 +201,55 @@ def record_rpc_request(
         logger.info("Agent RPC completed", extra=completion_fields)
     except Exception:
         logger.debug("Failed to emit agentex.rpc metrics", exc_info=True)
+
+
+@dataclass
+class RpcCallOutcome:
+    """Mutable outcome a handler fills in inside ``rpc_request_timing``.
+
+    ``error_code`` set => the call returned a ``JSONRPCError`` frame (counted in
+    ``agentex.rpc.errors``). ``error_type`` alone => the call terminated
+    abnormally without delivering an error frame (e.g. client disconnect
+    mid-stream) — visible on the duration/request series but not an RPC error.
+    """
+
+    error_code: int | None = None
+    error_type: str | None = None
+
+    def fail(self, code: int, exc: BaseException) -> None:
+        """Mark the call as failed with a JSON-RPC error code."""
+        self.error_code = code
+        self.error_type = type(exc).__name__
+
+
+@contextmanager
+def rpc_request_timing(method: str, streaming: bool) -> Iterator[RpcCallOutcome]:
+    """
+    Time one RPC call and record it exactly once on exit.
+
+    The handler classifies failures it converts into ``JSONRPCError`` responses
+    via ``outcome.fail(code, exc)``; timing, the single ``record_rpc_request``
+    call, and abnormal-exit classification live here.
+
+    An exception escaping the body (including ``GeneratorExit`` /
+    ``CancelledError`` when a streaming client disconnects mid-response) is
+    recorded with ``error.type`` but no ``error_code`` — no error frame was
+    delivered, so it must not count as a JSON-RPC error, but it must not read
+    as a clean success either — then re-raised.
+    """
+    outcome = RpcCallOutcome()
+    start = time.perf_counter()
+    try:
+        yield outcome
+    except BaseException as e:
+        if outcome.error_type is None:
+            outcome.error_type = type(e).__name__
+        raise
+    finally:
+        record_rpc_request(
+            method=method,
+            streaming=streaming,
+            duration_s=time.perf_counter() - start,
+            error_code=outcome.error_code,
+            error_type=outcome.error_type,
+        )

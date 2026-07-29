@@ -1,13 +1,15 @@
 """Tests for the InstrumentedAsyncAdaptedQueuePool connection-acquisition metrics.
 
-These three series (wait_time / pending_requests / timeouts) can't be sourced
-from SQLAlchemy's checkout/checkin events, so they're emitted from a connect()
-override. The contract under test:
+These series (wait_time / pending_requests / timeouts / failures) can't be
+sourced from SQLAlchemy's checkout/checkin events, so they're emitted from a
+connect() override. The contract under test:
 
   * unattached (OTel disabled) -> connect() is a pure passthrough,
   * success -> pending +1 then -1, wait_time recorded once, no timeout,
   * pool timeout -> timeout counted, pending balanced, wait_time NOT recorded,
     and the original error still propagates,
+  * any other acquisition error -> failure counted with error.type, no timeout,
+    pending balanced, original error still propagates,
   * recreate() carries the instruments forward so metrics survive a dispose.
 """
 
@@ -38,6 +40,7 @@ def _mock_instruments() -> tuple[_PoolWaitInstruments, dict]:
         wait_time=MagicMock(),
         pending_requests=MagicMock(),
         timeouts=MagicMock(),
+        failures=MagicMock(),
         attributes=attributes,
     )
     return instruments, attributes
@@ -88,6 +91,7 @@ def test_connect_timeout_counts_timeout_and_skips_wait_time():
             pool.connect()
 
     instruments.timeouts.add.assert_called_once_with(1, attributes)
+    instruments.failures.add.assert_not_called()
     # A timed-out acquisition obtained no connection, so no wait_time sample.
     instruments.wait_time.record.assert_not_called()
     # pending is still balanced even though acquisition failed.
@@ -98,7 +102,7 @@ def test_connect_timeout_counts_timeout_and_skips_wait_time():
 
 
 @pytest.mark.unit
-def test_connect_non_timeout_error_balances_pending_without_counting_timeout():
+def test_connect_non_timeout_error_counts_failure_with_error_type():
     pool = _make_pool()
     instruments, attributes = _mock_instruments()
     pool.attach_wait_instruments(instruments)
@@ -109,7 +113,12 @@ def test_connect_non_timeout_error_balances_pending_without_counting_timeout():
         with pytest.raises(RuntimeError):
             pool.connect()
 
+    # Not a pool timeout — it lands in the catch-all failure counter, tagged
+    # with the exception type, so refused/dropped connections aren't invisible.
     instruments.timeouts.add.assert_not_called()
+    instruments.failures.add.assert_called_once_with(
+        1, {**attributes, "error.type": "RuntimeError"}
+    )
     instruments.wait_time.record.assert_not_called()
     assert instruments.pending_requests.add.call_args_list == [
         call(1, attributes),

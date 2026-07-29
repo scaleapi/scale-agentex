@@ -102,12 +102,13 @@ class _PoolWaitInstruments:
     configured and the override degrades to a straight passthrough.
     """
 
-    __slots__ = ("wait_time", "pending_requests", "timeouts", "attributes")
+    __slots__ = ("wait_time", "pending_requests", "timeouts", "failures", "attributes")
 
-    def __init__(self, wait_time, pending_requests, timeouts, attributes):
+    def __init__(self, wait_time, pending_requests, timeouts, failures, attributes):
         self.wait_time = wait_time
         self.pending_requests = pending_requests
         self.timeouts = timeouts
+        self.failures = failures
         self.attributes = attributes
 
 
@@ -131,6 +132,8 @@ class InstrumentedAsyncAdaptedQueuePool(AsyncAdaptedQueuePool):
       * ``db.client.connection.wait_time``        — time to obtain a connection
       * ``db.client.connection.pending_requests`` — requests waiting right now
       * ``db.client.connection.timeouts``         — pool acquisition timeouts
+      * ``db.client.connection.failures_total``   — non-timeout acquisition
+        failures (DB refusing connections, network errors), by ``error.type``
 
     The pool is constructed inside ``create_async_engine`` before the collector
     has meters, so instruments are attached post-construction; until then, and
@@ -162,6 +165,15 @@ class InstrumentedAsyncAdaptedQueuePool(AsyncAdaptedQueuePool):
             connection = super().connect()
         except SQLAlchemyTimeoutError:
             instruments.timeouts.add(1, attributes)
+            raise
+        except Exception as exc:
+            # Non-timeout acquisition failure (DB at max_connections, network
+            # drop while establishing, auth error). Without this branch the
+            # attempt vanishes from metrics: no wait_time sample (nothing was
+            # acquired) and no timeout.
+            instruments.failures.add(
+                1, {**attributes, "error.type": type(exc).__name__}
+            )
             raise
         finally:
             instruments.pending_requests.add(-1, attributes)
@@ -278,6 +290,17 @@ class PostgresPoolMetrics:
             unit="{timeout}",
         )
 
+        # Custom extension (semconv only covers timeouts): acquisitions that
+        # failed for any other reason, tagged with error.type.
+        self._connection_failures: Counter = meter.create_counter(
+            name="db.client.connection.failures_total",
+            description=(
+                "Connection acquisitions that failed for a reason other than a "
+                "pool timeout (DB refusing connections, network errors)"
+            ),
+            unit="{failure}",
+        )
+
         # Hand the instruments to the pool so its connect() override can emit.
         # Only InstrumentedAsyncAdaptedQueuePool carries the hook; a differently
         # configured engine (e.g. NullPool in tests) is left as a passthrough.
@@ -288,6 +311,7 @@ class PostgresPoolMetrics:
                     wait_time=self._connection_wait_time,
                     pending_requests=self._connection_pending_requests,
                     timeouts=self._connection_timeouts,
+                    failures=self._connection_failures,
                     attributes=self.base_attributes,
                 )
             )
