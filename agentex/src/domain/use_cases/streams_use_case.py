@@ -16,6 +16,12 @@ from src.domain.entities.task_stream_events import (
 )
 from src.domain.services.task_service import DAgentTaskService
 from src.utils.logging import make_logger
+from src.utils.stream_metrics import (
+    StreamOutcome,
+    record_stream_closed,
+    record_stream_opened,
+    record_stream_stall,
+)
 from src.utils.stream_topics import get_task_event_stream_topic
 
 logger = make_logger(__name__)
@@ -101,25 +107,48 @@ class StreamsUseCase:
             task_id = task.id
 
         stream_topic = get_task_event_stream_topic(task_id=task_id)
-        # Snapshot the read cursor BEFORE yielding "connected". "connected" is
-        # the client's cue to send its message, which makes the agent start
-        # XADD-ing deltas. Snapshotting after the yield lets a congested relay
-        # fall behind far enough that those deltas land before the snapshot and
-        # are never read. Snapshotting first resolves to "0-0" (stream is empty
-        # until the client sends), so we read from the beginning.
-        last_id = await self.stream_repository.get_stream_tail_id(stream_topic)
-        # Send initial connection data
-        yield f"data: {TaskStreamConnectedEventEntity(type='connected', taskId=task_id).model_dump_json()}\n\n"
-        last_message_time = asyncio.get_running_loop().time()
-        ping_interval = float(
-            self.environment_variables.SSE_KEEPALIVE_PING_INTERVAL
-        )  # Configurable keepalive ping interval
-        # Track consecutive read failures so we can back off and avoid a
-        # tight error loop. When the Redis pool is exhausted, every connected
-        # client's read fails on each cycle; without backoff this turns into a
-        # log-ingestion firehose (one failure per client per cycle, ~once/sec).
-        consecutive_errors = 0
+
+        # A stream is "open" from here on. Pair this with exactly one
+        # record_stream_closed (in the finally below) so the active-stream gauge
+        # stays balanced even if setup — the tail snapshot or the first yield —
+        # raises. Placed after task resolution so a bad task_name never counts
+        # as an opened stream.
+        record_stream_opened()
+        stream_start_time = asyncio.get_running_loop().time()
+        outcome: StreamOutcome = "completed"
         try:
+            # Snapshot the read cursor BEFORE yielding "connected". "connected"
+            # is the client's cue to send its message, which makes the agent
+            # start XADD-ing deltas. Snapshotting after the yield lets a
+            # congested relay fall behind far enough that those deltas land
+            # before the snapshot and are never read. Snapshotting first resolves
+            # to "0-0" (stream is empty until the client sends), so we read from
+            # the beginning.
+            last_id = await self.stream_repository.get_stream_tail_id(stream_topic)
+            # Send initial connection data
+            yield f"data: {TaskStreamConnectedEventEntity(type='connected', taskId=task_id).model_dump_json()}\n\n"
+            now = asyncio.get_running_loop().time()
+            # last_message_time drives the keepalive ping and is reset by pings;
+            # last_event_time tracks only real data pushes (a ping is not a data
+            # event) and drives stall detection, so a persistently quiet stream
+            # still trips the stall signal even while keepalive pings flow.
+            last_message_time = now
+            last_event_time = now
+            ping_interval = float(
+                self.environment_variables.SSE_KEEPALIVE_PING_INTERVAL
+            )  # Configurable keepalive ping interval
+            stall_threshold = float(
+                self.environment_variables.SSE_STREAM_STALL_THRESHOLD_SECONDS
+            )
+            # Whether the current quiet spell has already been counted, so one
+            # stall episode increments the counter once (measuring stall onsets)
+            # rather than once per idle cycle. Reset when a data event flows.
+            stalled = False
+            # Track consecutive read failures so we can back off and avoid a
+            # tight error loop. When the Redis pool is exhausted, every connected
+            # client's read fails on each cycle; without backoff this turns into a
+            # log-ingestion firehose (one failure per client per cycle, ~once/sec).
+            consecutive_errors = 0
             # Application-level control loop
             while True:
                 try:
@@ -135,7 +164,10 @@ class StreamsUseCase:
                         # Send the data to the client
                         data_str = f"data: {data.model_dump_json()}\n\n"
                         yield data_str
-                        last_message_time = asyncio.get_running_loop().time()
+                        now = asyncio.get_running_loop().time()
+                        last_message_time = now
+                        last_event_time = now
+                        stalled = False
                         await asyncio.sleep(0.02)
 
                     # A read cycle completed without raising — the stream is
@@ -146,6 +178,16 @@ class StreamsUseCase:
                     # to prevent tight loops and send keepalive ping if needed
                     if message_count == 0:
                         current_time = asyncio.get_running_loop().time()
+                        # No data event pushed for the stall window: count the
+                        # onset once. Keepalive pings deliberately do not reset
+                        # last_event_time, so a persistently quiet stream is
+                        # visible even though the connection stays alive.
+                        if (
+                            current_time - last_event_time >= stall_threshold
+                            and not stalled
+                        ):
+                            stalled = True
+                            record_stream_stall()
                         if current_time - last_message_time >= ping_interval:
                             yield ":ping\n\n"
                             last_message_time = current_time
@@ -182,15 +224,20 @@ class StreamsUseCase:
 
         except asyncio.CancelledError:
             # Just exit the generator on cancellation
+            outcome = "client_disconnect"
             logger.info(f"Client disconnected from SSE stream for task {task_id}")
-            pass
         except Exception as e:
+            outcome = "error"
             logger.error(
                 f"Fatal error in SSE stream for task {task_id}: {e}", exc_info=True
             )
             yield f"data: {TaskStreamErrorEventEntity(type='error', message=str(e)).model_dump_json()}\n\n"
         finally:
             logger.info(f"SSE stream for task {task_id} has ended")
+            record_stream_closed(
+                outcome,
+                asyncio.get_running_loop().time() - stream_start_time,
+            )
             await self.cleanup_stream(stream_topic)
 
 
