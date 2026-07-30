@@ -62,6 +62,14 @@ _active_updown: UpDownCounter | None = None
 _stall_counter: Counter | None = None
 _instruments_initialized = False
 
+# Process-local count of currently-open streams, used solely to emit the StatsD
+# ``active`` gauge as an absolute value. DogStatsD gauges are last-value-wins and
+# do not honor deltas (unlike Etsy StatsD); increment/decrement would instead
+# submit a COUNT — the rate of change — never the concurrency level. So the
+# StatsD path keeps the running total here and reports it via ``statsd.gauge``.
+# The OTel ``UpDownCounter`` expresses this natively and needs no bookkeeping.
+_active_stream_count = 0
+
 
 def _ensure_instruments() -> None:
     """Create the OTel instruments on first use. No-op if OTel is not configured."""
@@ -111,6 +119,7 @@ def record_stream_opened() -> None:
     Pair every call with exactly one ``record_stream_closed`` so the active gauge
     stays balanced. Never raises: see ``record_stream_closed``.
     """
+    global _active_stream_count
     try:
         _ensure_instruments()
 
@@ -121,7 +130,9 @@ def record_stream_opened() -> None:
 
         if _STATSD_ENABLED:
             statsd.increment("agentex.task_stream.opened")
-            statsd.increment("agentex.task_stream.active")
+            # Report the concurrency level as an absolute gauge, not a delta.
+            _active_stream_count += 1
+            statsd.gauge("agentex.task_stream.active", _active_stream_count)
     except Exception:
         logger.debug("Failed to emit agentex.task_stream.opened metric", exc_info=True)
 
@@ -129,7 +140,7 @@ def record_stream_opened() -> None:
 def record_stream_closed(outcome: StreamOutcome, duration_seconds: float) -> None:
     """
     Record a task-event stream closing: bumps the closed counter (tagged by
-    outcome), records the stream lifetime, and decrements the active gauge.
+    outcome), records the stream lifetime, and lowers the active gauge.
 
     Args:
         outcome: One of "completed", "client_disconnect", "error".
@@ -138,6 +149,7 @@ def record_stream_closed(outcome: StreamOutcome, duration_seconds: float) -> Non
     Never raises: emission failures (e.g. a StatsD UDP socket error or an OTel
     SDK fault) are swallowed so instrumentation can never disrupt the SSE path.
     """
+    global _active_stream_count
     try:
         _ensure_instruments()
 
@@ -152,7 +164,9 @@ def record_stream_closed(outcome: StreamOutcome, duration_seconds: float) -> Non
             statsd.increment("agentex.task_stream.closed", tags=[f"outcome:{outcome}"])
             # Datadog histograms conventionally take milliseconds for durations.
             statsd.histogram("agentex.task_stream.duration", duration_seconds * 1000)
-            statsd.decrement("agentex.task_stream.active")
+            # Report the concurrency level as an absolute gauge, not a delta.
+            _active_stream_count -= 1
+            statsd.gauge("agentex.task_stream.active", _active_stream_count)
     except Exception:
         logger.debug("Failed to emit agentex.task_stream.closed metric", exc_info=True)
 
