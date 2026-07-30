@@ -46,7 +46,7 @@ Here is what we will build together in this README. We'll start with a Hello Wor
 
 https://github.com/user-attachments/assets/9badad0d-f939-4243-ba39-68cafdae0078
 
-> **Windows Users**: Please see [WINDOWS.md](WINDOWS.md) for a complete Windows-specific guide with PowerShell commands and troubleshooting tips.
+> **Windows Users**: Please see [WINDOWS.md](WINDOWS.md) for a complete Windows-specific guide. If WSL2 is available, run the docker-free local mode (`./dev.sh no-docker`) inside WSL2; otherwise (no WSL2 / locked-down environments) use the Docker-based flow with the PowerShell `build.ps1` scripts.
 
 
 ### Prerequisites

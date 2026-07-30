@@ -2,6 +2,54 @@
 
 This guide explains how to use Agentex on Windows. All functionality available through Makefiles is also available via PowerShell scripts.
 
+## Choosing a Setup
+
+There are two supported ways to run Agentex on Windows. Pick based on whether WSL2 is
+available in your environment:
+
+| Your environment | Recommended setup |
+|---|---|
+| **Windows with WSL2 available** | Docker-free local mode (`./dev.sh no-docker`) **inside WSL2** |
+| **Windows without WSL2 / locked-down or managed environments** | Docker-based local dev via PowerShell (`.\build.ps1 dev`) |
+
+**Why WSL2 → Docker-free.** The docker-free runner spawns host processes and embedded
+datastores (Postgres, Redis, MongoDB, a Temporal dev server) and relies on POSIX process
+and networking behavior. It runs cleanly inside a WSL2 Linux distribution and follows the
+same `./dev.sh` workflow documented in the [main README](README.md) — no Docker Desktop or
+container runtime needed.
+
+**Why no WSL2 → Docker.** Where WSL2 isn't permitted (some corporate/managed machines) or
+you'd rather stay in native Windows tooling, use the Docker-based flow with the PowerShell
+`build.ps1` scripts below. This is the fully native-Windows path and is what the rest of
+this guide covers.
+
+### Docker-free local mode inside WSL2
+
+If WSL2 is available, this is the simplest path.
+
+1. Install WSL2 with a Linux distribution (from an elevated PowerShell):
+
+   ```powershell
+   wsl --install
+   ```
+
+   Reboot if prompted, then launch your distribution (e.g. Ubuntu) and clone the repo
+   **inside the WSL2 filesystem** (e.g. under `~/`, not `/mnt/c/...`) for correct file
+   permissions and performance.
+
+2. From the repo root inside WSL2, run the docker-free stack exactly as on macOS/Linux:
+
+   ```bash
+   ./dev.sh no-docker            # whole stack, no Docker
+   ./dev.sh no-docker --lean     # Postgres + Redis + API + MongoDB only
+   ```
+
+   See the [main README](README.md) for the full no-docker walkthrough, port defaults, and
+   agent-connection notes. All `stop` / `status` / `logs` / `restart` commands work the same.
+
+> Everything from **Prerequisites** onward in this guide covers the **Docker-based**
+> native-Windows path. Use it if WSL2 isn't available to you.
+
 ## Prerequisites
 
 ### Required Software
