@@ -108,15 +108,20 @@ class StreamsUseCase:
 
         stream_topic = get_task_event_stream_topic(task_id=task_id)
 
-        # A stream is "open" from here on. Pair this with exactly one
-        # record_stream_closed (in the finally below) so the active-stream gauge
-        # stays balanced even if setup — the tail snapshot or the first yield —
-        # raises. Placed after task resolution so a bad task_name never counts
+        # Capture the timing/outcome state the finally needs *before* marking the
+        # stream open, then flip ``opened`` as the first statement inside the try.
+        # This keeps record_stream_opened paired with exactly one
+        # record_stream_closed: the open lives inside the try, so any failure
+        # after it still routes through the finally and rebalances the active
+        # gauge — closing the narrow window that opening before the try left
+        # exposed. Placed after task resolution so a bad task_name never counts
         # as an opened stream.
-        record_stream_opened()
         stream_start_time = asyncio.get_running_loop().time()
         outcome: StreamOutcome = "completed"
+        opened = False
         try:
+            record_stream_opened()
+            opened = True
             # Snapshot the read cursor BEFORE yielding "connected". "connected"
             # is the client's cue to send its message, which makes the agent
             # start XADD-ing deltas. Snapshotting after the yield lets a
@@ -234,10 +239,13 @@ class StreamsUseCase:
             yield f"data: {TaskStreamErrorEventEntity(type='error', message=str(e)).model_dump_json()}\n\n"
         finally:
             logger.info(f"SSE stream for task {task_id} has ended")
-            record_stream_closed(
-                outcome,
-                asyncio.get_running_loop().time() - stream_start_time,
-            )
+            # Only close what we actually opened, so the active gauge is never
+            # decremented for a stream that never incremented it.
+            if opened:
+                record_stream_closed(
+                    outcome,
+                    asyncio.get_running_loop().time() - stream_start_time,
+                )
             await self.cleanup_stream(stream_topic)
 
 

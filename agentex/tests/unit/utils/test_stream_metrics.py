@@ -87,9 +87,11 @@ def test_record_stream_closed_emits_statsd_when_enabled():
         "agentex.task_stream.closed",
         tags=["outcome:client_disconnect"],
     )
-    # Duration is reported to StatsD in milliseconds.
+    # Duration is reported to StatsD in milliseconds, tagged by outcome.
     mock_statsd.histogram.assert_called_once_with(
-        "agentex.task_stream.duration", 3250.0
+        "agentex.task_stream.duration",
+        3250.0,
+        tags=["outcome:client_disconnect"],
     )
     # Concurrency ("active") is OTel-only, so closing emits no StatsD gauge.
     mock_statsd.gauge.assert_not_called()
@@ -132,7 +134,7 @@ def test_closed_records_otel_instruments_with_outcome():
 
     assert opened.calls == [(1, None)]
     assert closed.calls == [(1, {"outcome": "error"})]
-    assert duration.calls == [(4.0, None)]
+    assert duration.calls == [(4.0, {"outcome": "error"})]
     # +1 on open, -1 on close nets to a balanced active gauge.
     assert active.calls == [(1, None), (-1, None)]
 

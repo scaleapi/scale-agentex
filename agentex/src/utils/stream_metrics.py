@@ -133,7 +133,8 @@ def record_stream_opened() -> None:
 def record_stream_closed(outcome: StreamOutcome, duration_seconds: float) -> None:
     """
     Record a task-event stream closing: bumps the closed counter (tagged by
-    outcome), records the stream lifetime, and lowers the active gauge.
+    outcome), records the stream lifetime (also tagged by outcome), and lowers
+    the active gauge.
 
     Args:
         outcome: One of "completed", "client_disconnect", "error".
@@ -148,14 +149,18 @@ def record_stream_closed(outcome: StreamOutcome, duration_seconds: float) -> Non
         if _closed_counter is not None:
             _closed_counter.add(1, {"outcome": outcome})
         if _duration_histogram is not None:
-            _duration_histogram.record(duration_seconds)
+            _duration_histogram.record(duration_seconds, {"outcome": outcome})
         if _active_updown is not None:
             _active_updown.add(-1)
 
         if _STATSD_ENABLED:
             statsd.increment("agentex.task_stream.closed", tags=[f"outcome:{outcome}"])
             # Datadog histograms conventionally take milliseconds for durations.
-            statsd.histogram("agentex.task_stream.duration", duration_seconds * 1000)
+            statsd.histogram(
+                "agentex.task_stream.duration",
+                duration_seconds * 1000,
+                tags=[f"outcome:{outcome}"],
+            )
             # No StatsD "active" gauge — concurrency is OTel-only; a per-worker
             # DogStatsD gauge would flap rather than sum (see record_stream_opened).
     except Exception:
