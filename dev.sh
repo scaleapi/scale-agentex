@@ -539,16 +539,12 @@ show_status() {
         echo -e "${RED}Stopped${NC}"
     fi
 
-    # Temporal UI port differs: local dev server uses 8233, Docker UI uses 8080.
-    local temporal_ui="http://localhost:8080"
-    [ "$mode" = "nodocker" ] && temporal_ui="http://localhost:8233"
-
     echo ""
     echo "=== URLs ==="
     echo "Frontend:     http://localhost:3000"
     echo "Backend API:  http://localhost:5003"
     echo "Swagger:      http://localhost:5003/swagger"
-    echo "Temporal UI:  $temporal_ui"
+    echo "Temporal UI:  http://localhost:8080"
     echo ""
 }
 
@@ -654,7 +650,7 @@ start_all_nodocker() {
     echo "Frontend:     http://localhost:3000"
     echo "Backend API:  http://localhost:5003"
     echo "Swagger:      http://localhost:5003/swagger"
-    echo "Temporal UI:  http://localhost:8233"
+    echo "Temporal UI:  http://localhost:8080"
     echo ""
     echo "=== Commands ==="
     echo "./dev.sh logs      - View all logs"

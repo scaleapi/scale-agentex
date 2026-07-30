@@ -111,6 +111,10 @@ Just run one command — no Docker required:
 ./dev.sh no-docker
 ```
 
+> Once you see `[SUCCESS] Development environment is ready!` in the terminal, the stack is
+> up and waiting. Leave this terminal running and move on to
+> [Create Your First Agent](#create-your-first-agent) in a new terminal.
+
 That's it. This will automatically:
 - Install Homebrew, uv, Node.js, and agentex-sdk if missing (macOS)
 - Install all backend and frontend dependencies
@@ -129,9 +133,7 @@ Once ready:
 | Frontend UI | http://localhost:3000 |
 | Backend API | http://localhost:5003 |
 | Swagger Docs | http://localhost:5003/swagger |
-| Temporal UI | http://localhost:8233 |
-
-> With `./dev.sh` (Docker) the Temporal UI is on http://localhost:8080 instead.
+| Temporal UI | http://localhost:8080 |
 
 #### Other commands
 ```bash
@@ -157,9 +159,9 @@ Once ready:
 > worker needs it, so `./dev.sh no-docker` auto-installs `mongod` (via Homebrew) and startup
 > **fails fast** with an install message if it can't be made available. Point at an
 > existing MongoDB with `--mongo-uri <uri>` to skip the local `mongod`. The OTel
-> collector is optional; if it's absent the runner continues without telemetry. In
-> no-docker mode the Temporal UI is at http://localhost:8233 (not :8080). Same `stop` / `status` /
-> `logs` / `restart` commands apply.
+> collector is optional; if it's absent the runner continues without telemetry. Ports
+> match Docker mode (Temporal UI at http://localhost:8080), so the same URLs work either
+> way. Same `stop` / `status` / `logs` / `restart` commands apply.
 
 **Connecting agents in no-docker mode.** Agents scaffolded by `agentex init` register their
 ACP URL as `http://host.docker.internal:<port>` (so a *Docker* backend can reach an

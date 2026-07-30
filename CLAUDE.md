@@ -67,8 +67,9 @@ Docker-free mode (host processes + embedded datastores, no Docker):
 > makes the runner fail fast (with an install message) rather than crash the worker.
 > `./dev.sh no-docker` auto-installs `mongod`; `make dev-no-docker` / direct `python -m
 > scripts.dev_nodocker` do not, so install `mongod` yourself or pass `--mongo-uri <uri>` to
-> point at an external MongoDB. In no-docker mode the Temporal UI is on :8233 (Docker mode
-> uses :8080).
+> point at an external MongoDB. No-docker port defaults match Docker mode (Temporal UI on
+> :8080), so no port flags are needed for quick start; pass `--redis-port` / `--ui-port` /
+> etc. if a Docker service already holds a port.
 >
 > Agents register their ACP URL as `host.docker.internal` (for a Docker backend), which
 > a host-process backend can't resolve. No-docker mode sets `AGENTEX_ACP_HOST_OVERRIDE=127.0.0.1`

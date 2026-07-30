@@ -97,8 +97,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--redis-port",
         type=int,
-        default=6390,
-        help="TCP port for embedded Redis (default 6390; avoids a Docker Redis on 6379).",
+        default=6379,
+        help="TCP port for embedded Redis (default 6379, matching Docker mode so quick start needs no port flag; pass a free port if a Docker Redis already holds 6379).",
     )
     p.add_argument(
         "--temporal-port",
@@ -109,8 +109,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--ui-port",
         type=int,
-        default=8233,
-        help="Port for the Temporal Web UI (default 8233).",
+        default=8080,
+        help="Port for the Temporal Web UI (default 8080, matching Docker mode so the same URL works in both; the Temporal dev server's own default is 8233).",
     )
     p.add_argument(
         "--mongo-port",
