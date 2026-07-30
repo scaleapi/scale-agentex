@@ -47,7 +47,6 @@ def test_record_functions_swallow_emission_errors():
     ):
         mock_statsd.increment.side_effect = OSError("socket in a bad state")
         mock_statsd.histogram.side_effect = OSError("socket in a bad state")
-        mock_statsd.gauge.side_effect = OSError("socket in a bad state")
 
         # None of these should raise despite the backend blowing up.
         stream_metrics.record_stream_opened()
@@ -62,15 +61,14 @@ def test_record_stream_opened_emits_statsd_when_enabled():
         patch.object(stream_metrics, "_instruments_initialized", True),
         patch.object(stream_metrics, "_opened_counter", None),
         patch.object(stream_metrics, "_active_updown", None),
-        patch.object(stream_metrics, "_active_stream_count", 0),
         patch.object(stream_metrics, "statsd") as mock_statsd,
     ):
         stream_metrics.record_stream_opened()
 
-    # Opening bumps the opened counter and reports the active concurrency level
-    # as an absolute gauge (DogStatsD gauges are last-value-wins, not deltas).
+    # Opening bumps the opened counter. Concurrency ("active") is deliberately
+    # OTel-only, so the StatsD path emits no gauge (see module rationale).
     mock_statsd.increment.assert_called_once_with("agentex.task_stream.opened")
-    mock_statsd.gauge.assert_called_once_with("agentex.task_stream.active", 1)
+    mock_statsd.gauge.assert_not_called()
 
 
 @pytest.mark.unit
@@ -81,7 +79,6 @@ def test_record_stream_closed_emits_statsd_when_enabled():
         patch.object(stream_metrics, "_closed_counter", None),
         patch.object(stream_metrics, "_duration_histogram", None),
         patch.object(stream_metrics, "_active_updown", None),
-        patch.object(stream_metrics, "_active_stream_count", 1),
         patch.object(stream_metrics, "statsd") as mock_statsd,
     ):
         stream_metrics.record_stream_closed("client_disconnect", 3.25)
@@ -94,8 +91,8 @@ def test_record_stream_closed_emits_statsd_when_enabled():
     mock_statsd.histogram.assert_called_once_with(
         "agentex.task_stream.duration", 3250.0
     )
-    # Closing lowers the active gauge to the new absolute level (1 -> 0).
-    mock_statsd.gauge.assert_called_once_with("agentex.task_stream.active", 0)
+    # Concurrency ("active") is OTel-only, so closing emits no StatsD gauge.
+    mock_statsd.gauge.assert_not_called()
 
 
 @pytest.mark.unit
