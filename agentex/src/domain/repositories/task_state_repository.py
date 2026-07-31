@@ -120,6 +120,8 @@ def get_task_state_repository() -> TaskStateRepositoryProtocol:
     phase = EnvironmentVariables.refresh().TASK_STATE_STORAGE_PHASE
     if phase == StoragePhase.MONGODB:
         return TaskStateRepository(GlobalDependencies().mongodb_database)
+    # Unreachable through env config (refresh() rejects unimplemented phases
+    # at startup); defense in depth for configs constructed another way.
     raise NotImplementedError(
         f"TASK_STATE_STORAGE_PHASE={phase.value!r} is not implemented yet; "
         "only 'mongodb' is currently supported."

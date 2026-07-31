@@ -81,8 +81,10 @@ class Environment(str, Enum):
 class StoragePhase(str, Enum):
     """Which backend serves a document store (task state, task messages).
 
-    A future data-migration effort would define its own additional phases;
-    new values are additive, not breaking.
+    POSTGRES becomes selectable per store once that store's Postgres
+    repository lands; until then refresh() rejects it at startup. A future
+    data-migration effort would define its own additional phases; new values
+    are additive, not breaking.
     """
 
     MONGODB = "mongodb"
@@ -114,6 +116,30 @@ def _parse_bool_env(key: EnvVarKeys, default: bool) -> bool:
     raise ValueError(
         f"Invalid boolean for {key.value}: {raw!r} (expected true/false/1/0)"
     )
+
+
+def _validate_storage_phases(environment_variables: EnvironmentVariables) -> None:
+    """
+    The Postgres storage path lands store-by-store; until a store's repository
+    exists, selecting its phase must fail here — at process startup, in the
+    API and Temporal workers alike — rather than on first use, where it would
+    surface as request-time 500s or a crash inside worker wiring.
+    """
+    for key, phase in (
+        (
+            EnvVarKeys.TASK_STATE_STORAGE_PHASE,
+            environment_variables.TASK_STATE_STORAGE_PHASE,
+        ),
+        (
+            EnvVarKeys.TASK_MESSAGE_STORAGE_PHASE,
+            environment_variables.TASK_MESSAGE_STORAGE_PHASE,
+        ),
+    ):
+        if phase is not StoragePhase.MONGODB:
+            raise ValueError(
+                f"{key.value}={phase.value!r} is not supported yet; "
+                "only 'mongodb' is currently available"
+            )
 
 
 class EnvironmentVariables(BaseModel):
@@ -326,6 +352,7 @@ class EnvironmentVariables(BaseModel):
                 EnvVarKeys.TASK_MESSAGE_STORAGE_PHASE, StoragePhase.MONGODB
             ),
         )
+        _validate_storage_phases(environment_variables)
         refreshed_environment_variables = environment_variables
         return refreshed_environment_variables
 

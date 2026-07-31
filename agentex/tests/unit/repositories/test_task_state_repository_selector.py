@@ -3,7 +3,8 @@ from typing import get_args
 from unittest.mock import MagicMock
 
 import pytest
-from src.config.environment_variables import EnvironmentVariables
+from src.config import environment_variables as environment_variables_module
+from src.config.environment_variables import EnvironmentVariables, StoragePhase
 from src.domain.repositories import task_state_repository as selector_module
 from src.domain.repositories.task_state_repository import (
     DTaskStateRepository,
@@ -27,6 +28,19 @@ def _set_phase(monkeypatch, phase: str | None):
     EnvironmentVariables.refresh(force_refresh=True)
 
 
+def _force_cached_phase(monkeypatch, phase: StoragePhase):
+    """Unimplemented phases are rejected by refresh() itself (the startup
+    guard), so exercise the selector's own defense-in-depth branch by patching
+    the cached config directly."""
+    monkeypatch.delenv("TASK_STATE_STORAGE_PHASE", raising=False)
+    env = EnvironmentVariables.refresh(force_refresh=True)
+    monkeypatch.setattr(
+        environment_variables_module,
+        "refreshed_environment_variables",
+        env.model_copy(update={"TASK_STATE_STORAGE_PHASE": phase}),
+    )
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize("phase", [None, "mongodb"])
 def test_selector_returns_mongo_repository_for_mongodb_phase(monkeypatch, phase):
@@ -48,14 +62,13 @@ def test_selector_returns_mongo_repository_for_mongodb_phase(monkeypatch, phase)
 def test_selector_rejects_unimplemented_phases_lazily(monkeypatch):
     """Unimplemented phases fail loud, and without touching any Mongo wiring:
     the mongodb branch must be the only one that needs a Mongo handle."""
-    phase = "postgres"
-    _set_phase(monkeypatch, phase)
+    _force_cached_phase(monkeypatch, StoragePhase.POSTGRES)
     global_dependencies = MagicMock(
         side_effect=AssertionError("selector must not touch Mongo wiring")
     )
     monkeypatch.setattr(selector_module, "GlobalDependencies", global_dependencies)
 
-    with pytest.raises(NotImplementedError, match=phase):
+    with pytest.raises(NotImplementedError, match="postgres"):
         get_task_state_repository()
 
     global_dependencies.assert_not_called()
