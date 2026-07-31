@@ -38,7 +38,6 @@ from src.api.routes import (
     deployments,
     events,
     messages,
-    slack,
     spans,
     states,
     task_retention,
@@ -201,7 +200,6 @@ fastapi_app.include_router(messages.router)
 fastapi_app.include_router(spans.router)
 fastapi_app.include_router(states.router)
 fastapi_app.include_router(events.router)
-fastapi_app.include_router(slack.router)
 fastapi_app.include_router(agent_task_tracker.router)
 fastapi_app.include_router(agent_api_keys.router)
 fastapi_app.include_router(deployment_history.router)
