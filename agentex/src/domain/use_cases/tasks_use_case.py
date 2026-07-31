@@ -3,7 +3,12 @@ from typing import Annotated, Any
 from fastapi import Depends
 
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
-from src.domain.entities.tasks import TaskEntity, TaskRelationships, TaskStatus
+from src.domain.entities.tasks import (
+    NON_TERMINAL_TASK_STATUSES,
+    TaskEntity,
+    TaskRelationships,
+    TaskStatus,
+)
 from src.domain.exceptions import ClientError
 from src.domain.services.task_service import DAgentTaskService
 from src.utils.logging import make_logger
@@ -132,10 +137,8 @@ class TasksUseCase:
 
         return task_entity
 
-    # Non-terminal statuses a task can be transitioned to a terminal status from.
-    # RUNNING is the normal case; INTERRUPTED is also valid so an interrupted
-    # (paused, still-continuable) task can still be canceled/completed/etc later.
-    _TERMINAL_TRANSITION_SOURCES = (TaskStatus.RUNNING, TaskStatus.INTERRUPTED)
+    # Statuses a task can transition to terminal from (the non-terminal set).
+    _TERMINAL_TRANSITION_SOURCES = NON_TERMINAL_TASK_STATUSES
 
     async def _transition_to_terminal(
         self,
