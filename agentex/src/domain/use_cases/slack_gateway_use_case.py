@@ -45,7 +45,7 @@ from typing import Annotated, Any
 import httpx
 from fastapi import Depends
 
-from src.adapters.crud_store.exceptions import ItemDoesNotExist
+from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
 from src.config.dependencies import (
     GlobalDependencies,
     database_async_read_only_session_maker,
@@ -320,15 +320,22 @@ class SlackGatewayUseCase:
             create_params = {"system_prompt": _DEFAULT_SYSTEM_PROMPT}
             if _DEFAULT_MCPS:
                 create_params["mcps"] = _DEFAULT_MCPS
-            task = await acp.handle_rpc_request(
-                method=AgentRPCMethod.TASK_CREATE,
-                params=CreateTaskRequestEntity(
-                    name=task_name,
-                    params=create_params,
-                    task_metadata=task_metadata,
-                ),
-                agent_id=agent.id,
-            )
+            try:
+                task = await acp.handle_rpc_request(
+                    method=AgentRPCMethod.TASK_CREATE,
+                    params=CreateTaskRequestEntity(
+                        name=task_name,
+                        params=create_params,
+                        task_metadata=task_metadata,
+                    ),
+                    agent_id=agent.id,
+                )
+            except DuplicateItemError:
+                # A concurrent first event for the same thread won the create race
+                # (task_name is globally unique, and the DB insert fails before any
+                # workflow starts). Fall back to the task it created and just send this
+                # turn's event, exactly as a follow-up would.
+                task = await acp.task_service.get_task(name=task_name)
 
         # Snapshot existing messages so we can isolate THIS turn's reply.
         seen = await self._seen_message_ids(acp.task_message_service, task.id)
@@ -356,11 +363,20 @@ class SlackGatewayUseCase:
         except ItemDoesNotExist:
             return None
 
-    async def _seen_message_ids(self, msg_service, task_id: str) -> set[str]:
+    async def _recent_messages(self, msg_service, task_id: str) -> list:
+        """The newest page of task messages, returned in chronological (ascending)
+        order. Fetches DESC so the most recent messages are always in the window even
+        on a long-running task (>_MESSAGE_PAGE messages) — a plain ascending page 1
+        would return the OLDEST messages and never see this turn's reply — then
+        reverses to chronological so a multi-part reply joins in order."""
         msgs = await msg_service.get_messages(
-            task_id=task_id, limit=_MESSAGE_PAGE, page_number=1, order_direction="asc"
+            task_id=task_id, limit=_MESSAGE_PAGE, page_number=1, order_direction="desc"
         )
-        return {m.id for m in (msgs or []) if getattr(m, "id", None)}
+        return list(reversed(msgs or []))
+
+    async def _seen_message_ids(self, msg_service, task_id: str) -> set[str]:
+        msgs = await self._recent_messages(msg_service, task_id)
+        return {m.id for m in msgs if getattr(m, "id", None)}
 
     async def _collect_reply(
         self,
@@ -379,13 +395,8 @@ class SlackGatewayUseCase:
         while waited < timeout_s:
             await asyncio.sleep(interval_s)
             waited += interval_s
-            msgs = await msg_service.get_messages(
-                task_id=task_id,
-                limit=_MESSAGE_PAGE,
-                page_number=1,
-                order_direction="asc",
-            )
-            new = [m for m in (msgs or []) if getattr(m, "id", None) not in seen]
+            msgs = await self._recent_messages(msg_service, task_id)
+            new = [m for m in msgs if getattr(m, "id", None) not in seen]
             text = _agent_text(new)
             if text and text == last:
                 stable += interval_s

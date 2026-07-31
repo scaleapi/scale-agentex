@@ -240,6 +240,48 @@ class TestDispatch:
             == AgentRPCMethod.EVENT_SEND
         )
 
+    @pytest.mark.asyncio
+    async def test_concurrent_first_turn_falls_back_to_existing_task(self, monkeypatch):
+        # Two first events for the same thread race: this one loses the create (the
+        # globally-unique task name is already taken), so TASK_CREATE raises
+        # DuplicateItemError. It must fall back to the task the winner created and
+        # still send its own event rather than dropping the turn.
+        monkeypatch.setattr(sg, "_ACTING_USER_API_KEY", "")
+        monkeypatch.setattr(sg, "GlobalDependencies", MagicMock())
+        winner_task = SimpleNamespace(id="task_1", task_metadata=None)
+        acp = MagicMock()
+        acp.agent_repository.get = AsyncMock(return_value=SimpleNamespace(id="agt_1"))
+        acp.task_message_service.get_messages = AsyncMock(return_value=[])
+        # 1st get_task = existence probe (absent); 2nd = post-race fallback (winner).
+        acp.task_service.get_task = AsyncMock(
+            side_effect=[sg.ItemDoesNotExist("no task"), winner_task]
+        )
+
+        async def rpc(*, method, **_):
+            if method == AgentRPCMethod.TASK_CREATE:
+                raise sg.DuplicateItemError("name taken")
+            return None  # EVENT_SEND
+
+        acp.handle_rpc_request = AsyncMock(side_effect=rpc)
+        monkeypatch.setattr(
+            "src.temporal.scheduled_agent_run_factory.build_acp_use_case_for_principal",
+            MagicMock(return_value=acp),
+        )
+        monkeypatch.setattr(
+            SlackGatewayUseCase, "_collect_reply", AsyncMock(return_value=None)
+        )
+
+        inbound = sg.InboundSlack(
+            team_id="T", channel="C1", user="U", text="hi", thread_ts="1", selector=None
+        )
+        await SlackGatewayUseCase()._dispatch(Target("golden-agent"), inbound, "hi")
+
+        # Create was attempted and raced, then the event still went out against the
+        # winner's task (re-fetched by name).
+        methods = [c.kwargs["method"] for c in acp.handle_rpc_request.await_args_list]
+        assert methods == [AgentRPCMethod.TASK_CREATE, AgentRPCMethod.EVENT_SEND]
+        assert acp.task_service.get_task.await_count == 2
+
 
 @pytest.mark.unit
 class TestRunTurn:
@@ -423,6 +465,27 @@ class TestCollectReply:
             timeout_s=0.05,
         )
         assert reply is None  # only pre-existing messages → nothing new
+
+    @pytest.mark.asyncio
+    async def test_polls_newest_first_and_returns_chronological_text(self):
+        # get_messages is fetched DESC (newest-first) so this turn's reply is in the
+        # window even once the task has more than _MESSAGE_PAGE messages; the page is
+        # then reversed to chronological before a multi-part reply is joined.
+        m2 = SimpleNamespace(
+            id="m2",
+            content=SimpleNamespace(author=sg.MessageAuthor.AGENT, content="second"),
+        )
+        m1 = SimpleNamespace(
+            id="m1",
+            content=SimpleNamespace(author=sg.MessageAuthor.AGENT, content="first"),
+        )
+        get_messages = AsyncMock(return_value=[m2, m1])  # newest-first
+        svc = SimpleNamespace(get_messages=get_messages)
+        reply = await SlackGatewayUseCase()._collect_reply(
+            svc, "task_1", seen=set(), interval_s=0.01, quiescence_s=0.0, timeout_s=1.0
+        )
+        assert reply == "first\n\nsecond"  # chronological order restored
+        assert get_messages.await_args.kwargs["order_direction"] == "desc"
 
 
 @pytest.mark.unit
