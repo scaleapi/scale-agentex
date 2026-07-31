@@ -21,6 +21,7 @@ dependencies = [
     "aiodocker>=0.23.0,<0.24",
     "kubernetes-asyncio>=31.1.0,<32",
     "aiohttp>=3.10.9,<4",
+    "slack_sdk>=3.33.0,<4",  # Socket Mode client for the Slack gateway worker (src/slack/socket_worker.py)
     "websockets~=14.2",
     "pymongo>=4.13.0,<5",
     "httpx[http2]>=0.27.2",

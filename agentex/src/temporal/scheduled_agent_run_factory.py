@@ -56,12 +56,20 @@ class _ScheduledRunRequest:
     the intended behavior here.
     """
 
-    def __init__(self, principal_context: dict[str, Any] | None):
+    def __init__(
+        self,
+        principal_context: dict[str, Any] | None,
+        headers: dict[str, str] | None = None,
+    ):
         self.state = SimpleNamespace(
             principal_context=principal_context,
             agent_identity=None,
         )
-        self.headers: dict[str, str] = {}
+        # Default empty = scheduled-run behavior (no live credentials forwarded).
+        # Callers that DO want delegation (e.g. the Slack gateway acting as a user)
+        # pass headers carrying x-api-key, which build_delegation_headers converts to
+        # x-acting-user-api-key downstream.
+        self.headers: dict[str, str] = headers or {}
 
 
 def build_agent_run_schedule_repository(
@@ -77,6 +85,7 @@ def build_agent_run_schedule_repository(
 def build_acp_use_case_for_principal(
     global_dependencies: GlobalDependencies,
     creator_principal: dict[str, Any] | None,
+    request_headers: dict[str, str] | None = None,
 ) -> AgentsACPUseCase:
     """Construct an AgentsACPUseCase bound to a specific creator principal.
 
@@ -84,13 +93,19 @@ def build_acp_use_case_for_principal(
     as the JSON-RPC path does (ACP-type validation, acp_url resolution, ownership
     grant, get-or-create idempotency), but attributes everything to
     *creator_principal* instead of the request principal.
+
+    ``request_headers`` (default: none) are forwarded downstream for runtime
+    delegation — e.g. an ``x-api-key`` becomes ``x-acting-user-api-key`` on the ACP
+    call so the agent's tools act as that user. Scheduled runs pass nothing (they
+    deliberately forward no live credentials); the Slack gateway passes the shared
+    acting-user key.
     """
     env = EnvironmentVariables.refresh()
     engine = database_async_read_write_engine()
     rw_session_maker = database_async_read_write_session_maker(engine)
     ro_session_maker = database_async_read_only_session_maker(engine)
 
-    request = _ScheduledRunRequest(creator_principal)
+    request = _ScheduledRunRequest(creator_principal, request_headers)
 
     agent_repository = AgentRepository(rw_session_maker, ro_session_maker)
     agent_api_key_repository = AgentAPIKeyRepository(rw_session_maker, ro_session_maker)
