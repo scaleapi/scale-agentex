@@ -34,14 +34,26 @@ async function proxy(
 
   const method = req.method.toUpperCase();
   const hasBody = method !== 'GET' && method !== 'HEAD';
-  const upstream = await fetch(target, {
-    method,
-    headers,
-    body: hasBody ? req.body : undefined,
-    redirect: 'manual',
-    // @ts-expect-error `duplex` is required to stream a request body (undici)
-    duplex: 'half',
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch(target, {
+      method,
+      headers,
+      body: hasBody ? req.body : undefined,
+      redirect: 'manual',
+      // A client disconnect must tear down the upstream request; undici otherwise holds it
+      // open and the upstream handler keeps running.
+      signal: req.signal,
+      // @ts-expect-error `duplex` is required to stream a request body (undici)
+      duplex: 'half',
+    });
+  } catch (error) {
+    // The disconnect above rejects the fetch with the signal's abort reason itself, so identity —
+    // not `error.name` — separates it from a transport failure that coincides with a disconnect.
+    // Next's reason is a `ResponseAborted`, so an `AbortError` check would never fire.
+    if (error === req.signal.reason) return new Response(null, { status: 499 });
+    throw error;
+  }
 
   // Pass the upstream body through unbuffered so SSE / streaming responses work.
   const resHeaders = new Headers(upstream.headers);

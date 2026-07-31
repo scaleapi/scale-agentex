@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import Depends
 from pydantic import ValidationError
 
+from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.adapters.streams.adapter_redis import DRedisStreamRepository
 from src.api.schemas.task_stream_events import TaskStreamEvent
 from src.config.dependencies import DEnvironmentVariables
@@ -12,8 +13,10 @@ from src.domain.entities.task_stream_events import (
     TaskStreamConnectedEventEntity,
     TaskStreamErrorEventEntity,
     TaskStreamEventEntity,
+    TaskStreamTaskUpdatedEventEntity,
     convert_task_stream_event_to_entity,
 )
+from src.domain.entities.tasks import TERMINAL_TASK_STATUSES
 from src.domain.services.task_service import DAgentTaskService
 from src.utils.logging import make_logger
 from src.utils.stream_metrics import (
@@ -128,10 +131,23 @@ class StreamsUseCase:
             # congested relay fall behind far enough that those deltas land
             # before the snapshot and are never read. Snapshotting first resolves
             # to "0-0" (stream is empty until the client sends), so we read from
-            # the beginning.
+            # the beginning. Reading the cursor before the status check also
+            # catches a task that goes terminal while we connect.
             last_id = await self.stream_repository.get_stream_tail_id(stream_topic)
+            task = await self.task_service.get_task(id=task_id)
             # Send initial connection data
             yield f"data: {TaskStreamConnectedEventEntity(type='connected', taskId=task_id).model_dump_json()}\n\n"
+            # Already terminal: replay buffered events and end (late connect).
+            if task.status in TERMINAL_TASK_STATUSES:
+                async for _id, data in self.read_messages(
+                    topic=stream_topic, last_id="0"
+                ):
+                    yield f"data: {data.model_dump_json()}\n\n"
+                    await asyncio.sleep(0.02)
+                logger.info(
+                    f"Ending SSE stream for task {task_id}: already terminal at connect"
+                )
+                return
             now = asyncio.get_running_loop().time()
             # last_message_time drives the keepalive ping and is reset by pings;
             # last_event_time tracks only real data pushes (a ping is not a data
@@ -154,9 +170,33 @@ class StreamsUseCase:
             # client's read fails on each cycle; without backoff this turns into a
             # log-ingestion firehose (one failure per client per cycle, ~once/sec).
             consecutive_errors = 0
+            last_status_check = last_message_time
             # Application-level control loop
             while True:
                 try:
+                    # Authoritative status recheck on an interval. Runs at the
+                    # TOP of every iteration — even after a read failure/backoff —
+                    # so a terminal task ends even if its event publish was lost
+                    # or Redis reads keep erroring.
+                    current_time = asyncio.get_running_loop().time()
+                    if current_time - last_status_check >= ping_interval:
+                        last_status_check = current_time
+                        try:
+                            task = await self.task_service.get_task(id=task_id)
+                        except ItemDoesNotExist:
+                            # Row permanently gone (e.g. retention) — end, don't retry.
+                            logger.info(
+                                f"Ending SSE stream for task {task_id}: "
+                                "task no longer exists"
+                            )
+                            return
+                        if task.status in TERMINAL_TASK_STATUSES:
+                            logger.info(
+                                f"Ending SSE stream for task {task_id}: "
+                                "terminal on status recheck"
+                            )
+                            return
+
                     # Process yielded messages one by one
                     message_generator = self.read_messages(
                         topic=stream_topic, last_id=last_id
@@ -173,29 +213,38 @@ class StreamsUseCase:
                         last_message_time = now
                         last_event_time = now
                         stalled = False
+                        # Terminal event is the last one — end here.
+                        if (
+                            isinstance(data, TaskStreamTaskUpdatedEventEntity)
+                            and data.task is not None
+                            and data.task.status in TERMINAL_TASK_STATUSES
+                        ):
+                            logger.info(
+                                f"Ending SSE stream for task {task_id}: received "
+                                "a terminal task_updated event"
+                            )
+                            return
                         await asyncio.sleep(0.02)
 
                     # A read cycle completed without raising — the stream is
                     # healthy again, so reset the backoff/error counter.
                     consecutive_errors = 0
 
-                    # If we didn't get any messages, add a small pause
-                    # to prevent tight loops and send keepalive ping if needed
+                    # Idle: send keepalive ping so proxies don't reap us. Use a
+                    # fresh timestamp — the read above blocks up to timeout_ms, so
+                    # the loop-top current_time would be stale for ping timing.
                     if message_count == 0:
-                        current_time = asyncio.get_running_loop().time()
+                        now = asyncio.get_running_loop().time()
                         # No data event pushed for the stall window: count the
                         # onset once. Keepalive pings deliberately do not reset
                         # last_event_time, so a persistently quiet stream is
                         # visible even though the connection stays alive.
-                        if (
-                            current_time - last_event_time >= stall_threshold
-                            and not stalled
-                        ):
+                        if now - last_event_time >= stall_threshold and not stalled:
                             stalled = True
                             record_stream_stall()
-                        if current_time - last_message_time >= ping_interval:
+                        if now - last_message_time >= ping_interval:
                             yield ":ping\n\n"
-                            last_message_time = current_time
+                            last_message_time = now
                         await asyncio.sleep(0.1)
                     else:
                         # Small pause between batches
@@ -238,6 +287,7 @@ class StreamsUseCase:
             )
             yield f"data: {TaskStreamErrorEventEntity(type='error', message=str(e)).model_dump_json()}\n\n"
         finally:
+            # Don't delete the shared topic; the TTL reclaims it.
             logger.info(f"SSE stream for task {task_id} has ended")
             # Only close what we actually opened, so the active gauge is never
             # decremented for a stream that never incremented it.
@@ -246,7 +296,6 @@ class StreamsUseCase:
                     outcome,
                     asyncio.get_running_loop().time() - stream_start_time,
                 )
-            await self.cleanup_stream(stream_topic)
 
 
 DStreamsUseCase = Annotated[StreamsUseCase, Depends(StreamsUseCase)]
