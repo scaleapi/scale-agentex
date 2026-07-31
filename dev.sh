@@ -332,6 +332,128 @@ check_redis_conflict() {
     fi
 }
 
+# Preflight: surface any process already LISTENing on a port the stack needs, and
+# offer to kill it before we launch. Without this, a leftover process from a previous
+# run (whose supervisor died without reaping its children — see EADDRINUSE crashes in
+# backend.log) makes a managed process fail to bind, which tears the whole launch back
+# down with the real cause buried in a background log.
+#
+# Args: "port:label" pairs (label is just for the human-readable report).
+# Behavior:
+#   - No conflicts            -> return 0, silent.
+#   - TTY                     -> list offenders, prompt [y/N] to kill and continue.
+#   - DEV_KILL_PORTS=1        -> kill offenders without prompting (useful for restart/CI).
+#   - Non-interactive, no opt -> warn and continue (preserves old behavior; launch may fail).
+preflight_port_check() {
+    local pairs=("$@")
+    local conflicts=()          # "port|pid|cmd"
+    local pids_to_kill=""       # space-separated, deduped
+
+    local pair port pids pid cmd
+    for pair in "${pairs[@]}"; do
+        port="${pair%%:*}"
+        pids=$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | sort -u || true)
+        [ -z "$pids" ] && continue
+        for pid in $pids; do
+            cmd=$(ps -p "$pid" -o comm= 2>/dev/null | awk -F/ '{print $NF}')
+            conflicts+=("$port|$pid|${cmd:-?}")
+            case " $pids_to_kill " in *" $pid "*) : ;; *) pids_to_kill="$pids_to_kill $pid" ;; esac
+        done
+    done
+
+    [ ${#conflicts[@]} -eq 0 ] && return 0
+
+    log_warn "Some ports the dev stack needs are already in use (likely a leftover run):"
+    local c
+    for c in "${conflicts[@]}"; do
+        IFS='|' read -r port pid cmd <<< "$c"
+        printf "    port %-6s -> PID %-7s (%s)\n" "$port" "$pid" "$cmd"
+    done
+
+    local do_kill=false
+    if [ "${DEV_KILL_PORTS:-}" = "1" ]; then
+        do_kill=true
+        log_info "DEV_KILL_PORTS=1 set — killing the above processes."
+    elif [ -t 0 ]; then
+        local answer
+        read -r -p "$(echo -e "${YELLOW}[WARN]${NC} Kill these processes and continue? [y/N] ")" answer
+        case "$answer" in
+            [yY]|[yY][eE][sS]) do_kill=true ;;
+        esac
+    else
+        log_warn "Not an interactive shell; leaving them running. Set DEV_KILL_PORTS=1 to auto-kill."
+        log_warn "The launch may fail to bind these ports."
+        return 0
+    fi
+
+    if [ "$do_kill" != true ]; then
+        log_error "Ports still in use. Stop the offending processes (or run './dev.sh stop') and retry."
+        exit 1
+    fi
+
+    # Graceful TERM, then force-KILL anything that survives. kill_tree walks children so
+    # a supervisor and its datastore children all go down together.
+    for pid in $pids_to_kill; do
+        kill_tree "$pid"
+    done
+    sleep 1
+    local still=""
+    for pid in $pids_to_kill; do
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+            still="$still $pid"
+        fi
+    done
+    [ -n "$still" ] && sleep 1
+    log_success "Freed conflicting ports."
+}
+
+# Build the "port:label" list for Docker mode and run the preflight check.
+preflight_ports_docker() {
+    preflight_port_check \
+        "5003:API" "5432:Postgres" "5433:Temporal-Postgres" \
+        "6379:Redis" "27017:Mongo" "7233:Temporal" "8080:Temporal-UI"
+}
+
+# Build the "port:label" list for no-docker mode, honoring any port-override flags the
+# runner accepts, then run the preflight check. (Postgres is an embedded UNIX socket in
+# no-docker mode, so it has no TCP port to check.)
+preflight_ports_nodocker() {
+    local api=5003 redis=6379 temporal=7233 ui=8080 mongo=27017 otel=4317
+    local expect="" arg
+    for arg in "$@"; do
+        if [ -n "$expect" ]; then
+            case "$expect" in
+                port)          api="$arg" ;;
+                redis-port)    redis="$arg" ;;
+                temporal-port) temporal="$arg" ;;
+                ui-port)       ui="$arg" ;;
+                mongo-port)    mongo="$arg" ;;
+                otel-port)     otel="$arg" ;;
+            esac
+            expect=""
+            continue
+        fi
+        case "$arg" in
+            --port)          expect=port ;;
+            --redis-port)    expect=redis-port ;;
+            --temporal-port) expect=temporal-port ;;
+            --ui-port)       expect=ui-port ;;
+            --mongo-port)    expect=mongo-port ;;
+            --otel-port)     expect=otel-port ;;
+            --port=*)          api="${arg#*=}" ;;
+            --redis-port=*)    redis="${arg#*=}" ;;
+            --temporal-port=*) temporal="${arg#*=}" ;;
+            --ui-port=*)       ui="${arg#*=}" ;;
+            --mongo-port=*)    mongo="${arg#*=}" ;;
+            --otel-port=*)     otel="${arg#*=}" ;;
+        esac
+    done
+    preflight_port_check \
+        "$api:API" "$redis:Redis" "$temporal:Temporal" \
+        "$ui:Temporal-UI" "$mongo:Mongo" "$otel:OTel"
+}
+
 setup_log_dir() {
     mkdir -p "$LOG_DIR"
 }
@@ -552,6 +674,7 @@ start_all() {
     ensure_prerequisites
     require_docker
     check_redis_conflict
+    preflight_ports_docker      # offer to free any port a leftover run is holding
     setup_log_dir
 
     echo ""
@@ -632,6 +755,7 @@ start_all_nodocker() {
     validate_nodocker_args "$@"            # fail fast on a stray positional before any side effects
     ensure_prerequisites                # no Docker requirement in no-docker mode
     ensure_nodocker_service_binaries "$@"  # ensure mongod (required) + otel (optional); honors --mongo-uri/--lean
+    preflight_ports_nodocker "$@"       # offer to free any port a leftover run is holding (honors port flags)
     setup_log_dir
 
     echo ""
