@@ -1,13 +1,17 @@
 """
 Metrics instrumentation for the task-event SSE stream lifecycle.
 
-Mirrors the dual-emit pattern in ``src/utils/cache_metrics.py``:
+Emission is OpenTelemetry-only:
 
 - When an OTLP endpoint is configured (``OTEL_EXPORTER_OTLP_ENDPOINT``), the
   instruments are recorded through the OpenTelemetry SDK.
-- When the Datadog Agent is reachable (``DD_AGENT_HOST``), the same events are
-  emitted as StatsD metrics.
-- When neither is configured, every function here is a cheap no-op.
+- When it is not configured, every function here is a cheap no-op.
+
+Unlike the older ``cache_metrics.py`` dual-emit path, there is no direct
+StatsD/DogStatsD emission here. These are new metrics, and the target state
+routes OTel to Datadog through the collector rather than emitting to the Datadog
+Agent directly — so a second, DogStatsD-native copy of every point would just be
+redundant.
 
 **Why this exists (see AGX1-616/AGX1-618):** HTTP request-level RED for
 ``GET /tasks/{task_id}/stream`` is already covered by auto-instrumentation — the
@@ -31,10 +35,7 @@ hand-instrumented series carry only bounded attributes (``outcome``) and no
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING, Literal
-
-from datadog import statsd
 
 from src.utils.logging import make_logger
 from src.utils.otel_metrics import get_meter
@@ -43,9 +44,6 @@ if TYPE_CHECKING:
     from opentelemetry.metrics import Counter, Histogram, UpDownCounter
 
 logger = make_logger(__name__)
-
-# StatsD is only emitted if the Datadog Agent host is configured.
-_STATSD_ENABLED = bool(os.environ.get("DD_AGENT_HOST"))
 
 # How a stream ended. "completed" = the generator returned normally;
 # "client_disconnect" = the client went away (asyncio.CancelledError);
@@ -74,7 +72,7 @@ def _ensure_instruments() -> None:
 
     meter = get_meter("agentex.task_stream")
     if meter is None:
-        # OTel not configured; OTel path stays disabled. StatsD may still emit.
+        # OTel not configured; every record_* call stays a no-op.
         return
 
     _opened_counter = meter.create_counter(
@@ -118,14 +116,6 @@ def record_stream_opened() -> None:
             _opened_counter.add(1)
         if _active_updown is not None:
             _active_updown.add(1)
-
-        if _STATSD_ENABLED:
-            statsd.increment("agentex.task_stream.opened")
-            # No StatsD "active" gauge: concurrency is OTel-only. DogStatsD
-            # gauges are last-write-wins per flush, so N workers each emitting a
-            # process-local count would make the gauge flap between workers
-            # rather than sum to the true concurrency. The OTel UpDownCounter
-            # sums correctly across per-instance series at query time.
     except Exception:
         logger.debug("Failed to emit agentex.task_stream.opened metric", exc_info=True)
 
@@ -140,8 +130,8 @@ def record_stream_closed(outcome: StreamOutcome, duration_seconds: float) -> Non
         outcome: One of "completed", "client_disconnect", "error".
         duration_seconds: How long the stream was open.
 
-    Never raises: emission failures (e.g. a StatsD UDP socket error or an OTel
-    SDK fault) are swallowed so instrumentation can never disrupt the SSE path.
+    Never raises: emission failures (e.g. an OTel SDK fault) are swallowed so
+    instrumentation can never disrupt the SSE path.
     """
     try:
         _ensure_instruments()
@@ -152,17 +142,6 @@ def record_stream_closed(outcome: StreamOutcome, duration_seconds: float) -> Non
             _duration_histogram.record(duration_seconds, {"outcome": outcome})
         if _active_updown is not None:
             _active_updown.add(-1)
-
-        if _STATSD_ENABLED:
-            statsd.increment("agentex.task_stream.closed", tags=[f"outcome:{outcome}"])
-            # Datadog histograms conventionally take milliseconds for durations.
-            statsd.histogram(
-                "agentex.task_stream.duration",
-                duration_seconds * 1000,
-                tags=[f"outcome:{outcome}"],
-            )
-            # No StatsD "active" gauge — concurrency is OTel-only; a per-worker
-            # DogStatsD gauge would flap rather than sum (see record_stream_opened).
     except Exception:
         logger.debug("Failed to emit agentex.task_stream.closed metric", exc_info=True)
 
@@ -180,8 +159,5 @@ def record_stream_stall() -> None:
 
         if _stall_counter is not None:
             _stall_counter.add(1)
-
-        if _STATSD_ENABLED:
-            statsd.increment("agentex.task_stream.stall")
     except Exception:
         logger.debug("Failed to emit agentex.task_stream.stall metric", exc_info=True)
