@@ -29,6 +29,13 @@ class TaskStatus(str, Enum):
     DELETED = "DELETED"
 
 
+# Canonical status partition (state machine + SSE termination).
+# Non-terminal: RUNNING or INTERRUPTED (resumable); terminal is the rest.
+# New statuses are terminal unless added to the non-terminal set.
+NON_TERMINAL_TASK_STATUSES = frozenset({TaskStatus.RUNNING, TaskStatus.INTERRUPTED})
+TERMINAL_TASK_STATUSES = frozenset(TaskStatus) - NON_TERMINAL_TASK_STATUSES
+
+
 class TaskEntity(BaseModel):
     id: str = Field(
         ...,

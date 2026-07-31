@@ -21,10 +21,14 @@ exporters:
     sampling_initial: 5
     sampling_thereafter: 200
 
-  # Expose Prometheus endpoint for scraping
+  # Expose Prometheus endpoint for scraping.
+  # No `namespace:` on purpose — the cluster's otel-operator -> daemonset
+  # pipeline adds no prefix, so metric names there are exactly their instrument
+  # names (e.g. agentex_rpc_requests_total, db_client_connection_wait_time_seconds).
+  # A namespace here would double-prefix agentex.* metrics (agentex_agentex_...)
+  # and make locally-tested PromQL diverge from Mimir.
   prometheus:
     endpoint: 0.0.0.0:8889
-    namespace: agentex
     send_timestamps: true
     metric_expiration: 5m
 

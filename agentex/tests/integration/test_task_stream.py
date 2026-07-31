@@ -588,9 +588,7 @@ class TestTaskEventStream:
 
             # Emit a delta while the generator is suspended at the yield.
             sentinel = "after-connected-sentinel"
-            await repo.send_data(
-                stream_topic, {"type": "error", "message": sentinel}
-            )
+            await repo.send_data(stream_topic, {"type": "error", "message": sentinel})
 
             # The delta must be delivered; a silent stream means it was dropped.
             received = False
@@ -656,3 +654,198 @@ class TestTaskEventStream:
         )
 
         print(f"✅ Stream sent {ping_count} keepalive pings during idle period")
+
+    async def test_stream_ends_when_task_reaches_terminal_status(
+        self, test_agent_and_task, tasks_use_case, streams_use_case
+    ):
+        """
+        Regression for the zombie-subscription leak: the stream must end on its
+        own once the task is terminal (no client-side cancellation), instead of
+        blocking on the topic forever and pinning a Redis connection.
+
+        Completing via TasksUseCase emits a terminal task_updated event, so this
+        exercises the event-driven termination path.
+        """
+        _agent, task = test_agent_and_task
+
+        async def drain_until_end():
+            # Returns normally only if the generator terminates by itself.
+            async for _event_data in streams_use_case.stream_task_events(
+                task_id=task.id
+            ):
+                pass
+
+        reader_task = asyncio.create_task(drain_until_end())
+
+        # Let the stream connect and enter its loop, then finish the task.
+        await asyncio.sleep(0.2)
+        completed = await tasks_use_case.complete_task(id=task.id)
+        assert completed.status == TaskStatus.COMPLETED
+
+        # The generator should now end by itself.
+        try:
+            await asyncio.wait_for(reader_task, timeout=10)
+        except TimeoutError as err:
+            reader_task.cancel()
+            try:
+                await reader_task
+            except asyncio.CancelledError:
+                pass
+            raise AssertionError(
+                "SSE stream did not terminate after the task reached a terminal "
+                "status — the subscription is a zombie and will pin a Redis "
+                "connection forever."
+            ) from err
+
+        print("✅ Stream ends on its own once the task is terminal")
+
+    async def test_cleanup_does_not_delete_shared_stream_on_disconnect(
+        self, test_agent_and_task, streams_use_case
+    ):
+        """
+        Regression for the shared-stream deletion bug: the topic is shared by
+        every viewer of a task, so one subscriber disconnecting must not delete
+        it (the old per-subscriber cleanup_stream did). The sliding TTL handles
+        reclamation instead.
+        """
+        from src.utils.stream_topics import get_task_event_stream_topic
+
+        _agent, task = test_agent_and_task
+        stream_topic = get_task_event_stream_topic(task_id=task.id)
+        repo = streams_use_case.stream_repository
+
+        # Ensure the topic exists.
+        await repo.send_data(stream_topic, {"type": "error", "message": "seed"})
+        assert bool(await repo.redis.exists(stream_topic)), "precondition: topic exists"
+
+        # Run one subscriber briefly, then disconnect it (simulating one viewer
+        # of a task that other viewers are still watching).
+        async def brief_reader():
+            try:
+                async for _event_data in streams_use_case.stream_task_events(
+                    task_id=task.id
+                ):
+                    pass
+            except asyncio.CancelledError:
+                pass
+
+        reader_task = asyncio.create_task(brief_reader())
+        await asyncio.sleep(0.3)
+        reader_task.cancel()
+        try:
+            await reader_task
+        except asyncio.CancelledError:
+            pass
+
+        # The shared topic must survive one subscriber leaving.
+        assert bool(await repo.redis.exists(stream_topic)), (
+            "Topic was deleted when a single subscriber disconnected — other "
+            "live viewers of this task would lose their stream."
+        )
+
+        print("✅ Shared stream survives a single subscriber disconnecting")
+
+    async def test_stream_ends_on_late_connect_to_terminal_task(
+        self, test_agent_and_task, tasks_use_case, streams_use_case
+    ):
+        """
+        Connect-time termination path: a viewer that connects *after* the task
+        has already reached a terminal state never receives a terminal
+        task_updated event via the read loop — the event is behind the snapshot
+        cursor, so the in-loop check can't fire. The authoritative connect-time
+        check must end the stream (replay buffered events, then return) instead
+        of blocking on the topic forever.
+        """
+        _agent, task = test_agent_and_task
+
+        # Finish the task BEFORE anyone subscribes. The terminal task_updated is
+        # XADDed to the stream now, so a later subscriber snapshots past it and
+        # the read loop never surfaces it.
+        completed = await tasks_use_case.complete_task(id=task.id)
+        assert completed.status == TaskStatus.COMPLETED
+
+        async def drain_until_end():
+            # Returns normally only if the generator terminates by itself.
+            async for _event_data in streams_use_case.stream_task_events(
+                task_id=task.id
+            ):
+                pass
+
+        reader_task = asyncio.create_task(drain_until_end())
+
+        # The connect-time check should end it near-immediately.
+        try:
+            await asyncio.wait_for(reader_task, timeout=10)
+        except TimeoutError as err:
+            reader_task.cancel()
+            try:
+                await reader_task
+            except asyncio.CancelledError:
+                pass
+            raise AssertionError(
+                "SSE stream to an already-terminal task did not self-close — the "
+                "connect-time terminal check is not firing, so late-connect "
+                "subscriptions leak as zombies."
+            ) from err
+
+        print("✅ Stream self-closes when connecting to an already-terminal task")
+
+    async def test_running_task_stream_survives_reclaimed_key(
+        self, test_agent_and_task, streams_use_case
+    ):
+        """
+        A still-RUNNING task whose idle stream key is reclaimed by the sliding
+        TTL must NOT have its stream closed — a later XADD recreates the key.
+        Termination is driven by the terminal task_updated event (and the
+        connect-time terminal check), never by a vanished key, so a live task's
+        stream stays open regardless of key reclamation.
+        """
+        from src.utils.stream_topics import get_task_event_stream_topic
+
+        # Short keepalive so several idle cycles elapse within the test window.
+        streams_use_case.environment_variables.SSE_KEEPALIVE_PING_INTERVAL = 1
+
+        _agent, task = test_agent_and_task  # created in RUNNING state
+        stream_topic = get_task_event_stream_topic(task_id=task.id)
+        repo = streams_use_case.stream_repository
+
+        # Seed the topic, subscribe, then reclaim the key mid-stream.
+        await repo.send_data(stream_topic, {"type": "error", "message": "seed"})
+        assert bool(await repo.redis.exists(stream_topic)), "precondition: topic exists"
+
+        async def reader():
+            try:
+                async for _event_data in streams_use_case.stream_task_events(
+                    task_id=task.id
+                ):
+                    pass
+            except asyncio.CancelledError:
+                pass
+
+        reader_task = asyncio.create_task(reader())
+
+        # Let the reader connect and go idle, then simulate the sliding TTL
+        # reclaiming the key while the task is still RUNNING.
+        await asyncio.sleep(0.5)
+        await repo.cleanup_stream(stream_topic)
+        assert not bool(await repo.redis.exists(stream_topic)), (
+            "precondition: key reclaimed"
+        )
+
+        # Give the fallback several cycles to (wrongly) close the stream.
+        await asyncio.sleep(4)
+
+        try:
+            assert not reader_task.done(), (
+                "SSE stream for a still-RUNNING task was closed after its idle key "
+                "was reclaimed — the fallback must not treat a reclaimed key as "
+                "terminal when the task is confirmed non-terminal."
+            )
+        finally:
+            reader_task.cancel()
+            try:
+                await reader_task
+            except asyncio.CancelledError:
+                pass
+
+        print("✅ Running task's stream stays open when its idle key is reclaimed")
