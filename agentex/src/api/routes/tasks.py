@@ -1,7 +1,7 @@
 import json
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from src.adapters.temporal.adapter_temporal import DTemporalAdapter
@@ -345,13 +345,18 @@ async def timeout_task(
 async def stream_task_events(
     task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.read),
     stream_use_case: DStreamsUseCase,
+    request: Request,
 ) -> StreamingResponse:
     """
     Streams task events using Server-Sent Events (SSE).
     """
 
     return StreamingResponse(
-        stream_use_case.stream_task_events(task_id=task_id),
+        # Pass request headers so the stream span continues an inbound W3C
+        # traceparent (ingress edge) instead of starting an unrelated trace.
+        stream_use_case.stream_task_events(
+            task_id=task_id, carrier=dict(request.headers)
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -369,13 +374,18 @@ async def stream_task_events(
 async def stream_task_events_by_name(
     task_name: DAuthorizedName(AgentexResourceType.task, AuthorizedOperationType.read),
     stream_use_case: DStreamsUseCase,
+    request: Request,
 ) -> StreamingResponse:
     """
     Streams task events using Server-Sent Events (SSE) by task name.
     """
 
     return StreamingResponse(
-        stream_use_case.stream_task_events(task_name=task_name),
+        # Pass request headers so the stream span continues an inbound W3C
+        # traceparent (ingress edge) instead of starting an unrelated trace.
+        stream_use_case.stream_task_events(
+            task_name=task_name, carrier=dict(request.headers)
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
