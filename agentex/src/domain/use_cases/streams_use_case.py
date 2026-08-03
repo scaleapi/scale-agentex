@@ -187,131 +187,129 @@ class StreamsUseCase:
             # log-ingestion firehose (one failure per client per cycle, ~once/sec).
             consecutive_errors = 0
             last_status_check = last_message_time
-            try:
-                # Application-level control loop
-                while True:
-                    try:
-                        # Authoritative status recheck on an interval. Runs at the
-                        # TOP of every iteration — even after a read failure/backoff
-                        # — so a terminal task ends even if its event publish was
-                        # lost or Redis reads keep erroring.
-                        current_time = asyncio.get_running_loop().time()
-                        if current_time - last_status_check >= ping_interval:
-                            last_status_check = current_time
-                            try:
-                                task = await self.task_service.get_task(id=task_id)
-                            except ItemDoesNotExist:
-                                # Row permanently gone (e.g. retention) — end.
-                                stream_outcome = "task_gone"
-                                disconnect_reason = "task_deleted"
-                                logger.info(
-                                    f"Ending SSE stream for task {task_id}: "
-                                    "task no longer exists"
-                                )
-                                return
-                            if task.status in TERMINAL_TASK_STATUSES:
-                                disconnect_reason = "terminal_status"
-                                logger.info(
-                                    f"Ending SSE stream for task {task_id}: "
-                                    "terminal on status recheck"
-                                )
-                                return
+            # Application-level control loop
+            while True:
+                try:
+                    # Authoritative status recheck on an interval. Runs at the
+                    # TOP of every iteration — even after a read failure/backoff
+                    # — so a terminal task ends even if its event publish was
+                    # lost or Redis reads keep erroring.
+                    current_time = asyncio.get_running_loop().time()
+                    if current_time - last_status_check >= ping_interval:
+                        last_status_check = current_time
+                        try:
+                            task = await self.task_service.get_task(id=task_id)
+                        except ItemDoesNotExist:
+                            # Row permanently gone (e.g. retention) — end.
+                            stream_outcome = "task_gone"
+                            disconnect_reason = "task_deleted"
+                            logger.info(
+                                f"Ending SSE stream for task {task_id}: "
+                                "task no longer exists"
+                            )
+                            return
+                        if task.status in TERMINAL_TASK_STATUSES:
+                            disconnect_reason = "terminal_status"
+                            logger.info(
+                                f"Ending SSE stream for task {task_id}: "
+                                "terminal on status recheck"
+                            )
+                            return
 
-                        # Process yielded messages one by one
-                        message_generator = self.read_messages(
-                            topic=stream_topic, last_id=last_id
-                        )
-                        message_count = 0
-                        async for new_id, data in message_generator:
-                            # Update the last_id for the next iteration
-                            last_id = new_id
-                            message_count += 1
-                            _record_first_event()
-                            # Send the data to the client
-                            data_str = f"data: {data.model_dump_json()}\n\n"
-                            yield data_str
-                            last_message_time = asyncio.get_running_loop().time()
-                            # Terminal event is the last one — end here.
-                            if (
-                                isinstance(data, TaskStreamTaskUpdatedEventEntity)
-                                and data.task is not None
-                                and data.task.status in TERMINAL_TASK_STATUSES
-                            ):
-                                disconnect_reason = "terminal_event"
-                                logger.info(
-                                    f"Ending SSE stream for task {task_id}: received "
-                                    "a terminal task_updated event"
-                                )
-                                return
-                            await asyncio.sleep(0.02)
+                    # Process yielded messages one by one
+                    message_generator = self.read_messages(
+                        topic=stream_topic, last_id=last_id
+                    )
+                    message_count = 0
+                    async for new_id, data in message_generator:
+                        # Update the last_id for the next iteration
+                        last_id = new_id
+                        message_count += 1
+                        _record_first_event()
+                        # Send the data to the client
+                        data_str = f"data: {data.model_dump_json()}\n\n"
+                        yield data_str
+                        last_message_time = asyncio.get_running_loop().time()
+                        # Terminal event is the last one — end here.
+                        if (
+                            isinstance(data, TaskStreamTaskUpdatedEventEntity)
+                            and data.task is not None
+                            and data.task.status in TERMINAL_TASK_STATUSES
+                        ):
+                            disconnect_reason = "terminal_event"
+                            logger.info(
+                                f"Ending SSE stream for task {task_id}: received "
+                                "a terminal task_updated event"
+                            )
+                            return
+                        await asyncio.sleep(0.02)
 
-                        # A read cycle completed without raising — the stream is
-                        # healthy again, so reset the backoff/error counter.
-                        consecutive_errors = 0
+                    # A read cycle completed without raising — the stream is
+                    # healthy again, so reset the backoff/error counter.
+                    consecutive_errors = 0
 
-                        # Idle: send keepalive ping so proxies don't reap us. Use a
-                        # fresh timestamp — the read above blocks up to timeout_ms,
-                        # so the loop-top current_time would be stale for ping timing.
-                        if message_count == 0:
-                            now = asyncio.get_running_loop().time()
-                            if now - last_message_time >= ping_interval:
-                                yield ":ping\n\n"
-                                last_message_time = now
-                            await asyncio.sleep(0.1)
-                        else:
-                            # Small pause between batches
-                            await asyncio.sleep(0.02)
-                    except asyncio.CancelledError:
-                        # Client disconnected, exit the loop
-                        stream_outcome = "client_disconnect"
-                        disconnect_reason = "client_disconnect"
-                        logger.info(
-                            f"Client disconnected from SSE stream for task {task_id}"
-                        )
-                        raise
-                    except Exception as e:
-                        consecutive_errors += 1
-                        # Always log the full traceback — nothing is swallowed.
-                        # Volume is controlled two ways instead of by dropping
-                        # diagnostics: structured JSON logging keeps each traceback
-                        # to a single log entry (see utils.logging), and the
-                        # exponential backoff below caps how often a sustained
-                        # failure can repeat. The failure counter gives context on
-                        # how long a stream has been erroring.
-                        logger.error(
-                            f"Error processing events for task {task_id} "
-                            f"(failure #{consecutive_errors}): {e}",
-                            exc_info=True,
-                        )
-                        yield f"data: {TaskStreamErrorEventEntity(type='error', message=str(e)).model_dump_json()}\n\n"
-                        # Exponential backoff (capped) so a sustained failure (e.g.
-                        # Redis pool exhaustion) doesn't spin a tight per-client
-                        # loop hammering Redis and flooding logs.
-                        backoff = min(2.0 ** min(consecutive_errors - 1, 5), 30.0)
-                        await asyncio.sleep(backoff)
+                    # Idle: send keepalive ping so proxies don't reap us. Use a
+                    # fresh timestamp — the read above blocks up to timeout_ms,
+                    # so the loop-top current_time would be stale for ping timing.
+                    if message_count == 0:
+                        now = asyncio.get_running_loop().time()
+                        if now - last_message_time >= ping_interval:
+                            yield ":ping\n\n"
+                            last_message_time = now
+                        await asyncio.sleep(0.1)
+                    else:
+                        # Small pause between batches
+                        await asyncio.sleep(0.02)
+                except asyncio.CancelledError:
+                    # Client disconnected, exit the loop
+                    stream_outcome = "client_disconnect"
+                    disconnect_reason = "client_disconnect"
+                    logger.info(
+                        f"Client disconnected from SSE stream for task {task_id}"
+                    )
+                    raise
+                except Exception as e:
+                    consecutive_errors += 1
+                    # Always log the full traceback — nothing is swallowed.
+                    # Volume is controlled two ways instead of by dropping
+                    # diagnostics: structured JSON logging keeps each traceback
+                    # to a single log entry (see utils.logging), and the
+                    # exponential backoff below caps how often a sustained
+                    # failure can repeat. The failure counter gives context on
+                    # how long a stream has been erroring.
+                    logger.error(
+                        f"Error processing events for task {task_id} "
+                        f"(failure #{consecutive_errors}): {e}",
+                        exc_info=True,
+                    )
+                    yield f"data: {TaskStreamErrorEventEntity(type='error', message=str(e)).model_dump_json()}\n\n"
+                    # Exponential backoff (capped) so a sustained failure (e.g.
+                    # Redis pool exhaustion) doesn't spin a tight per-client
+                    # loop hammering Redis and flooding logs.
+                    backoff = min(2.0 ** min(consecutive_errors - 1, 5), 30.0)
+                    await asyncio.sleep(backoff)
 
-            except asyncio.CancelledError:
-                # Just exit the generator on cancellation
-                stream_outcome = "client_disconnect"
-                disconnect_reason = "client_disconnect"
-                logger.info(f"Client disconnected from SSE stream for task {task_id}")
-                pass
-            except Exception as e:
-                stream_outcome = "error"
-                disconnect_reason = type(e).__name__
-                span.record_exception(e)
-                span.set_status(Status(StatusCode.ERROR, str(e)))
-                logger.error(
-                    f"Fatal error in SSE stream for task {task_id}: {e}", exc_info=True
-                )
-                yield f"data: {TaskStreamErrorEventEntity(type='error', message=str(e)).model_dump_json()}\n\n"
+        except asyncio.CancelledError:
+            # Just exit the generator on cancellation
+            stream_outcome = "client_disconnect"
+            disconnect_reason = "client_disconnect"
+            logger.info(f"Client disconnected from SSE stream for task {task_id}")
+            pass
+        except Exception as e:
+            stream_outcome = "error"
+            disconnect_reason = type(e).__name__
+            span.record_exception(e)
+            span.set_status(Status(StatusCode.ERROR, str(e)))
+            logger.error(
+                f"Fatal error in SSE stream for task {task_id}: {e}", exc_info=True
+            )
+            yield f"data: {TaskStreamErrorEventEntity(type='error', message=str(e)).model_dump_json()}\n\n"
         finally:
-            # Classify an outcome that no handler already set from the exception
-            # still in flight. Two uncaught cases reach here: Starlette aborting
-            # the body with GeneratorExit on client disconnect, and an exception
-            # from the pre-loop setup (task resolution, initial reads) — neither
-            # passes through the loop's handlers, so without this they'd be
-            # mislabeled "completed".
+            # Safety net for an exception that bypassed the except clauses above
+            # and is still in flight — chiefly Starlette aborting the SSE body
+            # with GeneratorExit on client disconnect, which is a BaseException
+            # that `except Exception` doesn't see. Only reclassify when no
+            # handler already set an outcome.
             in_flight = sys.exc_info()[1]
             if in_flight is not None and stream_outcome == "completed":
                 if isinstance(in_flight, GeneratorExit | asyncio.CancelledError):

@@ -204,3 +204,29 @@ class TestStreamTracing:
         # No stream span should be lingering as the current span.
         current = trace.get_current_span()
         assert current.get_span_context().trace_id == 0  # INVALID → nothing attached
+
+    async def test_setup_failure_emits_error_frame_and_marks_span(self, span_exporter):
+        # A failure during setup (here, the initial task lookup) must produce the
+        # established SSE error frame rather than escaping the generator — which
+        # would surface to the client as a broken stream — and the span must be
+        # marked errored.
+        class _BoomTaskService:
+            async def get_task(self, id=None, name=None):
+                raise RuntimeError("boom")
+
+        uc = StreamsUseCase(
+            stream_repository=_FakeStreamRepository(),
+            task_service=_BoomTaskService(),
+            environment_variables=SimpleNamespace(SSE_KEEPALIVE_PING_INTERVAL=15),
+        )
+        frames = [chunk async for chunk in uc.stream_task_events(task_id="task-123")]
+
+        # The generator completed normally, yielding a parseable SSE error frame.
+        assert frames, "expected an SSE error frame, got nothing"
+        assert frames[-1].startswith("data: ")
+        assert '"type":"error"' in frames[-1]
+        assert "boom" in frames[-1]
+
+        span = _only_stream_span(span_exporter)
+        assert span.attributes["stream.outcome"] == "error"
+        assert span.attributes["disconnect.reason"] == "RuntimeError"
