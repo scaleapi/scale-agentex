@@ -73,7 +73,10 @@ def _make_use_case(
     return StreamsUseCase(
         stream_repository=_FakeStreamRepository(buffered),
         task_service=_FakeTaskService(task),
-        environment_variables=SimpleNamespace(SSE_KEEPALIVE_PING_INTERVAL=15),
+        environment_variables=SimpleNamespace(
+            SSE_KEEPALIVE_PING_INTERVAL=15,
+            SSE_STREAM_STALL_THRESHOLD_SECONDS=30,
+        ),
     )
 
 
@@ -217,7 +220,10 @@ class TestStreamTracing:
         uc = StreamsUseCase(
             stream_repository=_FakeStreamRepository(),
             task_service=_BoomTaskService(),
-            environment_variables=SimpleNamespace(SSE_KEEPALIVE_PING_INTERVAL=15),
+            environment_variables=SimpleNamespace(
+                SSE_KEEPALIVE_PING_INTERVAL=15,
+                SSE_STREAM_STALL_THRESHOLD_SECONDS=30,
+            ),
         )
         frames = [chunk async for chunk in uc.stream_task_events(task_id="task-123")]
 

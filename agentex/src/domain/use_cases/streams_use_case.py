@@ -25,6 +25,12 @@ from src.domain.entities.task_stream_events import (
 from src.domain.entities.tasks import TERMINAL_TASK_STATUSES
 from src.domain.services.task_service import DAgentTaskService
 from src.utils.logging import make_logger
+from src.utils.stream_metrics import (
+    StreamOutcome,
+    record_stream_closed,
+    record_stream_opened,
+    record_stream_stall,
+)
 from src.utils.stream_topics import get_task_event_stream_topic
 
 logger = make_logger(__name__)
@@ -133,10 +139,14 @@ class StreamsUseCase:
             trace.set_span_in_context(span, parent_context)
         )
 
-        # Lifecycle outcome, finalized on the span in ``finally``. Defaults assume
-        # a clean server-side end; each termination path narrows the reason.
-        stream_outcome = "completed"
+        # Lifecycle state finalized in ``finally``. ``outcome`` is the coarse label
+        # shared by the close metric and the span's ``stream.outcome`` attribute;
+        # ``disconnect_reason`` is the finer, span-only detail. ``stream_start_time``
+        # and ``opened`` let the finally emit exactly one balanced close metric.
+        stream_start_time = asyncio.get_running_loop().time()
+        outcome: StreamOutcome = "completed"
         disconnect_reason = "completed"
+        opened = False
         first_event_recorded = False
 
         def _record_first_event() -> None:
@@ -149,6 +159,10 @@ class StreamsUseCase:
 
         span.add_event("open")
         try:
+            # Resolve task_name -> id inside the try so a failure yields the SSE
+            # error frame (and marks the span errored) instead of escaping into a
+            # broken stream. Mark the stream opened only after resolution so a bad
+            # task_name never counts as an opened stream.
             if not task_id:
                 if not task_name:
                     raise ValueError("Either task_id or task_name must be provided")
@@ -158,7 +172,16 @@ class StreamsUseCase:
             span.set_attribute("task.id", task_id)
 
             stream_topic = get_task_event_stream_topic(task_id=task_id)
-            # Cursor before status read: catches a racing terminal event.
+            record_stream_opened()
+            opened = True
+            # Snapshot the read cursor BEFORE yielding "connected". "connected"
+            # is the client's cue to send its message, which makes the agent
+            # start XADD-ing deltas. Snapshotting after the yield lets a
+            # congested relay fall behind far enough that those deltas land
+            # before the snapshot and are never read. Snapshotting first resolves
+            # to "0-0" (stream is empty until the client sends), so we read from
+            # the beginning. Reading the cursor before the status check also
+            # catches a task that goes terminal while we connect.
             last_id = await self.stream_repository.get_stream_tail_id(stream_topic)
             task = await self.task_service.get_task(id=task_id)
             # Send initial connection data
@@ -176,11 +199,23 @@ class StreamsUseCase:
                     f"Ending SSE stream for task {task_id}: already terminal at connect"
                 )
                 return
-
-            last_message_time = asyncio.get_running_loop().time()
+            now = asyncio.get_running_loop().time()
+            # last_message_time drives the keepalive ping and is reset by pings;
+            # last_event_time tracks only real data pushes (a ping is not a data
+            # event) and drives stall detection, so a persistently quiet stream
+            # still trips the stall signal even while keepalive pings flow.
+            last_message_time = now
+            last_event_time = now
             ping_interval = float(
                 self.environment_variables.SSE_KEEPALIVE_PING_INTERVAL
             )  # Configurable keepalive ping interval
+            stall_threshold = float(
+                self.environment_variables.SSE_STREAM_STALL_THRESHOLD_SECONDS
+            )
+            # Whether the current quiet spell has already been counted, so one
+            # stall episode increments the counter once (measuring stall onsets)
+            # rather than once per idle cycle. Reset when a data event flows.
+            stalled = False
             # Track consecutive read failures so we can back off and avoid a
             # tight error loop. When the Redis pool is exhausted, every connected
             # client's read fails on each cycle; without backoff this turns into a
@@ -200,8 +235,9 @@ class StreamsUseCase:
                         try:
                             task = await self.task_service.get_task(id=task_id)
                         except ItemDoesNotExist:
-                            # Row permanently gone (e.g. retention) — end.
-                            stream_outcome = "task_gone"
+                            # Row permanently gone (e.g. retention) — end. Coarse
+                            # outcome stays "completed"; the fine reason records
+                            # that the underlying row was deleted.
                             disconnect_reason = "task_deleted"
                             logger.info(
                                 f"Ending SSE stream for task {task_id}: "
@@ -229,7 +265,10 @@ class StreamsUseCase:
                         # Send the data to the client
                         data_str = f"data: {data.model_dump_json()}\n\n"
                         yield data_str
-                        last_message_time = asyncio.get_running_loop().time()
+                        now = asyncio.get_running_loop().time()
+                        last_message_time = now
+                        last_event_time = now
+                        stalled = False
                         # Terminal event is the last one — end here.
                         if (
                             isinstance(data, TaskStreamTaskUpdatedEventEntity)
@@ -253,6 +292,13 @@ class StreamsUseCase:
                     # so the loop-top current_time would be stale for ping timing.
                     if message_count == 0:
                         now = asyncio.get_running_loop().time()
+                        # No data event pushed for the stall window: count the
+                        # onset once. Keepalive pings deliberately do not reset
+                        # last_event_time, so a persistently quiet stream is
+                        # visible even though the connection stays alive.
+                        if now - last_event_time >= stall_threshold and not stalled:
+                            stalled = True
+                            record_stream_stall()
                         if now - last_message_time >= ping_interval:
                             yield ":ping\n\n"
                             last_message_time = now
@@ -262,7 +308,7 @@ class StreamsUseCase:
                         await asyncio.sleep(0.02)
                 except asyncio.CancelledError:
                     # Client disconnected, exit the loop
-                    stream_outcome = "client_disconnect"
+                    outcome = "client_disconnect"
                     disconnect_reason = "client_disconnect"
                     logger.info(
                         f"Client disconnected from SSE stream for task {task_id}"
@@ -291,12 +337,11 @@ class StreamsUseCase:
 
         except asyncio.CancelledError:
             # Just exit the generator on cancellation
-            stream_outcome = "client_disconnect"
+            outcome = "client_disconnect"
             disconnect_reason = "client_disconnect"
             logger.info(f"Client disconnected from SSE stream for task {task_id}")
-            pass
         except Exception as e:
-            stream_outcome = "error"
+            outcome = "error"
             disconnect_reason = type(e).__name__
             span.record_exception(e)
             span.set_status(Status(StatusCode.ERROR, str(e)))
@@ -311,21 +356,21 @@ class StreamsUseCase:
             # that `except Exception` doesn't see. Only reclassify when no
             # handler already set an outcome.
             in_flight = sys.exc_info()[1]
-            if in_flight is not None and stream_outcome == "completed":
+            if in_flight is not None and outcome == "completed":
                 if isinstance(in_flight, GeneratorExit | asyncio.CancelledError):
-                    stream_outcome = "client_disconnect"
+                    outcome = "client_disconnect"
                     disconnect_reason = "client_disconnect"
                 else:
-                    stream_outcome = "error"
+                    outcome = "error"
                     disconnect_reason = type(in_flight).__name__
                     span.record_exception(in_flight)
                     span.set_status(Status(StatusCode.ERROR, str(in_flight)))
-            span.set_attribute("stream.outcome", stream_outcome)
+            span.set_attribute("stream.outcome", outcome)
             span.set_attribute("disconnect.reason", disconnect_reason)
             span.add_event(
                 "close",
                 {
-                    "stream.outcome": stream_outcome,
+                    "stream.outcome": outcome,
                     "disconnect.reason": disconnect_reason,
                 },
             )
@@ -333,6 +378,13 @@ class StreamsUseCase:
             otel_context.detach(context_token)
             # Don't delete the shared topic; the TTL reclaims it.
             logger.info(f"SSE stream for task {task_id} has ended")
+            # Only close what we actually opened, so the active gauge is never
+            # decremented for a stream that never incremented it.
+            if opened:
+                record_stream_closed(
+                    outcome,
+                    asyncio.get_running_loop().time() - stream_start_time,
+                )
 
 
 DStreamsUseCase = Annotated[StreamsUseCase, Depends(StreamsUseCase)]
