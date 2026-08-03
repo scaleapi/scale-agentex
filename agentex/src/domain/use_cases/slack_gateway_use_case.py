@@ -102,20 +102,11 @@ _MESSAGE_PAGE = 200  # per-poll page size when collecting the reply
 # ``event_id`` via Redis with a short TTL so a retry can't start a duplicate turn.
 _EVENT_DEDUP_TTL_SECONDS = int(os.getenv("SLACK_EVENT_DEDUP_TTL", "600"))
 
-# v1/dev: golden-agent requires a system prompt (task/create params or turn-1 config).
-# Until name->config resolution lands (tier 2), pass this default so the turn can run.
-_DEFAULT_SYSTEM_PROMPT = os.getenv(
-    "SLACK_GATEWAY_DEFAULT_SYSTEM_PROMPT",
-    (
-        "You are Golden 🌟 — a friendly, upbeat teammate hanging out in Slack. Bring "
-        "personality and sprinkle in plentiful, fitting emojis. When you're working "
-        "through a task, narrate your progress with a little flair (e.g. 'On it! 🔍', "
-        "'Digging through the channel… 🧵', 'Crunching the details… ⚙️', 'Done! ✅'). "
-        "Keep replies concise and easy to skim in chat, and use your Slack tools to read "
-        "channel history, threads, or files whenever it helps 🛠️. Stay genuinely useful "
-        "first — the playfulness is seasoning, never a substitute for a clear, correct "
-        "answer. 🎉"
-    ),
+# v1/dev: golden-agent resolves its full turn config (system prompt / model / harness /
+# tools) from this agent_config id, passed as a task param on the first turn. Overridable
+# per-env; a routed agent with its own config_id (target.config_id) takes precedence.
+_DEFAULT_CONFIG_ID = os.getenv(
+    "SLACK_GATEWAY_DEFAULT_CONFIG_ID", "416f61d9-9587-46be-a1d8-0b0aba17eb6e"
 )
 
 # v1/dev: MCP tools to enable per task (golden-agent switches MCPs on from the config's
@@ -441,12 +432,12 @@ class SlackGatewayUseCase:
                 "thread_ts": thread_ts,
                 "channel_id": inbound.channel,
             }
-            if target.config_id:
-                task_metadata["config_id"] = target.config_id
-            # v1/dev: default system_prompt + optionally-enabled MCP tools.
-            # TODO: resolve target.config_id -> full params (system_prompt / harness /
-            # model / tools) via egp /v5/agent_configs/{id}/resolve.
-            create_params = {"system_prompt": _DEFAULT_SYSTEM_PROMPT}
+            # golden-agent resolves the agent_config id -> full turn config (system
+            # prompt / model / harness / tools). Use the routed agent's own config_id if
+            # it has one, else the gateway default.
+            config_id = target.config_id or _DEFAULT_CONFIG_ID
+            task_metadata["config_id"] = config_id
+            create_params = {"config_id": config_id}
             if _DEFAULT_MCPS:
                 create_params["mcps"] = _DEFAULT_MCPS
             try:

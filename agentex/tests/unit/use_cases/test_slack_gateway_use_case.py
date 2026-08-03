@@ -369,6 +369,9 @@ class TestDispatch:
         first, second = acp.handle_rpc_request.await_args_list
         assert first.kwargs["method"] == AgentRPCMethod.TASK_CREATE
         assert first.kwargs["params"].name == "slack:1700000000.000100"
+        # First turn passes the default agent_config id so golden-agent resolves its
+        # full turn config (prompt/model/tools) from it.
+        assert first.kwargs["params"].params["config_id"] == sg._DEFAULT_CONFIG_ID
         assert second.kwargs["method"] == AgentRPCMethod.EVENT_SEND
         # The turn content carries the user's prompt plus the Slack channel context so
         # the agent can point its Slack tools at the right conversation.
