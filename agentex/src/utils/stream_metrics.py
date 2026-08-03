@@ -13,7 +13,7 @@ routes OTel to Datadog through the collector rather than emitting to the Datadog
 Agent directly — so a second, DogStatsD-native copy of every point would just be
 redundant.
 
-**Why this exists (see AGX1-616/AGX1-618):** HTTP request-level RED for
+**Why this exists:** HTTP request-level RED for
 ``GET /tasks/{task_id}/stream`` is already covered by auto-instrumentation — the
 route records into ``http_server_request_duration_seconds`` at connection close.
 But a single SSE request produces exactly one duration sample, which says nothing
