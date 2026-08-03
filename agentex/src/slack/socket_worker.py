@@ -112,7 +112,9 @@ class SocketWorker:
         # ephemeral reply is delivered in Socket Mode. Verify is skipped (the socket
         # itself is authenticated), so the form payload dispatches directly.
         if req.type == "slash_commands":
-            resp = await self._gateway.handle_slash_command(form=req.payload)
+            resp = await self._gateway.handle_slash_command(
+                body=b"", headers={}, form=req.payload
+            )
             await client.send_socket_mode_response(
                 SocketModeResponse(envelope_id=req.envelope_id, payload=resp)
             )

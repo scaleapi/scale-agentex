@@ -1,9 +1,8 @@
 """DEV-ONLY Socket Mode bridge — run the Slack gateway end to end locally, no tunnel.
 
-The production ingress is the Socket Mode worker (``src/slack/socket_worker.py``); this
-is its lighter local counterpart. The app holds an outbound WebSocket to Slack, so
-there's no public URL and no per-event signature (the socket itself is authenticated).
-This process:
+TEMPORARY. Production ingress is ``POST /slack/events`` (agentex forward proxy + signature
+verify). Socket Mode is a different path — the app holds a WebSocket to Slack, so there's
+no public URL and no per-event signature. This process:
 
   1. initializes the real global dependencies (DB / Temporal / Redis / Mongo), the same
      ``startup_global_dependencies()`` the API uses — so dispatch runs for real;
@@ -15,8 +14,10 @@ Prereqs for a full round-trip:
   - Backing services up (``make dev`` for Postgres/Temporal/Redis/Mongo).
   - A target agent registered + running locally (e.g. ``agentex agents run`` for
     golden-agent) — dispatch HTTP-calls its acp_url, so it must be reachable.
-  - Creds: the app/bot tokens are read from agent_api_keys (DB) with env fallback
-    (SLACK_APP_TOKEN=xapp-..., SLACK_BOT_TOKEN=xoxb-...), same as the production worker.
+  - Env:
+      SLACK_APP_TOKEN=xapp-...     # Socket Mode (scope connections:write)
+      SLACK_BOT_TOKEN=xoxb-...     # used by _deliver to post the reply back
+      SLACK_GATEWAY_DEV_SKIP_VERIFY=true   # (belt-and-suspenders; this path skips verify anyway)
     Leave SLACK_GATEWAY_ACTING_USER_API_KEY unset locally so dispatch runs with no
     principal (local authz is off); set it only if pointing at an authz-enabled env.
 
@@ -78,7 +79,9 @@ async def _on_request(client: SocketModeClient, req: SocketModeRequest) -> None:
     # that's how the ephemeral reply is delivered. Verify is skipped in dev, so the
     # form payload dispatches directly.
     if req.type == "slash_commands":
-        resp = await _gateway.handle_slash_command(form=req.payload)
+        resp = await _gateway.handle_slash_command(
+            body=b"", headers={}, form=req.payload
+        )
         await client.send_socket_mode_response(
             SocketModeResponse(envelope_id=req.envelope_id, payload=resp)
         )

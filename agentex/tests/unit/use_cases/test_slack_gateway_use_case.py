@@ -1,19 +1,31 @@
-"""Unit tests for the Slack gateway (Socket Mode ingress) — everything that does NOT
-require a real Slack app: event normalization, slash-command handling, routing, and
-that _run_turn dispatches correctly (ACP mocked). No running stack, no Slack.
+"""Unit tests for the Slack gateway — everything that does NOT require a real Slack
+app: signature verification, event normalization, the handle_slack_event control flow
+(challenge / dev-skip / drop / ack), and that _run_turn dispatches correctly (ACP
+mocked). No running stack, no golden_agent, no Slack.
 """
 
+import hashlib
+import hmac
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import BackgroundTasks
 from src.domain.entities.agents_rpc import AgentRPCMethod
 from src.domain.use_cases import slack_gateway_use_case as sg
 from src.domain.use_cases.slack_gateway_use_case import (
     SlackGatewayUseCase,
     Target,
     normalize,
+    verify_signature,
 )
+
+
+def _sign(secret: str, ts: str, body: bytes) -> str:
+    basis = b"v0:" + ts.encode() + b":" + body
+    return "v0=" + hmac.new(secret.encode(), basis, hashlib.sha256).hexdigest()
+
 
 # Captured before the autouse fixture patches the class, so the repo-lookup tests can
 # exercise the real implementation.
@@ -27,6 +39,25 @@ def _no_runtime_agents(monkeypatch):
     monkeypatch.setattr(
         SlackGatewayUseCase, "_get_agent_by_name", AsyncMock(return_value=None)
     )
+
+
+@pytest.mark.unit
+class TestVerifySignature:
+    def test_valid_signature_passes(self):
+        secret, ts, body = "shh", str(int(time.time())), b'{"x":1}'
+        assert verify_signature(secret, ts, _sign(secret, ts, body), body) is True
+
+    def test_wrong_signature_fails(self):
+        ts, body = str(int(time.time())), b'{"x":1}'
+        assert verify_signature("shh", ts, _sign("other", ts, body), body) is False
+
+    def test_stale_timestamp_fails(self):
+        secret, body = "shh", b'{"x":1}'
+        ts = str(int(time.time()) - 60 * 10)  # 10 min old > 5 min guard
+        assert verify_signature(secret, ts, _sign(secret, ts, body), body) is False
+
+    def test_nonnumeric_timestamp_fails(self):
+        assert verify_signature("shh", "not-a-number", "v0=whatever", b"{}") is False
 
 
 @pytest.mark.unit
@@ -99,6 +130,86 @@ class TestNormalize:
         )
         assert inbound is not None
         assert inbound.selector is None
+
+
+@pytest.mark.unit
+class TestHandleSlackEvent:
+    @pytest.mark.asyncio
+    async def test_url_verification_returns_challenge_without_dispatch(self):
+        bg = BackgroundTasks()
+        result = await SlackGatewayUseCase().handle_slack_event(
+            body=b"{}",
+            headers={},
+            payload={"type": "url_verification", "challenge": "abc"},
+            background=bg,
+        )
+        assert result == {"challenge": "abc"}
+        assert len(bg.tasks) == 0
+
+    @pytest.mark.asyncio
+    async def test_dev_skip_verify_schedules_turn(self, monkeypatch):
+        monkeypatch.setattr(sg, "_DEV_SKIP_VERIFY", True)
+        bg = BackgroundTasks()
+        payload = {
+            "event": {
+                "type": "app_mention",
+                "text": "<@UBOT> hi",
+                "channel": "C1",
+                "ts": "1",
+            }
+        }
+        result = await SlackGatewayUseCase().handle_slack_event(
+            body=b"{}", headers={}, payload=payload, background=bg
+        )
+        assert result == {"ok": True}
+        assert len(bg.tasks) == 1  # _run_turn scheduled
+
+    @pytest.mark.asyncio
+    async def test_bad_signature_drops_without_dispatch(self, monkeypatch):
+        monkeypatch.setattr(sg, "_DEV_SKIP_VERIFY", False)
+        uc = SlackGatewayUseCase()
+        monkeypatch.setattr(uc, "_fetch_signing_secret", AsyncMock(return_value="shh"))
+        bg = BackgroundTasks()
+        result = await uc.handle_slack_event(
+            body=b"{}",
+            headers={
+                "x-slack-request-timestamp": str(int(time.time())),
+                "x-slack-signature": "v0=bad",
+            },
+            payload={
+                "api_app_id": "A1",
+                "event": {"type": "app_mention", "text": "<@U> hi"},
+            },
+            background=bg,
+        )
+        assert result == {"ok": False}
+        assert len(bg.tasks) == 0
+
+    @pytest.mark.asyncio
+    async def test_valid_signature_schedules_turn(self, monkeypatch):
+        monkeypatch.setattr(sg, "_DEV_SKIP_VERIFY", False)
+        uc = SlackGatewayUseCase()
+        monkeypatch.setattr(uc, "_fetch_signing_secret", AsyncMock(return_value="shh"))
+        ts, body = str(int(time.time())), b'{"api_app_id":"A1"}'
+        headers = {
+            "x-slack-request-timestamp": ts,
+            "x-slack-signature": _sign("shh", ts, body),
+        }
+        payload = {
+            "api_app_id": "A1",
+            "event": {
+                "type": "app_mention",
+                "text": "<@U> hi",
+                "channel": "C1",
+                "ts": "1",
+            },
+        }
+        bg = BackgroundTasks()
+        result = await uc.handle_slack_event(
+            body=body, headers=headers, payload=payload, background=bg
+        )
+        assert result == {"ok": True}
+        assert len(bg.tasks) == 1
 
 
 @pytest.mark.unit
@@ -321,8 +432,8 @@ class TestRunTurn:
 
 @pytest.mark.unit
 class TestTwoEventsEndToEnd:
-    """The two turn-driving events, end to end: payload -> normalize -> _run_turn ->
-    _dispatch, asserting the right thread + prompt reach dispatch."""
+    """The two turn-driving events, end to end: payload -> handle_slack_event ->
+    scheduled _run_turn -> _dispatch, asserting the right thread + prompt reach dispatch."""
 
     _APP_MENTION = {
         "team_id": "T1",
@@ -358,15 +469,24 @@ class TestTwoEventsEndToEnd:
     async def test_event_drives_dispatch(
         self, monkeypatch, payload, expected_thread, expected_prompt
     ):
+        monkeypatch.setattr(sg, "_DEV_SKIP_VERIFY", True)
         uc = SlackGatewayUseCase()
         dispatch = AsyncMock(return_value="answer")
         deliver = AsyncMock()
         monkeypatch.setattr(uc, "_dispatch", dispatch)
         monkeypatch.setattr(uc, "_deliver", deliver)
 
-        inbound = normalize(payload)
-        assert inbound is not None
-        await uc._run_turn(inbound)
+        bg = BackgroundTasks()
+        result = await uc.handle_slack_event(
+            body=b"{}", headers={}, payload=payload, background=bg
+        )
+
+        assert result == {"ok": True}
+        assert len(bg.tasks) == 1  # a turn was scheduled
+
+        # Run the scheduled background turn.
+        task = bg.tasks[0]
+        await task.func(*task.args, **task.kwargs)
 
         dispatch.assert_awaited_once()
         target, inbound_arg, prompt = dispatch.await_args.args
@@ -380,6 +500,7 @@ class TestTwoEventsEndToEnd:
 class TestNonGoldenAgent:
     @pytest.mark.asyncio
     async def test_event_routes_to_non_golden_runtime_end_to_end(self, monkeypatch):
+        monkeypatch.setattr(sg, "_DEV_SKIP_VERIFY", True)
         uc = SlackGatewayUseCase()
         # pr-bot is a registered agent; golden_agent is not what should run here.
         monkeypatch.setattr(
@@ -402,9 +523,11 @@ class TestNonGoldenAgent:
                 "ts": "1700000000.000100",
             },
         }
-        inbound = normalize(payload)
-        assert inbound is not None
-        await uc._run_turn(inbound)
+        bg = BackgroundTasks()
+        await uc.handle_slack_event(
+            body=b"{}", headers={}, payload=payload, background=bg
+        )
+        await bg.tasks[0].func(*bg.tasks[0].args)
 
         target, inbound_arg, prompt = dispatch.await_args.args
         assert target.agent_name == "pr-bot"  # routed to the non-golden runtime
@@ -543,8 +666,8 @@ class TestDeliver:
 
 @pytest.mark.unit
 class TestGatewaySecrets:
-    """The throwaway DB store: bot token read from agent_api_keys (via
-    _gateway_secret), env fallback, and fail-safe when there's no DB."""
+    """The throwaway DB store: bot token / signing secret read from agent_api_keys
+    (via _gateway_secret), env fallback, and fail-safe when there's no DB."""
 
     @pytest.mark.asyncio
     async def test_bot_token_from_db(self, monkeypatch):
@@ -561,6 +684,13 @@ class TestGatewaySecrets:
         uc = SlackGatewayUseCase()
         monkeypatch.setattr(uc, "_gateway_secret", AsyncMock(return_value=""))
         assert await uc._fetch_bot_token() == "xoxb-env"
+
+    @pytest.mark.asyncio
+    async def test_signing_secret_from_db(self, monkeypatch):
+        uc = SlackGatewayUseCase()
+        monkeypatch.setattr(uc, "_gateway_secret", AsyncMock(return_value="sign-db"))
+        assert await uc._fetch_signing_secret("A123") == "sign-db"
+        uc._gateway_secret.assert_awaited_once_with("slack-signing-secret")
 
     @pytest.mark.asyncio
     async def test_gateway_secret_fail_safe_without_db(self, monkeypatch):
@@ -732,6 +862,7 @@ class TestListAgents:
 class TestHandleSlashCommand:
     @pytest.mark.asyncio
     async def test_agents_command_lists_agents(self, monkeypatch):
+        monkeypatch.setattr(sg, "_DEV_SKIP_VERIFY", True)
         uc = SlackGatewayUseCase()
         monkeypatch.setattr(
             uc,
@@ -740,13 +871,31 @@ class TestHandleSlashCommand:
                 return_value=[SimpleNamespace(name="pr-bot", description="Reviews PRs")]
             ),
         )
-        resp = await uc.handle_slash_command(form={"command": "/agents"})
+        resp = await uc.handle_slash_command(
+            body=b"", headers={}, form={"command": "/agents"}
+        )
         assert resp["response_type"] == "ephemeral"
         assert "pr-bot" in resp["text"]
 
     @pytest.mark.asyncio
-    async def test_unknown_command_is_reported(self):
+    async def test_unknown_command_is_reported(self, monkeypatch):
+        monkeypatch.setattr(sg, "_DEV_SKIP_VERIFY", True)
         resp = await SlackGatewayUseCase().handle_slash_command(
-            form={"command": "/whoami"}
+            body=b"", headers={}, form={"command": "/whoami"}
         )
         assert "Unsupported command" in resp["text"]
+
+    @pytest.mark.asyncio
+    async def test_bad_signature_rejected(self, monkeypatch):
+        monkeypatch.setattr(sg, "_DEV_SKIP_VERIFY", False)
+        uc = SlackGatewayUseCase()
+        monkeypatch.setattr(uc, "_fetch_signing_secret", AsyncMock(return_value="shh"))
+        resp = await uc.handle_slash_command(
+            body=b"cmd=/agents",
+            headers={
+                "x-slack-request-timestamp": str(int(time.time())),
+                "x-slack-signature": "v0=bad",
+            },
+            form={"command": "/agents", "api_app_id": "A1"},
+        )
+        assert "Signature verification failed" in resp["text"]

@@ -11,20 +11,14 @@ Deliberately NOT layered onto ``/agents/forward`` — that route is the generic,
 per-agent verifying proxy. This is its own module so Slack-specific logic stays out
 of the generic path.
 
-Ingress is Socket Mode only: the app holds an outbound WebSocket to Slack
-(``src/slack/socket_worker.py`` in prod, ``scripts/slack_socket_dev.py`` locally), so
-it works from a network-restricted deployment with no public inbound endpoint. There
-is no HTTP webhook path.
-
 v1 identity: every Slack turn acts as ONE shared SGP identity — the acting-user API
-key (``slack-acting-user-api-key`` in agent_api_keys, env fallback
-``SLACK_GATEWAY_ACTING_USER_API_KEY``). It's forwarded as ``x-api-key``, which the
-platform (a) verifies -> principal for authz and (b) converts to
-``x-acting-user-api-key`` so the agent's tools act as that user via
+key (``SLACK_GATEWAY_ACTING_USER_API_KEY``, env/secret only). It's forwarded as
+``x-api-key``, which the platform (a) verifies -> principal for authz and (b) converts
+to ``x-acting-user-api-key`` so the agent's tools act as that user via
 resolve_user_secrets. Everyone shares its access: fine for a controlled internal
-deploy, NOT customer/multi-tenant. Credentials (bot token + this acting identity) come
-from agent_api_keys (DB-first, env fallback). name->config resolution against
-``agent_configs`` is still TODO (a default system_prompt is used until then).
+deploy, NOT customer/multi-tenant. STILL STUBBED (marked TODO): the signing-secret/
+bot-token fetch (sgp-secrets microservice), name->config resolution against
+``agent_configs``, and reply delivery. Dispatch, delegation, and idempotency are real.
 
 Future — per-user identity (post-v1): resolve the Slack user -> SGP user via a verified
 link. When a user is unlinked, nudge them with an **ephemeral in-channel message**
@@ -37,13 +31,16 @@ until linked.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Annotated, Any
 
 import httpx
-from fastapi import Depends
+from fastapi import BackgroundTasks, Depends
 
 from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
 from src.config.dependencies import (
@@ -88,6 +85,16 @@ _ACTING_USER_API_KEY = os.getenv("SLACK_GATEWAY_ACTING_USER_API_KEY", "")
 # (verified against sgp-dev). Also forwarded downstream so the agent runs in this account.
 _ACTING_ACCOUNT_ID = os.getenv("SLACK_GATEWAY_ACCOUNT_ID", "")
 
+# DEV ONLY. When true, skip Slack signature verification so the backend pipeline can be
+# exercised by POSTing a hand-crafted payload to /slack/events (no real Slack app yet).
+# Default OFF; never enable outside a dev environment — it lets anyone invoke agents
+# through the gateway unauthenticated. TODO: remove once the real Slack app is wired.
+_DEV_SKIP_VERIFY = os.getenv("SLACK_GATEWAY_DEV_SKIP_VERIFY", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 _MESSAGE_PAGE = 200  # per-poll page size when collecting the reply
 
 # v1/dev: golden-agent requires a system prompt (task/create params or turn-1 config).
@@ -121,6 +128,7 @@ _DEFAULT_MCPS = [
 # the cryptic api_app_id (also avoids colliding with per-agent webhook rows, which use
 # name=api_app_id). TODO: replace this whole store with sgp-secrets user-scope.
 _BOT_TOKEN_NAME = "slack-bot-token"
+_SIGNING_SECRET_NAME = "slack-signing-secret"
 # v1 shared acting identity (SGP acting-user API key + account) — same throwaway
 # DB store as the tokens, so a deployed (authz-on) gateway can dispatch with a real
 # principal. Not a Slack token, but kept in the one gateway-config store for now.
@@ -158,6 +166,23 @@ def normalize(payload: dict[str, Any]) -> InboundSlack | None:
         thread_ts=event.get("thread_ts") or event.get("ts") or "",
         selector=text.split(maxsplit=1)[0] if text else None,
     )
+
+
+def verify_signature(
+    signing_secret: str, timestamp: str, signature: str, body: bytes
+) -> bool:
+    """Slack v0 HMAC (same scheme as validate_slack_delivery_webhook), with a ±5 min
+    replay guard. The signing secret comes from the secrets microservice, not the DB."""
+    try:
+        if abs(time.time() - int(timestamp)) > 60 * 5:
+            return False
+    except (TypeError, ValueError):
+        return False
+    basis = b"v0:" + timestamp.encode() + b":" + body
+    expected = (
+        "v0=" + hmac.new(signing_secret.encode(), basis, hashlib.sha256).hexdigest()
+    )
+    return hmac.compare_digest(expected, signature or "")
 
 
 @dataclass
@@ -234,11 +259,76 @@ class SlackGatewayUseCase:
     case is built per-turn, bound to the resolved principal + delegation headers, in
     ``_dispatch``."""
 
-    async def handle_slash_command(self, *, form: dict[str, Any]) -> dict:
-        """Handle a Slack slash command (the ``payload`` of a Socket Mode
-        ``slash_commands`` envelope, which is already authenticated by the socket).
-        Returns the response body Slack renders (ephemeral). v1 supports ``/agents`` —
-        list the agents invocable via ``@agent <name>``."""
+    async def handle_slack_event(
+        self,
+        *,
+        body: bytes,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        background: BackgroundTasks,
+    ) -> dict:
+        # 1. URL-verification handshake (Slack pings the Request URL on save).
+        if payload.get("type") == "url_verification":
+            return {"challenge": payload.get("challenge")}
+
+        # 2. Verify the signature against the app's signing secret (from the microservice).
+        api_app_id = payload.get("api_app_id") or ""
+        if _DEV_SKIP_VERIFY:
+            logger.warning(
+                "SLACK_GATEWAY_DEV_SKIP_VERIFY is ON — skipping signature verification. "
+                "DEV ONLY; the gateway is unauthenticated in this mode."
+            )
+        else:
+            signing_secret = await self._fetch_signing_secret(api_app_id)
+            if not verify_signature(
+                signing_secret,
+                headers.get("x-slack-request-timestamp", ""),
+                headers.get("x-slack-signature", ""),
+                body,
+            ):
+                logger.warning(
+                    "slack signature verification failed for app %s", api_app_id
+                )
+                return {"ok": False}  # 200 to Slack, but drop it
+
+        inbound = normalize(payload)
+        if inbound is None:
+            return {"ok": True}  # event we don't act on
+
+        # 3. ACK fast (Slack's ~3s budget); run the turn out-of-band.
+        background.add_task(self._run_turn, inbound)
+        return {"ok": True}
+
+    async def handle_slash_command(
+        self, *, body: bytes, headers: dict[str, str], form: dict[str, Any]
+    ) -> dict:
+        """Handle a Slack slash command (form-encoded). Returns the response body
+        Slack renders (ephemeral). Verifies the signature like events (skipped in
+        dev). v1 supports ``/agents`` — list the agents invocable via ``@agent
+        <name>``. Synchronous: the registry read is a cheap DB query, well within
+        Slack's 3s budget, so no response_url round-trip is needed."""
+        if _DEV_SKIP_VERIFY:
+            logger.warning(
+                "SLACK_GATEWAY_DEV_SKIP_VERIFY is ON — skipping slash-command signature "
+                "verification. DEV ONLY."
+            )
+        else:
+            api_app_id = form.get("api_app_id") or ""
+            signing_secret = await self._fetch_signing_secret(api_app_id)
+            if not verify_signature(
+                signing_secret,
+                headers.get("x-slack-request-timestamp", ""),
+                headers.get("x-slack-signature", ""),
+                body,
+            ):
+                logger.warning(
+                    "slack slash-command signature failed for app %s", api_app_id
+                )
+                return {
+                    "response_type": "ephemeral",
+                    "text": "Signature verification failed.",
+                }
+
         command = (form.get("command") or "").strip()
         if command == "/agents":
             return _agents_list_response(await self._list_agents())
@@ -444,8 +534,8 @@ class SlackGatewayUseCase:
 
     async def _gateway_secret(self, name: str) -> str:
         """Read a Slack gateway secret from the ``agent_api_keys`` table by (name,
-        SLACK). THROWAWAY store — plaintext, reusing the existing table under
-        descriptive names (slack-bot-token, slack-app-token, slack-acting-*) so it
+        SLACK). THROWAWAY store — plaintext, reusing the existing table by naming
+        convention (api_app_id = signing secret, api_app_id:bot = bot token) so it
         needs no migration. To be replaced by sgp-secrets user-scope. Fail-safe: any
         error (incl. no DB in unit tests) returns "" so callers fall back to env."""
         if not name:
@@ -465,6 +555,14 @@ class SlackGatewayUseCase:
                 exc_info=True,
             )
             return ""
+
+    async def _fetch_signing_secret(self, api_app_id: str) -> str:
+        # Throwaway DB store (agent_api_keys, name="slack-signing-secret", type SLACK);
+        # env fallback for local dev. Empty => verify_signature fails closed. api_app_id
+        # is unused (one shared app) but kept on the interface.
+        return await self._gateway_secret(_SIGNING_SECRET_NAME) or os.getenv(
+            "SLACK_SIGNING_SECRET", ""
+        )
 
     async def _resolve_account(self, team_id: str) -> str:
         # TODO: Slack team_id -> SGP account (tenant-aware from day one). v1 derives the
