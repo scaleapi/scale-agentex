@@ -213,6 +213,58 @@ class TestHandleSlackEvent:
 
 
 @pytest.mark.unit
+class TestEventDedup:
+    """Slack's HTTP Events API is at-least-once; a retried event_id must not start a
+    second turn. Dedup fail-open so it can never drop a legitimate first delivery."""
+
+    _PAYLOAD = {
+        "event": {"type": "app_mention", "text": "<@U> hi", "channel": "C1", "ts": "1"},
+        "event_id": "Ev1",
+    }
+
+    @pytest.mark.asyncio
+    async def test_duplicate_event_is_not_dispatched(self, monkeypatch):
+        monkeypatch.setattr(sg, "_DEV_SKIP_VERIFY", True)
+        uc = SlackGatewayUseCase()
+        monkeypatch.setattr(uc, "_already_processed", AsyncMock(return_value=True))
+        bg = BackgroundTasks()
+        result = await uc.handle_slack_event(
+            body=b"{}", headers={}, payload=self._PAYLOAD, background=bg
+        )
+        assert result == {"ok": True}
+        assert len(bg.tasks) == 0  # deduped -> no turn scheduled
+
+    @pytest.mark.asyncio
+    async def test_first_delivery_is_dispatched(self, monkeypatch):
+        monkeypatch.setattr(sg, "_DEV_SKIP_VERIFY", True)
+        uc = SlackGatewayUseCase()
+        seen = AsyncMock(return_value=False)
+        monkeypatch.setattr(uc, "_already_processed", seen)
+        bg = BackgroundTasks()
+        await uc.handle_slack_event(
+            body=b"{}", headers={}, payload=self._PAYLOAD, background=bg
+        )
+        assert len(bg.tasks) == 1
+        seen.assert_awaited_once_with("Ev1")  # deduped on the envelope event_id
+
+    @pytest.mark.asyncio
+    async def test_already_processed_fail_open_without_redis(self, monkeypatch):
+        # No Redis pool (deps not up) -> fail-open (False) so the turn still runs.
+        monkeypatch.setattr(
+            sg,
+            "GlobalDependencies",
+            MagicMock(return_value=SimpleNamespace(redis_pool=None)),
+        )
+        assert await SlackGatewayUseCase()._already_processed("Ev1") is False
+
+    @pytest.mark.asyncio
+    async def test_already_processed_no_event_id_is_false(self):
+        uc = SlackGatewayUseCase()
+        assert await uc._already_processed(None) is False
+        assert await uc._already_processed("") is False
+
+
+@pytest.mark.unit
 class TestTurnContent:
     def test_prepends_channel_context_and_preserves_prompt(self):
         inbound = sg.InboundSlack(

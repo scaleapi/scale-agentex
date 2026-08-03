@@ -97,6 +97,11 @@ _DEV_SKIP_VERIFY = os.getenv("SLACK_GATEWAY_DEV_SKIP_VERIFY", "").lower() in (
 
 _MESSAGE_PAGE = 200  # per-poll page size when collecting the reply
 
+# Slack's HTTP Events API is at-least-once — it retries a delivery (up to ~3x, with an
+# X-Slack-Retry-Num header) if we don't 200 within ~3s. Dedup on the envelope's
+# ``event_id`` via Redis with a short TTL so a retry can't start a duplicate turn.
+_EVENT_DEDUP_TTL_SECONDS = int(os.getenv("SLACK_EVENT_DEDUP_TTL", "600"))
+
 # v1/dev: golden-agent requires a system prompt (task/create params or turn-1 config).
 # Until name->config resolution lands (tier 2), pass this default so the turn can run.
 _DEFAULT_SYSTEM_PROMPT = os.getenv(
@@ -295,9 +300,43 @@ class SlackGatewayUseCase:
         if inbound is None:
             return {"ok": True}  # event we don't act on
 
-        # 3. ACK fast (Slack's ~3s budget); run the turn out-of-band.
+        # 3. Dedup: Slack redelivers at-least-once, so skip an event_id we've already
+        #    seen — otherwise a retry starts a second turn for the same message.
+        event_id = payload.get("event_id")
+        if await self._already_processed(event_id):
+            logger.info("[slack] duplicate event %s skipped", event_id)
+            return {"ok": True}
+
+        # 4. ACK fast (Slack's ~3s budget); run the turn out-of-band.
         background.add_task(self._run_turn, inbound)
         return {"ok": True}
+
+    async def _already_processed(self, event_id: str | None) -> bool:
+        """Dedup Slack's at-least-once HTTP delivery on the envelope ``event_id`` via a
+        Redis ``SET NX`` with a short TTL. Returns True when the id was already seen
+        (skip it). Fail-open (False) with no id / no Redis / any Redis error, so dedup
+        can never drop a legitimate first delivery."""
+        if not event_id:
+            return False
+        try:
+            pool = GlobalDependencies().redis_pool
+        except Exception:  # noqa: BLE001 - deps not initialized (unit test) -> allow
+            return False
+        if pool is None:
+            return False
+        try:
+            import redis.asyncio as redis
+
+            client = redis.Redis(connection_pool=pool)
+            first_time = await client.set(
+                f"slack:dedup:{event_id}", "1", nx=True, ex=_EVENT_DEDUP_TTL_SECONDS
+            )
+            return not first_time
+        except Exception:  # noqa: BLE001 - dedup is best-effort; never block a turn
+            logger.warning(
+                "[slack] event dedup check failed; processing anyway", exc_info=True
+            )
+            return False
 
     async def handle_slash_command(
         self, *, body: bytes, headers: dict[str, str], form: dict[str, Any]
