@@ -82,6 +82,7 @@ dependencies = [
     { name = "redis", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "sqlalchemy", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "temporalio", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "tzdata", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "uvicorn", extra = ["standard"], marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "websockets", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
 ]
@@ -133,6 +134,7 @@ requires-dist = [
     { name = "redis", specifier = ">=5.1.0,<6" },
     { name = "sqlalchemy", specifier = ">=2.0.35,<3" },
     { name = "temporalio", specifier = ">=1.18.0,<2" },
+    { name = "tzdata", specifier = ">=2025.2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35.0,<0.36" },
     { name = "websockets", specifier = "~=14.2" },
 ]

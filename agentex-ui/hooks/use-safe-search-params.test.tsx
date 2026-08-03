@@ -1,7 +1,11 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { SearchParamKey, useSafeSearchParams } from './use-safe-search-params';
+import {
+  ScheduleScope,
+  SearchParamKey,
+  useSafeSearchParams,
+} from './use-safe-search-params';
 
 // Router spies + a mutable snapshot the mocked `useSearchParams` returns. Created via
 // vi.hoisted so the hoisted vi.mock factory can reference them.
@@ -79,5 +83,17 @@ describe('useSafeSearchParams.updateParams', () => {
     expect(mocks.push).not.toHaveBeenCalled();
     expect(mocks.replace).toHaveBeenCalledTimes(1);
     expect(mocks.replace.mock.calls[0]![0]).toContain('task_id=x');
+  });
+});
+
+describe('useSafeSearchParams.scheduleScope', () => {
+  it('parses all scope and defaults every other value to current', () => {
+    mocks.snapshot = new URLSearchParams('schedule_scope=all');
+    const { result, rerender } = renderHook(() => useSafeSearchParams());
+    expect(result.current.scheduleScope).toBe(ScheduleScope.ALL);
+
+    mocks.snapshot = new URLSearchParams('schedule_scope=unexpected');
+    rerender();
+    expect(result.current.scheduleScope).toBe(ScheduleScope.CURRENT);
   });
 });

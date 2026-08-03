@@ -408,12 +408,14 @@ class TestListOwnershipFiltering:
             run_schedules_use_case=use_case,
             authorized_schedule_ids=[_authz_selector("agent-1", "schedule-1")],
             limit=5,
+            include_live=True,
         )
 
         use_case.list_schedules.assert_awaited_once_with(
             "agent-1",
             authorized_schedule_ids=[_authz_selector("agent-1", "schedule-1")],
             limit=5,
+            include_live=True,
         )
 
     async def test_authorized_resource_ids_dependency_lists_schedule_reads(self):

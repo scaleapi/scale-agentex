@@ -31,6 +31,7 @@ dependencies = [
     "opentelemetry-sdk>=1.28.0",
     "opentelemetry-exporter-otlp>=1.28.0",
     "pyyaml>=6.0,<7",
+    "tzdata>=2025.2",
 ]
 
 [dependency-groups]

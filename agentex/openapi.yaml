@@ -555,7 +555,8 @@ paths:
       tags:
       - Tasks
       summary: List Tasks
-      description: List all tasks.
+      description: List tasks. Returns a lean summary per task and omits `params`;
+        fetch GET /tasks/{task_id} for the full record including `params`.
       operationId: list_tasks_tasks_get
       parameters:
       - name: agent_id
@@ -641,7 +642,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/TaskResponse'
+                  $ref: '#/components/schemas/TaskSummary'
                 title: Response List Tasks Tasks Get
         '422':
           description: Validation Error
@@ -2536,6 +2537,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /slack/events:
+    post:
+      tags:
+      - Slack
+      summary: Slack Events API ingress for the @agent app
+      operationId: slack_events_slack_events_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Slack Events Slack Events Post
+  /slack/commands:
+    post:
+      tags:
+      - Slack
+      summary: Slack slash-command ingress (e.g. /agents)
+      operationId: slack_commands_slack_commands_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Slack Commands Slack Commands Post
   /tracker/{tracker_id}:
     get:
       tags:
@@ -2954,36 +2985,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /slack/events:
-    post:
-      tags:
-      - Slack
-      summary: Slack Events API ingress for the @agent app
-      operationId: slack_events_slack_events_post
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                additionalProperties: true
-                type: object
-                title: Response Slack Events Slack Events Post
-  /slack/commands:
-    post:
-      tags:
-      - Slack
-      summary: Slack slash-command ingress (e.g. /agents)
-      operationId: slack_commands_slack_commands_post
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                additionalProperties: true
-                type: object
-                title: Response Slack Commands Slack Commands Post
   /deployment-history/{deployment_id}:
     get:
       tags:
@@ -3374,6 +3375,15 @@ paths:
           minimum: 1
           default: 100
           title: Limit
+      - name: include_live
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Include live Temporal state and upcoming action times.
+          default: false
+          title: Include Live
+        description: Include live Temporal state and upcoming action times.
       responses:
         '200':
           description: Successful Response
@@ -4507,6 +4517,13 @@ components:
           type: array
           title: Next Action Times
           description: Upcoming scheduled fire times.
+        live_data_available:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Live Data Available
+          description: Whether requested live Temporal fields were retrieved successfully.
+            Null when live enrichment was not requested.
         skipped_action_times:
           items:
             type: string
@@ -6844,6 +6861,68 @@ components:
           title: Optional reason for the status change
       type: object
       title: TaskStatusReasonRequest
+    TaskSummary:
+      properties:
+        id:
+          type: string
+          title: Unique Task ID
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Unique name of the task
+        status:
+          anyOf:
+          - $ref: '#/components/schemas/TaskStatus'
+          - type: 'null'
+          title: The current status of the task
+        status_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: The reason for the current task status
+        created_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: The timestamp when the task was created
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: The timestamp when the task was last updated
+        cleaned_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: The timestamp when the task's content was cleaned for retention compliance;
+            null when active
+        task_metadata:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task metadata
+        agents:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/Agent'
+            type: array
+          - type: 'null'
+          title: Agents associated with this task (only populated when 'agents' view
+            is requested)
+      type: object
+      required:
+      - id
+      title: TaskSummary
+      description: 'Lean list-response shape. Omits `params` (the arbitrary create-time
+
+        payload, which can carry per-caller secrets and PII); fetch GET /tasks/{id}
+
+        for the full record.'
     TextContent:
       properties:
         type:

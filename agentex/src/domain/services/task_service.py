@@ -166,7 +166,9 @@ class AgentTaskService:
     async def fail_task(self, task: TaskEntity, reason: str) -> None:
         task.status = TaskStatus.FAILED
         task.status_reason = reason
-        await self.task_repository.update(task)
+        # Publish task_updated so streaming viewers see the failure and end.
+        # Every terminal write must emit; SSE termination relies on it.
+        await self.update_task(task)
 
     async def get_task(
         self,
@@ -374,7 +376,11 @@ class AgentTaskService:
             new_status=TaskStatus.CANCELED,
             status_reason="Task canceled by user",
         )
-        return updated if updated is not None else await self.task_repository.get(id=task.id)
+        return (
+            updated
+            if updated is not None
+            else await self.task_repository.get(id=task.id)
+        )
 
     async def interrupt_task(
         self, agent: AgentEntity, task: TaskEntity, acp_url: str
