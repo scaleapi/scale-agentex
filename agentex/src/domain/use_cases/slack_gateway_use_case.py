@@ -102,20 +102,16 @@ _MESSAGE_PAGE = 200  # per-poll page size when collecting the reply
 # ``event_id`` via Redis with a short TTL so a retry can't start a duplicate turn.
 _EVENT_DEDUP_TTL_SECONDS = int(os.getenv("SLACK_EVENT_DEDUP_TTL", "600"))
 
-# The gateway runs golden-agent against an agent_config, passed as a task param on the
-# first turn; the agent resolves the id -> full turn config (prompt / model / harness /
-# tools). A routed agent's own config_id (target.config_id) takes precedence.
-#
-# Prefer resolving the default config by NAME against SGP's directory
-# (GET {SGP}/v5/agent_configs?name=) — stable across config re-creation — and fall back to
-# a fixed id when SGP resolution isn't available (no SLACK_GATEWAY_SGP_BASE_URL, or local
-# dev with no acting identity to authenticate the lookup).
-_DEFAULT_CONFIG_NAME = os.getenv(
-    "SLACK_GATEWAY_DEFAULT_CONFIG_NAME", "mc-golden-local-test"
-)
+# The ``@agent <selector>`` token drives resolution (see ``_resolve_target``): the
+# selector is tried as an SGP agent_config NAME (-> golden-agent + that config), then as a
+# registered agentex agent name (-> route to that runtime); if neither matches (or there's
+# no selector) the turn falls back to this default agent_config id. golden-agent resolves
+# whatever config_id it gets -> full turn config (prompt / model / harness / tools).
 _DEFAULT_CONFIG_ID = os.getenv(
     "SLACK_GATEWAY_DEFAULT_CONFIG_ID", "416f61d9-9587-46be-a1d8-0b0aba17eb6e"
 )
+# SGP API base for name -> config_id resolution (GET {base}/v5/agent_configs?name=).
+# Empty (or no acting identity to authenticate the call) -> name resolution is skipped.
 _SGP_BASE_URL = os.getenv("SLACK_GATEWAY_SGP_BASE_URL", "").rstrip("/")
 # name -> config_id, keyed by (account_id, name). Module-level because the use case is
 # instantiated per-request; config ids are stable, so a process-lifetime cache is fine.
@@ -199,9 +195,9 @@ class Target:
     config_id: str | None = None
 
     def label(self) -> str:
-        return (
-            f"{self.agent_name}/{self.config_id}" if self.config_id else self.agent_name
-        )
+        # User-facing attribution — the agent name only; the config_id (a UUID) is kept
+        # out of Slack messages and recorded in task_metadata instead.
+        return self.agent_name
 
 
 def _strip_selector(text: str, selector: str) -> str:
@@ -381,8 +377,11 @@ class SlackGatewayUseCase:
 
     async def _run_turn(self, inbound: InboundSlack) -> None:
         try:
-            account_id = await self._resolve_account(inbound.team_id)
-            target, prompt = await self._resolve_target(account_id, inbound)
+            # One shared v1 identity per turn, resolved once and threaded into both target
+            # resolution (the SGP agent_config lookup) and dispatch (principal + the
+            # delegated x-api-key headers).
+            principal, auth_headers = await self._acting_identity()
+            target, prompt = await self._resolve_target(inbound, auth_headers)
 
             if not await self._authorize(target):
                 await self._deliver(
@@ -393,7 +392,9 @@ class SlackGatewayUseCase:
             # AI-app "thinking…" indicator while the turn runs (assistant pane); cleared
             # automatically when we post the reply. No-op outside an assistant thread.
             await self._set_status(inbound, "is thinking…")
-            reply = await self._dispatch(target, inbound, prompt)
+            reply = await self._dispatch(
+                target, inbound, prompt, principal, auth_headers
+            )
             note = f"_via {target.label()}_"  # attribution
             await self._deliver(
                 inbound,
@@ -440,39 +441,31 @@ class SlackGatewayUseCase:
             )
         return None
 
-    async def _effective_config_id(
-        self, target: Target, auth_headers: dict[str, str]
-    ) -> str | None:
-        """The agent_config id for a first turn: the routed agent's own config_id if set,
-        else the gateway default resolved by NAME via SGP, else the fixed fallback id."""
-        if target.config_id:
-            return target.config_id
-        resolved = await self._resolve_config_id(_DEFAULT_CONFIG_NAME, auth_headers)
-        return resolved or (_DEFAULT_CONFIG_ID or None)
-
     async def _dispatch(
-        self, target: Target, inbound: InboundSlack, prompt: str
+        self,
+        target: Target,
+        inbound: InboundSlack,
+        prompt: str,
+        principal: Any,
+        auth_headers: dict[str, str],
     ) -> str | None:
         """Create-or-resume a task on the resolved agent, then inject the turn, acting as
         the shared v1 identity (x-api-key -> principal for authz, delegated downstream as
-        x-acting-user-api-key so tools act as that user).
+        x-acting-user-api-key so tools act as that user). The principal + headers are
+        resolved once per turn in ``_run_turn`` and passed in.
 
         The task is keyed on the Slack thread (``slack:{thread_ts}``), so a thread is one
         long-lived task/workflow. TASK_CREATE runs only on the FIRST turn; follow-ups in
         the same thread skip it (the workflow is already running — re-creating raises
         WorkflowAlreadyStarted) and just send the next event.
-
-        TODO: dedup on Slack's event_id — the Events API is at-least-once, so a
-        retried delivery could otherwise start a duplicate turn.
         """
         # Local import avoids a domain -> temporal import cycle at module load.
         from src.temporal.scheduled_agent_run_factory import (
             build_acp_use_case_for_principal,
         )
 
-        principal, delegation_headers = await self._acting_identity()
         acp = build_acp_use_case_for_principal(
-            GlobalDependencies(), principal, request_headers=delegation_headers
+            GlobalDependencies(), principal, request_headers=auth_headers
         )
         agent = await acp.agent_repository.get(name=target.agent_name)
         thread_ts = inbound.thread_ts
@@ -487,10 +480,10 @@ class SlackGatewayUseCase:
                 "thread_ts": thread_ts,
                 "channel_id": inbound.channel,
             }
-            # golden-agent resolves the agent_config id -> full turn config (system prompt
-            # / model / harness / tools). Resolve the default config by NAME via SGP (or
-            # use the routed agent's own id), falling back to the fixed default id.
-            config_id = await self._effective_config_id(target, delegation_headers)
+            # target.config_id was chosen by _resolve_target (the selector's SGP config,
+            # or the default id); a routed runtime agent carries None and resolves its own
+            # config. golden-agent turns the id -> full turn config (prompt/model/tools).
+            config_id = target.config_id
             create_params: dict[str, Any] = {}
             if config_id:
                 task_metadata["config_id"] = config_id
@@ -657,18 +650,32 @@ class SlackGatewayUseCase:
         return ""
 
     async def _resolve_target(
-        self, account_id: str, inbound: InboundSlack
+        self, inbound: InboundSlack, auth_headers: dict[str, str]
     ) -> tuple[Target, str]:
-        """Resolution cascade:
-        1. runtime registry — the selector names a separately-registered agent -> route
-           to it (strip the selector; the rest is the prompt).
-        2. TODO agent_configs by name -> golden_agent + config_id.
-        3. default — golden_agent, whole message is the prompt.
+        """Resolution cascade for the ``@agent <selector>`` token:
+        1. an SGP agent_config with that name -> golden-agent + that config_id;
+        2. a registered agentex agent with that name -> route to that runtime;
+        3. neither (or no selector) -> golden-agent + the default config_id.
+        The selector is stripped from the prompt only when it matched (1 or 2); an
+        unmatched first word is just part of the message.
         """
         selector = inbound.selector
-        if selector and await self._get_agent_by_name(selector) is not None:
-            return Target(agent_name=selector), _strip_selector(inbound.text, selector)
-        return Target(agent_name=_DEFAULT_AGENT_NAME, config_id=None), inbound.text
+        if selector:
+            config_id = await self._resolve_config_id(selector, auth_headers)
+            if config_id:
+                return (
+                    Target(_DEFAULT_AGENT_NAME, config_id=config_id),
+                    _strip_selector(inbound.text, selector),
+                )
+            if await self._get_agent_by_name(selector) is not None:
+                return (
+                    Target(agent_name=selector),
+                    _strip_selector(inbound.text, selector),
+                )
+        return (
+            Target(_DEFAULT_AGENT_NAME, config_id=_DEFAULT_CONFIG_ID or None),
+            inbound.text,
+        )
 
     async def _get_agent_by_name(self, name: str):
         """The runtime-registry tier: does an agent with this name exist? Read-only repo

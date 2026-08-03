@@ -284,7 +284,9 @@ class TestTurnContent:
 @pytest.mark.unit
 class TestResolveTarget:
     @pytest.mark.asyncio
-    async def test_defaults_to_golden_agent_with_full_text(self):
+    async def test_unmatched_selector_falls_back_to_default_config(self):
+        # selector names no SGP config and no registered agent -> golden-agent + the
+        # default config id; the whole message stays the prompt (nothing stripped).
         uc = SlackGatewayUseCase()
         inbound = sg.InboundSlack(
             team_id="T",
@@ -294,13 +296,34 @@ class TestResolveTarget:
             thread_ts="1",
             selector="pr-bot",
         )
-        target, prompt = await uc._resolve_target("acct", inbound)
-        assert target == Target(agent_name="golden-agent", config_id=None)
-        assert prompt == "pr-bot do it"  # no stripping in the default branch
+        target, prompt = await uc._resolve_target(inbound, {})
+        assert target == Target("golden-agent", config_id=sg._DEFAULT_CONFIG_ID)
+        assert prompt == "pr-bot do it"
+
+    @pytest.mark.asyncio
+    async def test_selector_matching_sgp_config_runs_golden_with_that_config(
+        self, monkeypatch
+    ):
+        # selector resolves to an SGP agent_config -> golden-agent + that config_id.
+        uc = SlackGatewayUseCase()
+        monkeypatch.setattr(uc, "_resolve_config_id", AsyncMock(return_value="cfg-9"))
+        inbound = sg.InboundSlack(
+            team_id="T",
+            channel="C",
+            user="U",
+            text="pr-bot do it",
+            thread_ts="1",
+            selector="pr-bot",
+        )
+        target, prompt = await uc._resolve_target(inbound, {"x-api-key": "k"})
+        assert target == Target("golden-agent", config_id="cfg-9")
+        assert prompt == "do it"  # selector stripped once it matched a config
 
     @pytest.mark.asyncio
     async def test_selector_matching_registered_agent_routes_to_it(self, monkeypatch):
+        # No SGP config by that name, but a registered runtime exists -> route to it.
         uc = SlackGatewayUseCase()
+        monkeypatch.setattr(uc, "_resolve_config_id", AsyncMock(return_value=None))
         monkeypatch.setattr(
             uc,
             "_get_agent_by_name",
@@ -314,9 +337,9 @@ class TestResolveTarget:
             thread_ts="1",
             selector="pr-bot",
         )
-        target, prompt = await uc._resolve_target("acct", inbound)
-        assert target == Target(agent_name="pr-bot", config_id=None)  # NOT golden_agent
-        assert prompt == "do it"  # selector stripped once it matched
+        target, prompt = await uc._resolve_target(inbound, {"x-api-key": "k"})
+        assert target == Target(agent_name="pr-bot", config_id=None)  # NOT golden
+        assert prompt == "do it"  # selector stripped
 
 
 def _fake_acp(existing_task=None):
@@ -363,7 +386,13 @@ class TestDispatch:
             thread_ts="1700000000.000100",
             selector=None,
         )
-        await SlackGatewayUseCase()._dispatch(Target("golden-agent"), inbound, "hello")
+        await SlackGatewayUseCase()._dispatch(
+            Target("golden-agent", config_id=sg._DEFAULT_CONFIG_ID),
+            inbound,
+            "hello",
+            None,
+            {},
+        )
 
         assert acp.handle_rpc_request.await_count == 2
         first, second = acp.handle_rpc_request.await_args_list
@@ -398,7 +427,9 @@ class TestDispatch:
         inbound = sg.InboundSlack(
             team_id="T", channel="C1", user="U", text="hi", thread_ts="1", selector=None
         )
-        await SlackGatewayUseCase()._dispatch(Target("golden-agent"), inbound, "hi")
+        await SlackGatewayUseCase()._dispatch(
+            Target("golden-agent"), inbound, "hi", None, {}
+        )
 
         assert acp.handle_rpc_request.await_count == 1
         assert (
@@ -440,7 +471,9 @@ class TestDispatch:
         inbound = sg.InboundSlack(
             team_id="T", channel="C1", user="U", text="hi", thread_ts="1", selector=None
         )
-        await SlackGatewayUseCase()._dispatch(Target("golden-agent"), inbound, "hi")
+        await SlackGatewayUseCase()._dispatch(
+            Target("golden-agent"), inbound, "hi", None, {}
+        )
 
         # Create was attempted and raced, then the event still went out against the
         # winner's task (re-fetched by name).
@@ -544,7 +577,7 @@ class TestTwoEventsEndToEnd:
         await task.func(*task.args, **task.kwargs)
 
         dispatch.assert_awaited_once()
-        target, inbound_arg, prompt = dispatch.await_args.args
+        target, inbound_arg, prompt = dispatch.await_args.args[:3]
         assert target.agent_name == "golden-agent"
         assert inbound_arg.thread_ts == expected_thread
         assert prompt == expected_prompt
@@ -584,7 +617,7 @@ class TestNonGoldenAgent:
         )
         await bg.tasks[0].func(*bg.tasks[0].args)
 
-        target, inbound_arg, prompt = dispatch.await_args.args
+        target, inbound_arg, prompt = dispatch.await_args.args[:3]
         assert target.agent_name == "pr-bot"  # routed to the non-golden runtime
         assert prompt == "review PR 42"  # selector stripped
         assert "via pr-bot" in deliver.await_args.args[1]
@@ -605,7 +638,7 @@ class TestNonGoldenAgent:
         inbound = sg.InboundSlack(
             team_id="T", channel="C1", user="U", text="hi", thread_ts="1", selector=None
         )
-        await SlackGatewayUseCase()._dispatch(Target("pr-bot"), inbound, "hi")
+        await SlackGatewayUseCase()._dispatch(Target("pr-bot"), inbound, "hi", None, {})
 
         # dispatch is agent-agnostic — it resolves whatever target it's given.
         acp.agent_repository.get.assert_awaited_once_with(name="pr-bot")
@@ -613,34 +646,8 @@ class TestNonGoldenAgent:
 
 @pytest.mark.unit
 class TestConfigIdResolution:
-    """First-turn config id: routed agent's own > default resolved by NAME via SGP >
-    fixed fallback id."""
-
-    @pytest.mark.asyncio
-    async def test_prefers_routed_config_id(self):
-        cid = await SlackGatewayUseCase()._effective_config_id(
-            Target("pr-bot", config_id="cfg-explicit"), {"x-api-key": "k"}
-        )
-        assert cid == "cfg-explicit"  # no SGP call needed
-
-    @pytest.mark.asyncio
-    async def test_falls_back_to_default_id_without_acting_auth(self):
-        # No x-api-key (e.g. local, no acting identity) -> can't query SGP -> fixed id.
-        cid = await SlackGatewayUseCase()._effective_config_id(
-            Target("golden-agent"), {}
-        )
-        assert cid == sg._DEFAULT_CONFIG_ID
-
-    @pytest.mark.asyncio
-    async def test_uses_name_resolution_when_it_succeeds(self, monkeypatch):
-        uc = SlackGatewayUseCase()
-        monkeypatch.setattr(
-            uc, "_resolve_config_id", AsyncMock(return_value="cfg-from-sgp")
-        )
-        cid = await uc._effective_config_id(
-            Target("golden-agent"), {"x-api-key": "k", "x-selected-account-id": "a"}
-        )
-        assert cid == "cfg-from-sgp"
+    """The SGP name -> config_id lookup used by _resolve_target (the cascade itself is
+    covered in TestResolveTarget)."""
 
     @pytest.mark.asyncio
     async def test_resolve_config_id_queries_sgp_by_name_and_caches(self, monkeypatch):
