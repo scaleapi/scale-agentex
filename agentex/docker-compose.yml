@@ -164,7 +164,8 @@ services:
       - REDIS_URL=redis://agentex-redis:6379
       - MONGODB_URI=mongodb://agentex-mongodb:27017
       - MONGODB_DATABASE_NAME=agentex
-      # Storage backend per document store (mongodb|postgres), e.g. `TASK_STATE_STORAGE_PHASE=postgres ./dev.sh`.
+      # Storage backend per document store; only mongodb is selectable until
+      # the Postgres repositories land (startup rejects anything else).
       - TASK_STATE_STORAGE_PHASE=${TASK_STATE_STORAGE_PHASE:-mongodb}
       - TASK_MESSAGE_STORAGE_PHASE=${TASK_MESSAGE_STORAGE_PHASE:-mongodb}
       - WATCHFILES_FORCE_POLLING=true
