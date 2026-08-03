@@ -102,12 +102,24 @@ _MESSAGE_PAGE = 200  # per-poll page size when collecting the reply
 # ``event_id`` via Redis with a short TTL so a retry can't start a duplicate turn.
 _EVENT_DEDUP_TTL_SECONDS = int(os.getenv("SLACK_EVENT_DEDUP_TTL", "600"))
 
-# v1/dev: golden-agent resolves its full turn config (system prompt / model / harness /
-# tools) from this agent_config id, passed as a task param on the first turn. Overridable
-# per-env; a routed agent with its own config_id (target.config_id) takes precedence.
+# The gateway runs golden-agent against an agent_config, passed as a task param on the
+# first turn; the agent resolves the id -> full turn config (prompt / model / harness /
+# tools). A routed agent's own config_id (target.config_id) takes precedence.
+#
+# Prefer resolving the default config by NAME against SGP's directory
+# (GET {SGP}/v5/agent_configs?name=) — stable across config re-creation — and fall back to
+# a fixed id when SGP resolution isn't available (no SLACK_GATEWAY_SGP_BASE_URL, or local
+# dev with no acting identity to authenticate the lookup).
+_DEFAULT_CONFIG_NAME = os.getenv(
+    "SLACK_GATEWAY_DEFAULT_CONFIG_NAME", "mc-golden-local-test"
+)
 _DEFAULT_CONFIG_ID = os.getenv(
     "SLACK_GATEWAY_DEFAULT_CONFIG_ID", "416f61d9-9587-46be-a1d8-0b0aba17eb6e"
 )
+_SGP_BASE_URL = os.getenv("SLACK_GATEWAY_SGP_BASE_URL", "").rstrip("/")
+# name -> config_id, keyed by (account_id, name). Module-level because the use case is
+# instantiated per-request; config ids are stable, so a process-lifetime cache is fine.
+_CONFIG_ID_CACHE: dict[tuple[str, str], str] = {}
 
 # v1/dev: MCP tools to enable per task (golden-agent switches MCPs on from the config's
 # `mcps` list; the credential existing isn't enough — the tool must be enabled for the
@@ -395,6 +407,49 @@ class SlackGatewayUseCase:
                 inbound, "Something went wrong handling that. Please retry."
             )
 
+    async def _resolve_config_id(
+        self, name: str, auth_headers: dict[str, str]
+    ) -> str | None:
+        """Resolve an agent_config NAME -> id via SGP's directory
+        (GET {SGP}/v5/agent_configs?name=), authenticated with the acting identity's
+        headers (x-api-key + x-selected-account-id). Cached by (account, name) for the
+        process lifetime. Fail-safe -> None (no SGP base / no acting key / any error) so
+        the caller falls back to the fixed default id."""
+        api_key = auth_headers.get("x-api-key")
+        if not (_SGP_BASE_URL and name and api_key):
+            return None
+        cache_key = (auth_headers.get("x-selected-account-id", ""), name)
+        if cache_key in _CONFIG_ID_CACHE:
+            return _CONFIG_ID_CACHE[cache_key]
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"{_SGP_BASE_URL}/v5/agent_configs",
+                    headers=auth_headers,
+                    params={"name": name},
+                )
+            items = (resp.json() or {}).get("items") or []
+            for cfg in items:
+                if cfg.get("name") == name and cfg.get("id"):
+                    _CONFIG_ID_CACHE[cache_key] = cfg["id"]
+                    return cfg["id"]
+            logger.warning("[slack] no agent_config named %r in SGP", name)
+        except Exception:  # noqa: BLE001 - best-effort; fall back to the default id
+            logger.warning(
+                "[slack] config-id resolution failed for %r", name, exc_info=True
+            )
+        return None
+
+    async def _effective_config_id(
+        self, target: Target, auth_headers: dict[str, str]
+    ) -> str | None:
+        """The agent_config id for a first turn: the routed agent's own config_id if set,
+        else the gateway default resolved by NAME via SGP, else the fixed fallback id."""
+        if target.config_id:
+            return target.config_id
+        resolved = await self._resolve_config_id(_DEFAULT_CONFIG_NAME, auth_headers)
+        return resolved or (_DEFAULT_CONFIG_ID or None)
+
     async def _dispatch(
         self, target: Target, inbound: InboundSlack, prompt: str
     ) -> str | None:
@@ -432,12 +487,14 @@ class SlackGatewayUseCase:
                 "thread_ts": thread_ts,
                 "channel_id": inbound.channel,
             }
-            # golden-agent resolves the agent_config id -> full turn config (system
-            # prompt / model / harness / tools). Use the routed agent's own config_id if
-            # it has one, else the gateway default.
-            config_id = target.config_id or _DEFAULT_CONFIG_ID
-            task_metadata["config_id"] = config_id
-            create_params = {"config_id": config_id}
+            # golden-agent resolves the agent_config id -> full turn config (system prompt
+            # / model / harness / tools). Resolve the default config by NAME via SGP (or
+            # use the routed agent's own id), falling back to the fixed default id.
+            config_id = await self._effective_config_id(target, delegation_headers)
+            create_params: dict[str, Any] = {}
+            if config_id:
+                task_metadata["config_id"] = config_id
+                create_params["config_id"] = config_id
             if _DEFAULT_MCPS:
                 create_params["mcps"] = _DEFAULT_MCPS
             try:

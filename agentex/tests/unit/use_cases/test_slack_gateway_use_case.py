@@ -612,6 +612,80 @@ class TestNonGoldenAgent:
 
 
 @pytest.mark.unit
+class TestConfigIdResolution:
+    """First-turn config id: routed agent's own > default resolved by NAME via SGP >
+    fixed fallback id."""
+
+    @pytest.mark.asyncio
+    async def test_prefers_routed_config_id(self):
+        cid = await SlackGatewayUseCase()._effective_config_id(
+            Target("pr-bot", config_id="cfg-explicit"), {"x-api-key": "k"}
+        )
+        assert cid == "cfg-explicit"  # no SGP call needed
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_default_id_without_acting_auth(self):
+        # No x-api-key (e.g. local, no acting identity) -> can't query SGP -> fixed id.
+        cid = await SlackGatewayUseCase()._effective_config_id(
+            Target("golden-agent"), {}
+        )
+        assert cid == sg._DEFAULT_CONFIG_ID
+
+    @pytest.mark.asyncio
+    async def test_uses_name_resolution_when_it_succeeds(self, monkeypatch):
+        uc = SlackGatewayUseCase()
+        monkeypatch.setattr(
+            uc, "_resolve_config_id", AsyncMock(return_value="cfg-from-sgp")
+        )
+        cid = await uc._effective_config_id(
+            Target("golden-agent"), {"x-api-key": "k", "x-selected-account-id": "a"}
+        )
+        assert cid == "cfg-from-sgp"
+
+    @pytest.mark.asyncio
+    async def test_resolve_config_id_queries_sgp_by_name_and_caches(self, monkeypatch):
+        monkeypatch.setattr(sg, "_SGP_BASE_URL", "https://sgp.example")
+        monkeypatch.setattr(sg, "_CONFIG_ID_CACHE", {})
+        captured = {}
+
+        class _Resp:
+            def json(self):
+                return {"items": [{"id": "cfg-123", "name": "my-config"}]}
+
+        class _Client:
+            def __init__(self, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def get(self, url, headers=None, params=None):
+                captured.update(url=url, headers=headers, params=params)
+                return _Resp()
+
+        monkeypatch.setattr(sg.httpx, "AsyncClient", _Client)
+        headers = {"x-api-key": "k", "x-selected-account-id": "acct1"}
+        cid = await SlackGatewayUseCase()._resolve_config_id("my-config", headers)
+
+        assert cid == "cfg-123"
+        assert captured["url"].endswith("/v5/agent_configs")
+        assert captured["params"] == {"name": "my-config"}
+        assert captured["headers"]["x-api-key"] == "k"
+        assert sg._CONFIG_ID_CACHE[("acct1", "my-config")] == "cfg-123"  # cached
+
+    @pytest.mark.asyncio
+    async def test_resolve_config_id_none_without_base_or_key(self, monkeypatch):
+        uc = SlackGatewayUseCase()
+        monkeypatch.setattr(sg, "_SGP_BASE_URL", "")
+        assert await uc._resolve_config_id("x", {"x-api-key": "k"}) is None  # no base
+        monkeypatch.setattr(sg, "_SGP_BASE_URL", "https://sgp.example")
+        assert await uc._resolve_config_id("x", {}) is None  # no acting key
+
+
+@pytest.mark.unit
 class TestCollectReply:
     @pytest.mark.asyncio
     async def test_returns_settled_agent_text(self):
