@@ -377,8 +377,8 @@ class SlackGatewayUseCase:
         the same thread skip it (the workflow is already running — re-creating raises
         WorkflowAlreadyStarted) and just send the next event.
 
-        TODO: Slack at-least-once dedup. Socket Mode acks the envelope immediately so
-        redelivery is unlikely there; the HTTP path should dedup on Slack's event_id.
+        TODO: dedup on Slack's event_id — the Events API is at-least-once, so a
+        retried delivery could otherwise start a duplicate turn.
         """
         # Local import avoids a domain -> temporal import cycle at module load.
         from src.temporal.scheduled_agent_run_factory import (
@@ -626,7 +626,7 @@ class SlackGatewayUseCase:
 
     async def _fetch_bot_token(self) -> str:
         # Throwaway DB store (agent_api_keys, name="slack-bot-token", type SLACK); env
-        # fallback for local dev / the Socket Mode bridge.
+        # fallback for local dev.
         return await self._gateway_secret(_BOT_TOKEN_NAME) or os.getenv(
             "SLACK_BOT_TOKEN", ""
         )
