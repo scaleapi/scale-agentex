@@ -68,7 +68,9 @@ class TaskStateRepositoryProtocol(Protocol):
     ) -> StateEntity | None: ...
 
 
-class TaskStateRepository(MongoDBCRUDRepository[StateEntity]):
+class TaskStateRepository(
+    MongoDBCRUDRepository[StateEntity], TaskStateRepositoryProtocol
+):
     """Repository for managing task states in MongoDB."""
 
     COLLECTION_NAME = "task_states"

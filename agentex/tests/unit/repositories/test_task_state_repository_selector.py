@@ -9,6 +9,7 @@ from src.domain.repositories import task_state_repository as selector_module
 from src.domain.repositories.task_state_repository import (
     DTaskStateRepository,
     TaskStateRepository,
+    TaskStateRepositoryProtocol,
     get_task_state_repository,
 )
 
@@ -72,6 +73,28 @@ def test_selector_rejects_unimplemented_phases_lazily(monkeypatch):
         get_task_state_repository()
 
     global_dependencies.assert_not_called()
+
+
+@pytest.mark.unit
+def test_mongo_repository_implements_every_protocol_method():
+    """The Mongo repo explicitly subclasses the Protocol, so a missing method
+    would silently inherit the protocol's `...` placeholder (returning None)
+    instead of raising AttributeError. Pin that every required method is a
+    real implementation."""
+    for name in (
+        "create",
+        "batch_create",
+        "get",
+        "update",
+        "delete",
+        "list",
+        "find_by_field",
+        "delete_by_field",
+        "get_by_task_and_agent",
+    ):
+        assert getattr(TaskStateRepository, name) is not getattr(
+            TaskStateRepositoryProtocol, name
+        ), f"{name} is still the protocol placeholder — not implemented"
 
 
 @pytest.mark.unit
