@@ -52,6 +52,27 @@ logger = make_logger(__name__)
 # distinction lives here as a bounded label rather than on the request metric.
 StreamOutcome = Literal["completed", "client_disconnect", "error"]
 
+# Bucket boundaries (seconds) for the stream-lifetime histogram, spanning 1s to
+# 4h. SSE streams are long-lived — seconds to hours — so without this advisory
+# the SDK falls back to its millisecond-scale default boundaries [0, 5, 10, 25,
+# ... 10000] and every stream shorter than 10s piles into one bucket while
+# anything past ~2.8h overflows to +Inf. See rpc_metrics.py / db_metrics.py for
+# the same pattern.
+_DURATION_BUCKET_BOUNDARIES_S = (
+    1.0,
+    5.0,
+    15.0,
+    30.0,
+    60.0,
+    120.0,
+    300.0,
+    600.0,
+    1800.0,
+    3600.0,
+    7200.0,
+    14400.0,
+)
+
 # Lazily-created OTel instruments (created once, on first use).
 _opened_counter: Counter | None = None
 _closed_counter: Counter | None = None
@@ -89,6 +110,7 @@ def _ensure_instruments() -> None:
         name="agentex.task_stream.duration",
         description="Task-event SSE stream lifetime",
         unit="s",
+        explicit_bucket_boundaries_advisory=_DURATION_BUCKET_BOUNDARIES_S,
     )
     _active_updown = meter.create_up_down_counter(
         name="agentex.task_stream.active",
