@@ -417,6 +417,61 @@ class TestAgentACPService:
         assert headers["x-request-id"] != "client-request-id"
         assert len(headers["x-request-id"]) > 0
 
+    async def test_get_headers_falls_back_to_inbound_request_headers(
+        self,
+        agent_acp_service,
+        mock_request,
+        sample_agent,
+    ):
+        """When request_headers is omitted, safe inbound x-* headers are forwarded."""
+        mock_request.state.principal_context = None
+        mock_request.state.agent_identity = None
+        mock_request.headers = {
+            "x-trace-id": "trace-789",
+            "x-user-id": "user-123",
+            "x-api-key": "must-not-forward",
+            "authorization": "Bearer must-not-forward",
+            "user-agent": "must-not-forward",
+        }
+
+        with patch.object(
+            agent_acp_service,
+            "get_agent_auth_headers",
+            new=AsyncMock(return_value={}),
+        ):
+            headers = await agent_acp_service.get_headers(sample_agent)
+
+        assert headers["x-trace-id"] == "trace-789"
+        assert headers["x-user-id"] == "user-123"
+        assert "x-api-key" not in headers
+        assert "authorization" not in headers
+        assert "user-agent" not in headers
+
+    async def test_get_headers_empty_request_headers_forwards_none(
+        self,
+        agent_acp_service,
+        mock_request,
+        sample_agent,
+    ):
+        """Passing an explicit empty dict forwards no client headers (no fallback)."""
+        mock_request.state.principal_context = None
+        mock_request.state.agent_identity = None
+        mock_request.headers = {"x-trace-id": "should-not-be-used"}
+
+        with patch.object(
+            agent_acp_service,
+            "get_agent_auth_headers",
+            new=AsyncMock(return_value={}),
+        ):
+            headers = await agent_acp_service.get_headers(
+                sample_agent,
+                request_headers={},
+            )
+
+        assert "x-trace-id" not in headers
+        # Only the server-generated x-request-id should remain.
+        assert set(headers.keys()) == {"x-request-id"}
+
     async def test_send_message_success_data(
         self,
         agent_acp_service,
