@@ -11,21 +11,16 @@ Deliberately NOT layered onto ``/agents/forward`` — that route is the generic,
 per-agent verifying proxy. This is its own module so Slack-specific logic stays out
 of the generic path.
 
-v1 identity: every Slack turn acts as ONE shared SGP identity — the acting-user API
-key (``SLACK_GATEWAY_ACTING_USER_API_KEY``, env/secret only). It's forwarded as
-``x-api-key``, which the platform (a) verifies -> principal for authz and (b) converts
-to ``x-acting-user-api-key`` so the agent's tools act as that user via
-resolve_user_secrets. Everyone shares its access: fine for a controlled internal
-deploy, NOT customer/multi-tenant. STILL STUBBED (marked TODO): the signing-secret/
-bot-token fetch (sgp-secrets microservice), name->config resolution against
-``agent_configs``, and reply delivery. Dispatch, delegation, and idempotency are real.
-
-Future — per-user identity (post-v1): resolve the Slack user -> SGP user via a verified
-link. When a user is unlinked, nudge them with an **ephemeral in-channel message**
-(``chat.postEphemeral`` — needs only ``chat:write``, no DM/``im:write``) carrying a
-signed one-time link to ``/link/slack``; the SGP OIDC login on that page proves the SGP
-side and the callback writes ``(team_id, slack_user_id) -> sgp_user_id``. Don't dispatch
-until linked.
+Identity: every Slack turn acts as the gateway's own SGP identity — a dedicated bot
+service account (``SLACK_GATEWAY_ACTING_BOT_API_KEY`` + ``SLACK_GATEWAY_ACCOUNT_ID``,
+env / k8s-secret only). The key is forwarded as ``x-api-key``, which the platform (a)
+verifies -> principal for authz and (b) converts to ``x-acting-user-api-key`` so the
+agent's tools act as the bot via resolve_user_secrets. The bot is a first-class entity,
+not a proxy for the invoking user: all Slack traffic shares its account and its tasks
+are owned by it — fine for a controlled internal deploy, NOT per-user multi-tenant.
+Deliberately NOT per-user: we don't conflate the invoking user's SGP identity with the
+bot's. The bot's Slack credentials (signing secret, bot token) live in the same
+env / k8s-secret set. Dispatch, delegation, and idempotency are real.
 """
 
 from __future__ import annotations
@@ -49,7 +44,6 @@ from src.config.dependencies import (
     database_async_read_write_engine,
     database_async_read_write_session_maker,
 )
-from src.domain.entities.agent_api_keys import AgentAPIKeyType
 from src.domain.entities.agents import ACPType, AgentStatus
 from src.domain.entities.agents_rpc import (
     AgentRPCMethod,
@@ -62,7 +56,6 @@ from src.domain.entities.task_messages import (
     TextContentEntity,
     TextFormat,
 )
-from src.domain.repositories.agent_api_key_repository import AgentAPIKeyRepository
 from src.domain.repositories.agent_repository import AgentRepository
 from src.utils.logging import make_logger
 
@@ -73,17 +66,16 @@ _MENTION_RE = re.compile(r"^\s*<@[A-Z0-9]+>\s*")
 # agent is "golden-agent", not "golden_agent" (verified against the sgp-dev directory).
 _DEFAULT_AGENT_NAME = "golden-agent"
 
-# v1: every Slack turn acts as ONE shared SGP identity — this acting-user API key.
-# Forwarded as x-api-key: the platform verifies it -> principal (authz) and converts it
-# to x-acting-user-api-key downstream (tools act as that user via resolve_user_secrets).
-# Everyone shares its access — controlled-internal only, NOT customer/multi-tenant.
-# Secret lives in env only, never in code. TODO: replace with a per-user key resolved
-# from verified Slack->SGP linking.
-_ACTING_USER_API_KEY = os.getenv("SLACK_GATEWAY_ACTING_USER_API_KEY", "")
+# Every Slack turn acts as the gateway's own SGP identity — a dedicated bot service
+# account. Forwarded as x-api-key: the platform verifies it -> principal (authz) and
+# converts it to x-acting-user-api-key downstream (tools act as the bot via
+# resolve_user_secrets). The bot is its own entity, not a proxy for the invoking user;
+# all Slack traffic shares its account. Env / k8s-secret only, never in code.
+_ACTING_BOT_API_KEY = os.getenv("SLACK_GATEWAY_ACTING_BOT_API_KEY", "")
 
-# Account the shared identity acts within. REQUIRED alongside the API key — the backend
-# authenticates on (x-api-key + x-selected-account-id) together; the key alone 401s
-# (verified against sgp-dev). Also forwarded downstream so the agent runs in this account.
+# Account the bot acts within. REQUIRED alongside the API key — the backend authenticates
+# on (x-api-key + x-selected-account-id) together; the key alone 401s. Also forwarded
+# downstream so the agent runs in this account.
 _ACTING_ACCOUNT_ID = os.getenv("SLACK_GATEWAY_ACCOUNT_ID", "")
 
 # DEV ONLY. When true, skip Slack signature verification so the backend pipeline can be
@@ -135,18 +127,6 @@ _DEFAULT_MCPS = [
     for m in os.getenv("SLACK_GATEWAY_DEFAULT_MCPS", "").split(",")
     if m.strip()
 ]
-
-# Fixed, descriptive names for the gateway's own Slack credentials in the throwaway
-# agent_api_keys store. One shared app, so we key by these readable names rather than
-# the cryptic api_app_id (also avoids colliding with per-agent webhook rows, which use
-# name=api_app_id). TODO: replace this whole store with sgp-secrets user-scope.
-_BOT_TOKEN_NAME = "slack-bot-token"
-_SIGNING_SECRET_NAME = "slack-signing-secret"
-# v1 shared acting identity (SGP acting-user API key + account) — same throwaway
-# DB store as the tokens, so a deployed (authz-on) gateway can dispatch with a real
-# principal. Not a Slack token, but kept in the one gateway-config store for now.
-_ACTING_API_KEY_NAME = "slack-acting-user-api-key"
-_ACTING_ACCOUNT_ID_NAME = "slack-acting-account-id"
 
 
 # --------------------------------------------------------------------------- shaping
@@ -639,20 +619,25 @@ class SlackGatewayUseCase:
         return last
 
     async def _acting_identity(self) -> tuple[Any, dict[str, str]]:
-        """v1 shared identity. The acting-user API key + account come from the DB
-        (agent_api_keys, same throwaway store as the tokens), env fallback. Verify the
-        key -> principal (for authz), and return the credential headers (delegated to
-        the agent, where x-api-key becomes x-acting-user-api-key). Auth needs BOTH
-        x-api-key and x-selected-account-id — the key alone 401s. No key configured ->
-        (None, {}) i.e. dev/authz-bypass."""
-        api_key = (
-            await self._gateway_secret(_ACTING_API_KEY_NAME) or _ACTING_USER_API_KEY
-        )
+        """The gateway's bot identity. The bot API key + account come from env /
+        k8s-secret. Verify the key -> principal (for authz), and return the credential
+        headers (delegated to the agent, where x-api-key becomes x-acting-user-api-key).
+        Auth needs BOTH x-api-key and x-selected-account-id — the key alone 401s.
+
+        Missing bot key: FAIL CLOSED when authz is enabled (AGENTEX_AUTH_URL set), so a
+        misconfigured deploy never dispatches unauthenticated (which would run with no
+        principal, bypassing the per-turn authz boundary). Only the authz-off local case
+        (no AGENTEX_AUTH_URL) is allowed to run with no principal — the dev bypass."""
+        api_key = _ACTING_BOT_API_KEY
         if not api_key:
-            return None, {}
-        account_id = (
-            await self._gateway_secret(_ACTING_ACCOUNT_ID_NAME) or _ACTING_ACCOUNT_ID
-        )
+            if os.getenv("AGENTEX_AUTH_URL"):
+                raise RuntimeError(
+                    "SLACK_GATEWAY_ACTING_BOT_API_KEY is unset while authz is enabled "
+                    "(AGENTEX_AUTH_URL); refusing to dispatch a Slack turn without a bot "
+                    "principal."
+                )
+            return None, {}  # authz off (local dev) — run with no principal
+        account_id = _ACTING_ACCOUNT_ID
         # Local imports avoid an import cycle at module load.
         from src.adapters.authentication.adapter_agentex_authn_proxy import (
             AgentexAuthenticationProxy,
@@ -672,39 +657,10 @@ class SlackGatewayUseCase:
         principal = await authn.verify_headers(headers)
         return principal, headers
 
-    # --- STUBS (each is a real net-new piece; do NOT ship as-is) ----------------
-
-    async def _gateway_secret(self, name: str) -> str:
-        """Read a Slack gateway secret from the ``agent_api_keys`` table by (name,
-        SLACK). THROWAWAY store — plaintext, reusing the existing table by naming
-        convention (api_app_id = signing secret, api_app_id:bot = bot token) so it
-        needs no migration. To be replaced by sgp-secrets user-scope. Fail-safe: any
-        error (incl. no DB in unit tests) returns "" so callers fall back to env."""
-        if not name:
-            return ""
-        try:
-            engine = database_async_read_write_engine()
-            repo = AgentAPIKeyRepository(
-                database_async_read_write_session_maker(engine),
-                database_async_read_only_session_maker(engine),
-            )
-            row = await repo.get_by_name_and_type(name, AgentAPIKeyType.SLACK)
-            return row.api_key if row else ""
-        except Exception:  # noqa: BLE001 - fail-safe to env fallback
-            logger.debug(
-                "gateway-secret DB read failed for %r; env fallback",
-                name,
-                exc_info=True,
-            )
-            return ""
-
     async def _fetch_signing_secret(self, api_app_id: str) -> str:
-        # Throwaway DB store (agent_api_keys, name="slack-signing-secret", type SLACK);
-        # env fallback for local dev. Empty => verify_signature fails closed. api_app_id
-        # is unused (one shared app) but kept on the interface.
-        return await self._gateway_secret(_SIGNING_SECRET_NAME) or os.getenv(
-            "SLACK_SIGNING_SECRET", ""
-        )
+        # Signing secret from env / k8s-secret. Empty => verify_signature fails closed.
+        # api_app_id is unused (one shared app) but kept on the interface.
+        return os.getenv("SLACK_SIGNING_SECRET", "")
 
     async def _resolve_account(self, team_id: str) -> str:
         # TODO: Slack team_id -> SGP account (tenant-aware from day one). v1 derives the
@@ -781,11 +737,8 @@ class SlackGatewayUseCase:
         return True
 
     async def _fetch_bot_token(self) -> str:
-        # Throwaway DB store (agent_api_keys, name="slack-bot-token", type SLACK); env
-        # fallback for local dev.
-        return await self._gateway_secret(_BOT_TOKEN_NAME) or os.getenv(
-            "SLACK_BOT_TOKEN", ""
-        )
+        # Bot token from env / k8s-secret.
+        return os.getenv("SLACK_BOT_TOKEN", "")
 
     async def _set_status(self, inbound: InboundSlack, status: str) -> None:
         """AI-app 'thinking…' indicator (assistant.threads.setStatus). Shows in the

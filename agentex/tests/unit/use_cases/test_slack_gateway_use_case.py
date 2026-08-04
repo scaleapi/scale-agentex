@@ -370,7 +370,7 @@ class TestDispatch:
     @pytest.mark.asyncio
     async def test_new_thread_creates_task_then_sends_event(self, monkeypatch):
         monkeypatch.setattr(
-            sg, "_ACTING_USER_API_KEY", ""
+            sg, "_ACTING_BOT_API_KEY", ""
         )  # -> (None, {}), no authn proxy
         monkeypatch.setattr(sg, "GlobalDependencies", MagicMock())
         acp, _ = _fake_acp(existing_task=None)  # new thread → create
@@ -416,7 +416,7 @@ class TestDispatch:
     async def test_existing_thread_skips_create_but_sends_event(self, monkeypatch):
         # Same-thread follow-up: the task/workflow already exists, so we must NOT
         # TASK_CREATE (it would re-start the running workflow) — only EVENT_SEND.
-        monkeypatch.setattr(sg, "_ACTING_USER_API_KEY", "")
+        monkeypatch.setattr(sg, "_ACTING_BOT_API_KEY", "")
         monkeypatch.setattr(sg, "GlobalDependencies", MagicMock())
         existing = SimpleNamespace(id="task_1", task_metadata=None)
         acp, _ = _fake_acp(existing_task=existing)
@@ -447,7 +447,7 @@ class TestDispatch:
         # globally-unique task name is already taken), so TASK_CREATE raises
         # DuplicateItemError. It must fall back to the task the winner created and
         # still send its own event rather than dropping the turn.
-        monkeypatch.setattr(sg, "_ACTING_USER_API_KEY", "")
+        monkeypatch.setattr(sg, "_ACTING_BOT_API_KEY", "")
         monkeypatch.setattr(sg, "GlobalDependencies", MagicMock())
         winner_task = SimpleNamespace(id="task_1", task_metadata=None)
         acp = MagicMock()
@@ -494,7 +494,7 @@ class TestDispatch:
         # After the create-race, the fallback get_task reads the replica — which may lag
         # and miss the winner's task. Retry until it catches up rather than dropping the
         # turn with ItemDoesNotExist.
-        monkeypatch.setattr(sg, "_ACTING_USER_API_KEY", "")
+        monkeypatch.setattr(sg, "_ACTING_BOT_API_KEY", "")
         monkeypatch.setattr(sg, "GlobalDependencies", MagicMock())
         monkeypatch.setattr(sg, "_CREATE_RACE_BACKOFF_S", 0.0)
         winner_task = SimpleNamespace(id="task_1", task_metadata=None)
@@ -541,7 +541,7 @@ class TestDispatch:
     async def test_sync_agent_uses_message_send_and_returns_reply(self, monkeypatch):
         # A SYNC agent has no event stream: dispatch does ONE message/send (get-or-create
         # + reply), not task/create + event/send + poll.
-        monkeypatch.setattr(sg, "_ACTING_USER_API_KEY", "")
+        monkeypatch.setattr(sg, "_ACTING_BOT_API_KEY", "")
         monkeypatch.setattr(sg, "GlobalDependencies", MagicMock())
         acp, _ = _fake_acp(acp_type=sg.ACPType.SYNC)
         reply_msg = SimpleNamespace(
@@ -575,7 +575,7 @@ class TestDispatch:
 
     @staticmethod
     def _sync_race_acp(monkeypatch, side_effect):
-        monkeypatch.setattr(sg, "_ACTING_USER_API_KEY", "")
+        monkeypatch.setattr(sg, "_ACTING_BOT_API_KEY", "")
         monkeypatch.setattr(sg, "GlobalDependencies", MagicMock())
         monkeypatch.setattr(
             sg, "_CREATE_RACE_BACKOFF_S", 0.0
@@ -792,7 +792,7 @@ class TestNonGoldenAgent:
 
     @pytest.mark.asyncio
     async def test_dispatch_looks_up_the_target_agent_by_name(self, monkeypatch):
-        monkeypatch.setattr(sg, "_ACTING_USER_API_KEY", "")
+        monkeypatch.setattr(sg, "_ACTING_BOT_API_KEY", "")
         monkeypatch.setattr(sg, "GlobalDependencies", MagicMock())
         acp, _ = _fake_acp(existing_task=None)
         monkeypatch.setattr(
@@ -970,41 +970,27 @@ class TestDeliver:
 
 @pytest.mark.unit
 class TestGatewaySecrets:
-    """The throwaway DB store: bot token / signing secret read from agent_api_keys
-    (via _gateway_secret), env fallback, and fail-safe when there's no DB."""
+    """Bot token / signing secret read straight from env / k8s-secret."""
 
     @pytest.mark.asyncio
-    async def test_bot_token_from_db(self, monkeypatch):
-        uc = SlackGatewayUseCase()
-        monkeypatch.setattr(
-            uc, "_gateway_secret", AsyncMock(return_value="xoxb-from-db")
-        )
-        assert await uc._fetch_bot_token() == "xoxb-from-db"
-        uc._gateway_secret.assert_awaited_once_with("slack-bot-token")
-
-    @pytest.mark.asyncio
-    async def test_bot_token_env_fallback(self, monkeypatch):
+    async def test_bot_token_from_env(self, monkeypatch):
         monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-env")
-        uc = SlackGatewayUseCase()
-        monkeypatch.setattr(uc, "_gateway_secret", AsyncMock(return_value=""))
-        assert await uc._fetch_bot_token() == "xoxb-env"
+        assert await SlackGatewayUseCase()._fetch_bot_token() == "xoxb-env"
 
     @pytest.mark.asyncio
-    async def test_signing_secret_from_db(self, monkeypatch):
-        uc = SlackGatewayUseCase()
-        monkeypatch.setattr(uc, "_gateway_secret", AsyncMock(return_value="sign-db"))
-        assert await uc._fetch_signing_secret("A123") == "sign-db"
-        uc._gateway_secret.assert_awaited_once_with("slack-signing-secret")
+    async def test_bot_token_absent_is_empty(self, monkeypatch):
+        monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+        assert await SlackGatewayUseCase()._fetch_bot_token() == ""
 
     @pytest.mark.asyncio
-    async def test_gateway_secret_fail_safe_without_db(self, monkeypatch):
-        # No engine / GlobalDependencies in a unit test → fail-safe to "".
-        monkeypatch.setattr(
-            sg,
-            "database_async_read_write_engine",
-            MagicMock(side_effect=RuntimeError("no db")),
-        )
-        assert await SlackGatewayUseCase()._gateway_secret("A123:bot") == ""
+    async def test_signing_secret_from_env(self, monkeypatch):
+        monkeypatch.setenv("SLACK_SIGNING_SECRET", "sign-env")
+        assert await SlackGatewayUseCase()._fetch_signing_secret("A123") == "sign-env"
+
+    @pytest.mark.asyncio
+    async def test_signing_secret_absent_is_empty(self, monkeypatch):
+        monkeypatch.delenv("SLACK_SIGNING_SECRET", raising=False)
+        assert await SlackGatewayUseCase()._fetch_signing_secret("A123") == ""
 
 
 def _patch_authn(monkeypatch, user_id="u1"):
@@ -1024,50 +1010,34 @@ def _patch_authn(monkeypatch, user_id="u1"):
 @pytest.mark.unit
 class TestActingIdentity:
     @pytest.mark.asyncio
-    async def test_no_key_is_dev_bypass(self, monkeypatch):
-        monkeypatch.setattr(sg, "_ACTING_USER_API_KEY", "")
-        uc = SlackGatewayUseCase()
-        monkeypatch.setattr(
-            uc, "_gateway_secret", AsyncMock(return_value="")
-        )  # no DB value
-        principal, headers = await uc._acting_identity()
+    async def test_no_key_authz_off_is_dev_bypass(self, monkeypatch):
+        # authz off (no AGENTEX_AUTH_URL) + no bot key -> local dev bypass, no principal.
+        monkeypatch.setattr(sg, "_ACTING_BOT_API_KEY", "")
+        monkeypatch.delenv("AGENTEX_AUTH_URL", raising=False)
+        principal, headers = await SlackGatewayUseCase()._acting_identity()
         assert principal is None
         assert headers == {}
 
     @pytest.mark.asyncio
-    async def test_env_fallback_sends_both_headers(self, monkeypatch):
-        # DB empty → fall back to env; auth needs x-api-key AND x-selected-account-id.
-        monkeypatch.setattr(sg, "_ACTING_USER_API_KEY", "ssk_test")
+    async def test_no_key_authz_on_fails_closed(self, monkeypatch):
+        # authz on (AGENTEX_AUTH_URL set) + no bot key -> refuse to dispatch unauthenticated.
+        monkeypatch.setattr(sg, "_ACTING_BOT_API_KEY", "")
+        monkeypatch.setenv("AGENTEX_AUTH_URL", "http://auth")
+        with pytest.raises(RuntimeError, match="refusing to dispatch"):
+            await SlackGatewayUseCase()._acting_identity()
+
+    @pytest.mark.asyncio
+    async def test_sends_both_headers(self, monkeypatch):
+        # Auth needs x-api-key AND x-selected-account-id together.
+        monkeypatch.setattr(sg, "_ACTING_BOT_API_KEY", "ssk_test")
         monkeypatch.setattr(sg, "_ACTING_ACCOUNT_ID", "acct_1")
-        uc = SlackGatewayUseCase()
-        monkeypatch.setattr(uc, "_gateway_secret", AsyncMock(return_value=""))
         fake_authn = _patch_authn(monkeypatch)
 
-        principal, headers = await uc._acting_identity()
+        principal, headers = await SlackGatewayUseCase()._acting_identity()
 
         assert headers == {"x-api-key": "ssk_test", "x-selected-account-id": "acct_1"}
         fake_authn.verify_headers.assert_awaited_once_with(headers)
         assert principal.user_id == "u1"
-
-    @pytest.mark.asyncio
-    async def test_db_takes_precedence_over_env(self, monkeypatch):
-        # DB values (slack-acting-user-api-key / slack-acting-account-id) win over env.
-        monkeypatch.setattr(sg, "_ACTING_USER_API_KEY", "env-key")
-        monkeypatch.setattr(sg, "_ACTING_ACCOUNT_ID", "env-acct")
-        uc = SlackGatewayUseCase()
-
-        async def fake_secret(name):
-            return {
-                "slack-acting-user-api-key": "db-key",
-                "slack-acting-account-id": "db-acct",
-            }.get(name, "")
-
-        monkeypatch.setattr(uc, "_gateway_secret", AsyncMock(side_effect=fake_secret))
-        _patch_authn(monkeypatch)
-
-        _, headers = await uc._acting_identity()
-
-        assert headers == {"x-api-key": "db-key", "x-selected-account-id": "db-acct"}
 
 
 @pytest.mark.unit
