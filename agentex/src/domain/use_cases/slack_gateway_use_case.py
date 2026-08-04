@@ -103,6 +103,14 @@ _MESSAGE_PAGE = 200  # per-poll page size when collecting the reply
 # ``event_id`` via Redis with a short TTL so a retry can't start a duplicate turn.
 _EVENT_DEDUP_TTL_SECONDS = int(os.getenv("SLACK_EVENT_DEDUP_TTL", "600"))
 
+# A create-race (two concurrent first turns for one thread) makes the loser's
+# get-or-create raise DuplicateItemError. Retrying re-runs get-or-create; the backoff
+# lets a lagging read replica catch up so the retry sees the winner's task instead of
+# racing the create against the primary again. A single retry can still miss under
+# replica lag, so retry a bounded number of times before surfacing the failure.
+_CREATE_RACE_ATTEMPTS = max(1, int(os.getenv("SLACK_CREATE_RACE_ATTEMPTS", "4")))
+_CREATE_RACE_BACKOFF_S = float(os.getenv("SLACK_CREATE_RACE_BACKOFF_S", "0.25"))
+
 # The ``@agent <selector>`` token drives resolution (see ``_resolve_target``): the
 # selector is tried as an SGP agent_config NAME (-> golden-agent + that config), then as a
 # registered agentex agent name (-> route to that runtime); if neither matches (or there's
@@ -442,6 +450,46 @@ class SlackGatewayUseCase:
             )
         return None
 
+    async def _message_send_with_race_retry(self, acp, params, agent_id):
+        """Send a SYNC agent's ``message/send`` (which get-or-creates the thread task and
+        returns the reply), retrying the whole call on the create-race.
+
+        Two concurrent first messages for the same thread both miss the get-or-create
+        lookup and race the insert on the globally-unique task name; the loser raises
+        ``DuplicateItemError``. Retrying re-runs get-or-create — but the lookup reads the
+        (possibly-lagging) read replica, so a single retry can still miss the winner's
+        task and race the create again. Loop with a short backoff so replication catches
+        up; give up only after ``_CREATE_RACE_ATTEMPTS`` (persistent lag → surfaced to
+        the caller). Each raising attempt fails on the insert before appending anything,
+        so retries never duplicate the turn's message."""
+        last: DuplicateItemError | None = None
+        for attempt in range(_CREATE_RACE_ATTEMPTS):
+            try:
+                return await acp.handle_rpc_request(
+                    method=AgentRPCMethod.MESSAGE_SEND, params=params, agent_id=agent_id
+                )
+            except DuplicateItemError as exc:
+                last = exc
+                if attempt < _CREATE_RACE_ATTEMPTS - 1:
+                    await asyncio.sleep(_CREATE_RACE_BACKOFF_S)
+        raise last  # exhausted retries — let _run_turn surface the failure
+
+    async def _resolve_task_after_race(self, task_service, task_name: str):
+        """Resolve the winner's task by name after an async-path create-race
+        (DuplicateItemError). The lookup reads the (possibly-lagging) read replica, so
+        retry on ItemDoesNotExist with a short backoff until replication catches up —
+        the task exists on the primary, the replica just hasn't seen it yet. Give up
+        after ``_CREATE_RACE_ATTEMPTS`` (persistent lag → surfaced to the caller)."""
+        last: ItemDoesNotExist | None = None
+        for attempt in range(_CREATE_RACE_ATTEMPTS):
+            try:
+                return await task_service.get_task(name=task_name)
+            except ItemDoesNotExist as exc:
+                last = exc
+                if attempt < _CREATE_RACE_ATTEMPTS - 1:
+                    await asyncio.sleep(_CREATE_RACE_BACKOFF_S)
+        raise last
+
     async def _dispatch(
         self,
         target: Target,
@@ -496,14 +544,7 @@ class SlackGatewayUseCase:
                 task_params=create_params,
                 stream=False,
             )
-            try:
-                replies = await acp.handle_rpc_request(
-                    method=AgentRPCMethod.MESSAGE_SEND, params=send, agent_id=agent.id
-                )
-            except DuplicateItemError:
-                replies = await acp.handle_rpc_request(
-                    method=AgentRPCMethod.MESSAGE_SEND, params=send, agent_id=agent.id
-                )
+            replies = await self._message_send_with_race_retry(acp, send, agent.id)
             return _agent_text(replies or [])
 
         # ASYNC / AGENTIC: TASK_CREATE only on the first turn, then event/send + poll.
@@ -530,9 +571,10 @@ class SlackGatewayUseCase:
             except DuplicateItemError:
                 # A concurrent first event for the same thread won the create race
                 # (task_name is globally unique, and the DB insert fails before any
-                # workflow starts). Fall back to the task it created and just send this
-                # turn's event, exactly as a follow-up would.
-                task = await acp.task_service.get_task(name=task_name)
+                # workflow starts). Resolve the winner's task and just send this turn's
+                # event, as a follow-up would. Retry the lookup: it reads the (possibly
+                # lagging) replica, which may not have the just-created task yet.
+                task = await self._resolve_task_after_race(acp.task_service, task_name)
 
         # Snapshot existing messages so we can isolate THIS turn's reply.
         seen = await self._seen_message_ids(acp.task_message_service, task.id)
