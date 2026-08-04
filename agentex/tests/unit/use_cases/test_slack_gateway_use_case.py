@@ -342,11 +342,15 @@ class TestResolveTarget:
         assert prompt == "do it"  # selector stripped
 
 
-def _fake_acp(existing_task=None):
+def _fake_acp(existing_task=None, acp_type=None):
     """Fake ACP use case. existing_task=None → task doesn't exist yet (get_task raises,
-    so _dispatch will TASK_CREATE); pass a task to simulate a resumed thread."""
+    so _dispatch will TASK_CREATE); pass a task to simulate a resumed thread. acp_type
+    defaults to ASYNC (the golden-agent path); pass ACPType.SYNC for the message/send
+    path."""
     acp = MagicMock()
-    acp.agent_repository.get = AsyncMock(return_value=SimpleNamespace(id="agt_1"))
+    acp.agent_repository.get = AsyncMock(
+        return_value=SimpleNamespace(id="agt_1", acp_type=acp_type or sg.ACPType.ASYNC)
+    )
     created = SimpleNamespace(id="task_1", task_metadata=None)
     acp.handle_rpc_request = AsyncMock(return_value=created)
     acp.task_message_service.get_messages = AsyncMock(
@@ -447,7 +451,9 @@ class TestDispatch:
         monkeypatch.setattr(sg, "GlobalDependencies", MagicMock())
         winner_task = SimpleNamespace(id="task_1", task_metadata=None)
         acp = MagicMock()
-        acp.agent_repository.get = AsyncMock(return_value=SimpleNamespace(id="agt_1"))
+        acp.agent_repository.get = AsyncMock(
+            return_value=SimpleNamespace(id="agt_1", acp_type=sg.ACPType.ASYNC)
+        )
         acp.task_message_service.get_messages = AsyncMock(return_value=[])
         # 1st get_task = existence probe (absent); 2nd = post-race fallback (winner).
         acp.task_service.get_task = AsyncMock(
@@ -480,6 +486,42 @@ class TestDispatch:
         methods = [c.kwargs["method"] for c in acp.handle_rpc_request.await_args_list]
         assert methods == [AgentRPCMethod.TASK_CREATE, AgentRPCMethod.EVENT_SEND]
         assert acp.task_service.get_task.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_sync_agent_uses_message_send_and_returns_reply(self, monkeypatch):
+        # A SYNC agent has no event stream: dispatch does ONE message/send (get-or-create
+        # + reply), not task/create + event/send + poll.
+        monkeypatch.setattr(sg, "_ACTING_USER_API_KEY", "")
+        monkeypatch.setattr(sg, "GlobalDependencies", MagicMock())
+        acp, _ = _fake_acp(acp_type=sg.ACPType.SYNC)
+        reply_msg = SimpleNamespace(
+            content=SimpleNamespace(author=sg.MessageAuthor.AGENT, content="sync reply")
+        )
+        acp.handle_rpc_request = AsyncMock(
+            return_value=[reply_msg]
+        )  # message/send result
+        monkeypatch.setattr(
+            "src.temporal.scheduled_agent_run_factory.build_acp_use_case_for_principal",
+            MagicMock(return_value=acp),
+        )
+
+        inbound = sg.InboundSlack(
+            team_id="T",
+            channel="C1",
+            user="U",
+            text="2+2?",
+            thread_ts="1",
+            selector=None,
+        )
+        reply = await SlackGatewayUseCase()._dispatch(
+            Target("math-agent"), inbound, "2+2?", None, {}
+        )
+
+        acp.handle_rpc_request.assert_awaited_once()
+        call = acp.handle_rpc_request.await_args
+        assert call.kwargs["method"] == AgentRPCMethod.MESSAGE_SEND
+        assert call.kwargs["params"].task_name == "slack:1"
+        assert reply == "sync reply"  # extracted from the message/send result directly
 
 
 @pytest.mark.unit
