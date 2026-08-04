@@ -112,6 +112,25 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
             row = result.scalars().first()
             return AgentAPIKeyEntity.model_validate(row) if row else None
 
+    async def get_by_name_and_type(
+        self, name: str, api_key_type: AgentAPIKeyType
+    ) -> AgentAPIKeyEntity | None:
+        """Get an API key by (name, type) alone — agent-agnostic. The Slack gateway's
+        shared app isn't tied to one agent, so it stores its signing secret / bot token
+        here keyed by name (api_app_id and api_app_id:bot). Returns the first match."""
+        async with self.start_async_db_session(allow_writes=False) as session:
+            query = (
+                select(AgentAPIKeyORM)
+                .where(
+                    AgentAPIKeyORM.name == name,
+                    AgentAPIKeyORM.api_key_type == api_key_type,
+                )
+                .limit(1)
+            )
+            result = await session.execute(query)
+            row = result.scalars().first()
+            return AgentAPIKeyEntity.model_validate(row) if row else None
+
     async def get_by_agent_name_and_key_name(
         self, agent_name: str, key_name: str, api_key_type: AgentAPIKeyType
     ) -> AgentAPIKeyEntity | None:
