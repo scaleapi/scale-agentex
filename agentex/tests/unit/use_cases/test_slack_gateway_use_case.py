@@ -523,6 +523,37 @@ class TestDispatch:
         assert call.kwargs["params"].task_name == "slack:1"
         assert reply == "sync reply"  # extracted from the message/send result directly
 
+    @pytest.mark.asyncio
+    async def test_sync_agent_retries_message_send_on_create_race(self, monkeypatch):
+        # Two first messages for the same thread race on the globally-unique task name;
+        # the loser's message/send raises DuplicateItemError. It must retry (get-or-create
+        # now finds the winner's task) rather than drop the turn.
+        monkeypatch.setattr(sg, "_ACTING_USER_API_KEY", "")
+        monkeypatch.setattr(sg, "GlobalDependencies", MagicMock())
+        acp, _ = _fake_acp(acp_type=sg.ACPType.SYNC)
+        reply_msg = SimpleNamespace(
+            content=SimpleNamespace(author=sg.MessageAuthor.AGENT, content="ok")
+        )
+        acp.handle_rpc_request = AsyncMock(
+            side_effect=[sg.DuplicateItemError("name taken"), [reply_msg]]
+        )
+        monkeypatch.setattr(
+            "src.temporal.scheduled_agent_run_factory.build_acp_use_case_for_principal",
+            MagicMock(return_value=acp),
+        )
+
+        inbound = sg.InboundSlack(
+            team_id="T", channel="C1", user="U", text="hi", thread_ts="1", selector=None
+        )
+        reply = await SlackGatewayUseCase()._dispatch(
+            Target("math-agent"), inbound, "hi", None, {}
+        )
+
+        assert acp.handle_rpc_request.await_count == 2  # first raised, retry succeeded
+        methods = [c.kwargs["method"] for c in acp.handle_rpc_request.await_args_list]
+        assert methods == [AgentRPCMethod.MESSAGE_SEND, AgentRPCMethod.MESSAGE_SEND]
+        assert reply == "ok"  # the retry's reply, not a dropped turn
+
 
 @pytest.mark.unit
 class TestRunTurn:

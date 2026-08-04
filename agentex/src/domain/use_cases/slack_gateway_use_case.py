@@ -490,16 +490,20 @@ class SlackGatewayUseCase:
         # returns the reply synchronously. (event/send is async/agentic-only, which is
         # why routing to a SYNC agent otherwise fails with "Unsupported method".)
         if agent.acp_type == ACPType.SYNC:
-            replies = await acp.handle_rpc_request(
-                method=AgentRPCMethod.MESSAGE_SEND,
-                params=SendMessageRequestEntity(
-                    task_name=task_name,
-                    content=content,
-                    task_params=create_params,
-                    stream=False,
-                ),
-                agent_id=agent.id,
+            send = SendMessageRequestEntity(
+                task_name=task_name,
+                content=content,
+                task_params=create_params,
+                stream=False,
             )
+            try:
+                replies = await acp.handle_rpc_request(
+                    method=AgentRPCMethod.MESSAGE_SEND, params=send, agent_id=agent.id
+                )
+            except DuplicateItemError:
+                replies = await acp.handle_rpc_request(
+                    method=AgentRPCMethod.MESSAGE_SEND, params=send, agent_id=agent.id
+                )
             return _agent_text(replies or [])
 
         # ASYNC / AGENTIC: TASK_CREATE only on the first turn, then event/send + poll.
