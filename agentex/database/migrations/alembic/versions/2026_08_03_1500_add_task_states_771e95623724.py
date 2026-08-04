@@ -48,9 +48,12 @@ def upgrade() -> None:
             nullable=False,
         ),
         # Both FKs are bare (no ON DELETE action), deliberately: MongoDB has no
-        # cascades, so state deletion is application-driven on both backends.
-        # The FK alone prevents orphaned rows; a future hard-delete flow must
-        # remove states through the repository or fail loudly here.
+        # cascades, so state deletion is application-driven on both backends,
+        # and the FK alone prevents orphaned rows. This matches the sibling
+        # child tables of tasks (task_agents, events), whose bare FKs already
+        # reject the existing DELETE /tasks path for any task with children;
+        # task_states behaves identically rather than cascading on one backend
+        # only.
         sa.ForeignKeyConstraint(["task_id"], ["tasks.id"]),
         sa.ForeignKeyConstraint(["agent_id"], ["agents.id"]),
         sa.PrimaryKeyConstraint("id"),
