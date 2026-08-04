@@ -50,11 +50,12 @@ from src.config.dependencies import (
     database_async_read_write_session_maker,
 )
 from src.domain.entities.agent_api_keys import AgentAPIKeyType
-from src.domain.entities.agents import AgentStatus
+from src.domain.entities.agents import ACPType, AgentStatus
 from src.domain.entities.agents_rpc import (
     AgentRPCMethod,
     CreateTaskRequestEntity,
     SendEventRequestEntity,
+    SendMessageRequestEntity,
 )
 from src.domain.entities.task_messages import (
     MessageAuthor,
@@ -101,6 +102,14 @@ _MESSAGE_PAGE = 200  # per-poll page size when collecting the reply
 # X-Slack-Retry-Num header) if we don't 200 within ~3s. Dedup on the envelope's
 # ``event_id`` via Redis with a short TTL so a retry can't start a duplicate turn.
 _EVENT_DEDUP_TTL_SECONDS = int(os.getenv("SLACK_EVENT_DEDUP_TTL", "600"))
+
+# A create-race (two concurrent first turns for one thread) makes the loser's
+# get-or-create raise DuplicateItemError. Retrying re-runs get-or-create; the backoff
+# lets a lagging read replica catch up so the retry sees the winner's task instead of
+# racing the create against the primary again. A single retry can still miss under
+# replica lag, so retry a bounded number of times before surfacing the failure.
+_CREATE_RACE_ATTEMPTS = max(1, int(os.getenv("SLACK_CREATE_RACE_ATTEMPTS", "4")))
+_CREATE_RACE_BACKOFF_S = float(os.getenv("SLACK_CREATE_RACE_BACKOFF_S", "0.25"))
 
 # The ``@agent <selector>`` token drives resolution (see ``_resolve_target``): the
 # selector is tried as an SGP agent_config NAME (-> golden-agent + that config), then as a
@@ -441,6 +450,46 @@ class SlackGatewayUseCase:
             )
         return None
 
+    async def _message_send_with_race_retry(self, acp, params, agent_id):
+        """Send a SYNC agent's ``message/send`` (which get-or-creates the thread task and
+        returns the reply), retrying the whole call on the create-race.
+
+        Two concurrent first messages for the same thread both miss the get-or-create
+        lookup and race the insert on the globally-unique task name; the loser raises
+        ``DuplicateItemError``. Retrying re-runs get-or-create — but the lookup reads the
+        (possibly-lagging) read replica, so a single retry can still miss the winner's
+        task and race the create again. Loop with a short backoff so replication catches
+        up; give up only after ``_CREATE_RACE_ATTEMPTS`` (persistent lag → surfaced to
+        the caller). Each raising attempt fails on the insert before appending anything,
+        so retries never duplicate the turn's message."""
+        last: DuplicateItemError | None = None
+        for attempt in range(_CREATE_RACE_ATTEMPTS):
+            try:
+                return await acp.handle_rpc_request(
+                    method=AgentRPCMethod.MESSAGE_SEND, params=params, agent_id=agent_id
+                )
+            except DuplicateItemError as exc:
+                last = exc
+                if attempt < _CREATE_RACE_ATTEMPTS - 1:
+                    await asyncio.sleep(_CREATE_RACE_BACKOFF_S)
+        raise last  # exhausted retries — let _run_turn surface the failure
+
+    async def _resolve_task_after_race(self, task_service, task_name: str):
+        """Resolve the winner's task by name after an async-path create-race
+        (DuplicateItemError). The lookup reads the (possibly-lagging) read replica, so
+        retry on ItemDoesNotExist with a short backoff until replication catches up —
+        the task exists on the primary, the replica just hasn't seen it yet. Give up
+        after ``_CREATE_RACE_ATTEMPTS`` (persistent lag → surfaced to the caller)."""
+        last: ItemDoesNotExist | None = None
+        for attempt in range(_CREATE_RACE_ATTEMPTS):
+            try:
+                return await task_service.get_task(name=task_name)
+            except ItemDoesNotExist as exc:
+                last = exc
+                if attempt < _CREATE_RACE_ATTEMPTS - 1:
+                    await asyncio.sleep(_CREATE_RACE_BACKOFF_S)
+        raise last
+
     async def _dispatch(
         self,
         target: Target,
@@ -455,9 +504,11 @@ class SlackGatewayUseCase:
         resolved once per turn in ``_run_turn`` and passed in.
 
         The task is keyed on the Slack thread (``slack:{thread_ts}``), so a thread is one
-        long-lived task/workflow. TASK_CREATE runs only on the FIRST turn; follow-ups in
-        the same thread skip it (the workflow is already running — re-creating raises
-        WorkflowAlreadyStarted) and just send the next event.
+        conversation. ASYNC/AGENTIC agents (e.g. golden-agent) get a long-lived workflow:
+        TASK_CREATE on the FIRST turn (re-creating a running workflow raises
+        WorkflowAlreadyStarted), then event/send + poll for the reply. SYNC agents have
+        no event stream — a single message/send get-or-creates the task and returns the
+        reply synchronously.
         """
         # Local import avoids a domain -> temporal import cycle at module load.
         from src.temporal.scheduled_agent_run_factory import (
@@ -468,28 +519,45 @@ class SlackGatewayUseCase:
             GlobalDependencies(), principal, request_headers=auth_headers
         )
         agent = await acp.agent_repository.get(name=target.agent_name)
-        thread_ts = inbound.thread_ts
-        task_name = f"slack:{thread_ts}"
+        task_name = f"slack:{inbound.thread_ts}"
+        content = TextContentEntity(
+            author=MessageAuthor.USER,
+            content=_turn_content(inbound, prompt),
+            format=TextFormat.MARKDOWN,
+        )
+        # First-turn task params: golden-agent's agent_config id (when this turn resolved
+        # to one) + any gateway-default MCPs. A routed non-golden agent carries no
+        # config_id and ignores params it doesn't use.
+        create_params: dict[str, Any] = {}
+        if target.config_id:
+            create_params["config_id"] = target.config_id
+        if _DEFAULT_MCPS:
+            create_params["mcps"] = _DEFAULT_MCPS
 
+        # SYNC agents have no event stream: one message/send get-or-creates the task and
+        # returns the reply synchronously. (event/send is async/agentic-only, which is
+        # why routing to a SYNC agent otherwise fails with "Unsupported method".)
+        if agent.acp_type == ACPType.SYNC:
+            send = SendMessageRequestEntity(
+                task_name=task_name,
+                content=content,
+                task_params=create_params,
+                stream=False,
+            )
+            replies = await self._message_send_with_race_retry(acp, send, agent.id)
+            return _agent_text(replies or [])
+
+        # ASYNC / AGENTIC: TASK_CREATE only on the first turn, then event/send + poll.
         task = await self._existing_task(acp.task_service, task_name)
         if task is None:
-            # First turn in this thread → start the task/workflow.
             task_metadata = {
                 "channel": "slack",
                 "sender_id": target.label(),
-                "thread_ts": thread_ts,
+                "thread_ts": inbound.thread_ts,
                 "channel_id": inbound.channel,
             }
-            # target.config_id was chosen by _resolve_target (the selector's SGP config,
-            # or the default id); a routed runtime agent carries None and resolves its own
-            # config. golden-agent turns the id -> full turn config (prompt/model/tools).
-            config_id = target.config_id
-            create_params: dict[str, Any] = {}
-            if config_id:
-                task_metadata["config_id"] = config_id
-                create_params["config_id"] = config_id
-            if _DEFAULT_MCPS:
-                create_params["mcps"] = _DEFAULT_MCPS
+            if target.config_id:
+                task_metadata["config_id"] = target.config_id
             try:
                 task = await acp.handle_rpc_request(
                     method=AgentRPCMethod.TASK_CREATE,
@@ -503,24 +571,18 @@ class SlackGatewayUseCase:
             except DuplicateItemError:
                 # A concurrent first event for the same thread won the create race
                 # (task_name is globally unique, and the DB insert fails before any
-                # workflow starts). Fall back to the task it created and just send this
-                # turn's event, exactly as a follow-up would.
-                task = await acp.task_service.get_task(name=task_name)
+                # workflow starts). Resolve the winner's task and just send this turn's
+                # event, as a follow-up would. Retry the lookup: it reads the (possibly
+                # lagging) replica, which may not have the just-created task yet.
+                task = await self._resolve_task_after_race(acp.task_service, task_name)
 
         # Snapshot existing messages so we can isolate THIS turn's reply.
         seen = await self._seen_message_ids(acp.task_message_service, task.id)
-
-        content = TextContentEntity(
-            author=MessageAuthor.USER,
-            content=_turn_content(inbound, prompt),
-            format=TextFormat.MARKDOWN,
-        )
         await acp.handle_rpc_request(
             method=AgentRPCMethod.EVENT_SEND,
             params=SendEventRequestEntity(task_name=task_name, content=content),
             agent_id=agent.id,
         )
-
         # Poll the task's messages for this turn's settled agent reply.
         return await self._collect_reply(acp.task_message_service, task.id, seen)
 
