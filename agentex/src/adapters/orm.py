@@ -158,13 +158,11 @@ class TaskStateORM(BaseORM):
     __tablename__ = "task_states"
 
     id = Column(String, primary_key=True, default=orm_id)
-    # Cascade is a dormant safety net: no current flow hard-deletes task rows
-    # (API deletes are soft; retention deletes states explicitly and keeps the
-    # task row).
-    task_id = Column(String, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
-    # No cascade: agents are never hard-deleted today, and if that changed,
-    # silently dropping an agent's states while its messages survive would be
-    # the wrong default.
+    # Both FKs are bare (no ON DELETE action), deliberately: MongoDB has no
+    # cascades, so state deletion is application-driven on both backends. The
+    # FK alone prevents orphaned rows; a future hard-delete flow must remove
+    # states through the repository or fail loudly here.
+    task_id = Column(String, ForeignKey("tasks.id"), nullable=False)
     agent_id = Column(String, ForeignKey("agents.id"), nullable=False)
     state = Column(JSONB, nullable=False)
     created_at = Column(

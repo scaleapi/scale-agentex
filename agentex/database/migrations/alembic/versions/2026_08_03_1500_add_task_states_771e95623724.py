@@ -47,13 +47,11 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
             nullable=False,
         ),
-        # Cascade is a dormant safety net: no current flow hard-deletes task
-        # rows (API deletes are soft; retention deletes states explicitly and
-        # keeps the task row).
-        sa.ForeignKeyConstraint(["task_id"], ["tasks.id"], ondelete="CASCADE"),
-        # No cascade on agent_id: agents are never hard-deleted today, and
-        # silently dropping an agent's states if that changed would be the
-        # wrong default.
+        # Both FKs are bare (no ON DELETE action), deliberately: MongoDB has no
+        # cascades, so state deletion is application-driven on both backends.
+        # The FK alone prevents orphaned rows; a future hard-delete flow must
+        # remove states through the repository or fail loudly here.
+        sa.ForeignKeyConstraint(["task_id"], ["tasks.id"]),
         sa.ForeignKeyConstraint(["agent_id"], ["agents.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
