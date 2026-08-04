@@ -622,11 +622,21 @@ class SlackGatewayUseCase:
         """The gateway's bot identity. The bot API key + account come from env /
         k8s-secret. Verify the key -> principal (for authz), and return the credential
         headers (delegated to the agent, where x-api-key becomes x-acting-user-api-key).
-        Auth needs BOTH x-api-key and x-selected-account-id — the key alone 401s. No key
-        configured -> (None, {}) i.e. dev/authz-bypass."""
+        Auth needs BOTH x-api-key and x-selected-account-id — the key alone 401s.
+
+        Missing bot key: FAIL CLOSED when authz is enabled (AGENTEX_AUTH_URL set), so a
+        misconfigured deploy never dispatches unauthenticated (which would run with no
+        principal, bypassing the per-turn authz boundary). Only the authz-off local case
+        (no AGENTEX_AUTH_URL) is allowed to run with no principal — the dev bypass."""
         api_key = _ACTING_BOT_API_KEY
         if not api_key:
-            return None, {}
+            if os.getenv("AGENTEX_AUTH_URL"):
+                raise RuntimeError(
+                    "SLACK_GATEWAY_ACTING_BOT_API_KEY is unset while authz is enabled "
+                    "(AGENTEX_AUTH_URL); refusing to dispatch a Slack turn without a bot "
+                    "principal."
+                )
+            return None, {}  # authz off (local dev) — run with no principal
         account_id = _ACTING_ACCOUNT_ID
         # Local imports avoid an import cycle at module load.
         from src.adapters.authentication.adapter_agentex_authn_proxy import (

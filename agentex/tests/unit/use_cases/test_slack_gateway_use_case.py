@@ -1010,11 +1010,21 @@ def _patch_authn(monkeypatch, user_id="u1"):
 @pytest.mark.unit
 class TestActingIdentity:
     @pytest.mark.asyncio
-    async def test_no_key_is_dev_bypass(self, monkeypatch):
+    async def test_no_key_authz_off_is_dev_bypass(self, monkeypatch):
+        # authz off (no AGENTEX_AUTH_URL) + no bot key -> local dev bypass, no principal.
         monkeypatch.setattr(sg, "_ACTING_BOT_API_KEY", "")
+        monkeypatch.delenv("AGENTEX_AUTH_URL", raising=False)
         principal, headers = await SlackGatewayUseCase()._acting_identity()
         assert principal is None
         assert headers == {}
+
+    @pytest.mark.asyncio
+    async def test_no_key_authz_on_fails_closed(self, monkeypatch):
+        # authz on (AGENTEX_AUTH_URL set) + no bot key -> refuse to dispatch unauthenticated.
+        monkeypatch.setattr(sg, "_ACTING_BOT_API_KEY", "")
+        monkeypatch.setenv("AGENTEX_AUTH_URL", "http://auth")
+        with pytest.raises(RuntimeError, match="refusing to dispatch"):
+            await SlackGatewayUseCase()._acting_identity()
 
     @pytest.mark.asyncio
     async def test_sends_both_headers(self, monkeypatch):
