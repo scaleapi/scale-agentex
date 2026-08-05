@@ -1,6 +1,6 @@
 """Tracing tests for the SSE task-event stream.
 
-These lock in the AGX1-617 fixes:
+These lock in the SSE trace context bleed fixes:
 
 1. Each stream runs under its own span, isolated from the ambient OTel context —
    a stream must never nest under a leftover span from an unrelated request
@@ -203,6 +203,9 @@ class TestStreamTracing:
         # stream context was detached), so a later span is a fresh root.
         uc = _make_use_case(status=TaskStatus.COMPLETED)
         await _drain(uc.stream_task_events(task_id="task-123"))
+
+        # Exactly one stream span was finished (ended once, not zero or twice).
+        _only_stream_span(span_exporter)
 
         # No stream span should be lingering as the current span.
         current = trace.get_current_span()
