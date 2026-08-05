@@ -358,7 +358,7 @@ Use the escape hatch for "this needs a maintenance window with traffic shifted a
 
 ##### Anti-pattern → linter rule reference
 
-The migration linter at `agentex/scripts/lint_migrations.py` enforces these rules at PR time via `.github/workflows/migration-lint.yml`. It only checks files changed vs the PR base, so existing migrations are not retro-flagged. The mapping below is what the linter catches:
+The migration linter at `agentex/scripts/ci_tools/migration_lint.py` enforces these rules at PR time via `.github/workflows/migration-lint.yml`. It only checks files changed vs the PR base, so existing migrations are not retro-flagged. The mapping below is what the linter catches:
 
 | Anti-pattern | Linter rule |
 |---|---|
@@ -371,7 +371,7 @@ The migration linter at `agentex/scripts/lint_migrations.py` enforces these rule
 Run the linter locally before pushing:
 
 ```bash
-agentex/scripts/lint_migrations.py --base-ref origin/main
+agentex/scripts/ci_tools/migration_lint.py --base origin/main
 ```
 
 ##### Other rules

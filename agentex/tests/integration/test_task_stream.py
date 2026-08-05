@@ -230,6 +230,65 @@ class TestTaskEventStream:
 
         print("✅ Task metadata update successfully triggered stream event")
 
+    async def test_current_state_update_triggers_stream_event(
+        self, test_agent_and_task, tasks_use_case, streams_use_case
+    ):
+        """current_state rides the existing task_updated event (reactive push to subscribers)."""
+        _agent, task = test_agent_and_task
+
+        stream_events = []
+
+        async def collect_stream_events():
+            try:
+                async for event_data in streams_use_case.stream_task_events(
+                    task_id=task.id
+                ):
+                    if event_data.startswith("data: "):
+                        import json
+
+                        event_json = event_data[6:].strip()
+                        if event_json:
+                            try:
+                                event = json.loads(event_json)
+                                stream_events.append(event)
+                                if event.get("type") == "task_updated":
+                                    break
+                            except json.JSONDecodeError:
+                                pass
+            except asyncio.CancelledError:
+                pass
+
+        stream_task = asyncio.create_task(collect_stream_events())
+        # Let the tail-only subscription establish before the update, or the event is missed.
+        await asyncio.sleep(0.1)
+
+        updated_task = await tasks_use_case.update_mutable_fields_on_task(
+            id=task.id, current_state="awaiting_input"
+        )
+
+        # Wait for the collector to see task_updated (it breaks on it); timeout is only a ceiling.
+        try:
+            async with asyncio.timeout(5):
+                await stream_task
+        except (TimeoutError, asyncio.CancelledError):
+            stream_task.cancel()
+            # Re-await so cancellation cleanup runs and no dangling-task warning leaks at teardown.
+            await asyncio.gather(stream_task, return_exceptions=True)
+
+        task_updated_events = [
+            e for e in stream_events if e.get("type") == "task_updated"
+        ]
+        assert len(task_updated_events) >= 1, (
+            f"Expected task_updated event, got events: {[e.get('type') for e in stream_events]}"
+        )
+        event_task = task_updated_events[0]["task"]
+        assert event_task["id"] == task.id
+        assert event_task["current_state"] == "awaiting_input"
+
+        assert updated_task.current_state == "awaiting_input"
+
+        print("✅ current_state update successfully triggered stream event")
+
     async def test_get_task_returns_updated_metadata_after_stream_update(
         self, test_agent_and_task, tasks_use_case
     ):

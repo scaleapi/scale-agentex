@@ -6,6 +6,7 @@ from pydantic import Field
 
 from src.api.schemas.agents import Agent
 from src.utils.model_utils import BaseModel
+from src.utils.task_constants import CURRENT_STATE_MAX_LENGTH
 
 
 class TaskRelationships(str, Enum):
@@ -62,6 +63,14 @@ class Task(BaseModel):
     task_metadata: dict[str, Any] | None = Field(
         None,
         title="Task metadata",
+    )
+    # No bound on the read path: enforcing it would 500 if the column is ever widened (writes are already bounded).
+    current_state: str | None = Field(
+        None,
+        title=(
+            "Opaque label mirroring the agent's StateMachine current state; "
+            "null when the agent does not emit one. Orthogonal to 'status'."
+        ),
     )
 
 
@@ -128,6 +137,14 @@ class UpdateTaskRequest(BaseModel):
             "Optional shallow-merge patch applied to the task's params column. "
             "Top-level keys overwrite; pass full nested objects to change "
             "subfields."
+        ),
+    )
+    current_state: str | None = Field(
+        None,
+        max_length=CURRENT_STATE_MAX_LENGTH,
+        title=(
+            "If provided, replaces the task's current_state label; "
+            "pass null to clear it, omit to leave it unchanged."
         ),
     )
 
