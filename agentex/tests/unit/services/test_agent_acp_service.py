@@ -21,6 +21,7 @@ from src.domain.repositories.agent_api_key_repository import AgentAPIKeyReposito
 from src.domain.repositories.agent_repository import AgentRepository
 from src.domain.services.agent_acp_service import (
     AgentACPService,
+    extract_trace_context_headers,
     filter_request_headers,
 )
 
@@ -1131,3 +1132,46 @@ class TestFilterRequestHeaders:
             }
         )
         assert result == {"x-trace-id": "trace-1"}
+
+    def test_forwards_w3c_trace_context_headers(self):
+        # traceparent/tracestate/baggage are not x-* but must survive the forward
+        # so the downstream agent's trace continues the ingress trace.
+        result = filter_request_headers(
+            {
+                "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+                "tracestate": "vendor=value",
+                "baggage": "agentex.business_trace_id=t1",
+                "authorization": "Bearer x",  # still blocked
+                "host": "gateway",  # still hop-by-hop
+            }
+        )
+        assert result == {
+            "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+            "tracestate": "vendor=value",
+            "baggage": "agentex.business_trace_id=t1",
+        }
+
+
+class TestExtractTraceContextHeaders:
+    def test_extracts_only_trace_context_case_insensitive(self):
+        # get_headers forwards these on every op regardless of request_headers,
+        # so extraction must pull them from inbound headers (case-insensitive)
+        # and ignore everything else.
+        result = extract_trace_context_headers(
+            {
+                "Traceparent": "00-abc-def-01",
+                "tracestate": "vendor=value",
+                "BAGGAGE": "agentex.business_trace_id=t1",
+                "x-api-key": "secret",
+                "content-type": "application/json",
+            }
+        )
+        assert result == {
+            "Traceparent": "00-abc-def-01",
+            "tracestate": "vendor=value",
+            "BAGGAGE": "agentex.business_trace_id=t1",
+        }
+
+    def test_empty_or_none(self):
+        assert extract_trace_context_headers(None) == {}
+        assert extract_trace_context_headers({}) == {}
