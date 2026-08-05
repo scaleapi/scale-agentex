@@ -2541,7 +2541,7 @@ paths:
     post:
       tags:
       - Slack
-      summary: Slack Events API ingress
+      summary: Slack Events API ingress for the @agent app
       operationId: slack_events_slack_events_post
       responses:
         '200':
@@ -2552,6 +2552,21 @@ paths:
                 additionalProperties: true
                 type: object
                 title: Response Slack Events Slack Events Post
+  /slack/commands:
+    post:
+      tags:
+      - Slack
+      summary: Slack slash-command ingress (e.g. /agents)
+      operationId: slack_commands_slack_commands_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Slack Commands Slack Commands Post
   /tracker/{tracker_id}:
     get:
       tags:

@@ -31,9 +31,10 @@ environments = [
 # wrappers (no .path), which crashes the injected OTel FastAPI instrumentation on
 # OPTIONS/CORS preflights (-> 500). 0.137.1/0.137.2/0.138.0 do not restore the flat
 # list. The starlette>=1.3.1 floor below keeps the CVE fixes regardless of this cap.
-# aiohttp>=3.14.1 clears 11 CVEs (incl. CVE-2026-54273 / CVE-2026-54274) present in
-# the transitively-resolved 3.13.x line. Floor kept at the patched minimum so a
-# re-resolve can't regress below it.
+# aiohttp>=3.14.3 clears 14 CVEs present in the transitively-resolved 3.13.x/3.14.x
+# line: the original 11 (incl. CVE-2026-54273 / CVE-2026-54274) fixed by 3.14.0/3.14.1,
+# plus CVE-2026-59881 / CVE-2026-69243 (3.14.2) and CVE-2026-69244 (3.14.3). Floor
+# kept at the patched minimum so a re-resolve can't regress below it.
 override-dependencies = [
     "fastapi>=0.135.0,<0.137.0",
     "starlette>=1.3.1",
@@ -41,7 +42,7 @@ override-dependencies = [
     "langchain-core>=1.3.3",
     "mako>=1.3.12",
     "python-multipart>=0.0.32",
-    "aiohttp>=3.14.1",
+    "aiohttp>=3.14.3",
 ]
 
 [tool.uv.workspace]

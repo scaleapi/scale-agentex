@@ -17,6 +17,9 @@ logger = make_logger(__name__)
 WHITELISTED_ROUTES: set[str] = {
     "/agents/register",
     "/agents/forward",
+    # Slack can't present an SGP principal; the Slack signature is the auth,
+    # verified inside SlackGatewayUseCase against the app's signing secret.
+    "/slack",
     "/docs",
     "/api",
     "/openapi.json",
@@ -28,9 +31,6 @@ WHITELISTED_ROUTES: set[str] = {
     "/readyz",
     "/ping",
     "/echo",
-    # Slack can't present an SGP principal; the url_verification handshake must
-    # reach /slack/events without credentials.
-    "/slack",
 }
 
 DROP_HEADERS: set[str] = {
