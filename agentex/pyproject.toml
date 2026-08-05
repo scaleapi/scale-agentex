@@ -6,7 +6,7 @@ authors = [{ name = "Felix Su", email = "felix.su@scale.com" }]
 requires-python = ">=3.12,<3.13"
 readme = "README.md"
 dependencies = [
-    "fastapi>=0.115.0",
+    "fastapi>=0.115.0,<0.137.0",  # <0.137.0 keeps app.routes flat; 0.137.0's _IncludedRouter (no .path) crashes injected OTel instrumentation on OPTIONS preflights -> 500
     "litellm>=1.84.0,<2",  # >=1.84.0 clears CVE-2026-49468 (CRITICAL auth bypass)
     "python-dotenv>=1.2.2,<2",
     "temporalio>=1.18.0,<2",
@@ -24,13 +24,14 @@ dependencies = [
     "websockets~=14.2",
     "pymongo>=4.13.0,<5",
     "httpx[http2]>=0.27.2",
-    "ddtrace>=3.13.0",
+    "ddtrace>=4.8.2",  # >=4.8.2 clears CVE-2026-50271 (HIGH: W3C baggage header parsing DoS). Floor kept at the patched minimum so a re-resolve can't regress below it.
     "json_log_formatter>=1.1.1",
     "datadog>=0.52.1",
     "opentelemetry-api>=1.28.0",
     "opentelemetry-sdk>=1.28.0",
     "opentelemetry-exporter-otlp>=1.28.0",
     "pyyaml>=6.0,<7",
+    "tzdata>=2025.2",
 ]
 
 [dependency-groups]

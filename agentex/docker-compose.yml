@@ -164,8 +164,14 @@ services:
       - REDIS_URL=redis://agentex-redis:6379
       - MONGODB_URI=mongodb://agentex-mongodb:27017
       - MONGODB_DATABASE_NAME=agentex
+      # Storage backend per document store; only mongodb is selectable until
+      # the Postgres repositories land (startup rejects anything else).
+      - TASK_STATE_STORAGE_PHASE=${TASK_STATE_STORAGE_PHASE:-mongodb}
+      - TASK_MESSAGE_STORAGE_PHASE=${TASK_MESSAGE_STORAGE_PHASE:-mongodb}
       - WATCHFILES_FORCE_POLLING=true
       - ENABLE_HEALTH_CHECK_WORKFLOW=true
+      # Disabled by default; enable when testing, e.g. `ENABLE_AGENT_RUN_SCHEDULES=true ./dev.sh`.
+      - ENABLE_AGENT_RUN_SCHEDULES=${ENABLE_AGENT_RUN_SCHEDULES:-false}
       - AGENTEX_SERVER_TASK_QUEUE=agentex-server
       - ALLOWED_ORIGINS=http://localhost:3000
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://agentex-otel-collector:4317
@@ -177,6 +183,7 @@ services:
       - RETENTION_CLEANUP_PAGE_SIZE=${RETENTION_CLEANUP_PAGE_SIZE:-200}
       - RETENTION_CLEANUP_MAX_IN_FLIGHT=${RETENTION_CLEANUP_MAX_IN_FLIGHT:-20}
       - RETENTION_CLEANUP_DRY_RUN=${RETENTION_CLEANUP_DRY_RUN:-true}
+      - RETENTION_CLEANUP_STALE_RUNNING_DAYS=${RETENTION_CLEANUP_STALE_RUNNING_DAYS:-0}
     ports:
       - "5003:5003"
     volumes:
@@ -235,6 +242,8 @@ services:
       - REDIS_URL=redis://agentex-redis:6379
       - MONGODB_URI=mongodb://agentex-mongodb:27017
       - MONGODB_DATABASE_NAME=agentex
+      - TASK_STATE_STORAGE_PHASE=${TASK_STATE_STORAGE_PHASE:-mongodb}
+      - TASK_MESSAGE_STORAGE_PHASE=${TASK_MESSAGE_STORAGE_PHASE:-mongodb}
       - AGENTEX_SERVER_TASK_QUEUE=agentex-server
       - RETENTION_CLEANUP_ENABLED=${RETENTION_CLEANUP_ENABLED:-false}
       - RETENTION_CLEANUP_AGENT_ALLOWLIST=${RETENTION_CLEANUP_AGENT_ALLOWLIST:-}
@@ -242,6 +251,7 @@ services:
       - RETENTION_CLEANUP_PAGE_SIZE=${RETENTION_CLEANUP_PAGE_SIZE:-200}
       - RETENTION_CLEANUP_MAX_IN_FLIGHT=${RETENTION_CLEANUP_MAX_IN_FLIGHT:-20}
       - RETENTION_CLEANUP_DRY_RUN=${RETENTION_CLEANUP_DRY_RUN:-true}
+      - RETENTION_CLEANUP_STALE_RUNNING_DAYS=${RETENTION_CLEANUP_STALE_RUNNING_DAYS:-0}
     volumes:
       - .:/app:cached
     depends_on:

@@ -197,6 +197,47 @@ class AgentAPIKeyORM(BaseORM):
     )
 
 
+class AgentRunScheduleORM(BaseORM):
+    __tablename__ = "agent_run_schedules"
+    id = Column(String, primary_key=True, default=orm_id)
+    agent_id = Column(String(64), ForeignKey("agents.id"), nullable=False)
+    name = Column(String(256), nullable=False)
+    description = Column(Text, nullable=True)
+    cron_expression = Column(String, nullable=True)
+    interval_seconds = Column(Integer, nullable=True)
+    timezone = Column(String, nullable=False, server_default="UTC")
+    start_at = Column(DateTime(timezone=True), nullable=True)
+    end_at = Column(DateTime(timezone=True), nullable=True)
+    paused = Column(Boolean, nullable=False, server_default="false")
+    # Credential-free creator context (see ScheduleCreatorPrincipal): no cookies,
+    # JWTs, API keys, OAuth tokens, or request headers are ever stored here.
+    creator_principal = Column(JSON, nullable=False)
+    task_params = Column(JSON, nullable=True)
+    task_metadata = Column(JSON, nullable=True)
+    initial_input = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    # Soft-delete marker: NULL = active, set = tombstoned for audit.
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    # Monotonic record version reserved for future optimistic concurrency /
+    # change history. Not enforced yet — no read-modify-write path increments it.
+    version = Column(Integer, nullable=False, server_default="1")
+
+    __table_args__ = (
+        # Schedule names are mutable labels, unique only among active schedules.
+        Index(
+            "uq_agent_run_schedules_active_agent_name",
+            "agent_id",
+            "name",
+            unique=True,
+            postgresql_where=(deleted_at.is_(None)),
+        ),
+        Index("idx_agent_run_schedules_agent", "agent_id"),
+    )
+
+
 class DeploymentHistoryORM(BaseORM):
     __tablename__ = "deployment_history"
 

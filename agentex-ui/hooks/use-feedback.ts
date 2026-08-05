@@ -1,6 +1,7 @@
 import { useMutation } from '@tanstack/react-query';
 
 import { toast } from '@/components/ui/toast';
+import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 
 type SubmitFeedbackParams = {
   traceId: string;
@@ -21,13 +22,18 @@ type FeedbackResponse = {
 };
 
 export function useFeedback() {
+  const { sgpAccountID } = useSafeSearchParams();
   return useMutation({
     mutationFn: async (
       params: SubmitFeedbackParams
     ): Promise<FeedbackResponse> => {
       const response = await fetch('/api/feedback', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          // Selected account (same source as the SDK); the BFF forwards it.
+          ...(sgpAccountID ? { 'x-selected-account-id': sgpAccountID } : {}),
+        },
         body: JSON.stringify(params),
       });
 

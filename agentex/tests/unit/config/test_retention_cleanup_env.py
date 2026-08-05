@@ -54,3 +54,53 @@ def test_retention_cleanup_env_allows_explicit_dry_run_false(monkeypatch):
     env = EnvironmentVariables.refresh(force_refresh=True)
 
     assert env.RETENTION_CLEANUP_DRY_RUN is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("True", True),
+        ("TRUE", True),
+        ("1", True),
+        (" true ", True),
+        ("False", False),
+        ("FALSE", False),
+        ("0", False),
+    ],
+)
+def test_retention_cleanup_bool_env_is_case_insensitive(monkeypatch, raw, expected):
+    # YAML/Helm tooling tends to render booleans as True/False; the old strict
+    # `== "true"` comparison silently turned DRY_RUN=True into live deletion.
+    monkeypatch.setenv("RETENTION_CLEANUP_DRY_RUN", raw)
+
+    env = EnvironmentVariables.refresh(force_refresh=True)
+
+    assert env.RETENTION_CLEANUP_DRY_RUN is expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("raw", ["yes", "on", "truee", "dry", ""])
+def test_retention_cleanup_bool_env_rejects_garbage(monkeypatch, raw):
+    monkeypatch.setenv("RETENTION_CLEANUP_DRY_RUN", raw)
+
+    with pytest.raises(ValueError, match="RETENTION_CLEANUP_DRY_RUN"):
+        EnvironmentVariables.refresh(force_refresh=True)
+
+
+@pytest.mark.unit
+def test_retention_cleanup_stale_running_days_defaults_to_disabled(monkeypatch):
+    monkeypatch.delenv("RETENTION_CLEANUP_STALE_RUNNING_DAYS", raising=False)
+
+    env = EnvironmentVariables.refresh(force_refresh=True)
+
+    assert env.RETENTION_CLEANUP_STALE_RUNNING_DAYS == 0
+
+
+@pytest.mark.unit
+def test_retention_cleanup_stale_running_days_parses(monkeypatch):
+    monkeypatch.setenv("RETENTION_CLEANUP_STALE_RUNNING_DAYS", "30")
+
+    env = EnvironmentVariables.refresh(force_refresh=True)
+
+    assert env.RETENTION_CLEANUP_STALE_RUNNING_DAYS == 30

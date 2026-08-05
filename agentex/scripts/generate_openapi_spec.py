@@ -8,6 +8,9 @@ from pathlib import Path
 
 os.environ.setdefault("ENVIRONMENT", "development")
 os.environ.setdefault("ALLOWED_ORIGINS", "*")
+# Document feature-flagged endpoints in the spec/SDK regardless of where the
+# feature is enabled at runtime. Runtime serving stays gated by the live env var.
+os.environ.setdefault("ENABLE_AGENT_RUN_SCHEDULES", "true")
 
 
 def main() -> int:

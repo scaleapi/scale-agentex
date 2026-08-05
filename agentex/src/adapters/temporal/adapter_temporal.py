@@ -1,5 +1,6 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Annotated, Any
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends
 from temporalio.client import (
@@ -7,11 +8,17 @@ from temporalio.client import (
     Schedule,
     ScheduleActionStartWorkflow,
     ScheduleAlreadyRunningError,
+    ScheduleCalendarSpec,
     ScheduleDescription,
     ScheduleHandle,
     ScheduleIntervalSpec,
+    ScheduleOverlapPolicy,
+    SchedulePolicy,
+    ScheduleRange,
     ScheduleSpec,
     ScheduleState,
+    ScheduleUpdate,
+    ScheduleUpdateInput,
     WorkflowExecution,
     WorkflowHandle,
 )
@@ -35,6 +42,7 @@ from src.adapters.temporal.exceptions import (
 )
 from src.adapters.temporal.port import TemporalGateway
 from src.utils.logging import make_logger
+from src.utils.schedule_metrics import record_schedule_temporal_op
 
 logger = make_logger(__name__)
 
@@ -88,10 +96,13 @@ class TemporalAdapter(TemporalGateway):
             if start_delay:
                 options["start_delay"] = start_delay
 
-            # Start the workflow
+            # Start the workflow. Temporal's client.start_workflow takes a single
+            # positional ``arg``; multiple workflow arguments must be passed via
+            # the ``args`` keyword (spreading them positionally raises "takes from
+            # 2 to 3 positional arguments").
             handle = await self.client.start_workflow(
                 workflow,
-                *args if args else [],
+                args=args if args else [],
                 **options,
             )
 
@@ -362,9 +373,20 @@ class TemporalAdapter(TemporalGateway):
         start_at: Any | None = None,
         end_at: Any | None = None,
         paused: bool = False,
+        time_zone_name: str | None = None,
+        overlap_policy: str | None = None,
     ) -> ScheduleHandle:
         """
         Create a new schedule for recurring workflow execution.
+
+        ``time_zone_name`` is an optional IANA timezone (e.g. ``America/New_York``)
+        the cron expression is evaluated in; when omitted, cron is evaluated in
+        UTC. Ignored for interval-based schedules.
+
+        ``overlap_policy`` is an optional ScheduleOverlapPolicy name (e.g.
+        ``"skip"``, ``"buffer_one"``) controlling what happens when a fire is due
+        while a prior run is still executing. When omitted, Temporal's default
+        (SKIP) applies.
         """
         if not self.client:
             raise TemporalConnectionError("Temporal client is not connected")
@@ -377,6 +399,9 @@ class TemporalAdapter(TemporalGateway):
 
         try:
             # Build schedule spec
+            spec_kwargs: dict[str, Any] = {}
+            if time_zone_name:
+                spec_kwargs["time_zone_name"] = time_zone_name
             spec = ScheduleSpec(
                 cron_expressions=cron_expressions or [],
                 intervals=[
@@ -386,6 +411,7 @@ class TemporalAdapter(TemporalGateway):
                 else [],
                 start_at=start_at,
                 end_at=end_at,
+                **spec_kwargs,
             )
 
             # Build workflow action
@@ -408,6 +434,13 @@ class TemporalAdapter(TemporalGateway):
                 paused=paused,
             )
 
+            # Build schedule policies (overlap), when requested
+            schedule_kwargs: dict[str, Any] = {}
+            if overlap_policy:
+                schedule_kwargs["policy"] = SchedulePolicy(
+                    overlap=ScheduleOverlapPolicy[overlap_policy.upper()]
+                )
+
             # Create the schedule
             handle = await self.client.create_schedule(
                 schedule_id,
@@ -415,26 +448,31 @@ class TemporalAdapter(TemporalGateway):
                     action=action,
                     spec=spec,
                     state=state,
+                    **schedule_kwargs,
                 ),
             )
 
             logger.info(f"Created schedule {schedule_id} successfully")
+            record_schedule_temporal_op("create", "success")
             return handle
 
         except ScheduleAlreadyRunningError as e:
             logger.error(f"Schedule {schedule_id} already exists: {e}")
+            record_schedule_temporal_op("create", "error")
             raise TemporalScheduleAlreadyExistsError(
                 message=f"Schedule with ID '{schedule_id}' already exists",
                 detail=str(e),
             ) from e
         except ValueError as e:
             logger.error(f"Invalid arguments for schedule {schedule_id}: {e}")
+            record_schedule_temporal_op("create", "error")
             raise TemporalInvalidArgumentError(
                 message=f"Invalid arguments provided for schedule '{schedule_id}'",
                 detail=str(e),
             ) from e
         except Exception as e:
             logger.error(f"Failed to create schedule {schedule_id}: {e}")
+            record_schedule_temporal_op("create", "error")
             raise TemporalScheduleError(
                 message=f"Failed to create schedule '{schedule_id}'",
                 detail=str(e),
@@ -589,6 +627,316 @@ class TemporalAdapter(TemporalGateway):
                 detail=str(e),
             ) from e
 
+    async def skip_schedule_action(
+        self, schedule_id: str, scheduled_time: datetime
+    ) -> None:
+        """
+        Add a one-off exclusion for a scheduled action time.
+        """
+        if not self.client:
+            raise TemporalConnectionError("Temporal client is not connected")
+
+        try:
+            handle = self.client.get_schedule_handle(schedule_id)
+            description = await handle.describe()
+            now = datetime.now(UTC)
+            self._validate_future_scheduled_time(
+                scheduled_time, now=now, operation="skip"
+            )
+            if not self._contains_instant(
+                scheduled_time, description.info.next_action_times or []
+            ):
+                raise TemporalInvalidArgumentError(
+                    message="Cannot skip a time that is not an upcoming schedule action",
+                    detail=(
+                        f"Scheduled time '{scheduled_time.isoformat()}' is not in "
+                        f"the upcoming action times for schedule '{schedule_id}'."
+                    ),
+                )
+            skip = self._one_off_skip_spec(
+                scheduled_time, description.schedule.spec.time_zone_name
+            )
+
+            def _apply(input: ScheduleUpdateInput) -> ScheduleUpdate:
+                schedule = input.description.schedule
+                retained_skips = self._without_past_one_off_skips(
+                    schedule.spec.skip,
+                    schedule.spec.time_zone_name,
+                    now=now,
+                )
+                # Replace an existing exact match so retries do not duplicate skips.
+                schedule.spec.skip = [
+                    existing
+                    for existing in retained_skips
+                    if not self._same_one_off_skip(existing, skip)
+                ]
+                if scheduled_time.astimezone(UTC) >= now:
+                    schedule.spec.skip.append(skip)
+                return ScheduleUpdate(schedule=schedule)
+
+            await handle.update(_apply)
+            logger.info(f"Skipped action for schedule {schedule_id}")
+        except TemporalInvalidArgumentError:
+            raise
+        except Exception as e:
+            if "not found" in str(e).lower():
+                logger.error(f"Schedule {schedule_id} not found: {e}")
+                raise TemporalScheduleNotFoundError(
+                    message=f"Schedule '{schedule_id}' not found",
+                    detail=str(e),
+                ) from e
+            logger.error(f"Failed to skip action for schedule {schedule_id}: {e}")
+            raise TemporalScheduleError(
+                message=f"Failed to skip action for schedule '{schedule_id}'",
+                detail=str(e),
+            ) from e
+
+    async def unskip_schedule_action(
+        self, schedule_id: str, scheduled_time: datetime
+    ) -> None:
+        """
+        Remove a one-off exclusion for a scheduled action time.
+        """
+        if not self.client:
+            raise TemporalConnectionError("Temporal client is not connected")
+
+        try:
+            handle = self.client.get_schedule_handle(schedule_id)
+            description = await handle.describe()
+            now = datetime.now(UTC)
+            self._validate_future_scheduled_time(
+                scheduled_time, now=now, operation="unskip"
+            )
+            skipped_times = self.extract_one_off_skip_times(description)
+            if not self._contains_instant(scheduled_time, skipped_times):
+                raise TemporalInvalidArgumentError(
+                    message="Cannot unskip a time that is not currently skipped",
+                    detail=(
+                        f"Scheduled time '{scheduled_time.isoformat()}' is not in "
+                        f"the skipped action times for schedule '{schedule_id}'."
+                    ),
+                )
+            target = self._one_off_skip_spec(
+                scheduled_time, description.schedule.spec.time_zone_name
+            )
+
+            def _apply(input: ScheduleUpdateInput) -> ScheduleUpdate:
+                schedule = input.description.schedule
+                retained_skips = self._without_past_one_off_skips(
+                    schedule.spec.skip,
+                    schedule.spec.time_zone_name,
+                    now=now,
+                )
+                schedule.spec.skip = [
+                    skip
+                    for skip in retained_skips
+                    if not self._same_one_off_skip(skip, target)
+                ]
+                return ScheduleUpdate(schedule=schedule)
+
+            await handle.update(_apply)
+            logger.info(f"Unskipped action for schedule {schedule_id}")
+        except TemporalInvalidArgumentError:
+            raise
+        except Exception as e:
+            if "not found" in str(e).lower():
+                logger.error(f"Schedule {schedule_id} not found: {e}")
+                raise TemporalScheduleNotFoundError(
+                    message=f"Schedule '{schedule_id}' not found",
+                    detail=str(e),
+                ) from e
+            logger.error(f"Failed to unskip action for schedule {schedule_id}: {e}")
+            raise TemporalScheduleError(
+                message=f"Failed to unskip action for schedule '{schedule_id}'",
+                detail=str(e),
+            ) from e
+
+    @staticmethod
+    def _one_off_skip_spec(
+        scheduled_time: datetime, time_zone_name: str | None
+    ) -> ScheduleCalendarSpec:
+        if time_zone_name:
+            scheduled_time = scheduled_time.astimezone(ZoneInfo(time_zone_name))
+
+        def _range(value: int) -> list[ScheduleRange]:
+            return [ScheduleRange(start=value, end=value)]
+
+        return ScheduleCalendarSpec(
+            second=_range(scheduled_time.second),
+            minute=_range(scheduled_time.minute),
+            hour=_range(scheduled_time.hour),
+            day_of_month=_range(scheduled_time.day),
+            month=_range(scheduled_time.month),
+            year=_range(scheduled_time.year),
+            # Specify all days of week so the exact date fields above decide
+            # the match regardless of Temporal/Python weekday numbering.
+            day_of_week=[ScheduleRange(start=0, end=6)],
+            comment=f"Skipped via API at {datetime.now(UTC).isoformat()}",
+        )
+
+    @staticmethod
+    def _same_one_off_skip(
+        left: ScheduleCalendarSpec, right: ScheduleCalendarSpec
+    ) -> bool:
+        fields = ("second", "minute", "hour", "day_of_month", "month", "year")
+        return all(
+            len(getattr(left, field)) == 1
+            and len(getattr(right, field)) == 1
+            and getattr(left, field)[0].start == getattr(right, field)[0].start
+            and getattr(left, field)[0].end == getattr(right, field)[0].end
+            for field in fields
+        )
+
+    @staticmethod
+    def _contains_instant(target: datetime, times: list[datetime]) -> bool:
+        target_utc = target.astimezone(UTC)
+        return any(time.astimezone(UTC) == target_utc for time in times)
+
+    @staticmethod
+    def _validate_future_scheduled_time(
+        scheduled_time: datetime, *, now: datetime, operation: str
+    ) -> None:
+        if scheduled_time.astimezone(UTC) < now.astimezone(UTC):
+            raise TemporalInvalidArgumentError(
+                message=f"Cannot {operation} a past scheduled time",
+                detail=(
+                    f"Scheduled time '{scheduled_time.isoformat()}' is before "
+                    f"the current time '{now.isoformat()}'."
+                ),
+            )
+
+    @staticmethod
+    def _one_off_skip_time(
+        skip: ScheduleCalendarSpec, timezone: tzinfo
+    ) -> datetime | None:
+        values: dict[str, int] = {}
+        for field, date_part in (
+            ("second", "second"),
+            ("minute", "minute"),
+            ("hour", "hour"),
+            ("day_of_month", "day"),
+            ("month", "month"),
+            ("year", "year"),
+        ):
+            ranges = getattr(skip, field)
+            if len(ranges) != 1 or ranges[0].start != ranges[0].end:
+                return None
+            values[date_part] = ranges[0].start
+
+        return datetime(
+            values["year"],
+            values["month"],
+            values["day"],
+            values["hour"],
+            values["minute"],
+            values["second"],
+            tzinfo=timezone,
+        ).astimezone(UTC)
+
+    @classmethod
+    def _without_past_one_off_skips(
+        cls,
+        skips: list[ScheduleCalendarSpec] | None,
+        time_zone_name: str | None,
+        *,
+        now: datetime,
+    ) -> list[ScheduleCalendarSpec]:
+        timezone = ZoneInfo(time_zone_name) if time_zone_name else UTC
+        now = now.astimezone(UTC)
+        retained_skips: list[ScheduleCalendarSpec] = []
+
+        for skip in skips or []:
+            skipped_time = cls._one_off_skip_time(skip, timezone)
+            if skipped_time is None or skipped_time >= now:
+                retained_skips.append(skip)
+
+        return retained_skips
+
+    @classmethod
+    def extract_one_off_skip_times(
+        cls, description: ScheduleDescription, *, after: datetime | None = None
+    ) -> list[datetime]:
+        time_zone_name = description.schedule.spec.time_zone_name
+        timezone = ZoneInfo(time_zone_name) if time_zone_name else UTC
+        skipped_times: list[datetime] = []
+        after_utc = after.astimezone(UTC) if after else None
+
+        for skip in description.schedule.spec.skip or []:
+            skipped_time = cls._one_off_skip_time(skip, timezone)
+            if skipped_time is not None and (
+                after_utc is None or skipped_time >= after_utc
+            ):
+                skipped_times.append(skipped_time)
+
+        return skipped_times
+
+    async def update_schedule(
+        self,
+        schedule_id: str,
+        cron_expressions: list[str] | None = None,
+        interval_seconds: int | None = None,
+        start_at: Any | None = None,
+        end_at: Any | None = None,
+        time_zone_name: str | None = None,
+        paused: bool | None = None,
+    ) -> None:
+        """
+        Update an existing schedule's spec and/or paused state.
+
+        Rebuilds the schedule spec (cadence, window, timezone) from the provided
+        values and replaces it, leaving the workflow action untouched. ``paused``
+        is applied only when provided. The caller is expected to pass the full
+        desired spec (cron XOR interval), mirroring ``create_schedule``.
+        """
+        if not self.client:
+            raise TemporalConnectionError("Temporal client is not connected")
+
+        if not cron_expressions and not interval_seconds:
+            raise TemporalInvalidArgumentError(
+                message="Either cron_expressions or interval_seconds must be provided",
+                detail="A schedule requires at least one scheduling specification",
+            )
+
+        spec_kwargs: dict[str, Any] = {}
+        if time_zone_name:
+            spec_kwargs["time_zone_name"] = time_zone_name
+        new_spec = ScheduleSpec(
+            cron_expressions=cron_expressions or [],
+            intervals=[ScheduleIntervalSpec(every=timedelta(seconds=interval_seconds))]
+            if interval_seconds
+            else [],
+            start_at=start_at,
+            end_at=end_at,
+            **spec_kwargs,
+        )
+
+        def _apply(input: ScheduleUpdateInput) -> ScheduleUpdate:
+            schedule = input.description.schedule
+            schedule.spec = new_spec
+            if paused is not None:
+                schedule.state.paused = paused
+            return ScheduleUpdate(schedule=schedule)
+
+        try:
+            handle = self.client.get_schedule_handle(schedule_id)
+            await handle.update(_apply)
+            logger.info(f"Updated schedule {schedule_id}")
+            record_schedule_temporal_op("update", "success")
+        except Exception as e:
+            if "not found" in str(e).lower():
+                logger.error(f"Schedule {schedule_id} not found: {e}")
+                record_schedule_temporal_op("update", "not_found")
+                raise TemporalScheduleNotFoundError(
+                    message=f"Schedule '{schedule_id}' not found",
+                    detail=str(e),
+                ) from e
+            logger.error(f"Failed to update schedule {schedule_id}: {e}")
+            record_schedule_temporal_op("update", "error")
+            raise TemporalScheduleError(
+                message=f"Failed to update schedule '{schedule_id}'",
+                detail=str(e),
+            ) from e
+
     async def delete_schedule(self, schedule_id: str) -> None:
         """
         Delete a schedule.
@@ -600,14 +948,17 @@ class TemporalAdapter(TemporalGateway):
             handle = self.client.get_schedule_handle(schedule_id)
             await handle.delete()
             logger.info(f"Deleted schedule {schedule_id}")
+            record_schedule_temporal_op("delete", "success")
         except Exception as e:
             if "not found" in str(e).lower():
                 logger.error(f"Schedule {schedule_id} not found: {e}")
+                record_schedule_temporal_op("delete", "not_found")
                 raise TemporalScheduleNotFoundError(
                     message=f"Schedule '{schedule_id}' not found",
                     detail=str(e),
                 ) from e
             logger.error(f"Failed to delete schedule {schedule_id}: {e}")
+            record_schedule_temporal_op("delete", "error")
             raise TemporalScheduleError(
                 message=f"Failed to delete schedule '{schedule_id}'",
                 detail=str(e),

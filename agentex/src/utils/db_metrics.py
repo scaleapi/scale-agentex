@@ -19,6 +19,8 @@ from urllib.parse import urlparse
 from datadog import statsd
 from sqlalchemy import event
 from sqlalchemy.engine import ExecutionContext
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
+from sqlalchemy.pool import AsyncAdaptedQueuePool
 
 from src.utils.logging import make_logger
 from src.utils.otel_metrics import get_meter
@@ -38,6 +40,28 @@ _SLOW_QUERY_THRESHOLD = float(os.environ.get("POSTGRES_SLOW_QUERY_THRESHOLD", "0
 
 # StatsD is only enabled if DD_AGENT_HOST is configured
 _STATSD_ENABLED = bool(os.environ.get("DD_AGENT_HOST"))
+
+# Bucket boundaries (seconds) for the connection-acquisition wait histogram.
+# The SDK's default boundaries are millisecond-magnitude integers [0, 5, 10, ...]
+# that assume a millisecond unit; against a seconds-unit metric almost every
+# pool wait (µs–ms normally, up to the ~30s pool_timeout under saturation) falls
+# in the first bucket and quantiles are meaningless. These span instant-to-
+# timeout so p95/p99 stay usable.
+_POOL_WAIT_BUCKET_BOUNDARIES_S = (
+    0.001,
+    0.005,
+    0.01,
+    0.025,
+    0.05,
+    0.1,
+    0.25,
+    0.5,
+    1.0,
+    2.5,
+    5.0,
+    10.0,
+    30.0,
+)
 
 
 def _format_statsd_tags(attributes: dict) -> list[str]:
@@ -68,6 +92,96 @@ def _parse_db_url(url: str) -> tuple[str, int, str]:
     port = parsed.port or 5432
     db_name = parsed.path.lstrip("/") if parsed.path else "postgres"
     return host, port, db_name
+
+
+class _PoolWaitInstruments:
+    """OTel instruments + attributes for connection-acquisition metrics.
+
+    Held on the pool instance so ``connect()`` can emit without looking back
+    through the collector. A ``None`` slot on the pool means OTel is not
+    configured and the override degrades to a straight passthrough.
+    """
+
+    __slots__ = ("wait_time", "pending_requests", "timeouts", "failures", "attributes")
+
+    def __init__(self, wait_time, pending_requests, timeouts, failures, attributes):
+        self.wait_time = wait_time
+        self.pending_requests = pending_requests
+        self.timeouts = timeouts
+        self.failures = failures
+        self.attributes = attributes
+
+
+class InstrumentedAsyncAdaptedQueuePool(AsyncAdaptedQueuePool):
+    """Async connection pool that measures connection acquisition.
+
+    Sources the three OTel DB connection-pool metrics that the checkout/checkin
+    events in ``PostgresPoolMetrics`` cannot: by the time ``checkout`` fires the
+    wait is already over, SQLAlchemy exposes no "started waiting" event, and a
+    pool timeout raises before any connection is handed out.
+
+    ``Pool.connect()`` is the single, non-recursive entry point for obtaining a
+    connection (``connect() -> _ConnectionFairy._checkout() -> _do_get()``) and
+    runs inside the acquiring greenlet, so wall-clock timing around it captures
+    the real wait — including time blocked on a saturated pool. Overriding
+    ``_do_get`` directly would double-count, because ``QueuePool._do_get``
+    recurses on itself on the overflow-retry path.
+
+    Emits (OTel-only; no StatsD dual-emit, these are new series with no Datadog
+    consumer yet):
+      * ``db.client.connection.wait_time``        — time to obtain a connection
+      * ``db.client.connection.pending_requests`` — requests waiting right now
+      * ``db.client.connection.timeouts``         — pool acquisition timeouts
+      * ``db.client.connection.failures_total``   — non-timeout acquisition
+        failures (DB refusing connections, network errors), by ``error.type``
+
+    The pool is constructed inside ``create_async_engine`` before the collector
+    has meters, so instruments are attached post-construction; until then, and
+    whenever OTel is disabled, ``connect()`` is a plain passthrough.
+    """
+
+    # None => passthrough (OTel disabled, or instruments not yet attached).
+    _wait_instruments: _PoolWaitInstruments | None = None
+
+    def attach_wait_instruments(self, instruments: _PoolWaitInstruments) -> None:
+        self._wait_instruments = instruments
+
+    def recreate(self) -> InstrumentedAsyncAdaptedQueuePool:
+        # dispose()/reset recreates the pool object; carry instrumentation
+        # forward so metrics don't silently go dark after a pool recreate.
+        new_pool = super().recreate()
+        new_pool._wait_instruments = self._wait_instruments
+        return new_pool
+
+    def connect(self):
+        instruments = self._wait_instruments
+        if instruments is None:
+            return super().connect()
+
+        attributes = instruments.attributes
+        instruments.pending_requests.add(1, attributes)
+        start = time.monotonic()
+        try:
+            connection = super().connect()
+        except SQLAlchemyTimeoutError:
+            instruments.timeouts.add(1, attributes)
+            raise
+        except Exception as exc:
+            # Non-timeout acquisition failure (DB at max_connections, network
+            # drop while establishing, auth error). Without this branch the
+            # attempt vanishes from metrics: no wait_time sample (nothing was
+            # acquired) and no timeout.
+            instruments.failures.add(
+                1, {**attributes, "error.type": type(exc).__name__}
+            )
+            raise
+        finally:
+            instruments.pending_requests.add(-1, attributes)
+
+        # Only reached on success: a timed-out (or otherwise failed) acquisition
+        # obtained no connection, so it must not land in the wait_time histogram.
+        instruments.wait_time.record(time.monotonic() - start, attributes)
+        return connection
 
 
 class PostgresPoolMetrics:
@@ -150,6 +264,64 @@ class PostgresPoolMetrics:
             description="Time a connection was checked out",
             unit="s",
         )
+
+        # Connection-acquisition metrics (OTel DB semconv). Sourced from the
+        # InstrumentedAsyncAdaptedQueuePool.connect() seam rather than pool
+        # events, which can't see the wait, the current waiters, or a timeout.
+        self._connection_wait_time: Histogram = meter.create_histogram(
+            name="db.client.connection.wait_time",
+            description="The time it took to obtain an open connection from the pool",
+            unit="s",
+            explicit_bucket_boundaries_advisory=_POOL_WAIT_BUCKET_BOUNDARIES_S,
+        )
+
+        self._connection_pending_requests: UpDownCounter = meter.create_up_down_counter(
+            name="db.client.connection.pending_requests",
+            description="The number of current pending requests for an open connection",
+            unit="{request}",
+        )
+
+        self._connection_timeouts: Counter = meter.create_counter(
+            name="db.client.connection.timeouts",
+            description=(
+                "The number of connection timeouts that have occurred trying to "
+                "obtain a connection from the pool"
+            ),
+            unit="{timeout}",
+        )
+
+        # Custom extension (semconv only covers timeouts): acquisitions that
+        # failed for any other reason, tagged with error.type.
+        self._connection_failures: Counter = meter.create_counter(
+            name="db.client.connection.failures_total",
+            description=(
+                "Connection acquisitions that failed for a reason other than a "
+                "pool timeout (DB refusing connections, network errors)"
+            ),
+            unit="{failure}",
+        )
+
+        # Hand the instruments to the pool so its connect() override can emit.
+        # Only InstrumentedAsyncAdaptedQueuePool carries the hook; a differently
+        # configured engine (e.g. NullPool in tests) is left as a passthrough.
+        pool = self.engine.sync_engine.pool
+        if isinstance(pool, InstrumentedAsyncAdaptedQueuePool):
+            pool.attach_wait_instruments(
+                _PoolWaitInstruments(
+                    wait_time=self._connection_wait_time,
+                    pending_requests=self._connection_pending_requests,
+                    timeouts=self._connection_timeouts,
+                    failures=self._connection_failures,
+                    attributes=self.base_attributes,
+                )
+            )
+        else:
+            logger.warning(
+                "Pool for %s is %s, not InstrumentedAsyncAdaptedQueuePool; "
+                "wait_time/pending_requests/timeouts will not be emitted",
+                pool_name,
+                type(pool).__name__,
+            )
 
         # Track last reported values for delta calculation
         self._last_idle = 0

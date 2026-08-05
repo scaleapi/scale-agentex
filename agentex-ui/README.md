@@ -96,8 +96,8 @@ cp example.env.development .env.development
 Edit `.env.development` with your configuration:
 
 ```bash
-# Backend API endpoint
-NEXT_PUBLIC_AGENTEX_API_BASE_URL=http://localhost:5003
+# Backend API endpoint — server-only upstream for the /api/agentex BFF proxy
+AGENTEX_API_URL=http://localhost:5003
 ```
 
 ### 3. Install Dependencies

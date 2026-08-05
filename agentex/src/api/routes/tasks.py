@@ -1,7 +1,7 @@
 import json
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from src.adapters.temporal.adapter_temporal import DTemporalAdapter
@@ -17,6 +17,7 @@ from src.api.schemas.tasks import (
     TaskResponse,
     TaskStatus,
     TaskStatusReasonRequest,
+    TaskSummary,
     UpdateTaskRequest,
 )
 from src.domain.entities.tasks import TaskStatus as DomainTaskStatus
@@ -73,9 +74,12 @@ async def get_task_by_name(
 
 @router.get(
     "",
-    response_model=list[TaskResponse],
+    response_model=list[TaskSummary],
     summary="List Tasks",
-    description="List all tasks.",
+    description=(
+        "List tasks. Returns a lean summary per task and omits `params`; "
+        "fetch GET /tasks/{task_id} for the full record including `params`."
+    ),
 )
 async def list_tasks(
     task_use_case: DTaskUseCase,
@@ -143,7 +147,7 @@ async def list_tasks(
         order_direction=order_direction,
         relationships=relationships,
     )
-    return [TaskResponse.model_validate(task_entity) for task_entity in task_entities]
+    return [TaskSummary.model_validate(task_entity) for task_entity in task_entities]
 
 
 @router.delete(
@@ -193,7 +197,9 @@ async def update_task(
     task_use_case: DTaskUseCase,
 ) -> Task:
     updated_task_entity = await task_use_case.update_mutable_fields_on_task(
-        id=task_id, task_metadata=request.task_metadata
+        id=task_id,
+        task_metadata=request.task_metadata,
+        merge_params=request.merge_params,
     )
     return Task.model_validate(updated_task_entity)
 
@@ -212,7 +218,9 @@ async def update_task_by_name(
     task_use_case: DTaskUseCase,
 ) -> Task:
     updated_task_entity = await task_use_case.update_mutable_fields_on_task(
-        name=task_name, task_metadata=request.task_metadata
+        name=task_name,
+        task_metadata=request.task_metadata,
+        merge_params=request.merge_params,
     )
     return Task.model_validate(updated_task_entity)
 
@@ -272,6 +280,30 @@ async def cancel_task(
 
 
 @router.post(
+    "/{task_id}/interrupt",
+    response_model=Task,
+    summary="Interrupt Task",
+    description=(
+        "Stop the in-flight turn without terminating the task. Transitions a "
+        "running task to the non-terminal INTERRUPTED status; the task stays "
+        "continuable and the next message or event resumes it."
+    ),
+)
+async def interrupt_task(
+    # Interrupt is non-terminal (the task remains continuable), so it authorizes
+    # the editor-allowed ``update`` action — matching the RPC task/interrupt
+    # path — rather than the owner-only ``cancel`` used by the sibling cancel route.
+    task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.update),
+    task_use_case: DTaskUseCase,
+    request: TaskStatusReasonRequest | None = None,
+) -> Task:
+    updated = await task_use_case.interrupt_task(
+        id=task_id, reason=request.reason if request else None
+    )
+    return Task.model_validate(updated)
+
+
+@router.post(
     "/{task_id}/terminate",
     response_model=Task,
     summary="Terminate Task",
@@ -313,13 +345,18 @@ async def timeout_task(
 async def stream_task_events(
     task_id: DAuthorizedId(AgentexResourceType.task, AuthorizedOperationType.read),
     stream_use_case: DStreamsUseCase,
+    request: Request,
 ) -> StreamingResponse:
     """
     Streams task events using Server-Sent Events (SSE).
     """
 
     return StreamingResponse(
-        stream_use_case.stream_task_events(task_id=task_id),
+        # Pass request headers so the stream span continues an inbound W3C
+        # traceparent (ingress edge) instead of starting an unrelated trace.
+        stream_use_case.stream_task_events(
+            task_id=task_id, carrier=dict(request.headers)
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -337,13 +374,18 @@ async def stream_task_events(
 async def stream_task_events_by_name(
     task_name: DAuthorizedName(AgentexResourceType.task, AuthorizedOperationType.read),
     stream_use_case: DStreamsUseCase,
+    request: Request,
 ) -> StreamingResponse:
     """
     Streams task events using Server-Sent Events (SSE) by task name.
     """
 
     return StreamingResponse(
-        stream_use_case.stream_task_events(task_name=task_name),
+        # Pass request headers so the stream span continues an inbound W3C
+        # traceparent (ingress edge) instead of starting an unrelated trace.
+        stream_use_case.stream_task_events(
+            task_name=task_name, carrier=dict(request.headers)
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

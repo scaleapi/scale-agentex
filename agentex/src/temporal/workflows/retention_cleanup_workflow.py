@@ -37,7 +37,12 @@ class RetentionCleanupTaskWorkflow:
     async def run(self, args: dict) -> dict:
         return await workflow.execute_activity(
             CLEAN_TASK_ACTIVITY,
-            args=[args["task_id"], args["idle_days"], args.get("dry_run", True)],
+            args=[
+                args["task_id"],
+                args["idle_days"],
+                args.get("dry_run", True),
+                args.get("stale_running_days", 0),
+            ],
             start_to_close_timeout=timedelta(seconds=60),
             retry_policy=RetryPolicy(
                 maximum_attempts=3,
@@ -73,6 +78,7 @@ class RetentionCleanupSweepWorkflow:
         page_size = args.get("page_size", 200)
         max_in_flight = args.get("max_in_flight", 20)
         dry_run = args.get("dry_run", True)
+        stale_running_days = args.get("stale_running_days", 0)
         after_id = args.get("after_id")
         totals = args.get("totals", {"cleaned": 0, "skipped": 0, "failed": 0})
 
@@ -135,6 +141,7 @@ class RetentionCleanupSweepWorkflow:
                             "task_id": task_id,
                             "idle_days": idle_days,
                             "dry_run": dry_run,
+                            "stale_running_days": stale_running_days,
                         },
                         id=f"retention-cleanup-task-{sweep_run_id}-{task_id}",
                         retry_policy=RetryPolicy(maximum_attempts=1),
@@ -158,6 +165,7 @@ class RetentionCleanupSweepWorkflow:
                 "page_size": page_size,
                 "max_in_flight": max_in_flight,
                 "dry_run": dry_run,
+                "stale_running_days": stale_running_days,
                 "after_id": page_last_id,
                 "totals": totals,
             }

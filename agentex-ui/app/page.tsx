@@ -2,29 +2,29 @@ import { connection } from 'next/server';
 
 import { AgentexUIRoot } from '@/components/agentex-ui-root';
 import { AgentexProvider } from '@/components/providers';
+import { parseBooleanEnv } from '@/lib/env-utils';
 
 export default async function RootPage() {
   await connection();
 
   const sgpAppURL = process.env.NEXT_PUBLIC_SGP_APP_URL ?? '';
-  const agentexAPIBaseURL =
-    process.env.NEXT_PUBLIC_AGENTEX_API_BASE_URL ?? 'http://localhost:5003';
-
-  if (!agentexAPIBaseURL) {
-    return (
-      <div role="alert">
-        <p>Missing some configs</p>
-        <pre>{JSON.stringify({ sgpAppURL, agentexAPIBaseURL }, null, 2)}</pre>
-      </div>
-    );
-  }
+  const authEnabled = !!process.env.AGENTEX_UI_AUTH_PROVIDER_ID;
+  const agentRunSchedulesEnabled = parseBooleanEnv(
+    process.env.ENABLE_AGENT_RUN_SCHEDULES,
+    'ENABLE_AGENT_RUN_SCHEDULES'
+  );
+  // The account picker needs the platform API (accounts come from /api/user-info).
+  const accountsEnabled = !!(
+    process.env.SGP_API_URL ?? process.env.NEXT_PUBLIC_SGP_APP_URL
+  );
 
   return (
     <AgentexProvider
+      authEnabled={authEnabled}
+      accountsEnabled={accountsEnabled}
       sgpAppURL={sgpAppURL}
-      agentexAPIBaseURL={agentexAPIBaseURL}
     >
-      <AgentexUIRoot />
+      <AgentexUIRoot agentRunSchedulesEnabled={agentRunSchedulesEnabled} />
     </AgentexProvider>
   );
 }

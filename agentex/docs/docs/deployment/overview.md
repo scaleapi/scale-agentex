@@ -10,6 +10,7 @@ Before deploying, you need:
 - **Cluster access** - Contact your cluster administrators for access
 - **Namespace** - Get a namespace provisioned for your agent
 - **Permissions** - RBAC access to create deployments and secrets
+- **Redis** - A reachable Redis instance. Agents require it for streaming and messaging, so its connection string must be provided as the `REDIS_URL` secret (synced in step 2 below). Unlike local development — where the Docker stack provides Redis automatically — a deployed agent has no Redis unless you configure one.
 
 Verify your setup:
 ```bash

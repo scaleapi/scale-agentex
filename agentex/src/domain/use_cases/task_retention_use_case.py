@@ -46,16 +46,22 @@ class TaskRetentionUseCase:
         task_id: str,
         force: bool = False,
         idle_days: int = 7,
+        stale_running_days: int = 0,
     ) -> TaskCleanupResultEntity:
         """
         force=True is the admin escape hatch; it bypasses the idle-threshold
         check (but NOT the active-workflow / unprocessed-events checks, which
         protect correctness, not policy).
+
+        stale_running_days > 0 relaxes the active-workflow check for tasks that
+        have sat in RUNNING with no interaction for at least that many days
+        (abandoned runs that would otherwise be exempt from retention forever).
         """
         return await self.retention_service.clean_task(
             task_id=task_id,
             enforce_idle_threshold=not force,
             idle_days=idle_days,
+            stale_running_days=stale_running_days,
         )
 
     async def preview_clean_task(
@@ -63,6 +69,7 @@ class TaskRetentionUseCase:
         task_id: str,
         force: bool = False,
         idle_days: int = 7,
+        stale_running_days: int = 0,
     ) -> TaskCleanupResultEntity:
         """
         Dry-run counterpart to clean_task: runs the same safety checks without
@@ -72,6 +79,7 @@ class TaskRetentionUseCase:
             task_id=task_id,
             enforce_idle_threshold=not force,
             idle_days=idle_days,
+            stale_running_days=stale_running_days,
         )
 
     async def rehydrate_task(

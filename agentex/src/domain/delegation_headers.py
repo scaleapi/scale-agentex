@@ -4,9 +4,19 @@ Outbound runtime-delegation headers for ACP calls to agent pods (v1).
 After auth, agentex may attach x-acting-user-* headers so agent pods can call
 downstream APIs as the user. Values are minimal (never the full browser Cookie).
 
+Three credential forms are forwarded, in precedence order:
+  1. x-api-key            -> x-acting-user-api-key
+  2. session cookie       -> x-acting-user-cookie
+  3. Authorization bearer -> x-acting-user-authorization
+
 Session cookies: only configured names are forwarded on x-acting-user-cookie.
 Default name is _identityJwt. Override with AGENTEX_DELEGATION_SESSION_COOKIE_NAMES
 (comma-separated). Set to empty string to disable cookie delegation.
+
+The bearer branch is the lowest-precedence fallback: it only fires when neither an
+api key nor a session cookie is present. Callers authenticated by an OIDC/OneAuth
+access token (bearer, no api key or session cookie) land here, so the agent pod can
+present the same bearer to downstream APIs that accept it.
 """
 
 import os
@@ -14,9 +24,13 @@ from typing import Any
 
 HEADER_ACTING_USER_API_KEY = "x-acting-user-api-key"
 HEADER_ACTING_USER_COOKIE = "x-acting-user-cookie"
+HEADER_ACTING_USER_AUTHORIZATION = "x-acting-user-authorization"
+HEADER_AUTHORIZATION = "authorization"
 HEADER_COOKIE = "cookie"
 HEADER_SELECTED_ACCOUNT_ID = "x-selected-account-id"
 HEADER_USER_API_KEY = "x-api-key"
+
+_BEARER_PREFIX = "bearer "
 
 ENV_SESSION_COOKIE_NAMES = "AGENTEX_DELEGATION_SESSION_COOKIE_NAMES"
 DEFAULT_SESSION_COOKIE_NAMES = ("_identityJwt",)
@@ -80,17 +94,24 @@ def build_delegation_headers(
     normalized = _normalize_headers(inbound_headers)
     api_key = normalized.get(HEADER_USER_API_KEY)
     cookie_header = normalized.get(HEADER_COOKIE)
+    authorization = normalized.get(HEADER_AUTHORIZATION)
+
+    # Resolve the session cookie up front: a Cookie header carrying only
+    # non-allowlisted morsels (analytics, CSRF) yields nothing, and must not
+    # pre-empt a bearer that rides alongside it (browser OIDC callers send both).
+    session_cookie = (
+        _minimal_session_cookie(cookie_header, session_cookie_names_to_forward())
+        if cookie_header
+        else None
+    )
 
     result: dict[str, str] = {}
     if api_key:
         result[HEADER_ACTING_USER_API_KEY] = api_key
-    elif cookie_header:
-        session_cookie = _minimal_session_cookie(
-            cookie_header, session_cookie_names_to_forward()
-        )
-        if not session_cookie:
-            return {}
+    elif session_cookie:
         result[HEADER_ACTING_USER_COOKIE] = session_cookie
+    elif authorization and authorization.lower().startswith(_BEARER_PREFIX):
+        result[HEADER_ACTING_USER_AUTHORIZATION] = authorization
     else:
         return {}
 

@@ -555,7 +555,8 @@ paths:
       tags:
       - Tasks
       summary: List Tasks
-      description: List all tasks.
+      description: List tasks. Returns a lean summary per task and omits `params`;
+        fetch GET /tasks/{task_id} for the full record including `params`.
       operationId: list_tasks_tasks_get
       parameters:
       - name: agent_id
@@ -641,7 +642,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/TaskResponse'
+                  $ref: '#/components/schemas/TaskSummary'
                 title: Response List Tasks Tasks Get
         '422':
           description: Validation Error
@@ -726,6 +727,43 @@ paths:
       summary: Cancel Task
       description: Mark a running task as canceled.
       operationId: cancel_task_tasks__task_id__cancel_post
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Task Id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/TaskStatusReasonRequest'
+              - type: 'null'
+              title: Request
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /tasks/{task_id}/interrupt:
+    post:
+      tags:
+      - Tasks
+      summary: Interrupt Task
+      description: Stop the in-flight turn without terminating the task. Transitions
+        a running task to the non-terminal INTERRUPTED status; the task stays continuable
+        and the next message or event resumes it.
+      operationId: interrupt_task_tasks__task_id__interrupt_post
       parameters:
       - name: task_id
         in: path
@@ -1213,19 +1251,25 @@ paths:
             : {\n          \"anyOf\": [\n            {},\n            {\n        \
             \      \"type\": \"null\"\n            }\n          ],\n          \"default\"\
             : null,\n          \"description\": \"The result of the tool.\",\n   \
-            \       \"title\": \"Content\"\n        }\n      },\n      \"title\":\
-            \ \"ToolResponseContentEntityOptional\",\n      \"type\": \"object\"\n\
-            \    }\n  },\n  \"description\": \"Filter model for TaskMessage - all\
-            \ fields optional for flexible filtering.\\n\\nThe `exclude` field determines\
-            \ whether this filter is inclusionary or exclusionary.\\nWhen multiple\
-            \ filters are provided:\\n- Inclusionary filters (exclude=False) are OR'd\
-            \ together\\n- Exclusionary filters (exclude=True) are OR'd together and\
-            \ negated with $nor\\n- The two groups are AND'd: (include1 OR include2)\
-            \ AND NOT (exclude1 OR exclude2)\",\n  \"properties\": {\n    \"content\"\
-            : {\n      \"anyOf\": [\n        {\n          \"$ref\": \"#/$defs/ToolRequestContentEntityOptional\"\
-            \n        },\n        {\n          \"$ref\": \"#/$defs/DataContentEntityOptional\"\
-            \n        },\n        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\
-            \n        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
+            \       \"title\": \"Content\"\n        },\n        \"is_error\": {\n\
+            \          \"anyOf\": [\n            {\n              \"type\": \"boolean\"\
+            \n            },\n            {\n              \"type\": \"null\"\n  \
+            \          }\n          ],\n          \"default\": null,\n          \"\
+            description\": \"Whether the tool call resulted in an error. `None` when\
+            \ the harness does not report a status.\",\n          \"title\": \"Is\
+            \ Error\"\n        }\n      },\n      \"title\": \"ToolResponseContentEntityOptional\"\
+            ,\n      \"type\": \"object\"\n    }\n  },\n  \"description\": \"Filter\
+            \ model for TaskMessage - all fields optional for flexible filtering.\\\
+            n\\nThe `exclude` field determines whether this filter is inclusionary\
+            \ or exclusionary.\\nWhen multiple filters are provided:\\n- Inclusionary\
+            \ filters (exclude=False) are OR'd together\\n- Exclusionary filters (exclude=True)\
+            \ are OR'd together and negated with $nor\\n- The two groups are AND'd:\
+            \ (include1 OR include2) AND NOT (exclude1 OR exclude2)\",\n  \"properties\"\
+            : {\n    \"content\": {\n      \"anyOf\": [\n        {\n          \"$ref\"\
+            : \"#/$defs/ToolRequestContentEntityOptional\"\n        },\n        {\n\
+            \          \"$ref\": \"#/$defs/DataContentEntityOptional\"\n        },\n\
+            \        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\n\
+            \        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
             \n        },\n        {\n          \"$ref\": \"#/$defs/ReasoningContentEntityOptional\"\
             \n        },\n        {\n          \"type\": \"null\"\n        }\n   \
             \   ],\n      \"default\": null,\n      \"description\": \"Filter by message\
@@ -1416,19 +1460,24 @@ paths:
           \            {},\n            {\n              \"type\": \"null\"\n    \
           \        }\n          ],\n          \"default\": null,\n          \"description\"\
           : \"The result of the tool.\",\n          \"title\": \"Content\"\n     \
-          \   }\n      },\n      \"title\": \"ToolResponseContentEntityOptional\"\
-          ,\n      \"type\": \"object\"\n    }\n  },\n  \"description\": \"Filter\
-          \ model for TaskMessage - all fields optional for flexible filtering.\\\
-          n\\nThe `exclude` field determines whether this filter is inclusionary or\
-          \ exclusionary.\\nWhen multiple filters are provided:\\n- Inclusionary filters\
-          \ (exclude=False) are OR'd together\\n- Exclusionary filters (exclude=True)\
-          \ are OR'd together and negated with $nor\\n- The two groups are AND'd:\
-          \ (include1 OR include2) AND NOT (exclude1 OR exclude2)\",\n  \"properties\"\
-          : {\n    \"content\": {\n      \"anyOf\": [\n        {\n          \"$ref\"\
-          : \"#/$defs/ToolRequestContentEntityOptional\"\n        },\n        {\n\
-          \          \"$ref\": \"#/$defs/DataContentEntityOptional\"\n        },\n\
-          \        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\n\
-          \        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
+          \   },\n        \"is_error\": {\n          \"anyOf\": [\n            {\n\
+          \              \"type\": \"boolean\"\n            },\n            {\n  \
+          \            \"type\": \"null\"\n            }\n          ],\n         \
+          \ \"default\": null,\n          \"description\": \"Whether the tool call\
+          \ resulted in an error. `None` when the harness does not report a status.\"\
+          ,\n          \"title\": \"Is Error\"\n        }\n      },\n      \"title\"\
+          : \"ToolResponseContentEntityOptional\",\n      \"type\": \"object\"\n \
+          \   }\n  },\n  \"description\": \"Filter model for TaskMessage - all fields\
+          \ optional for flexible filtering.\\n\\nThe `exclude` field determines whether\
+          \ this filter is inclusionary or exclusionary.\\nWhen multiple filters are\
+          \ provided:\\n- Inclusionary filters (exclude=False) are OR'd together\\\
+          n- Exclusionary filters (exclude=True) are OR'd together and negated with\
+          \ $nor\\n- The two groups are AND'd: (include1 OR include2) AND NOT (exclude1\
+          \ OR exclude2)\",\n  \"properties\": {\n    \"content\": {\n      \"anyOf\"\
+          : [\n        {\n          \"$ref\": \"#/$defs/ToolRequestContentEntityOptional\"\
+          \n        },\n        {\n          \"$ref\": \"#/$defs/DataContentEntityOptional\"\
+          \n        },\n        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\
+          \n        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
           \n        },\n        {\n          \"$ref\": \"#/$defs/ReasoningContentEntityOptional\"\
           \n        },\n        {\n          \"type\": \"null\"\n        }\n     \
           \ ],\n      \"default\": null,\n      \"description\": \"Filter by message\
@@ -1769,19 +1818,25 @@ paths:
             : {\n          \"anyOf\": [\n            {},\n            {\n        \
             \      \"type\": \"null\"\n            }\n          ],\n          \"default\"\
             : null,\n          \"description\": \"The result of the tool.\",\n   \
-            \       \"title\": \"Content\"\n        }\n      },\n      \"title\":\
-            \ \"ToolResponseContentEntityOptional\",\n      \"type\": \"object\"\n\
-            \    }\n  },\n  \"description\": \"Filter model for TaskMessage - all\
-            \ fields optional for flexible filtering.\\n\\nThe `exclude` field determines\
-            \ whether this filter is inclusionary or exclusionary.\\nWhen multiple\
-            \ filters are provided:\\n- Inclusionary filters (exclude=False) are OR'd\
-            \ together\\n- Exclusionary filters (exclude=True) are OR'd together and\
-            \ negated with $nor\\n- The two groups are AND'd: (include1 OR include2)\
-            \ AND NOT (exclude1 OR exclude2)\",\n  \"properties\": {\n    \"content\"\
-            : {\n      \"anyOf\": [\n        {\n          \"$ref\": \"#/$defs/ToolRequestContentEntityOptional\"\
-            \n        },\n        {\n          \"$ref\": \"#/$defs/DataContentEntityOptional\"\
-            \n        },\n        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\
-            \n        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
+            \       \"title\": \"Content\"\n        },\n        \"is_error\": {\n\
+            \          \"anyOf\": [\n            {\n              \"type\": \"boolean\"\
+            \n            },\n            {\n              \"type\": \"null\"\n  \
+            \          }\n          ],\n          \"default\": null,\n          \"\
+            description\": \"Whether the tool call resulted in an error. `None` when\
+            \ the harness does not report a status.\",\n          \"title\": \"Is\
+            \ Error\"\n        }\n      },\n      \"title\": \"ToolResponseContentEntityOptional\"\
+            ,\n      \"type\": \"object\"\n    }\n  },\n  \"description\": \"Filter\
+            \ model for TaskMessage - all fields optional for flexible filtering.\\\
+            n\\nThe `exclude` field determines whether this filter is inclusionary\
+            \ or exclusionary.\\nWhen multiple filters are provided:\\n- Inclusionary\
+            \ filters (exclude=False) are OR'd together\\n- Exclusionary filters (exclude=True)\
+            \ are OR'd together and negated with $nor\\n- The two groups are AND'd:\
+            \ (include1 OR include2) AND NOT (exclude1 OR exclude2)\",\n  \"properties\"\
+            : {\n    \"content\": {\n      \"anyOf\": [\n        {\n          \"$ref\"\
+            : \"#/$defs/ToolRequestContentEntityOptional\"\n        },\n        {\n\
+            \          \"$ref\": \"#/$defs/DataContentEntityOptional\"\n        },\n\
+            \        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\n\
+            \        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
             \n        },\n        {\n          \"$ref\": \"#/$defs/ReasoningContentEntityOptional\"\
             \n        },\n        {\n          \"type\": \"null\"\n        }\n   \
             \   ],\n      \"default\": null,\n      \"description\": \"Filter by message\
@@ -1972,19 +2027,24 @@ paths:
           \            {},\n            {\n              \"type\": \"null\"\n    \
           \        }\n          ],\n          \"default\": null,\n          \"description\"\
           : \"The result of the tool.\",\n          \"title\": \"Content\"\n     \
-          \   }\n      },\n      \"title\": \"ToolResponseContentEntityOptional\"\
-          ,\n      \"type\": \"object\"\n    }\n  },\n  \"description\": \"Filter\
-          \ model for TaskMessage - all fields optional for flexible filtering.\\\
-          n\\nThe `exclude` field determines whether this filter is inclusionary or\
-          \ exclusionary.\\nWhen multiple filters are provided:\\n- Inclusionary filters\
-          \ (exclude=False) are OR'd together\\n- Exclusionary filters (exclude=True)\
-          \ are OR'd together and negated with $nor\\n- The two groups are AND'd:\
-          \ (include1 OR include2) AND NOT (exclude1 OR exclude2)\",\n  \"properties\"\
-          : {\n    \"content\": {\n      \"anyOf\": [\n        {\n          \"$ref\"\
-          : \"#/$defs/ToolRequestContentEntityOptional\"\n        },\n        {\n\
-          \          \"$ref\": \"#/$defs/DataContentEntityOptional\"\n        },\n\
-          \        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\n\
-          \        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
+          \   },\n        \"is_error\": {\n          \"anyOf\": [\n            {\n\
+          \              \"type\": \"boolean\"\n            },\n            {\n  \
+          \            \"type\": \"null\"\n            }\n          ],\n         \
+          \ \"default\": null,\n          \"description\": \"Whether the tool call\
+          \ resulted in an error. `None` when the harness does not report a status.\"\
+          ,\n          \"title\": \"Is Error\"\n        }\n      },\n      \"title\"\
+          : \"ToolResponseContentEntityOptional\",\n      \"type\": \"object\"\n \
+          \   }\n  },\n  \"description\": \"Filter model for TaskMessage - all fields\
+          \ optional for flexible filtering.\\n\\nThe `exclude` field determines whether\
+          \ this filter is inclusionary or exclusionary.\\nWhen multiple filters are\
+          \ provided:\\n- Inclusionary filters (exclude=False) are OR'd together\\\
+          n- Exclusionary filters (exclude=True) are OR'd together and negated with\
+          \ $nor\\n- The two groups are AND'd: (include1 OR include2) AND NOT (exclude1\
+          \ OR exclude2)\",\n  \"properties\": {\n    \"content\": {\n      \"anyOf\"\
+          : [\n        {\n          \"$ref\": \"#/$defs/ToolRequestContentEntityOptional\"\
+          \n        },\n        {\n          \"$ref\": \"#/$defs/DataContentEntityOptional\"\
+          \n        },\n        {\n          \"$ref\": \"#/$defs/TextContentEntityOptional\"\
+          \n        },\n        {\n          \"$ref\": \"#/$defs/ToolResponseContentEntityOptional\"\
           \n        },\n        {\n          \"$ref\": \"#/$defs/ReasoningContentEntityOptional\"\
           \n        },\n        {\n          \"type\": \"null\"\n        }\n     \
           \ ],\n      \"default\": null,\n      \"description\": \"Filter by message\
@@ -2477,6 +2537,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /slack/events:
+    post:
+      tags:
+      - Slack
+      summary: Slack Events API ingress for the @agent app
+      operationId: slack_events_slack_events_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Slack Events Slack Events Post
+  /slack/commands:
+    post:
+      tags:
+      - Slack
+      summary: Slack slash-command ingress (e.g. /agents)
+      operationId: slack_commands_slack_commands_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Slack Commands Slack Commands Post
   /tracker/{tracker_id}:
     get:
       tags:
@@ -2694,6 +2784,47 @@ paths:
                 items:
                   $ref: '#/components/schemas/AgentAPIKey'
                 title: Response List Agent Api Keys Agent Api Keys Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent_api_keys/webhook-trigger:
+    post:
+      tags:
+      - Agent APIKeys
+      summary: Create Webhook Trigger
+      description: 'Wire a webhook trigger in one call.
+
+
+        Registers the source''s signature-verification key (github/slack) for the
+        agent and
+
+        returns the ready-to-paste forward webhook URL plus the signing secret (shown
+        once).
+
+        The webhook then flows through the existing /agents/forward ingress, which
+        verifies
+
+        the signature against this key. Bundles the existing key-create + URL composition
+        so
+
+        a UI (or a curl) can set up a trigger without two steps.'
+      operationId: create_webhook_trigger_agent_api_keys_webhook_trigger_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWebhookTriggerRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateWebhookTriggerResponse'
         '422':
           description: Validation Error
           content:
@@ -3192,9 +3323,10 @@ paths:
     post:
       tags:
       - Schedules
-      summary: Create Schedule
-      description: Create a new schedule for recurring workflow execution for an agent.
-      operationId: create_schedule_agents__agent_id__schedules_post
+      summary: Create Run Schedule
+      description: Create a recurring schedule that starts a fresh agent run on each
+        fire.
+      operationId: create_run_schedule_agents__agent_id__schedules_post
       parameters:
       - name: agent_id
         in: path
@@ -3207,14 +3339,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateScheduleRequest'
+              $ref: '#/components/schemas/CreateAgentRunScheduleRequest'
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ScheduleResponse'
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
         '422':
           description: Validation Error
           content:
@@ -3224,9 +3356,9 @@ paths:
     get:
       tags:
       - Schedules
-      summary: List Agent Schedules
-      description: List all schedules for an agent.
-      operationId: list_schedules_agents__agent_id__schedules_get
+      summary: List Run Schedules
+      description: List run schedules for an agent.
+      operationId: list_run_schedules_agents__agent_id__schedules_get
       parameters:
       - name: agent_id
         in: path
@@ -3234,7 +3366,7 @@ paths:
         schema:
           type: string
           title: Agent Id
-      - name: page_size
+      - name: limit
         in: query
         required: false
         schema:
@@ -3242,27 +3374,36 @@ paths:
           maximum: 1000
           minimum: 1
           default: 100
-          title: Page Size
+          title: Limit
+      - name: include_live
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Include live Temporal state and upcoming action times.
+          default: false
+          title: Include Live
+        description: Include live Temporal state and upcoming action times.
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ScheduleListResponse'
+                $ref: '#/components/schemas/AgentRunScheduleListResponse'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /agents/{agent_id}/schedules/{schedule_name}:
+  /agents/{agent_id}/schedules/name/{name}:
     get:
       tags:
       - Schedules
-      summary: Get Schedule
-      description: Get details of a schedule by its name.
-      operationId: get_schedule_agents__agent_id__schedules__schedule_name__get
+      summary: Get Run Schedule By Name
+      description: Get a run schedule by its active name.
+      operationId: get_run_schedule_by_name_agents__agent_id__schedules_name__name__get
       parameters:
       - name: agent_id
         in: path
@@ -3270,19 +3411,57 @@ paths:
         schema:
           type: string
           title: Agent Id
-      - name: schedule_name
+      - name: name
         in: path
         required: true
         schema:
           type: string
-          title: Schedule Name
+          title: Name
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ScheduleResponse'
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Schedules
+      summary: Update Run Schedule By Name
+      description: Partially update a run schedule's definition by its active name.
+      operationId: update_run_schedule_by_name_agents__agent_id__schedules_name__name__patch
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAgentRunScheduleRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
         '422':
           description: Validation Error
           content:
@@ -3292,9 +3471,9 @@ paths:
     delete:
       tags:
       - Schedules
-      summary: Delete Schedule
-      description: Delete a schedule permanently.
-      operationId: delete_schedule_agents__agent_id__schedules__schedule_name__delete
+      summary: Delete Run Schedule By Name
+      description: Delete a run schedule by its active name.
+      operationId: delete_run_schedule_by_name_agents__agent_id__schedules_name__name__delete
       parameters:
       - name: agent_id
         in: path
@@ -3302,12 +3481,12 @@ paths:
         schema:
           type: string
           title: Agent Id
-      - name: schedule_name
+      - name: name
         in: path
         required: true
         schema:
           type: string
-          title: Schedule Name
+          title: Name
       responses:
         '200':
           description: Successful Response
@@ -3321,13 +3500,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /agents/{agent_id}/schedules/{schedule_name}/pause:
-    post:
+  /agents/{agent_id}/schedules/{schedule_id}:
+    get:
       tags:
       - Schedules
-      summary: Pause Schedule
-      description: Pause a schedule to stop it from executing.
-      operationId: pause_schedule_agents__agent_id__schedules__schedule_name__pause_post
+      summary: Get Run Schedule
+      description: Get a run schedule by its id.
+      operationId: get_run_schedule_agents__agent_id__schedules__schedule_id__get
       parameters:
       - name: agent_id
         in: path
@@ -3335,18 +3514,268 @@ paths:
         schema:
           type: string
           title: Agent Id
-      - name: schedule_name
+      - name: schedule_id
         in: path
         required: true
         schema:
           type: string
-          title: Schedule Name
+          title: Schedule Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Schedules
+      summary: Update Run Schedule
+      description: Partially update a run schedule's definition (cadence, window,
+        input, etc.).
+      operationId: update_run_schedule_agents__agent_id__schedules__schedule_id__patch
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: schedule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAgentRunScheduleRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Schedules
+      summary: Delete Run Schedule
+      description: Delete a run schedule permanently.
+      operationId: delete_run_schedule_agents__agent_id__schedules__schedule_id__delete
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: schedule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/schedules/name/{name}/trigger:
+    post:
+      tags:
+      - Schedules
+      summary: Trigger Run Schedule By Name
+      description: Trigger an immediate, out-of-band run of the schedule by its active
+        name.
+      operationId: trigger_run_schedule_by_name_agents__agent_id__schedules_name__name__trigger_post
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/schedules/{schedule_id}/trigger:
+    post:
+      tags:
+      - Schedules
+      summary: Trigger Run Schedule
+      description: Trigger an immediate, out-of-band run of the schedule (in addition
+        to its cadence).
+      operationId: trigger_run_schedule_agents__agent_id__schedules__schedule_id__trigger_post
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: schedule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/schedules/{schedule_id}/skip:
+    post:
+      tags:
+      - Schedules
+      summary: Skip Run Schedule Action
+      description: Skip a recurring fire of the schedule.
+      operationId: skip_run_schedule_action_agents__agent_id__schedules__schedule_id__skip_post
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: schedule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkipRunScheduleRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/schedules/{schedule_id}/unskip:
+    post:
+      tags:
+      - Schedules
+      summary: Unskip Run Schedule Action
+      description: Remove a skip for a recurring fire of the schedule.
+      operationId: unskip_run_schedule_action_agents__agent_id__schedules__schedule_id__unskip_post
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: schedule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UnskipRunScheduleRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/schedules/name/{name}/pause:
+    post:
+      tags:
+      - Schedules
+      summary: Pause Run Schedule By Name
+      description: Pause a run schedule by its active name.
+      operationId: pause_run_schedule_by_name_agents__agent_id__schedules_name__name__pause_post
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
       requestBody:
         content:
           application/json:
             schema:
               anyOf:
-              - $ref: '#/components/schemas/PauseScheduleRequest'
+              - $ref: '#/components/schemas/PauseRunScheduleRequest'
               - type: 'null'
               title: Request
       responses:
@@ -3355,20 +3784,20 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ScheduleResponse'
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /agents/{agent_id}/schedules/{schedule_name}/unpause:
+  /agents/{agent_id}/schedules/{schedule_id}/pause:
     post:
       tags:
       - Schedules
-      summary: Unpause Schedule
-      description: Unpause/resume a schedule to allow it to execute again.
-      operationId: unpause_schedule_agents__agent_id__schedules__schedule_name__unpause_post
+      summary: Pause Run Schedule
+      description: Pause a run schedule so it stops firing.
+      operationId: pause_run_schedule_agents__agent_id__schedules__schedule_id__pause_post
       parameters:
       - name: agent_id
         in: path
@@ -3376,18 +3805,18 @@ paths:
         schema:
           type: string
           title: Agent Id
-      - name: schedule_name
+      - name: schedule_id
         in: path
         required: true
         schema:
           type: string
-          title: Schedule Name
+          title: Schedule Id
       requestBody:
         content:
           application/json:
             schema:
               anyOf:
-              - $ref: '#/components/schemas/UnpauseScheduleRequest'
+              - $ref: '#/components/schemas/PauseRunScheduleRequest'
               - type: 'null'
               title: Request
       responses:
@@ -3396,21 +3825,20 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ScheduleResponse'
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /agents/{agent_id}/schedules/{schedule_name}/trigger:
+  /agents/{agent_id}/schedules/name/{name}/resume:
     post:
       tags:
       - Schedules
-      summary: Trigger Schedule
-      description: Trigger a schedule to run immediately, regardless of its regular
-        schedule.
-      operationId: trigger_schedule_agents__agent_id__schedules__schedule_name__trigger_post
+      summary: Resume Run Schedule By Name
+      description: Resume a paused run schedule by its active name.
+      operationId: resume_run_schedule_by_name_agents__agent_id__schedules_name__name__resume_post
       parameters:
       - name: agent_id
         in: path
@@ -3418,19 +3846,68 @@ paths:
         schema:
           type: string
           title: Agent Id
-      - name: schedule_name
+      - name: name
         in: path
         required: true
         schema:
           type: string
-          title: Schedule Name
+          title: Name
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/ResumeRunScheduleRequest'
+              - type: 'null'
+              title: Request
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ScheduleResponse'
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/schedules/{schedule_id}/resume:
+    post:
+      tags:
+      - Schedules
+      summary: Resume Run Schedule
+      description: Resume a paused run schedule so it fires again.
+      operationId: resume_run_schedule_agents__agent_id__schedules__schedule_id__resume_post
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      - name: schedule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/ResumeRunScheduleRequest'
+              - type: 'null'
+              title: Request
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunScheduleResponse'
         '422':
           description: Validation Error
           content:
@@ -3847,11 +4324,13 @@ components:
       - task/create
       - message/send
       - task/cancel
+      - task/interrupt
       title: AgentRPCMethod
     AgentRPCParams:
       anyOf:
       - $ref: '#/components/schemas/CreateTaskRequest'
       - $ref: '#/components/schemas/CancelTaskRequest'
+      - $ref: '#/components/schemas/InterruptTaskRequest'
       - $ref: '#/components/schemas/SendMessageRequest'
       - $ref: '#/components/schemas/SendEventRequest'
       title: AgentRPCParams
@@ -3913,6 +4392,166 @@ components:
       - $ref: '#/components/schemas/Event'
       - type: 'null'
       title: AgentRPCResult
+    AgentRunScheduleListResponse:
+      properties:
+        run_schedules:
+          items:
+            $ref: '#/components/schemas/AgentRunScheduleResponse'
+          type: array
+          title: Run Schedules
+          description: The list of run schedules.
+        total:
+          type: integer
+          title: Total
+          description: The number of run schedules returned.
+      type: object
+      required:
+      - run_schedules
+      - total
+      title: AgentRunScheduleListResponse
+      description: Response model for listing run schedules.
+    AgentRunScheduleResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: The unique identifier of the run schedule.
+        agent_id:
+          type: string
+          title: Agent Id
+          description: The agent this schedule belongs to.
+        name:
+          type: string
+          title: Name
+          description: Human-readable schedule name.
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+          description: Optional description.
+        cron_expression:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cron Expression
+          description: Cron cadence, if cron-based.
+        interval_seconds:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Interval Seconds
+          description: Interval cadence in seconds, if interval-based.
+        timezone:
+          type: string
+          title: Timezone
+          description: Timezone the cron expression is evaluated in.
+          default: UTC
+        start_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Start At
+          description: Schedule activation time.
+        end_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: End At
+          description: Schedule deactivation time.
+        paused:
+          type: boolean
+          title: Paused
+          description: Whether the schedule is paused.
+          default: false
+        task_params:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task Params
+          description: Task params at fire time.
+        task_metadata:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task Metadata
+          description: Task metadata at fire time.
+        initial_input:
+          $ref: '#/components/schemas/ScheduleInitialInput'
+          description: The initial input.
+        initial_input_method:
+          type: string
+          title: Initial Input Method
+          description: Delivery method, inferred from the agent's ACP type.
+        creator_principal:
+          anyOf:
+          - $ref: '#/components/schemas/ScheduleCreatorPrincipal'
+          - type: 'null'
+          description: Credential-free creator identity.
+        created_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Created At
+          description: When the schedule was created.
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+          description: When the schedule was updated.
+        state:
+          $ref: '#/components/schemas/RunScheduleState'
+          description: Live schedule state from Temporal.
+          default: ACTIVE
+        next_action_times:
+          items:
+            type: string
+            format: date-time
+          type: array
+          title: Next Action Times
+          description: Upcoming scheduled fire times.
+        live_data_available:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Live Data Available
+          description: Whether requested live Temporal fields were retrieved successfully.
+            Null when live enrichment was not requested.
+        skipped_action_times:
+          items:
+            type: string
+            format: date-time
+          type: array
+          title: Skipped Action Times
+          description: Skipped one-off scheduled fire times.
+        last_action_time:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Action Time
+          description: When the schedule last fired.
+        num_actions_taken:
+          type: integer
+          title: Num Actions Taken
+          description: Number of times the schedule has fired.
+          default: 0
+      type: object
+      required:
+      - id
+      - agent_id
+      - name
+      - initial_input
+      - initial_input_method
+      title: AgentRunScheduleResponse
+      description: Response model describing a scheduled agent run.
     AgentStatus:
       type: string
       enum:
@@ -4264,6 +4903,83 @@ components:
       - api_key_type
       - api_key
       title: CreateAPIKeyResponse
+    CreateAgentRunScheduleRequest:
+      properties:
+        name:
+          type: string
+          maxLength: 64
+          minLength: 1
+          pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$
+          title: Schedule Name
+          description: Human-readable name, unique among active schedules for the
+            agent.
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+          description: Optional description of what this schedule does.
+        cron_expression:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cron Expression
+          description: Cron expression for the cadence (e.g. '0 17 * * MON-FRI').
+            Mutually exclusive with interval_seconds.
+        interval_seconds:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Interval Seconds
+          description: Interval cadence in seconds. Mutually exclusive with cron_expression.
+        timezone:
+          type: string
+          title: Timezone
+          description: IANA timezone the cron expression is evaluated in (e.g. 'America/New_York').
+          default: UTC
+        start_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Start At
+          description: When the schedule should start being active.
+        end_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: End At
+          description: When the schedule should stop being active.
+        paused:
+          type: boolean
+          title: Paused
+          description: Whether to create the schedule in a paused state.
+          default: false
+        task_params:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task Params
+          description: Resolved config forwarded as task `params` at fire time.
+        task_metadata:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task Metadata
+          description: Metadata copied onto each created task at fire time.
+        initial_input:
+          $ref: '#/components/schemas/ScheduleInitialInput'
+          description: The first input delivered to each created task.
+      type: object
+      required:
+      - name
+      - initial_input
+      title: CreateAgentRunScheduleRequest
+      description: Request body for creating a scheduled agent run.
     CreateDeploymentRequest:
       properties:
         docker_image:
@@ -4294,78 +5010,6 @@ components:
       required:
       - docker_image
       title: CreateDeploymentRequest
-    CreateScheduleRequest:
-      properties:
-        name:
-          type: string
-          maxLength: 64
-          minLength: 1
-          pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$
-          title: Schedule Name
-          description: Human-readable name for the schedule (e.g., 'weekly-profiling').
-            Will be combined with agent_id to form the full schedule_id.
-        workflow_name:
-          type: string
-          title: Workflow Name
-          description: Name of the Temporal workflow to execute (e.g., 'sae-orchestrator')
-        task_queue:
-          type: string
-          title: Task Queue
-          description: Temporal task queue where the agent's worker is listening
-        workflow_params:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Workflow Parameters
-          description: Parameters to pass to the workflow
-        cron_expression:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Cron Expression
-          description: Cron expression for scheduling (e.g., '0 0 * * 0' for weekly
-            on Sunday)
-        interval_seconds:
-          anyOf:
-          - type: integer
-            minimum: 1.0
-          - type: 'null'
-          title: Interval Seconds
-          description: Alternative to cron - run every N seconds
-        execution_timeout_seconds:
-          anyOf:
-          - type: integer
-            minimum: 1.0
-          - type: 'null'
-          title: Execution Timeout
-          description: Maximum time in seconds for each workflow execution
-        start_at:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: Start At
-          description: When the schedule should start being active
-        end_at:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: End At
-          description: When the schedule should stop being active
-        paused:
-          type: boolean
-          title: Paused
-          description: Whether to create the schedule in a paused state
-          default: false
-      type: object
-      required:
-      - name
-      - workflow_name
-      - task_queue
-      title: CreateScheduleRequest
-      description: Request model for creating a new schedule for an agent
     CreateSpanRequest:
       properties:
         id:
@@ -4527,6 +5171,93 @@ components:
             to the agent inside the ACP payload for backward compatibility.
       type: object
       title: CreateTaskRequest
+    CreateWebhookTriggerRequest:
+      properties:
+        agent_name:
+          type: string
+          title: Agent Name
+          description: The agent the webhook drives.
+        source:
+          $ref: '#/components/schemas/AgentAPIKeyType'
+          description: Webhook source whose signature is verified (github or slack).
+          default: github
+        name:
+          type: string
+          title: Name
+          description: 'Signature-lookup key: the repo full_name (github) or api_app_id
+            (slack) that the forward ingress matches the incoming webhook against.'
+        forward_path:
+          type: string
+          title: Forward Path
+          description: Subpath the agent's own route handles, e.g. 'github-pr/<config-id>'.
+            Appended to /agents/forward/name/{agent_name}/ to form the webhook URL.
+        secret:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Secret
+          description: Signing secret. For GitHub, omit to generate one, or provide
+            an existing webhook secret. For Slack, this is required and must be the
+            Slack app's Signing Secret.
+        base_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Base Url
+          description: Optional public agentex base URL for the returned webhook_url;
+            defaults to the AGENTEX_PUBLIC_URL env var.
+      type: object
+      required:
+      - agent_name
+      - name
+      - forward_path
+      title: CreateWebhookTriggerRequest
+      description: 'One-call setup for a webhook trigger: register the source''s signature
+        key and
+
+        get back the ready-to-paste forward webhook URL.'
+    CreateWebhookTriggerResponse:
+      properties:
+        key_id:
+          type: string
+          title: Key Id
+          description: The created agent API key id.
+        agent_name:
+          type: string
+          title: Agent Name
+          description: The agent the webhook drives.
+        source:
+          $ref: '#/components/schemas/AgentAPIKeyType'
+          description: Webhook source (github or slack).
+        name:
+          type: string
+          title: Name
+          description: Signature-lookup key (repo full_name / api_app_id).
+        secret:
+          type: string
+          title: Secret
+          description: The signing secret — shown once; paste into the source's webhook
+            config.
+        webhook_path:
+          type: string
+          title: Webhook Path
+          description: The forward path to POST webhooks to.
+        webhook_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Webhook Url
+          description: Full webhook URL to paste into the source (None if no base
+            URL configured).
+      type: object
+      required:
+      - key_id
+      - agent_name
+      - source
+      - name
+      - secret
+      - webhook_path
+      title: CreateWebhookTriggerResponse
     DataContent:
       properties:
         type:
@@ -4924,6 +5655,24 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    InterruptTaskRequest:
+      properties:
+        task_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Task Id
+          description: The ID of the task to interrupt. Either this or task_name must
+            be provided.
+        task_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Task Name
+          description: The name of the task to interrupt. Either this or task_id must
+            be provided.
+      type: object
+      title: InterruptTaskRequest
     ListCheckpointsRequest:
       properties:
         thread_id:
@@ -4991,17 +5740,16 @@ components:
       - data
       title: PaginatedMessagesResponse
       description: Response with cursor pagination metadata.
-    PauseScheduleRequest:
+    PauseRunScheduleRequest:
       properties:
         note:
           anyOf:
           - type: string
           - type: 'null'
           title: Note
-          description: Optional note explaining why the schedule was paused
+          description: Optional note explaining the pause.
       type: object
-      title: PauseScheduleRequest
-      description: Request model for pausing a schedule
+      title: PauseRunScheduleRequest
     PutCheckpointRequest:
       properties:
         thread_id:
@@ -5401,195 +6149,79 @@ components:
         snapshot → clean → rehydrate round-trips cleanly without serialization
 
         changes.'
-    ScheduleActionInfo:
+    ResumeRunScheduleRequest:
       properties:
-        workflow_name:
-          type: string
-          title: Workflow Name
-          description: Name of the workflow being executed
-        workflow_id_prefix:
-          type: string
-          title: Workflow ID Prefix
-          description: Prefix for workflow execution IDs
-        task_queue:
-          type: string
-          title: Task Queue
-          description: Task queue for the workflow
-        workflow_params:
+        note:
           anyOf:
-          - items: {}
-            type: array
+          - type: string
           - type: 'null'
-          title: Workflow Parameters
-          description: Parameters passed to the workflow
+          title: Note
+          description: Optional note explaining the resume.
       type: object
-      required:
-      - workflow_name
-      - workflow_id_prefix
-      - task_queue
-      title: ScheduleActionInfo
-      description: Information about the scheduled action
-    ScheduleListItem:
-      properties:
-        schedule_id:
-          type: string
-          title: Schedule ID
-          description: Unique identifier for the schedule
-        name:
-          type: string
-          title: Schedule Name
-          description: Human-readable name for the schedule
-        agent_id:
-          type: string
-          title: Agent ID
-          description: ID of the agent this schedule belongs to
-        state:
-          $ref: '#/components/schemas/ScheduleState'
-          title: State
-          description: Current state of the schedule
-        workflow_name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Workflow Name
-          description: Name of the scheduled workflow
-        next_action_time:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: Next Action Time
-          description: Next scheduled execution time
-      type: object
-      required:
-      - schedule_id
-      - name
-      - agent_id
-      - state
-      title: ScheduleListItem
-      description: Abbreviated schedule info for list responses
-    ScheduleListResponse:
-      properties:
-        schedules:
-          items:
-            $ref: '#/components/schemas/ScheduleListItem'
-          type: array
-          title: Schedules
-          description: List of schedules
-        total:
-          type: integer
-          title: Total
-          description: Total number of schedules
-      type: object
-      required:
-      - schedules
-      - total
-      title: ScheduleListResponse
-      description: Response model for listing schedules
-    ScheduleResponse:
-      properties:
-        schedule_id:
-          type: string
-          title: Schedule ID
-          description: Unique identifier for the schedule
-        name:
-          type: string
-          title: Schedule Name
-          description: Human-readable name for the schedule
-        agent_id:
-          type: string
-          title: Agent ID
-          description: ID of the agent this schedule belongs to
-        state:
-          $ref: '#/components/schemas/ScheduleState'
-          title: State
-          description: Current state of the schedule
-        action:
-          $ref: '#/components/schemas/ScheduleActionInfo'
-          title: Action
-        spec:
-          $ref: '#/components/schemas/ScheduleSpecInfo'
-          title: Spec
-          description: Schedule specification
-        num_actions_taken:
-          type: integer
-          title: Number of Actions Taken
-          description: Number of times the schedule has executed
-          default: 0
-        num_actions_missed:
-          type: integer
-          title: Number of Actions Missed
-          description: Number of scheduled executions that were missed
-          default: 0
-        next_action_times:
-          items:
-            type: string
-            format: date-time
-          type: array
-          title: Next Action Times
-          description: Upcoming scheduled execution times
-        last_action_time:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: Last Action Time
-          description: When the schedule last executed
-        created_at:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: Created At
-          description: When the schedule was created
-      type: object
-      required:
-      - schedule_id
-      - name
-      - agent_id
-      - state
-      - action
-      - spec
-      title: ScheduleResponse
-      description: Response model for schedule operations
-    ScheduleSpecInfo:
-      properties:
-        cron_expressions:
-          items:
-            type: string
-          type: array
-          title: Cron Expressions
-          description: Cron expressions for the schedule
-        intervals_seconds:
-          items:
-            type: integer
-          type: array
-          title: Interval Seconds
-          description: Interval specifications in seconds
-        start_at:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: Start At
-          description: When the schedule starts being active
-        end_at:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: End At
-          description: When the schedule stops being active
-      type: object
-      title: ScheduleSpecInfo
-      description: Information about the schedule specification
-    ScheduleState:
+      title: ResumeRunScheduleRequest
+    RunScheduleState:
       type: string
       enum:
       - ACTIVE
       - PAUSED
-      title: ScheduleState
-      description: Schedule state enum
+      title: RunScheduleState
+      description: Live state of a run schedule, derived from Temporal.
+    ScheduleCreatorPrincipal:
+      properties:
+        principal_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Principal Type
+          description: e.g. 'user' or 'service_account'.
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+          description: Creator user id, if a user principal.
+        service_account_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Service Account Id
+          description: Creator service-account id, if a service principal.
+        account_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Account Id
+          description: Account/workspace id of the creator.
+      type: object
+      title: ScheduleCreatorPrincipal
+      description: 'Credential-free creator identity stored with the schedule.
+
+
+        Never carries cookies, JWTs, API keys, OAuth tokens, or request headers —
+        it
+
+        is creator *context* used only for AuthZ and ownership at fire time.'
+    ScheduleInitialInput:
+      properties:
+        type:
+          type: string
+          const: text
+          title: Type
+          description: Input content type.
+          default: text
+        author:
+          $ref: '#/components/schemas/MessageAuthor'
+          description: The author attributed to the initial input.
+          default: user
+        content:
+          type: string
+          title: Content
+          description: The initial prompt delivered to the task.
+      type: object
+      required:
+      - content
+      title: ScheduleInitialInput
+      description: The first input delivered to each freshly created scheduled task.
     SendEventRequest:
       properties:
         task_id:
@@ -5644,6 +6276,17 @@ components:
       required:
       - content
       title: SendMessageRequest
+    SkipRunScheduleRequest:
+      properties:
+        scheduled_time:
+          type: string
+          format: date-time
+          title: Scheduled Time
+          description: Specific scheduled fire time to skip.
+      type: object
+      required:
+      - scheduled_time
+      title: SkipRunScheduleRequest
     Span:
       properties:
         id:
@@ -6204,6 +6847,7 @@ components:
       - COMPLETED
       - FAILED
       - RUNNING
+      - INTERRUPTED
       - TERMINATED
       - TIMED_OUT
       - DELETED
@@ -6217,6 +6861,68 @@ components:
           title: Optional reason for the status change
       type: object
       title: TaskStatusReasonRequest
+    TaskSummary:
+      properties:
+        id:
+          type: string
+          title: Unique Task ID
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Unique name of the task
+        status:
+          anyOf:
+          - $ref: '#/components/schemas/TaskStatus'
+          - type: 'null'
+          title: The current status of the task
+        status_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: The reason for the current task status
+        created_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: The timestamp when the task was created
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: The timestamp when the task was last updated
+        cleaned_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: The timestamp when the task's content was cleaned for retention compliance;
+            null when active
+        task_metadata:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task metadata
+        agents:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/Agent'
+            type: array
+          - type: 'null'
+          title: Agents associated with this task (only populated when 'agents' view
+            is requested)
+      type: object
+      required:
+      - id
+      title: TaskSummary
+      description: 'Lean list-response shape. Omits `params` (the arbitrary create-time
+
+        payload, which can carry per-caller secrets and PII); fetch GET /tasks/{id}
+
+        for the full record.'
     TextContent:
       properties:
         type:
@@ -6445,6 +7151,13 @@ components:
         content:
           title: Content
           description: The result of the tool.
+        is_error:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Error
+          description: Whether the tool call resulted in an error. `None` when the
+            harness does not report a status.
       type: object
       required:
       - author
@@ -6480,6 +7193,13 @@ components:
         content:
           title: Content
           description: The result of the tool.
+        is_error:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Error
+          description: Whether the tool call resulted in an error. `None` when the
+            harness does not report a status.
       type: object
       required:
       - author
@@ -6512,17 +7232,104 @@ components:
       - name
       title: ToolResponseDelta
       description: Delta for tool response updates
-    UnpauseScheduleRequest:
+    UnskipRunScheduleRequest:
       properties:
-        note:
+        scheduled_time:
+          type: string
+          format: date-time
+          title: Scheduled Time
+          description: Specific scheduled fire time to unskip.
+      type: object
+      required:
+      - scheduled_time
+      title: UnskipRunScheduleRequest
+    UpdateAgentRunScheduleRequest:
+      properties:
+        name:
+          anyOf:
+          - type: string
+            maxLength: 64
+            minLength: 1
+            pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$
+          - type: 'null'
+          title: Schedule Name
+          description: Human-readable name, unique among active schedules for the
+            agent.
+        description:
           anyOf:
           - type: string
           - type: 'null'
-          title: Note
-          description: Optional note explaining why the schedule was unpaused
+          title: Description
+          description: Optional description of what this schedule does.
+        cron_expression:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cron Expression
+          description: New cron cadence. Mutually exclusive with interval_seconds.
+        interval_seconds:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Interval Seconds
+          description: New interval cadence in seconds. Mutually exclusive with cron_expression.
+        timezone:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Timezone
+          description: IANA timezone the cron expression is evaluated in.
+        start_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Start At
+          description: When the schedule should start being active.
+        end_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: End At
+          description: When the schedule should stop being active.
+        paused:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Paused
+          description: Pause/resume the schedule as part of the update.
+        task_params:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task Params
+          description: Resolved config forwarded as task `params` at fire time.
+        task_metadata:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task Metadata
+          description: Metadata copied onto each created task at fire time.
+        initial_input:
+          anyOf:
+          - $ref: '#/components/schemas/ScheduleInitialInput'
+          - type: 'null'
+          description: Replacement initial input delivered to each created task.
       type: object
-      title: UnpauseScheduleRequest
-      description: Request model for unpausing a schedule
+      title: UpdateAgentRunScheduleRequest
+      description: 'Partial update for a scheduled agent run.
+
+
+        Only fields present in the request body are changed. Setting
+
+        ``cron_expression`` clears ``interval_seconds`` and vice versa; providing
+        both
+
+        is rejected.'
     UpdateAgentTaskTrackerRequest:
       properties:
         last_processed_event_id:
@@ -6660,6 +7467,13 @@ components:
             type: object
           - type: 'null'
           title: If provided, replaces task_metadata with this value
+        merge_params:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Optional shallow-merge patch applied to the task's params column.
+            Top-level keys overwrite; pass full nested objects to change subfields.
       type: object
       title: UpdateTaskRequest
     ValidationError:

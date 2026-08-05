@@ -5,7 +5,7 @@
 #
 # agentex-sdk floats by design (docs track the latest SDK release); the mkdocs
 # toolchain is pinned for reproducible builds — Dependabot keeps the pins current.
-agentex-sdk>=0.12.0
+agentex-sdk>=0.15.0
 
 mkdocs==1.6.1
 mkdocs-material==9.7.6

@@ -18,6 +18,7 @@ from src.temporal.workflows.healthcheck_workflow import HealthCheckWorkflow
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
+READY_AGENT_PAGE_SIZE = 200
 
 
 async def main() -> None:
@@ -45,37 +46,50 @@ async def main() -> None:
         logger.error("Temporal is not configured, skipping workflow creation")
         return
 
-    # Initialize repository and list agents
+    # Initialize repository and list ready agents
     engine = database_async_read_write_engine()
     session_maker = database_async_read_write_session_maker(engine)
     read_only_session_maker = database_async_read_only_session_maker(engine)
     agent_repo = AgentRepository(session_maker, read_only_session_maker)
-    agents = await agent_repo.list()
 
     adapter = TemporalAdapter(temporal_client=global_dependencies.temporal_client)
     logger.info(f"Adding Health Check workflows to task queue: {task_queue}")
-    # Try to add health check workflows to task queue for each agent
-    for agent in agents:
-        if agent.status != AgentStatus.READY:
-            logger.info(
-                f"Agent {agent.id} is not ready, skipping health check workflow"
-            )
-            continue
-        try:
-            await adapter.start_workflow(
-                workflow_id=f"healthcheck_workflow_{agent.id}",
-                workflow=HealthCheckWorkflow,
-                args=[{"agent_id": agent.id, "acp_url": agent.acp_url}],
-                task_queue=task_queue,
-            )
-        except TemporalWorkflowAlreadyExistsError:
-            # Expected if workflow is already running for existing agent registration
-            logger.info(f"Health check workflow already exists for agent {agent.id}")
-        except Exception as e:
-            # Unexpected error, don't raise here to continue with the next agent
-            logger.error(
-                f"Failed to start health check workflow for agent {agent.id}: {e}"
-            )
+
+    page_number = 1
+    while True:
+        agents = await agent_repo.list(
+            filters={"status": AgentStatus.READY},
+            limit=READY_AGENT_PAGE_SIZE,
+            page_number=page_number,
+            order_by="id",
+            order_direction="asc",
+        )
+        if not agents:
+            break
+
+        # Try to add health check workflows to task queue for each ready agent
+        for agent in agents:
+            try:
+                await adapter.start_workflow(
+                    workflow_id=f"healthcheck_workflow_{agent.id}",
+                    workflow=HealthCheckWorkflow,
+                    args=[{"agent_id": agent.id, "acp_url": agent.acp_url}],
+                    task_queue=task_queue,
+                )
+            except TemporalWorkflowAlreadyExistsError:
+                # Expected if workflow is already running for existing agent registration
+                logger.info(
+                    f"Health check workflow already exists for agent {agent.id}"
+                )
+            except Exception as e:
+                # Unexpected error, don't raise here to continue with the next agent
+                logger.error(
+                    f"Failed to start health check workflow for agent {agent.id}: {e}"
+                )
+
+        if len(agents) < READY_AGENT_PAGE_SIZE:
+            break
+        page_number += 1
 
 
 if __name__ == "__main__":

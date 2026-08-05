@@ -18,6 +18,7 @@ from src.domain.entities.agents_rpc import (
     AgentRPCRequestEntity,
     CancelTaskRequestEntity,
     CreateTaskRequestEntity,
+    InterruptTaskRequestEntity,
     SendEventRequestEntity,
     SendMessageRequestEntity,
 )
@@ -41,7 +42,7 @@ from src.domain.entities.task_messages import (
     ToolRequestContentEntity,
     ToolResponseContentEntity,
 )
-from src.domain.entities.tasks import TaskEntity
+from src.domain.entities.tasks import TaskEntity, TaskStatus
 from src.domain.exceptions import ClientError
 from src.domain.mixins.task_messages.task_message_mixin import TaskMessageMixin
 from src.domain.repositories.agent_repository import DAgentRepository
@@ -292,6 +293,27 @@ class AgentsACPUseCase(TaskMessageMixin):
             # No identifier provided - will create below
             task = None
 
+        # INTERRUPTED is a transient resting state ("paused, waiting for you").
+        # Reaching an existing task here means a new turn is starting (message/send,
+        # event/send, or a get-or-create by name), so resume it back to RUNNING.
+        # This is NOT a terminal transition, so it does not go through
+        # _transition_to_terminal.
+        if task is not None and task.status == TaskStatus.INTERRUPTED:
+            resumed = await self.task_service.resume_interrupted_task(task.id)
+            if resumed is not None:
+                task = resumed
+            else:
+                # The INTERRUPTED -> RUNNING CAS missed: the task moved out of
+                # INTERRUPTED concurrently (e.g. a cancel/complete). Refetch and
+                # reject if it is now terminal, rather than starting a turn against
+                # a terminal task. (RUNNING here means another turn already resumed
+                # it, which is fine to proceed with.)
+                task = await self.task_service.get_task(id=task.id)
+                if task.status not in (TaskStatus.RUNNING, TaskStatus.INTERRUPTED):
+                    raise ClientError(
+                        f"Task {task.id} is {task.status.value} and cannot accept new turns."
+                    )
+
         # If task exists and params provided, update them
         if task and task_params is not None:
             if task.params != task_params:
@@ -346,6 +368,7 @@ class AgentsACPUseCase(TaskMessageMixin):
         method: AgentRPCMethod,
         params: CreateTaskRequestEntity
         | CancelTaskRequestEntity
+        | InterruptTaskRequestEntity
         | SendMessageRequestEntity
         | SendEventRequestEntity,
         agent_id: str | None = None,
@@ -372,7 +395,7 @@ class AgentsACPUseCase(TaskMessageMixin):
         Returns:
             - list[TaskMessageEntity] for synchronous MESSAGE_SEND
             - AsyncIterator[TaskMessageUpdateEntity] for streaming MESSAGE_SEND
-            - TaskEntity for TASK_CREATE or TASK_CANCEL
+            - TaskEntity for TASK_CREATE, TASK_CANCEL or TASK_INTERRUPT
             - EventEntity for EVENT_SEND
         """
         # Get the agent
@@ -396,6 +419,8 @@ class AgentsACPUseCase(TaskMessageMixin):
             return await self._handle_task_create(agent, params, acp_url)
         elif method == AgentRPCMethod.TASK_CANCEL:
             return await self._handle_task_cancel(agent, params, acp_url)
+        elif method == AgentRPCMethod.TASK_INTERRUPT:
+            return await self._handle_task_interrupt(agent, params, acp_url)
         elif method == AgentRPCMethod.EVENT_SEND:
             return await self._handle_event_send(
                 agent, params, request_headers, acp_url
@@ -801,6 +826,45 @@ class AgentsACPUseCase(TaskMessageMixin):
         )
 
         return await self.task_service.cancel_task(
+            agent=agent,
+            task=task,
+            acp_url=acp_url,
+        )
+
+    async def _handle_task_interrupt(
+        self, agent: AgentEntity, params: InterruptTaskRequestEntity, acp_url: str
+    ) -> TaskEntity:
+        """
+        Handle task/interrupt method.
+
+        Interrupt is a non-terminal counterpart to task/cancel: it stops the
+        in-flight turn and leaves the task continuable (status INTERRUPTED),
+        rather than transitioning to a terminal status. It never calls
+        _transition_to_terminal.
+
+        For ASYNC/AGENTIC agents the interrupt is forwarded to the pod over the
+        same HTTP JSON-RPC transport as event/send and task/cancel; the agent is
+        the actor that actually stops the model/tool calls. For SYNC agents the
+        real interrupt is the teardown of the streaming connection on the client
+        side, so the forwarded RPC is best-effort (a sync agent may not implement
+        an interrupt handler). In both cases the platform's job is to record the
+        non-terminal status transition; the forward is best-effort and must not
+        wedge the request.
+
+        Args:
+            agent: The agent to interrupt the task for
+            params: Parameters containing task_id or task_name
+            acp_url: Resolved ACP URL to route to
+
+        Returns:
+            The task with its (non-terminal) INTERRUPTED status.
+        """
+
+        task = await self.task_service.get_task(
+            id=params.task_id, name=params.task_name
+        )
+
+        return await self.task_service.interrupt_task(
             agent=agent,
             task=task,
             acp_url=acp_url,

@@ -3,7 +3,12 @@ from typing import Annotated, Any
 from fastapi import Depends
 
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
-from src.domain.entities.tasks import TaskEntity, TaskRelationships, TaskStatus
+from src.domain.entities.tasks import (
+    NON_TERMINAL_TASK_STATUSES,
+    TaskEntity,
+    TaskRelationships,
+    TaskStatus,
+)
 from src.domain.exceptions import ClientError
 from src.domain.services.task_service import DAgentTaskService
 from src.utils.logging import make_logger
@@ -94,6 +99,7 @@ class TasksUseCase:
         id: str | None = None,
         name: str | None = None,
         task_metadata: dict[str, Any] | None = None,
+        merge_params: dict[str, Any] | None = None,
     ) -> TaskEntity:
         """Update mutable fields on a task entity. This is used by our API since not all fields should be mutable."""
 
@@ -108,15 +114,31 @@ class TasksUseCase:
             else:
                 raise ItemDoesNotExist(f"Task {name} not found")
 
-        # if no mutations are provided, don't do anything
-        if task_metadata is None:
+        # No-op if neither field was supplied.
+        if task_metadata is None and merge_params is None:
             return task_entity
+
+        # `merge_params` is a separate atomic JSONB shallow-merge so concurrent
+        # callers don't overwrite each other's fields (vs reading→mutating→writing
+        # the whole params dict on task_entity). Run it first so the refreshed
+        # entity it returns becomes the base we apply `task_metadata` on top of;
+        # otherwise the `task_entity = merged` reassignment would discard an
+        # in-memory metadata change made before the merge.
+        if merge_params:
+            merged = await self.task_service.merge_task_params(
+                task_entity.id, merge_params
+            )
+            if merged is not None:
+                task_entity = merged
 
         if task_metadata is not None:
             task_entity.task_metadata = task_metadata
+            task_entity = await self.task_service.update_task(task=task_entity)
 
-        updated_task_entity = await self.task_service.update_task(task=task_entity)
-        return updated_task_entity
+        return task_entity
+
+    # Statuses a task can transition to terminal from (the non-terminal set).
+    _TERMINAL_TRANSITION_SOURCES = NON_TERMINAL_TASK_STATUSES
 
     async def _transition_to_terminal(
         self,
@@ -125,7 +147,47 @@ class TasksUseCase:
         name: str | None = None,
         reason: str | None = None,
     ) -> TaskEntity:
-        """Atomically transition a running task to a terminal status."""
+        """Atomically transition a running or interrupted task to a terminal status."""
+        if not id and not name:
+            raise ClientError("Either id or name must be provided")
+
+        task_entity = await self.task_service.get_task(id=id, name=name)
+        if task_entity.status == TaskStatus.DELETED:
+            raise ItemDoesNotExist(f"Task {id or name} not found")
+        if task_entity.status not in self._TERMINAL_TRANSITION_SOURCES:
+            raise ClientError(
+                f"Task {task_entity.id} cannot be transitioned (current status: {task_entity.status}). "
+                f"Only running or interrupted tasks can have their status updated."
+            )
+
+        # Compare-and-swap on the observed non-terminal source status (RUNNING or
+        # INTERRUPTED) so a concurrent modification is still detected as a lost race.
+        expected_status = task_entity.status
+        status_reason = reason or f"Task {target_status.value.lower()}"
+        updated = await self.task_service.transition_task_status(
+            task_id=task_entity.id,
+            expected_status=expected_status,
+            new_status=target_status,
+            status_reason=status_reason,
+        )
+        if updated is None:
+            raise ClientError(
+                f"Task {task_entity.id} status was concurrently modified. "
+                f"Please retry the request."
+            )
+        return updated
+
+    async def interrupt_task(
+        self, id: str | None = None, name: str | None = None, reason: str | None = None
+    ) -> TaskEntity:
+        """Interrupt a running task without terminating it.
+
+        This is the non-terminal counterpart to the terminal-transition methods
+        (cancel/complete/fail/...): it transitions RUNNING -> INTERRUPTED via a
+        compare-and-swap and deliberately does NOT go through
+        _transition_to_terminal. The task stays continuable; the next message or
+        event resumes it back to RUNNING.
+        """
         if not id and not name:
             raise ClientError("Either id or name must be provided")
 
@@ -135,14 +197,14 @@ class TasksUseCase:
         if task_entity.status != TaskStatus.RUNNING:
             raise ClientError(
                 f"Task {task_entity.id} is not running (current status: {task_entity.status}). "
-                f"Only running tasks can have their status updated."
+                f"Only running tasks can be interrupted."
             )
 
-        status_reason = reason or f"Task {target_status.value.lower()}"
+        status_reason = reason or "Task interrupted"
         updated = await self.task_service.transition_task_status(
             task_id=task_entity.id,
             expected_status=TaskStatus.RUNNING,
-            new_status=target_status,
+            new_status=TaskStatus.INTERRUPTED,
             status_reason=status_reason,
         )
         if updated is None:

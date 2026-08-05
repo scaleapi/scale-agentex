@@ -19,7 +19,10 @@ from temporalio.client import Client as TemporalClient
 
 from src.config.environment_variables import Environment, EnvironmentVariables
 from src.utils.database import async_db_engine_creator
-from src.utils.db_metrics import PostgresMetricsCollector
+from src.utils.db_metrics import (
+    InstrumentedAsyncAdaptedQueuePool,
+    PostgresMetricsCollector,
+)
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
@@ -97,6 +100,7 @@ class GlobalDependencies(metaclass=Singleton):
                 self.environment_variables.DATABASE_URL,
             ),
             echo=echo_db_engine,
+            poolclass=InstrumentedAsyncAdaptedQueuePool,  # emits pool wait_time/pending_requests/timeouts
             pool_size=async_db_pool_size,
             max_overflow=20,  # Allow 20 additional connections beyond pool_size when needed
             pool_pre_ping=True,
@@ -109,6 +113,7 @@ class GlobalDependencies(metaclass=Singleton):
                 self.environment_variables.DATABASE_URL,
             ),
             echo=echo_db_engine,
+            poolclass=InstrumentedAsyncAdaptedQueuePool,  # emits pool wait_time/pending_requests/timeouts
             pool_size=middleware_db_pool_size,
             max_overflow=10,  # Allow 10 additional connections for middleware
             pool_pre_ping=True,
@@ -188,6 +193,7 @@ class GlobalDependencies(metaclass=Singleton):
                 "postgresql+asyncpg://",
                 async_creator=async_db_engine_creator(read_only_db_url),
                 echo=echo_db_engine,
+                poolclass=InstrumentedAsyncAdaptedQueuePool,  # emits pool wait_time/pending_requests/timeouts
                 pool_size=async_db_pool_size,
                 max_overflow=20,
                 pool_pre_ping=True,

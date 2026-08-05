@@ -69,6 +69,11 @@ nav:
       - Tutorials: development_guides/tutorials.md
       - Jupyter Notebooks (dev.ipynb): development_guides/jupyter_notebooks.md
       - Streaming Patterns: development_guides/streaming_patterns.md
+      - Observability & Tracing: development_guides/observability_and_tracing.md
+      - Framework Agents:
+          - Claude Code: development_guides/claude_code_agents.md
+          - Codex: development_guides/codex_agents.md
+          - OpenAI Local Sandbox: development_guides/local_sandbox.md
       - Race Conditions: development_guides/race_conditions.md
       - Message Handling: development_guides/message_handling.md
       - Events vs Messages: development_guides/events_vs_messages.md

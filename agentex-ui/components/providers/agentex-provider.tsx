@@ -1,40 +1,134 @@
 'use client';
 
-import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from 'react';
 
 import AgentexSDK from 'agentex';
+
+import {
+  SearchParamKey,
+  useSafeSearchParams,
+} from '@/hooks/use-safe-search-params';
+
+// Hitting /api/auth/session runs the jwt-callback refresh and rotates the cookie. Deduped
+// so a burst of 401s (e.g. a refocused tab) shares one refresh.
+let sessionRefresh: Promise<unknown> | null = null;
+function refreshSession(): Promise<unknown> {
+  sessionRefresh ??= fetch('/api/auth/session', { credentials: 'include' })
+    .catch(() => {})
+    .finally(() => {
+      sessionRefresh = null;
+    });
+  return sessionRefresh;
+}
 
 interface AgentexContextValue {
   agentexClient: AgentexSDK;
   sgpAppURL: string;
+  authEnabled: boolean;
+  // Platform API configured → the account picker can fetch/switch accounts.
+  accountsEnabled: boolean;
+  // Selected account (from the `account_id` param) + a setter that mirrors it to the URL.
+  selectedAccountId: string | null;
+  setSelectedAccountId: (id: string, replace?: boolean) => void;
 }
 
 const AgentexContext = createContext<AgentexContextValue | null>(null);
 
 /**
- * Main provider for Agentex application
- * Provides the Agentex SDK client and app configuration to all child components
+ * The SDK always targets the same-origin BFF (`/api/agentex`), which attaches credentials
+ * server-side. The selected account rides as `x-selected-account-id`, from the `account_id`
+ * query param.
  */
 export function AgentexProvider({
   children,
-  agentexAPIBaseURL,
   sgpAppURL,
+  authEnabled,
+  accountsEnabled,
 }: {
   children: ReactNode;
-  agentexAPIBaseURL: string;
   sgpAppURL: string;
+  authEnabled: boolean;
+  accountsEnabled: boolean;
 }) {
-  const agentexClient = useMemo(
-    () =>
-      new AgentexSDK({
-        baseURL: agentexAPIBaseURL,
-        fetchOptions: { credentials: 'include' },
-      }),
-    [agentexAPIBaseURL]
+  const { sgpAccountID, updateParams } = useSafeSearchParams();
+
+  // Synchronous source for the SDK header: setSelectedAccountId sets it before the (async)
+  // URL navigation, so a switch's refetch doesn't race it.
+  const selectedAccountIdRef = useRef<string | null>(sgpAccountID);
+  useEffect(() => {
+    selectedAccountIdRef.current = sgpAccountID;
+  }, [sgpAccountID]);
+
+  const setSelectedAccountId = useCallback(
+    (id: string, replace = false) => {
+      selectedAccountIdRef.current = id;
+      updateParams(
+        {
+          [SearchParamKey.SGP_ACCOUNT_ID]: id,
+          // Explicit switch (bootstrap passes replace): drop the account-scoped task + agent
+          // in one navigation so they don't linger under the new account.
+          ...(replace
+            ? {}
+            : {
+                [SearchParamKey.TASK_ID]: null,
+                [SearchParamKey.AGENT_NAME]: null,
+              }),
+        },
+        replace
+      );
+    },
+    [updateParams]
   );
 
+  const agentexClient = useMemo(() => {
+    // The SDK builds URLs with `new URL()`, so the base must be absolute. `window` is absent
+    // on the server, but no request fires during SSR; the client render recomputes it.
+    const baseURL =
+      typeof window !== 'undefined'
+        ? `${window.location.origin}/api/agentex`
+        : '/api/agentex';
+
+    // Attach the selected account (from the ref — always current) on every request.
+    const withAccount = (init?: RequestInit): RequestInit => {
+      const headers = new Headers(init?.headers);
+      if (selectedAccountIdRef.current) {
+        headers.set('x-selected-account-id', selectedAccountIdRef.current);
+      }
+      return { ...init, headers };
+    };
+
+    return new AgentexSDK({
+      baseURL,
+      fetchOptions: { credentials: 'include' },
+      fetch: async (input, init) => {
+        const res = await fetch(input, withAccount(init));
+        if (res.status !== 401 || !authEnabled) return res;
+        // Token expired between refreshes — refresh the session and retry once.
+        await refreshSession();
+        return fetch(input, withAccount(init));
+      },
+    });
+  }, [authEnabled]);
+
   return (
-    <AgentexContext.Provider value={{ agentexClient, sgpAppURL }}>
+    <AgentexContext.Provider
+      value={{
+        agentexClient,
+        sgpAppURL,
+        authEnabled,
+        accountsEnabled,
+        selectedAccountId: sgpAccountID,
+        setSelectedAccountId,
+      }}
+    >
       {children}
     </AgentexContext.Provider>
   );

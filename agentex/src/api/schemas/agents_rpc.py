@@ -19,6 +19,7 @@ class AgentRPCMethod(str, Enum):
     TASK_CREATE = "task/create"
     MESSAGE_SEND = "message/send"
     TASK_CANCEL = "task/cancel"
+    TASK_INTERRUPT = "task/interrupt"
 
 
 class CreateTaskRequest(BaseModel):
@@ -57,6 +58,23 @@ class CancelTaskRequest(BaseModel):
     task_name: str | None = Field(
         None,
         description="The name of the task to cancel. Either this or task_id must be provided.",
+    )
+
+    @model_validator(mode="after")
+    def validate_task_identifiers(self):
+        if self.task_id is not None and self.task_name is not None:
+            raise ValueError("Cannot provide both task_id and task_name - use only one")
+        return self
+
+
+class InterruptTaskRequest(BaseModel):
+    task_id: str | None = Field(
+        None,
+        description="The ID of the task to interrupt. Either this or task_name must be provided.",
+    )
+    task_name: str | None = Field(
+        None,
+        description="The name of the task to interrupt. Either this or task_id must be provided.",
     )
 
     @model_validator(mode="after")
@@ -111,7 +129,11 @@ class SendEventRequest(BaseModel):
 
 class AgentRPCParams(RootModel):
     root: (
-        CreateTaskRequest | CancelTaskRequest | SendMessageRequest | SendEventRequest
+        CreateTaskRequest
+        | CancelTaskRequest
+        | InterruptTaskRequest
+        | SendMessageRequest
+        | SendEventRequest
     ) = Field(..., description="The parameters for the agent RPC request")
 
 
@@ -136,6 +158,10 @@ class AgentRPCRequest(JSONRPCRequest):
                 elif method == AgentRPCMethod.TASK_CANCEL:
                     data["params"] = AgentRPCParams(
                         root=CancelTaskRequest(**params_data)
+                    )
+                elif method == AgentRPCMethod.TASK_INTERRUPT:
+                    data["params"] = AgentRPCParams(
+                        root=InterruptTaskRequest(**params_data)
                     )
                 elif method == AgentRPCMethod.MESSAGE_SEND:
                     data["params"] = AgentRPCParams(

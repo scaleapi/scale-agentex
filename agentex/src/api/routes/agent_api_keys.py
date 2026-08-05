@@ -1,4 +1,6 @@
+import os
 import secrets
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -7,6 +9,8 @@ from src.api.schemas.agent_api_keys import (
     AgentAPIKey,
     CreateAPIKeyRequest,
     CreateAPIKeyResponse,
+    CreateWebhookTriggerRequest,
+    CreateWebhookTriggerResponse,
 )
 from src.api.schemas.authorization_types import (
     AgentexResourceType,
@@ -33,6 +37,10 @@ router = APIRouter(
     prefix="/agent_api_keys",
     tags=["Agent APIKeys"],
 )
+
+
+def _has_control_chars(value: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in value)
 
 
 @router.post(
@@ -90,6 +98,99 @@ async def create_api_key(
         name=agent_api_key_entity.name,
         api_key_type=agent_api_key_entity.api_key_type,
         api_key=str(new_api_key),  # Return the inserted API key
+    )
+
+
+@router.post(
+    "/webhook-trigger",
+    response_model=CreateWebhookTriggerResponse,
+)
+async def create_webhook_trigger(
+    request: CreateWebhookTriggerRequest,
+    agent_api_key_use_case: DAgentAPIKeysUseCase,
+    agent_use_case: DAgentsUseCase,
+    authorization_service: DAuthorizationService,
+) -> CreateWebhookTriggerResponse:
+    """Wire a webhook trigger in one call.
+
+    Registers the source's signature-verification key (github/slack) for the agent and
+    returns the ready-to-paste forward webhook URL plus the signing secret (shown once).
+    The webhook then flows through the existing /agents/forward ingress, which verifies
+    the signature against this key. Bundles the existing key-create + URL composition so
+    a UI (or a curl) can set up a trigger without two steps.
+    """
+    if request.source not in (AgentAPIKeyType.GITHUB, AgentAPIKeyType.SLACK):
+        raise HTTPException(
+            status_code=400,
+            detail="source must be 'github' or 'slack' for a webhook trigger.",
+        )
+    agent = await agent_use_case.get(name=request.agent_name)
+
+    # No api_key resource exists yet, so gate on the parent agent (update).
+    await _check_agent_or_collapse_to_404(
+        authorization_service,
+        agent.id,
+        AuthorizedOperationType.update,
+    )
+
+    existing_api_key = await agent_api_key_use_case.get_by_agent_id_and_name(
+        agent_id=agent.id,
+        name=request.name,
+        api_key_type=request.source,
+    )
+    if existing_api_key:
+        # A duplicate is an expected client condition (409), not a server error, and the
+        # message avoids leaking the internal agent UUID the caller never supplied.
+        raise HTTPException(
+            status_code=409,
+            detail=f"A {request.source} webhook key named '{request.name}' already exists for this agent.",
+        )
+
+    # GitHub lets you supply (and we can generate) a per-webhook secret to paste into the
+    # repo's Secret field. Slack is different: it signs every request with the app's own
+    # Signing Secret, so the caller must supply that exact value — a generated one would
+    # never match, and validate_slack_delivery_webhook would reject every real delivery.
+    # (See PR #329 discussion.)
+    if request.source == AgentAPIKeyType.SLACK and not request.secret:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Slack triggers must supply 'secret' set to the Slack app's Signing Secret "
+                "(from your app credentials); it can't be generated."
+            ),
+        )
+
+    forward_path = request.forward_path.lstrip("/")
+    if _has_control_chars(forward_path):
+        raise HTTPException(
+            status_code=400,
+            detail="forward_path must not contain control characters.",
+        )
+
+    secret = request.secret if request.secret is not None else secrets.token_hex(32)
+    agent_api_key_entity = await agent_api_key_use_case.create(
+        agent_id=agent.id,
+        api_key=str(secret),
+        name=request.name,
+        api_key_type=request.source,
+    )
+
+    encoded_agent_name = quote(request.agent_name, safe="")
+    encoded_forward_path = quote(forward_path, safe="/")
+    webhook_path = f"/agents/forward/name/{encoded_agent_name}/{encoded_forward_path}"
+    base_url = (request.base_url or os.environ.get("AGENTEX_PUBLIC_URL", "")).rstrip(
+        "/"
+    )
+    webhook_url = f"{base_url}{webhook_path}" if base_url else None
+
+    return CreateWebhookTriggerResponse(
+        key_id=agent_api_key_entity.id,
+        agent_name=request.agent_name,
+        source=agent_api_key_entity.api_key_type,
+        name=request.name,
+        secret=str(secret),
+        webhook_path=webhook_path,
+        webhook_url=webhook_url,
     )
 
 
