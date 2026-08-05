@@ -6620,6 +6620,18 @@ components:
           type: string
           title: Task Id
           description: ID of the task this message belongs to
+        agent_path:
+          anyOf:
+          - type: string
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Agent Path
+          description: 'Identifier of the agent that emitted this message: a single
+            agent id, or a root-to-emitter path (e.g. ["researcher", "subagent-abc"])
+            when nested agents share one task stream. Lets consumers attribute and
+            group streamed events by agent.'
         content:
           $ref: '#/components/schemas/TaskMessageContent'
           description: The content of the message. This content is not OpenAI compatible.
