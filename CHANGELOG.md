@@ -1,0 +1,75 @@
+# Changelog
+
+## [0.2.0](https://github.com/scaleapi/scale-agentex/compare/v0.1.0...v0.2.0) (2026-08-05)
+
+
+### Features
+
+* **agent_api_keys:** one-call webhook-trigger setup endpoint ([#329](https://github.com/scaleapi/scale-agentex/issues/329)) ([9cc71fb](https://github.com/scaleapi/scale-agentex/commit/9cc71fb998d00e15734d0ad7be180e1e6f1dfdda))
+* **agentex-ui:** accept RSA (RS256) private_key_jwt keys ([#367](https://github.com/scaleapi/scale-agentex/issues/367)) ([e2c8a22](https://github.com/scaleapi/scale-agentex/commit/e2c8a2250e305cb65c105126b48053b1a290da13))
+* **agentex-ui:** account picker via same-origin BFF proxy ([#350](https://github.com/scaleapi/scale-agentex/issues/350)) ([0f07dc7](https://github.com/scaleapi/scale-agentex/commit/0f07dc74dbd2450e190e07ea1fc1c2d9114000de))
+* **agentex-ui:** grow chat input vertically for multi-line prompts ([#332](https://github.com/scaleapi/scale-agentex/issues/332)) ([8c060f1](https://github.com/scaleapi/scale-agentex/commit/8c060f158e3ab4516fe9725887a9943f56b46826))
+* **agentex-ui:** OIDC login with server-side access token ([#351](https://github.com/scaleapi/scale-agentex/issues/351)) ([824286c](https://github.com/scaleapi/scale-agentex/commit/824286ca26e8d34fa4206abbb9f04713d8485ddb))
+* **agentex:** add Slack Events API url_verification endpoint ([#369](https://github.com/scaleapi/scale-agentex/issues/369)) ([d0ba8bf](https://github.com/scaleapi/scale-agentex/commit/d0ba8bf92066aaf6985b98d7014bb56de5b7e8cd))
+* **agentex:** forward OIDC bearer credential for user delegation ([#363](https://github.com/scaleapi/scale-agentex/issues/363)) ([cea5963](https://github.com/scaleapi/scale-agentex/commit/cea59632d79eece18198ce700bec29f2f9baf4b2))
+* **agentex:** Slack gateway — invoke agents from Slack ([#388](https://github.com/scaleapi/scale-agentex/issues/388)) ([8043a3b](https://github.com/scaleapi/scale-agentex/commit/8043a3b8994da8c0366230fbcafafd9ff4520ff5))
+* **agentex:** support SYNC agents in the Slack gateway ([#392](https://github.com/scaleapi/scale-agentex/issues/392)) ([28a1a00](https://github.com/scaleapi/scale-agentex/commit/28a1a004665f5e1e9bb0086c9b9e32f655f865d2))
+* **observability:** RPC + workflow + DB-pool metrics for the agent JSON-RPC endpoint ([#379](https://github.com/scaleapi/scale-agentex/issues/379)) ([80763f7](https://github.com/scaleapi/scale-agentex/commit/80763f7089adcbcc8e26b35e82ebf6949f904eb6))
+* **retention:** strict bool env parsing + stale-RUNNING cleanup override ([#306](https://github.com/scaleapi/scale-agentex/issues/306)) ([5ad81e8](https://github.com/scaleapi/scale-agentex/commit/5ad81e8fb9f80bb6b2bfa7c6ed05afd3d59c6a59))
+* **schedules:** add exact skip and unskip actions ([#357](https://github.com/scaleapi/scale-agentex/issues/357)) ([ac88134](https://github.com/scaleapi/scale-agentex/commit/ac88134039e92166c632cf3c9e7a176107358524))
+* **schedules:** agent run schedules (v1) ([#335](https://github.com/scaleapi/scale-agentex/issues/335)) ([6a66ad3](https://github.com/scaleapi/scale-agentex/commit/6a66ad3003c64ad49671173043108095a6fbb843))
+* **states:** add storage-phase config and task-state repository selector ([#380](https://github.com/scaleapi/scale-agentex/issues/380)) ([354f35e](https://github.com/scaleapi/scale-agentex/commit/354f35ec97d87905ce4be6c8d5e8c425ee2f245e))
+* **task-messages:** add optional is_error to ToolResponseContent ([#331](https://github.com/scaleapi/scale-agentex/issues/331)) ([5020e96](https://github.com/scaleapi/scale-agentex/commit/5020e96f8bb689553a8b1e253c09e5750e6f80fc))
+* **tasks:** add task-stream lifecycle metrics ([#387](https://github.com/scaleapi/scale-agentex/issues/387)) ([6b9e58f](https://github.com/scaleapi/scale-agentex/commit/6b9e58fac5beaf7c119f1c69956ef218583093af))
+* **tasks:** non-terminal task/interrupt + INTERRUPTED status (AGX1-391) ([#365](https://github.com/scaleapi/scale-agentex/issues/365)) ([a92081a](https://github.com/scaleapi/scale-agentex/commit/a92081a24c0e181cdbd6836fcc880e6be4abeb24))
+* **ui:** add scheduled task management ([#354](https://github.com/scaleapi/scale-agentex/issues/354)) ([0d859c2](https://github.com/scaleapi/scale-agentex/commit/0d859c2ff85d227af124abb93dc611d40ef2337e))
+* **ui:** improve scheduled task controls ([#378](https://github.com/scaleapi/scale-agentex/issues/378)) ([b5a1d17](https://github.com/scaleapi/scale-agentex/commit/b5a1d17ada9867cf24daf20a6a0a3e4f95b79aff))
+* update task configs in agentex db on turn ([#309](https://github.com/scaleapi/scale-agentex/issues/309)) ([13eea7a](https://github.com/scaleapi/scale-agentex/commit/13eea7a68b23c169bb5e51331ee47d49ac3f11f6))
+
+
+### Bug Fixes
+
+* **acp:** forward allowlisted client headers on all ACP paths ([#384](https://github.com/scaleapi/scale-agentex/issues/384)) ([2c2d5c8](https://github.com/scaleapi/scale-agentex/commit/2c2d5c802ee1c3ee328122d6f538fc30d43ad05c))
+* **acp:** forward W3C trace-context headers to downstream agents ([#396](https://github.com/scaleapi/scale-agentex/issues/396)) ([e5f13ba](https://github.com/scaleapi/scale-agentex/commit/e5f13bac6778caa76e27005c5fb7154f688bcec8))
+* **agentex-ui:** abort the upstream request when the BFF client disconnects ([#383](https://github.com/scaleapi/scale-agentex/issues/383)) ([c729b12](https://github.com/scaleapi/scale-agentex/commit/c729b1269faf6c3aa16b7bad1ec6713183572b31))
+* **agentex-ui:** bump next 15.5.18 -&gt; 15.5.21 (8 CVEs) ([#375](https://github.com/scaleapi/scale-agentex/issues/375)) ([2c27100](https://github.com/scaleapi/scale-agentex/commit/2c27100b187814d675f8fc6d8fe4b1eccc2e8b00))
+* **agentex-ui:** bump next-auth 5.0.0-beta.31 -&gt; 5.0.0-beta.32 (4 CVEs) ([#376](https://github.com/scaleapi/scale-agentex/issues/376)) ([d355c92](https://github.com/scaleapi/scale-agentex/commit/d355c92b7d4f3b2f137f95bc734879cddc1f9942))
+* **agentex-ui:** bump postcss 8.5.19 -&gt; 8.5.25 (CVE-2026-69153) ([#395](https://github.com/scaleapi/scale-agentex/issues/395)) ([4d805e4](https://github.com/scaleapi/scale-agentex/commit/4d805e4fe01daaa6516d308493dbae74cf0f7422))
+* **agentex-ui:** bump postcss to &gt;=8.5.10 (CVE-2026-41305) ([#360](https://github.com/scaleapi/scale-agentex/issues/360)) ([8e5159b](https://github.com/scaleapi/scale-agentex/commit/8e5159ba59662c396b023deb9fbcbef5f72ebc3b))
+* **agentex-ui:** bump sharp 0.34.3 -&gt; 0.35.3 (GHSA-f88m-g3jw-g9cj) ([#371](https://github.com/scaleapi/scale-agentex/issues/371)) ([ffa5f94](https://github.com/scaleapi/scale-agentex/commit/ffa5f948dd0608458dc0d557f50e232bfe6026e2))
+* **agentex-ui:** bump tar 7.5.11 -&gt; 7.5.16 (CVE-2026-53655) ([#361](https://github.com/scaleapi/scale-agentex/issues/361)) ([f8e64a1](https://github.com/scaleapi/scale-agentex/commit/f8e64a122d128d3ff1556a8d0c7b62f30de118a2))
+* **agentex-ui:** bump tar 7.5.20 -&gt; 7.5.22 (GHSA-r292-9mhp-454m) ([#382](https://github.com/scaleapi/scale-agentex/issues/382)) ([32a9acc](https://github.com/scaleapi/scale-agentex/commit/32a9acc4140b2b470bd3f8ff783e69a9c1efd3f3))
+* **agentex-ui:** bump uuid 11.1.0 -&gt; 11.1.1 (CVE-2026-41907) ([#362](https://github.com/scaleapi/scale-agentex/issues/362)) ([9edebf5](https://github.com/scaleapi/scale-agentex/commit/9edebf53385ce7dfcc8e1de1479ff87b2e590b65))
+* **agentex-ui:** merge URL updates against the live URL to fix account-switch races ([#355](https://github.com/scaleapi/scale-agentex/issues/355)) ([f87e363](https://github.com/scaleapi/scale-agentex/commit/f87e3639a2e30b62c632e08aacab95a712523055))
+* **agentex-ui:** stop clipping agent badge hover scale and shadow ([#352](https://github.com/scaleapi/scale-agentex/issues/352)) ([b49fab6](https://github.com/scaleapi/scale-agentex/commit/b49fab636941bb1796500d2d50388eec142e0b3d))
+* **agentex:** bump aiohttp 3.13.4 -&gt; 3.14.1 (clears 11 CVEs, agentex server image) ([#359](https://github.com/scaleapi/scale-agentex/issues/359)) ([3001351](https://github.com/scaleapi/scale-agentex/commit/3001351244307ff5d3cb01d1d1bfbb2ebdc2b035))
+* **agentex:** bump aiohttp 3.14.1 -&gt; 3.14.3 (clears 3 CVEs, agentex server image) ([#393](https://github.com/scaleapi/scale-agentex/issues/393)) ([a167690](https://github.com/scaleapi/scale-agentex/commit/a167690ae074b8219d3c219da7b4820677fed92c))
+* **agentex:** bump ddtrace to &gt;=4.8.2 (CVE-2026-50271) ([#364](https://github.com/scaleapi/scale-agentex/issues/364)) ([2913fe0](https://github.com/scaleapi/scale-agentex/commit/2913fe095c55f50f520b3471c6900d5bea642a20))
+* **agentex:** end SSE subscriptions on terminal task / vanished topic; stop deleting shared stream ([#385](https://github.com/scaleapi/scale-agentex/issues/385)) ([0011d2c](https://github.com/scaleapi/scale-agentex/commit/0011d2c3d13a675dc748a705089b8123ab959f33))
+* **authz:** grant legacy agent register principal ([#325](https://github.com/scaleapi/scale-agentex/issues/325)) ([cae5f94](https://github.com/scaleapi/scale-agentex/commit/cae5f9470c03a0c14371981a78540c4d7052819d))
+* **deps:** cap fastapi &lt;0.137.0 to stop OPTIONS preflight 500s ([#334](https://github.com/scaleapi/scale-agentex/issues/334)) ([acbe9e3](https://github.com/scaleapi/scale-agentex/commit/acbe9e3957ad3867a9793d1726e07141da691f47))
+* **deps:** clear golden-image Trivy CRITICAL/HIGH (litellm, starlette, pyjwt, python-multipart) ([#320](https://github.com/scaleapi/scale-agentex/issues/320)) ([bfa6652](https://github.com/scaleapi/scale-agentex/commit/bfa6652b8125dcd6beee471f21ffa313c107551b))
+* **observability:** isolate SSE stream spans and continue ingress traceparent ([#390](https://github.com/scaleapi/scale-agentex/issues/390)) ([b3a301d](https://github.com/scaleapi/scale-agentex/commit/b3a301d173f7d0bbe273c1b47e8765260ae4c9e0))
+* page ready agents during health-check startup ([#345](https://github.com/scaleapi/scale-agentex/issues/345)) ([2ffde24](https://github.com/scaleapi/scale-agentex/commit/2ffde244f2c9ecb2b2318eaf34ce36aa9e31005d))
+* **schedules:** backfill agent_run_schedules deleted_at/version on early-deployed envs ([#341](https://github.com/scaleapi/scale-agentex/issues/341)) ([fc1ba55](https://github.com/scaleapi/scale-agentex/commit/fc1ba556ff12a1fc0df8aace544f690bed97b3c7))
+* **schedules:** grant legacy auth for run schedules ([#344](https://github.com/scaleapi/scale-agentex/issues/344)) ([648e81c](https://github.com/scaleapi/scale-agentex/commit/648e81cf6d9513a309a9475c228eea3ab0bf7353))
+* **schedules:** include timezone data in backend image ([#370](https://github.com/scaleapi/scale-agentex/issues/370)) ([2c4f061](https://github.com/scaleapi/scale-agentex/commit/2c4f061569a4249d47b27233f01c3aa9054341fe))
+* **schedules:** load live fields in schedule lists ([#368](https://github.com/scaleapi/scale-agentex/issues/368)) ([c045ad0](https://github.com/scaleapi/scale-agentex/commit/c045ad023ac3be1df79032494d851f43d6c26c3a))
+* **schedules:** use stable handles for run schedules ([#349](https://github.com/scaleapi/scale-agentex/issues/349)) ([3b722f6](https://github.com/scaleapi/scale-agentex/commit/3b722f66a30092f936de638ab861d2e06c202542))
+* **streams:** cut SSE error-log volume and add Redis pool headroom ([#340](https://github.com/scaleapi/scale-agentex/issues/340)) ([352eaaa](https://github.com/scaleapi/scale-agentex/commit/352eaaae082ca08a576b20880333493e449da1be))
+* **streams:** snapshot SSE cursor before "connected" to stop first-token drops ([#330](https://github.com/scaleapi/scale-agentex/issues/330)) ([7c2ccfd](https://github.com/scaleapi/scale-agentex/commit/7c2ccfd61376ddeaa2ae5580bae7421adea5ffd6))
+* **tasks:** omit `params` from the list-tasks response ([#377](https://github.com/scaleapi/scale-agentex/issues/377)) ([e62a2a7](https://github.com/scaleapi/scale-agentex/commit/e62a2a7c7c360303ad388af1f2cd7eba58a6877a))
+* **tasks:** preserve task_metadata in combined update and forward merge_params by name ([#336](https://github.com/scaleapi/scale-agentex/issues/336)) ([8c25c64](https://github.com/scaleapi/scale-agentex/commit/8c25c6417b6d39e2fa4457cad6ff4c37f2c952db))
+* **ui:** load all agents so the picker and deep-links work past the first page ([#347](https://github.com/scaleapi/scale-agentex/issues/347)) ([92b9da3](https://github.com/scaleapi/scale-agentex/commit/92b9da3c81d0e5f04d5ca2f748db694f765b376e))
+
+
+### Documentation
+
+* document Redis as a required dependency ([#343](https://github.com/scaleapi/scale-agentex/issues/343)) ([4c1740b](https://github.com/scaleapi/scale-agentex/commit/4c1740bf576eacdf2f3f4251cf1c93803b16368f))
+* **guides:** tracing, framework-agent, and local-sandbox guides ([#339](https://github.com/scaleapi/scale-agentex/issues/339)) ([b43e8c3](https://github.com/scaleapi/scale-agentex/commit/b43e8c3f0d6a586e1ae676793245cc004e558c48))
+* **streaming:** document the unified harness surface ([#337](https://github.com/scaleapi/scale-agentex/issues/337)) ([31fd697](https://github.com/scaleapi/scale-agentex/commit/31fd6975624d4842ca9314ee6cbd17717a0e16a5))
+
+
+### Refactors
+
+* **agentex:** Slack gateway reads bot credentials from env, not DB ([#394](https://github.com/scaleapi/scale-agentex/issues/394)) ([3d1817c](https://github.com/scaleapi/scale-agentex/commit/3d1817c921798e89fb7b4a008f7de4e422ef9d2a))
