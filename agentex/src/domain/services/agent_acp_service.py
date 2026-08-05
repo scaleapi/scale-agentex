@@ -125,6 +125,21 @@ def filter_request_headers(headers: dict[str, str] | None) -> dict[str, str]:
     }
 
 
+def extract_trace_context_headers(headers: dict[str, str] | None) -> dict[str, str]:
+    """Pull just the W3C trace-context headers (case-insensitive) from an inbound
+    request.
+
+    Used so trace context is forwarded on EVERY downstream operation
+    (task/create, event/send, message, streaming, cancel) rather than only the
+    call sites that happen to thread ``request_headers`` through get_headers().
+    Keeping the agent's trace continuous with the ingress trace must not depend
+    on each caller remembering to pass headers.
+    """
+    if not headers:
+        return {}
+    return {k: v for k, v in headers.items() if k.lower() in TRACE_CONTEXT_HEADERS}
+
+
 class AgentACPService(TaskMessageMixin):
     """
     Client service for communicating with downstream ACP servers.
@@ -288,6 +303,13 @@ class AgentACPService(TaskMessageMixin):
         request_headers: dict[str, str] | None = None,
     ) -> dict[str, str]:
         filtered_request_headers = filter_request_headers(request_headers)
+        # Always forward inbound W3C trace-context, independent of whether the
+        # caller threaded request_headers through — otherwise task/create,
+        # message, streaming and cancel (which call get_headers(agent) with no
+        # request_headers) would drop traceparent and the downstream agent would
+        # start a detached trace. The inbound headers are on self._request.
+        inbound_headers = dict(self._request.headers) if getattr(self, "_request", None) is not None else {}
+        trace_context_headers = extract_trace_context_headers(inbound_headers)
         delegation_headers = self.get_delegation_headers(agent)
         auth_headers = await self.get_agent_auth_headers(agent)
         request_id = ctx_var_request_id.get(uuid4().hex)
@@ -295,6 +317,7 @@ class AgentACPService(TaskMessageMixin):
         # Later keys win. Client passthrough and delegation first; agent auth last.
         return {
             **filtered_request_headers,
+            **trace_context_headers,
             **delegation_headers,
             **auth_headers,
             "x-request-id": request_id,

@@ -21,6 +21,7 @@ from src.domain.repositories.agent_api_key_repository import AgentAPIKeyReposito
 from src.domain.repositories.agent_repository import AgentRepository
 from src.domain.services.agent_acp_service import (
     AgentACPService,
+    extract_trace_context_headers,
     filter_request_headers,
 )
 
@@ -1093,3 +1094,28 @@ class TestFilterRequestHeaders:
             "tracestate": "vendor=value",
             "baggage": "agentex.business_trace_id=t1",
         }
+
+
+class TestExtractTraceContextHeaders:
+    def test_extracts_only_trace_context_case_insensitive(self):
+        # get_headers forwards these on every op regardless of request_headers,
+        # so extraction must pull them from inbound headers (case-insensitive)
+        # and ignore everything else.
+        result = extract_trace_context_headers(
+            {
+                "Traceparent": "00-abc-def-01",
+                "tracestate": "vendor=value",
+                "BAGGAGE": "agentex.business_trace_id=t1",
+                "x-api-key": "secret",
+                "content-type": "application/json",
+            }
+        )
+        assert result == {
+            "Traceparent": "00-abc-def-01",
+            "tracestate": "vendor=value",
+            "BAGGAGE": "agentex.business_trace_id=t1",
+        }
+
+    def test_empty_or_none(self):
+        assert extract_trace_context_headers(None) == {}
+        assert extract_trace_context_headers({}) == {}
