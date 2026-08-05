@@ -1075,3 +1075,21 @@ class TestFilterRequestHeaders:
             }
         )
         assert result == {"x-trace-id": "trace-1"}
+
+    def test_forwards_w3c_trace_context_headers(self):
+        # traceparent/tracestate/baggage are not x-* but must survive the forward
+        # so the downstream agent's trace continues the ingress trace.
+        result = filter_request_headers(
+            {
+                "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+                "tracestate": "vendor=value",
+                "baggage": "agentex.business_trace_id=t1",
+                "authorization": "Bearer x",  # still blocked
+                "host": "gateway",  # still hop-by-hop
+            }
+        )
+        assert result == {
+            "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+            "tracestate": "vendor=value",
+            "baggage": "agentex.business_trace_id=t1",
+        }

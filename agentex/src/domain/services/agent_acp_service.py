@@ -82,13 +82,24 @@ BLOCKED_HEADERS = frozenset(
     }
 )
 
+# W3C trace-context headers. These are NOT x-* prefixed, so the allowlist below
+# would otherwise strip them on the forward to the downstream agent — which
+# detaches the agent's observability trace (and the Temporal workflow/activity it
+# signals) from the ingress trace, so you can't follow a request from the API
+# call to the agent's work. Forwarding them lets the agent continue the same
+# trace. `baggage` additionally carries the business-trace sampling key. None are
+# sensitive or hop-by-hop, so passing them through is safe.
+TRACE_CONTEXT_HEADERS = frozenset({"traceparent", "tracestate", "baggage"})
+
 
 def filter_request_headers(headers: dict[str, str] | None) -> dict[str, str]:
     """
     Filter request headers to only include safe custom headers.
 
     Security filtering rules:
-    1. Allow only x-* prefixed headers (allowlist approach)
+    1. Allow x-* prefixed headers (allowlist approach), plus the W3C
+       trace-context headers (traceparent/tracestate/baggage) so the downstream
+       agent's trace continues the ingress trace instead of detaching
     2. Block hop-by-hop headers (connection, keep-alive, etc.)
     3. Block sensitive headers (credentials, acting delegation, x-agent-api-key,
        x-selected-account-id)
@@ -108,7 +119,7 @@ def filter_request_headers(headers: dict[str, str] | None) -> dict[str, str]:
     return {
         k: v
         for k, v in headers.items()
-        if k.lower().startswith("x-")
+        if (k.lower().startswith("x-") or k.lower() in TRACE_CONTEXT_HEADERS)
         and k.lower() not in HOP_BY_HOP_HEADERS
         and k.lower() not in BLOCKED_HEADERS
     }
