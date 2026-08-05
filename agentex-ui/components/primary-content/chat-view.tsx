@@ -1,5 +1,6 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
+import { APIError } from 'agentex';
 import { motion } from 'framer-motion';
 
 import { TaskProvider, useAgentexClient } from '@/components/providers';
@@ -9,6 +10,7 @@ import {
   SearchParamKey,
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
+import { useTask } from '@/hooks/use-tasks';
 
 import { TaskHeader } from '../task-header/task-header';
 
@@ -29,9 +31,40 @@ export function ChatView({
 }: ChatViewProps) {
   const { agentexClient } = useAgentexClient();
   const { data: agents = [] } = useAgents(agentexClient);
-  const { updateParams } = useSafeSearchParams();
+  const { agentName, updateParams } = useSafeSearchParams();
+  const {
+    data: task,
+    isError: isTaskError,
+    error: taskError,
+  } = useTask({ agentexClient, taskId: taskID });
 
   const headerRef = useRef<HTMLDivElement>(null);
+
+  // Deep links may carry only task_id — fill the agent pill from the task's own agent.
+  const taskAgentName = task?.agents?.[0]?.name;
+  useEffect(() => {
+    if (agentName || !taskAgentName) return;
+    updateParams({ [SearchParamKey.AGENT_NAME]: taskAgentName }, true);
+  }, [agentName, taskAgentName, updateParams]);
+
+  // Drop a task_id the client can't use: a 4xx means it's bad/off-limits (400/403/404/422).
+  // 401 is handled by the session refresh + login redirect, and 429/5xx are transient.
+  useEffect(() => {
+    const status = taskError instanceof APIError ? taskError.status : undefined;
+    if (
+      isTaskError &&
+      status !== undefined &&
+      status >= 400 &&
+      status < 500 &&
+      status !== 401 &&
+      status !== 429
+    ) {
+      updateParams(
+        { [SearchParamKey.TASK_ID]: null, [SearchParamKey.AGENT_NAME]: null },
+        true
+      );
+    }
+  }, [isTaskError, taskError, updateParams]);
 
   const handleSelectAgent = useCallback(
     (agentName: string | undefined) => {

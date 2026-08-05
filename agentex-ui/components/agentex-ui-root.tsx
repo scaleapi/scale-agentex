@@ -69,17 +69,21 @@ export function AgentexUIRoot({
     // than bouncing a possibly-valid deep link to the home grid.
     const couldNotDetermine = !agentInList && isAgentByNameError;
 
-    if (agentName && !isAgentValid && !couldNotDetermine) {
+    // Only validate/clear on the home surface. With a task open its agent wins (hydrated in
+    // ChatView) even if non-Ready, so this doesn't ping-pong against that restore.
+    if (agentName && !taskID && !isAgentValid && !couldNotDetermine) {
       updateParams({ [SearchParamKey.AGENT_NAME]: null });
       setLocalAgentName(undefined);
     }
 
-    if (!agentName && localAgentName) {
+    // With a task open, its agent wins (hydrated in ChatView) — don't restore from storage.
+    if (!agentName && !taskID && localAgentName) {
       updateParams({ [SearchParamKey.AGENT_NAME]: localAgentName });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     sgpAccountID,
+    taskID,
     isAgentsFetching,
     isAgentByNameFetching,
     isAgentByNameError,
