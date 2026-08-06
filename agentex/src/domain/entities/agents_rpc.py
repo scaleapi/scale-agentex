@@ -7,6 +7,7 @@ from src.api.schemas.agents_rpc import (
     AgentRPCRequest,
     CancelTaskRequest,
     CreateTaskRequest,
+    InterruptTaskRequest,
 )
 from src.domain.entities.agents import ACPType, AgentEntity
 from src.domain.entities.events import EventEntity
@@ -26,6 +27,7 @@ class AgentRPCMethod(str, Enum):
 
     TASK_CREATE = "task/create"
     TASK_CANCEL = "task/cancel"
+    TASK_INTERRUPT = "task/interrupt"
     MESSAGE_SEND = "message/send"
     EVENT_SEND = "event/send"
 
@@ -85,16 +87,32 @@ class CancelTaskParams(BaseModel):
     task: TaskEntity = Field(..., description="The task that was cancelled")
 
 
+class InterruptTaskParams(BaseModel):
+    """Parameters for task/interrupt method"""
+
+    agent: AgentEntity = Field(
+        ...,
+        description="The agent that the task was sent to",
+    )
+    task: TaskEntity = Field(..., description="The task that was interrupted")
+
+
 ACP_TYPE_TO_ALLOWED_RPC_METHODS = {
-    ACPType.SYNC: [AgentRPCMethod.MESSAGE_SEND, AgentRPCMethod.TASK_CREATE],
+    ACPType.SYNC: [
+        AgentRPCMethod.MESSAGE_SEND,
+        AgentRPCMethod.TASK_CREATE,
+        AgentRPCMethod.TASK_INTERRUPT,
+    ],
     ACPType.AGENTIC: [
         AgentRPCMethod.TASK_CREATE,
         AgentRPCMethod.TASK_CANCEL,
+        AgentRPCMethod.TASK_INTERRUPT,
         AgentRPCMethod.EVENT_SEND,
     ],
     ACPType.ASYNC: [
         AgentRPCMethod.TASK_CREATE,
         AgentRPCMethod.TASK_CANCEL,
+        AgentRPCMethod.TASK_INTERRUPT,
         AgentRPCMethod.EVENT_SEND,
     ],
 }
@@ -123,6 +141,23 @@ class CancelTaskRequestEntity(BaseModel):
     task_name: str | None = Field(
         None,
         description="The name of the task to cancel. Either this or task_id must be provided.",
+    )
+
+    @model_validator(mode="after")
+    def validate_task_identifiers(self):
+        if self.task_id is not None and self.task_name is not None:
+            raise ValueError("Cannot provide both task_id and task_name - use only one")
+        return self
+
+
+class InterruptTaskRequestEntity(BaseModel):
+    task_id: str | None = Field(
+        None,
+        description="The ID of the task to interrupt. Either this or task_name must be provided.",
+    )
+    task_name: str | None = Field(
+        None,
+        description="The name of the task to interrupt. Either this or task_id must be provided.",
     )
 
     @model_validator(mode="after")
@@ -180,6 +215,7 @@ class AgentRPCRequestEntity(JSONRPCRequest):
     params: (
         CreateTaskRequestEntity
         | CancelTaskRequestEntity
+        | InterruptTaskRequestEntity
         | SendMessageRequestEntity
         | SendEventRequestEntity
     ) = Field(..., description="The parameters for the agent RPC request")
@@ -198,6 +234,13 @@ class AgentRPCRequestEntity(JSONRPCRequest):
             request.params.root, CancelTaskRequest
         ):
             params = CancelTaskRequestEntity(
+                task_id=request.params.root.task_id,
+                task_name=request.params.root.task_name,
+            )
+        elif request.method == AgentRPCMethod.TASK_INTERRUPT and isinstance(
+            request.params.root, InterruptTaskRequest
+        ):
+            params = InterruptTaskRequestEntity(
                 task_id=request.params.root.task_id,
                 task_name=request.params.root.task_name,
             )

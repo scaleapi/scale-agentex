@@ -30,7 +30,9 @@ async def test_sweep_cleans_all_pages_and_aggregates():
         return []
 
     @activity.defn(name=CLEAN_TASK_ACTIVITY)
-    async def fake_clean(task_id: str, idle_days: int, dry_run: bool) -> dict:
+    async def fake_clean(
+        task_id: str, idle_days: int, dry_run: bool, stale_running_days: int = 0
+    ) -> dict:
         assert dry_run is False
         if task_id == "t2":
             return {
@@ -102,7 +104,9 @@ async def test_sweep_loads_config_from_activity_when_no_args():
         return []
 
     @activity.defn(name=CLEAN_TASK_ACTIVITY)
-    async def fake_clean(task_id: str, idle_days: int, dry_run: bool) -> dict:
+    async def fake_clean(
+        task_id: str, idle_days: int, dry_run: bool, stale_running_days: int = 0
+    ) -> dict:
         assert dry_run is True
         return {
             "task_id": task_id,
@@ -152,7 +156,9 @@ async def test_sweep_noops_when_runtime_config_disabled():
         raise AssertionError("disabled cleanup should not check multi-agent candidates")
 
     @activity.defn(name=CLEAN_TASK_ACTIVITY)
-    async def fake_clean(task_id: str, idle_days: int, dry_run: bool) -> dict:
+    async def fake_clean(
+        task_id: str, idle_days: int, dry_run: bool, stale_running_days: int = 0
+    ) -> dict:
         raise AssertionError("disabled cleanup should not clean tasks")
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
@@ -188,7 +194,9 @@ async def test_sweep_skips_multi_agent_candidates_before_cleanup():
         return ["t2"]
 
     @activity.defn(name=CLEAN_TASK_ACTIVITY)
-    async def fake_clean(task_id: str, idle_days: int, dry_run: bool) -> dict:
+    async def fake_clean(
+        task_id: str, idle_days: int, dry_run: bool, stale_running_days: int = 0
+    ) -> dict:
         cleaned_task_ids.append(task_id)
         return {
             "task_id": task_id,
@@ -252,7 +260,9 @@ async def test_sweep_propagates_dry_run_to_child_cleanup():
         return []
 
     @activity.defn(name=CLEAN_TASK_ACTIVITY)
-    async def fake_clean(task_id: str, idle_days: int, dry_run: bool) -> dict:
+    async def fake_clean(
+        task_id: str, idle_days: int, dry_run: bool, stale_running_days: int = 0
+    ) -> dict:
         assert dry_run is True
         return {
             "task_id": task_id,
@@ -279,3 +289,61 @@ async def test_sweep_propagates_dry_run_to_child_cleanup():
 
     assert summary["dry_run"] == 1
     assert summary["cleaned"] == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sweep_propagates_stale_running_days_to_child_cleanup():
+    pages = {None: ["t1"], "t1": []}
+    seen_stale_running_days: list[int] = []
+
+    @activity.defn(name=LOAD_CLEANUP_CONFIG_ACTIVITY)
+    async def fake_load() -> dict:
+        return {
+            "enabled": True,
+            "dry_run": True,
+            "idle_days": 7,
+            "agent_names": ["a"],
+            "page_size": 2,
+            "max_in_flight": 2,
+            "stale_running_days": 30,
+        }
+
+    @activity.defn(name=FIND_CLEANUP_CANDIDATES_ACTIVITY)
+    async def fake_find(after_id, limit, idle_days, agent_names) -> list[str]:
+        return pages[after_id]
+
+    @activity.defn(name=FIND_MULTI_AGENT_CLEANUP_CANDIDATES_ACTIVITY)
+    async def fake_find_multi_agent(task_ids: list[str]) -> list[str]:
+        return []
+
+    @activity.defn(name=CLEAN_TASK_ACTIVITY)
+    async def fake_clean(
+        task_id: str, idle_days: int, dry_run: bool, stale_running_days: int = 0
+    ) -> dict:
+        seen_stale_running_days.append(stale_running_days)
+        return {
+            "task_id": task_id,
+            "status": "dry_run",
+            "reason": "would_clean",
+            "messages_deleted": 0,
+            "task_states_deleted": 0,
+            "events_deleted": 0,
+        }
+
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        async with Worker(
+            env.client,
+            task_queue="test-retention-stale-running",
+            workflows=[RetentionCleanupSweepWorkflow, RetentionCleanupTaskWorkflow],
+            activities=[fake_load, fake_find, fake_find_multi_agent, fake_clean],
+            workflow_runner=UnsandboxedWorkflowRunner(),
+        ):
+            summary = await env.client.execute_workflow(
+                RetentionCleanupSweepWorkflow.run,
+                id=f"sweep-{uuid.uuid4()}",
+                task_queue="test-retention-stale-running",
+            )
+
+    assert seen_stale_running_days == [30]
+    assert summary["dry_run"] == 1

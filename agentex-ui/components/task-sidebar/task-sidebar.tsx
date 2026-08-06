@@ -13,13 +13,18 @@ import {
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
 
-export function TaskSidebar() {
+type TaskSidebarProps = {
+  agentRunSchedulesEnabled: boolean;
+};
+
+export function TaskSidebar({ agentRunSchedulesEnabled }: TaskSidebarProps) {
   const { updateParams } = useSafeSearchParams();
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
 
   const handleNewChat = useCallback(() => {
     updateParams({
       [SearchParamKey.TASK_ID]: null,
+      [SearchParamKey.VIEW]: null,
     });
   }, [updateParams]);
 
@@ -34,25 +39,29 @@ export function TaskSidebar() {
       className="flex h-full flex-col gap-2 pt-4"
       isCollapsed={isCollapsed}
       renderCollapsed={() => (
-        <div className="flex flex-col items-center gap-4">
-          <IconButton
-            icon={PanelLeftOpen}
-            onClick={toggleCollapse}
-            variant="ghost"
-            className="text-foreground"
-            aria-label="Open Task Sidebar"
-          />
-          <IconButton
-            icon={MessageSquarePlus}
-            onClick={handleNewChat}
-            variant="ghost"
-            className="text-foreground"
-            aria-label="New Chat"
-          />
-        </div>
+        <>
+          <div className="flex flex-col items-start gap-4 pl-2">
+            <IconButton
+              icon={PanelLeftOpen}
+              onClick={toggleCollapse}
+              variant="ghost"
+              className="text-foreground"
+              aria-label="Open Task Sidebar"
+            />
+            <IconButton
+              icon={MessageSquarePlus}
+              onClick={handleNewChat}
+              variant="ghost"
+              className="text-foreground"
+              aria-label="New Chat"
+            />
+          </div>
+          <TaskSidebarFooter collapsed className="mt-auto pb-2" />
+        </>
       )}
     >
       <TaskSidebarHeader
+        agentRunSchedulesEnabled={agentRunSchedulesEnabled}
         toggleCollapse={toggleCollapse}
         handleNewChat={handleNewChat}
       />

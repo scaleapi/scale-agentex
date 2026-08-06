@@ -27,11 +27,20 @@ from src.temporal.activities.healthcheck_activities import HealthCheckActivities
 from src.temporal.activities.retention_cleanup_activities import (
     RetentionCleanupActivities,
 )
+from src.temporal.activities.scheduled_agent_run_activities import (
+    ScheduledAgentRunActivities,
+)
+from src.temporal.scheduled_agent_run_factory import (
+    build_agent_run_schedule_repository,
+)
 from src.temporal.task_retention_factory import build_task_retention_use_case
 from src.temporal.workflows.healthcheck_workflow import HealthCheckWorkflow
 from src.temporal.workflows.retention_cleanup_workflow import (
     RetentionCleanupSweepWorkflow,
     RetentionCleanupTaskWorkflow,
+)
+from src.temporal.workflows.scheduled_agent_run_workflow import (
+    ScheduledAgentRunWorkflow,
 )
 from src.utils.logging import make_logger
 
@@ -39,6 +48,31 @@ logger = make_logger(__name__)
 
 # Task queue name for agentex server operations
 AGENTEX_SERVER_TASK_QUEUE = "agentex-server"
+OTLP_METRICS_DEFAULT_PORT = 4317
+
+
+def build_metrics_url(host_url: str | None) -> str | None:
+    """Build the worker OTLP metrics URL from DD_AGENT_HOST."""
+    if not host_url:
+        return None
+
+    host = host_url.strip()
+    if not host:
+        return None
+
+    port: str | int = OTLP_METRICS_DEFAULT_PORT
+    if host.startswith("["):
+        bracket_end = host.find("]")
+        if bracket_end != -1:
+            rest = host[bracket_end + 1 :]
+            port = rest[1:] or port if rest.startswith(":") else port
+            host = host[1:bracket_end]
+    elif host.count(":") == 1:
+        host, port = host.split(":", 1)
+
+    if ":" in host:
+        host = f"[{host}]"
+    return f"http://{host}:{port}"
 
 # Global worker instance
 health_check_worker: Worker | None = None
@@ -84,7 +118,7 @@ async def run_worker(
 
         # Check for metrics configuration
         host_url = os.environ.get("DD_AGENT_HOST")
-        metrics_url = f"http://[{host_url}]:4317" if host_url else None
+        metrics_url = build_metrics_url(host_url)
         if metrics_url:
             logger.info(f"Configuring worker with metrics URL: {metrics_url}")
 
@@ -161,6 +195,11 @@ def create_agentex_server_worker(
         use_case=retention_use_case,
     )
 
+    scheduled_agent_run_activities = ScheduledAgentRunActivities(
+        global_dependencies=global_dependencies,
+        schedule_repository=build_agent_run_schedule_repository(global_dependencies),
+    )
+
     return asyncio.create_task(
         run_worker(
             task_queue=task_queue,
@@ -168,6 +207,7 @@ def create_agentex_server_worker(
                 HealthCheckWorkflow,
                 RetentionCleanupSweepWorkflow,
                 RetentionCleanupTaskWorkflow,
+                ScheduledAgentRunWorkflow,
             ],
             activities=[
                 health_check_activities.check_status_activity,
@@ -176,6 +216,7 @@ def create_agentex_server_worker(
                 retention_activities.find_cleanup_candidates,
                 retention_activities.find_multi_agent_cleanup_candidates,
                 retention_activities.clean_task,
+                scheduled_agent_run_activities.launch_scheduled_agent_run,
             ],
             max_workers=50,
             max_concurrent_activities=50,

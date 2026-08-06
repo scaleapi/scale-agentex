@@ -166,7 +166,9 @@ class AgentTaskService:
     async def fail_task(self, task: TaskEntity, reason: str) -> None:
         task.status = TaskStatus.FAILED
         task.status_reason = reason
-        await self.task_repository.update(task)
+        # Publish task_updated so streaming viewers see the failure and end.
+        # Every terminal write must emit; SSE termination relies on it.
+        await self.update_task(task)
 
     async def get_task(
         self,
@@ -241,6 +243,15 @@ class AgentTaskService:
             )
 
         return updated_task
+
+    async def merge_task_params(self, task_id: str, patch: dict) -> TaskEntity | None:
+        """Atomically shallow-merge ``patch`` into ``tasks.params``. Returns
+        the updated entity, or ``None`` if no task with ``task_id`` exists.
+
+        Lets callers update agent config on the task row in place; the agent
+        picks up the new values when it next reads ``task.params``.
+        """
+        return await self.task_repository.merge_params(task_id, patch)
 
     async def delete_task(self, id: str | None = None, name: str | None = None) -> None:
         """
@@ -345,13 +356,61 @@ class AgentTaskService:
     async def cancel_task(
         self, agent: AgentEntity, task: TaskEntity, acp_url: str
     ) -> TaskEntity:
-        """Cancel a running task"""
+        """Cancel a running (or interrupted) task."""
         await self.acp_client.cancel_task(agent=agent, task=task, acp_url=acp_url)
 
-        task = await self.task_repository.get(id=task.id)
-        task.status = TaskStatus.CANCELED
-        task.status_reason = "Task canceled by user"
-        return await self.task_repository.update(task)
+        # Compare-and-swap to CANCELED on the observed non-terminal source status
+        # (mirrors interrupt_task). If the task moved to another status during the
+        # ACP call (the agent completed/failed it, or it was concurrently modified),
+        # leave that status intact rather than clobbering it with CANCELED.
+        current = await self.task_repository.get(id=task.id)
+        if current.status not in (TaskStatus.RUNNING, TaskStatus.INTERRUPTED):
+            logger.info(
+                f"Cancel for task {task.id} not applied: task is no longer running "
+                f"(current status: {current.status}); leaving its status intact."
+            )
+            return current
+        updated = await self.transition_task_status(
+            task_id=task.id,
+            expected_status=current.status,
+            new_status=TaskStatus.CANCELED,
+            status_reason="Task canceled by user",
+        )
+        return (
+            updated
+            if updated is not None
+            else await self.task_repository.get(id=task.id)
+        )
+
+    async def interrupt_task(
+        self, agent: AgentEntity, task: TaskEntity, acp_url: str
+    ) -> TaskEntity:
+        """Forward a task/interrupt to the agent (courier only; no status write).
+
+        Interrupt is a COOPERATIVE action, unlike cancel. The control plane only
+        forwards the request to the agent pod (same as event/send); the agent is
+        responsible for stopping its in-flight turn and then recording INTERRUPTED
+        via the REST POST /tasks/{id}/interrupt route (like the other task-state
+        routes). The control plane never writes status here — so an agent that does
+        not implement interrupt simply keeps running and its status stays honest.
+        Resume back to RUNNING is owned by the control plane (see _get_or_create_task).
+        """
+        await self.acp_client.interrupt_task(agent=agent, task=task, acp_url=acp_url)
+        return await self.task_repository.get(id=task.id)
+
+    async def resume_interrupted_task(self, task_id: str) -> TaskEntity | None:
+        """Atomically resume an INTERRUPTED task back to RUNNING on next-turn start.
+
+        Non-terminal transition (INTERRUPTED -> RUNNING). Returns None if the task
+        was not INTERRUPTED (e.g. it was concurrently canceled), so callers can
+        keep the task as-is rather than clobbering a terminal status.
+        """
+        return await self.transition_task_status(
+            task_id=task_id,
+            expected_status=TaskStatus.INTERRUPTED,
+            new_status=TaskStatus.RUNNING,
+            status_reason="Task resumed on next turn",
+        )
 
     async def create_event_and_forward_to_acp(
         self,

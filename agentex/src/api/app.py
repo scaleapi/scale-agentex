@@ -21,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from src._version import __version__
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.adapters.http.adapter_httpx import HttpxGateway
 from src.api.authentication_middleware import AgentexAuthMiddleware
@@ -29,6 +30,7 @@ from src.api.logged_api_route import LoggedAPIRoute
 from src.api.RequestLoggingMiddleware import RequestLoggingMiddleware
 from src.api.routes import (
     agent_api_keys,
+    agent_run_schedules,
     agent_task_tracker,
     agents,
     checkpoints,
@@ -36,7 +38,7 @@ from src.api.routes import (
     deployments,
     events,
     messages,
-    schedules,
+    slack,
     spans,
     states,
     task_retention,
@@ -108,6 +110,7 @@ async def lifespan(_: FastAPI):
 
 fastapi_app = FastAPI(
     title="Agentex API",
+    version=__version__,
     openapi_url="/openapi.json",
     docs_url="/swagger",
     redoc_url="/api",
@@ -198,11 +201,17 @@ fastapi_app.include_router(messages.router)
 fastapi_app.include_router(spans.router)
 fastapi_app.include_router(states.router)
 fastapi_app.include_router(events.router)
+fastapi_app.include_router(slack.router)
 fastapi_app.include_router(agent_task_tracker.router)
 fastapi_app.include_router(agent_api_keys.router)
+fastapi_app.include_router(slack.router)
 fastapi_app.include_router(deployment_history.router)
 fastapi_app.include_router(deployments.router)
-fastapi_app.include_router(schedules.router)
+# Agent run schedules are feature-flagged (off by default, enabled in development).
+# When disabled the routes are not registered, so the API surface is absent
+# entirely in environments that haven't opted in.
+if resolve_environment_variable_dependency(EnvVarKeys.ENABLE_AGENT_RUN_SCHEDULES):
+    fastapi_app.include_router(agent_run_schedules.router)
 fastapi_app.include_router(checkpoints.router)
 fastapi_app.include_router(task_retention.router)
 

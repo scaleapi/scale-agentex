@@ -10,6 +10,11 @@ When you run `agentex init`, the CLI creates a complete agent project with every
 - **Async Base Agent** - Custom async implementations  
 - **Async Temporal Agent** - Complex, durable workflows
 
+`agentex init` then asks which **agent framework** to scaffold (Basic, OpenAI Agents SDK, LangGraph, Pydantic AI, Claude Code, or Codex) — see [Pick a Framework (Harness)](choose_your_agent_type.md#pick-a-framework-harness).
+
+!!! note "These examples are the **Basic** variant"
+    The `project/acp.py` shown for each agent type below is the **Basic** (blank-slate) template. If you pick a framework instead, the handler comes pre-wired with the [unified harness](../development_guides/streaming_patterns.md#unified-harness-surface-framework-agents) (the framework's stream wrapped in a `HarnessTurn`, delivered by `UnifiedEmitter`, with streaming + tracing handled), and some frameworks add helper files: `agent.py` + `tools.py` (Pydantic AI, OpenAI Agents) or `graph.py` + `tools.py` (LangGraph). For **Sync** and **Async-base** agents this wiring lives in `acp.py`; for **Temporal** agents it lives in `workflow.py` / `activities.py` instead. The rest of the layout is identical.
+
 This guide is organized by agent type. Jump to your section:
 
 - [Sync Agent Structure](#sync-agent-structure)

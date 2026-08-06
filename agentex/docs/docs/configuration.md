@@ -125,6 +125,9 @@ agent:
       secret_key: "connection-string"
 ```
 
+!!! note "`REDIS_URL` is a required credential for streaming/messaging"
+    The examples above are your *own* secrets, but `REDIS_URL` is required by the platform for any agent that streams or sends messages — it is not optional. Map it here so it is synced to your deployment. See [Deploying Your Agent](deployment/overview.md#prerequisites).
+
 ### Key Points:
 
 - **`name`**: Must be unique across your organization (used for task routing)

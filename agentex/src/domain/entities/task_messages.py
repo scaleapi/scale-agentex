@@ -125,6 +125,10 @@ class ToolResponseContentEntity(BaseTaskMessageContentEntity):
         ..., description="The name of the tool that is being responded to."
     )
     content: Any = Field(..., description="The result of the tool.")
+    is_error: bool | None = Field(
+        default=None,
+        description="Whether the tool call resulted in an error. `None` when the harness does not report a status.",
+    )
 
 
 OptionalToolResponseContentEntity = make_optional(ToolResponseContentEntity)
@@ -207,6 +211,7 @@ def convert_task_message_content_to_entity(
             tool_call_id=content.tool_call_id,
             name=content.name,
             content=content.content,
+            is_error=content.is_error,
         )
 
     assert_never(content)

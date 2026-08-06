@@ -30,6 +30,7 @@ class AgentRPCMethod(str, Enum):
     TASK_CREATE = "task/create"
     MESSAGE_SEND = "message/send"
     TASK_CANCEL = "task/cancel"
+    TASK_INTERRUPT = "task/interrupt"
 
 
 class AgentInputType(str, Enum):
@@ -88,6 +89,9 @@ class RegisterAgentRequest(BaseModel):
         description="Optional agent ID if the agent already exists and needs to be updated.",
     )
     acp_type: ACPType = Field(..., description="The type of ACP to use for the agent.")
+    principal_context: Any | None = Field(
+        default=None, description="Principal used for authorization"
+    )
     registration_metadata: dict[str, Any] | None = Field(
         default=None,
         description="The metadata for the agent's registration.",

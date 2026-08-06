@@ -141,6 +141,10 @@ class TestTasksAPIIntegration:
         for task in tasks:
             assert "id" in task and isinstance(task["id"], str)
 
+            # The list is a lean summary and must never carry `params` (the
+            # arbitrary create-time payload that can hold secrets/PII).
+            assert "params" not in task
+
             # Check if this is our test task
             if task["id"] == test_task.id:
                 found_test_task = True
@@ -156,6 +160,7 @@ class TestTasksAPIIntegration:
                     "COMPLETED",
                     "FAILED",
                     "RUNNING",
+                    "INTERRUPTED",
                     "TERMINATED",
                     "TIMED_OUT",
                 ]
@@ -498,32 +503,24 @@ class TestTasksAPIIntegration:
         assert response.status_code == 404
 
     #
-    async def test_list_tasks_includes_params_in_response(
+    async def test_list_tasks_omits_params_in_response(
         self, isolated_client, test_task_with_params
     ):
-        """Test that list tasks endpoint includes params field in response"""
+        """The list summary must omit `params` even when the task has them
+        (they can carry secrets/PII); fetch a single task for the full record."""
         # When - Request all tasks
         response = await isolated_client.get("/tasks")
 
-        # Then - Should succeed and include params in response
+        # Then - The task is present but its params are not serialized
         assert response.status_code == 200
         tasks = response.json()
         assert isinstance(tasks, list)
 
-        # Find our test task with params
         params_task = next(
             (task for task in tasks if task["id"] == test_task_with_params.id), None
         )
-        assert params_task is not None, "Task with params should be in the list"
-
-        # Verify params field exists and has correct structure
-        assert "params" in params_task
-        assert params_task["params"] is not None
-        assert params_task["params"]["model"] == "gpt-4"
-        assert params_task["params"]["temperature"] == 0.8
-        assert params_task["params"]["max_tokens"] == 2000
-        assert params_task["params"]["nested"]["setting"] == "value"
-        assert params_task["params"]["nested"]["numbers"] == [1, 2, 3]
+        assert params_task is not None, "Task should be in the list"
+        assert "params" not in params_task
 
     #
     async def test_get_task_by_id_includes_params_in_response(
@@ -578,26 +575,22 @@ class TestTasksAPIIntegration:
         assert task_data["params"]["nested"]["numbers"] == [1, 2, 3]
 
     #
-    async def test_list_tasks_handles_null_params_correctly(
+    async def test_list_tasks_omits_params_for_null_params_task(
         self, isolated_client, test_task
     ):
-        """Test that list tasks handles tasks with null params correctly"""
+        """A task created without params also has no `params` key in the list."""
         # When - Request all tasks (test_task has null params)
         response = await isolated_client.get("/tasks")
 
-        # Then - Should succeed and handle null params
+        # Then - The task is present with no params field
         assert response.status_code == 200
         tasks = response.json()
 
-        # Find our test task without params
         null_params_task = next(
             (task for task in tasks if task["id"] == test_task.id), None
         )
         assert null_params_task is not None
-
-        # Verify params field exists and is null
-        assert "params" in null_params_task
-        assert null_params_task["params"] is None
+        assert "params" not in null_params_task
 
     #
     async def test_get_task_by_id_handles_null_params_correctly(
@@ -910,6 +903,87 @@ class TestTasksAPIIntegration:
         assert response_data["task_metadata"]["workflow"]["stage"] == "updated_by_name"
         assert response_data["task_metadata"]["configuration"]["version"] == "2.0.0"
         assert response_data["task_metadata"]["metrics"]["complexity_score"] == 75
+
+    async def test_update_task_by_name_forwards_merge_params(
+        self, isolated_client, isolated_repositories
+    ):
+        """PUT /tasks/name/{task_name} must forward merge_params, not drop it."""
+        # Given - a task with existing params
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="merge-params-by-name-agent",
+            description="Agent for merge_params by name testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="task-for-merge-params-by-name",
+            status=TaskStatus.RUNNING,
+            status_reason="Test task for merge_params by name endpoint",
+            params={"model": "gpt-4", "temperature": 0.2},
+        )
+        created_task = await task_repo.create(agent_id=agent.id, task=task)
+
+        # When - update by name supplying only merge_params
+        update_payload = {"merge_params": {"temperature": 0.9, "max_tokens": 1024}}
+        response = await isolated_client.put(
+            f"/tasks/name/{created_task.name}", json=update_payload
+        )
+
+        # Then - the patch is shallow-merged into the existing params
+        assert response.status_code == 200
+        response_data = response.json()
+        assert response_data["params"] == {
+            "model": "gpt-4",
+            "temperature": 0.9,
+            "max_tokens": 1024,
+        }
+
+    async def test_update_task_metadata_and_merge_params_together(
+        self, isolated_client, isolated_repositories
+    ):
+        """Supplying both task_metadata and merge_params must persist both."""
+        # Given - a task with existing params and metadata
+        agent_repo = isolated_repositories["agent_repository"]
+        agent = AgentEntity(
+            id=orm_id(),
+            name="merge-params-and-metadata-agent",
+            description="Agent for combined update testing",
+            acp_url="http://test-acp:8000",
+            acp_type=ACPType.SYNC,
+        )
+        await agent_repo.create(agent)
+
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="task-for-combined-update",
+            status=TaskStatus.RUNNING,
+            status_reason="Test task for combined update endpoint",
+            params={"model": "gpt-4"},
+            task_metadata={"initial": "metadata"},
+        )
+        created_task = await task_repo.create(agent_id=agent.id, task=task)
+
+        # When - update by id supplying both fields at once
+        update_payload = {
+            "task_metadata": {"stage": "tuned"},
+            "merge_params": {"temperature": 0.7},
+        }
+        response = await isolated_client.put(
+            f"/tasks/{created_task.id}", json=update_payload
+        )
+
+        # Then - neither field is silently discarded
+        assert response.status_code == 200
+        response_data = response.json()
+        assert response_data["task_metadata"] == {"stage": "tuned"}
+        assert response_data["params"] == {"model": "gpt-4", "temperature": 0.7}
 
     async def test_list_tasks_includes_task_metadata_field(
         self, isolated_client, isolated_repositories
@@ -1526,6 +1600,72 @@ class TestTasksAPIIntegration:
         task_data = response.json()
         assert task_data["status"] == "CANCELED"
         assert task_data["status_reason"] == "User requested cancellation"
+
+    async def test_interrupt_task_endpoint(self, isolated_client, test_task):
+        """POST /tasks/{task_id}/interrupt transitions RUNNING to the non-terminal
+        INTERRUPTED status (task stays continuable)."""
+        # When
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/interrupt",
+            json={"reason": "User hit stop"},
+        )
+
+        # Then
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "INTERRUPTED"
+        assert task_data["status_reason"] == "User hit stop"
+
+    async def test_interrupt_task_default_reason(self, isolated_client, test_task):
+        """POST /tasks/{task_id}/interrupt without a reason uses the default."""
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/interrupt",
+        )
+
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "INTERRUPTED"
+        assert task_data["status_reason"] == "Task interrupted"
+
+    async def test_interrupted_task_stays_transition_eligible(
+        self, isolated_client, test_task
+    ):
+        """An interrupted task is non-terminal: it can still be canceled
+        afterwards (terminal-from-INTERRUPTED)."""
+        # Given - interrupt the running task
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/interrupt",
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "INTERRUPTED"
+
+        # When - cancel the interrupted task
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/cancel",
+            json={"reason": "canceled after interrupt"},
+        )
+
+        # Then - the terminal transition succeeds from INTERRUPTED
+        assert response.status_code == 200
+        task_data = response.json()
+        assert task_data["status"] == "CANCELED"
+        assert task_data["status_reason"] == "canceled after interrupt"
+
+    async def test_cannot_interrupt_completed_task(self, isolated_client, test_task):
+        """A terminal (completed) task cannot be interrupted."""
+        # Given - complete the task first
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/complete",
+        )
+        assert response.status_code == 200
+
+        # When - try to interrupt the completed task
+        response = await isolated_client.post(
+            f"/tasks/{test_task.id}/interrupt",
+        )
+
+        # Then - rejected
+        assert response.status_code == 400
 
     async def test_terminate_task_endpoint(self, isolated_client, test_task):
         """Test POST /tasks/{task_id}/terminate transitions RUNNING to TERMINATED"""

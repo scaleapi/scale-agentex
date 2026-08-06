@@ -53,6 +53,8 @@ https://github.com/user-attachments/assets/9badad0d-f939-4243-ba39-68cafdae0078
 
 - **Install Python 3.12+ (Required)**: https://www.python.org/downloads/
 
+> **Redis is required.** Agentex uses Redis for streaming and messaging. You do **not** need to install it yourself — the Docker stack (`./dev.sh` / `make dev`) starts it for you. If you already run Redis locally it will conflict on port `6379`, so stop it first (see [Troubleshooting](#redis-port-conflict)).
+
 #### macOS/Linux
 
 ```bash
