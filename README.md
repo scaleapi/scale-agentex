@@ -46,7 +46,7 @@ Here is what we will build together in this README. We'll start with a Hello Wor
 
 https://github.com/user-attachments/assets/9badad0d-f939-4243-ba39-68cafdae0078
 
-> **Windows Users**: Please see [WINDOWS.md](WINDOWS.md) for a complete Windows-specific guide with PowerShell commands and troubleshooting tips.
+> **Windows Users**: Please see [WINDOWS.md](WINDOWS.md) for a complete Windows-specific guide. If WSL2 is available, run the docker-free local mode (`./dev.sh no-docker`) inside WSL2; otherwise (no WSL2 / locked-down environments) use the Docker-based flow with the PowerShell `build.ps1` scripts.
 
 
 ### Prerequisites
@@ -107,20 +107,27 @@ To do this, you just need to spin up the [Agentex Server](https://github.com/sca
 
 ### Quick Start (Recommended)
 
-Just run one command:
+Just run one command — no Docker required:
 
 ```bash
-./dev.sh
+./dev.sh no-docker
 ```
+
+> Once you see `[SUCCESS] Development environment is ready!` in the terminal, the stack is
+> up and waiting. Leave this terminal running and move on to
+> [Create Your First Agent](#create-your-first-agent) in a new terminal.
 
 That's it. This will automatically:
 - Install Homebrew, uv, Node.js, and agentex-sdk if missing (macOS)
 - Install all backend and frontend dependencies
-- Start all Docker services (Postgres, Redis, MongoDB, Temporal)
-- Start the backend API and frontend dev server
+- Start the backend API and frontend dev server as host processes
+- Provision embedded datastores — bundled Postgres + Redis, an auto-downloaded Temporal
+  dev server, a local MongoDB, and an optional OTel collector
 - Wait for everything to be healthy
 
-> **Note:** Make sure Docker Desktop or Rancher Desktop is running before you start.
+> Prefer containers? `./dev.sh` (or `./dev.sh docker`) runs the same stack with Docker
+> instead (needs Docker Desktop or Rancher Desktop) — see [Other commands](#other-commands)
+> below. See [Docker-free mode](#docker-free-mode) for `no-docker` flags and details.
 
 Once ready:
 | Service | URL |
@@ -130,13 +137,42 @@ Once ready:
 | Swagger Docs | http://localhost:5003/swagger |
 | Temporal UI | http://localhost:8080 |
 
-**Other commands:**
+#### Other commands
 ```bash
+./dev.sh           # Start everything with Docker instead (containers; needs Docker Desktop/Rancher)
 ./dev.sh stop      # Stop all services
 ./dev.sh status    # Check service status
 ./dev.sh logs      # View all logs
 ./dev.sh restart   # Restart all services
 ```
+
+#### Docker-free mode
+
+`./dev.sh no-docker` accepts flags to trim the stack:
+
+```bash
+./dev.sh no-docker                # whole stack, no Docker
+./dev.sh no-docker --lean         # Postgres + Redis + API + MongoDB only (no Temporal/OTel)
+./dev.sh no-docker --no-temporal  # skip Temporal + the worker
+./dev.sh no-docker --mongo-uri <uri>  # use an external MongoDB instead of a local mongod
+```
+
+> **MongoDB is required for the full no-docker stack** and is always started. The Temporal
+> worker needs it, so `./dev.sh no-docker` auto-installs `mongod` (via Homebrew) and startup
+> **fails fast** with an install message if it can't be made available. Point at an
+> existing MongoDB with `--mongo-uri <uri>` to skip the local `mongod`. The OTel
+> collector is optional; if it's absent the runner continues without telemetry. Ports
+> match Docker mode (Temporal UI at http://localhost:8080), so the same URLs work either
+> way. Same `stop` / `status` / `logs` / `restart` commands apply.
+
+**Connecting agents in no-docker mode.** Agents scaffolded by `agentex init` register their
+ACP URL as `http://host.docker.internal:<port>` (so a *Docker* backend can reach an
+agent on the host). A host-process backend can't resolve that name, so no-docker mode sets
+`AGENTEX_ACP_HOST_OVERRIDE=127.0.0.1` and the backend automatically rewrites
+`host.docker.internal` → `127.0.0.1` when dialing agents (and their healthchecks). So a
+default-scaffolded agent works with `./dev.sh no-docker` **without editing its manifest**.
+(You can still set `local_development.agent.host_address: localhost` in the manifest if
+you prefer; both work.)
 
 Then skip ahead to [Create Your First Agent](#create-your-first-agent).
 

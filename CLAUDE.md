@@ -55,6 +55,28 @@ Other commands:
 ./dev.sh restart            # Restart all services
 ```
 
+Docker-free mode (host processes + embedded datastores, no Docker):
+```bash
+./dev.sh no-docker              # whole stack without Docker (or: make dev-no-docker)
+./dev.sh no-docker --lean       # Postgres + Redis + API + MongoDB only
+./dev.sh no-docker --mongo-uri <uri>  # use an external MongoDB instead of a local mongod
+```
+
+> **MongoDB is required for the full no-docker stack** and is always started — the Temporal
+> worker builds Mongo-backed repositories at startup, so a missing/unreachable Mongo
+> makes the runner fail fast (with an install message) rather than crash the worker.
+> `./dev.sh no-docker` auto-installs `mongod`; `make dev-no-docker` / direct `python -m
+> scripts.dev_nodocker` do not, so install `mongod` yourself or pass `--mongo-uri <uri>` to
+> point at an external MongoDB. No-docker port defaults match Docker mode (Temporal UI on
+> :8080), so no port flags are needed for quick start; pass `--redis-port` / `--ui-port` /
+> etc. if a Docker service already holds a port.
+>
+> Agents register their ACP URL as `host.docker.internal` (for a Docker backend), which
+> a host-process backend can't resolve. No-docker mode sets `AGENTEX_ACP_HOST_OVERRIDE=127.0.0.1`
+> and the backend rewrites `host.docker.internal` → that value when dialing agents
+> (`src/utils/acp_url.py`, applied in the ACP request path + Temporal healthcheck), so
+> default-scaffolded agents work without manifest edits.
+
 **Then in a separate terminal - Agent Development:**
 ```bash
 agentex init                # Create a new agent
