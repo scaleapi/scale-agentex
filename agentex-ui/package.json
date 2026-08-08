@@ -56,6 +56,7 @@
   },
   "overrides": {
     "cross-spawn": "^7.0.5",
+    "nanoid": "^3.3.17",
     "postcss": "^8.5.23",
     "sharp": "^0.35.0",
     "tar": "^7.5.21"
