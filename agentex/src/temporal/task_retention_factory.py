@@ -18,7 +18,7 @@ from src.domain.repositories.agent_task_tracker_repository import (
 from src.domain.repositories.event_repository import EventRepository
 from src.domain.repositories.task_message_repository import TaskMessageRepository
 from src.domain.repositories.task_repository import TaskRepository
-from src.domain.repositories.task_state_repository import TaskStateRepository
+from src.domain.repositories.task_state_repository import get_task_state_repository
 from src.domain.services.task_message_service import TaskMessageService
 from src.domain.services.task_retention_service import TaskRetentionService
 from src.domain.use_cases.task_retention_use_case import TaskRetentionUseCase
@@ -41,7 +41,9 @@ def build_task_retention_use_case(
     task_message_repository = TaskMessageRepository(
         global_dependencies.mongodb_database
     )
-    task_state_repository = TaskStateRepository(global_dependencies.mongodb_database)
+    # Resolved through the shared selector (not constructed by hand) so the
+    # worker honors TASK_STATE_STORAGE_PHASE the same way the API does.
+    task_state_repository = get_task_state_repository()
     task_message_service = TaskMessageService(
         message_repository=task_message_repository
     )

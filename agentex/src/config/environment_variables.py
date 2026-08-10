@@ -55,6 +55,7 @@ class EnvVarKeys(str, Enum):
     HTTPX_POOL_TIMEOUT = "HTTPX_POOL_TIMEOUT"
     HTTPX_STREAMING_READ_TIMEOUT = "HTTPX_STREAMING_READ_TIMEOUT"
     SSE_KEEPALIVE_PING_INTERVAL = "SSE_KEEPALIVE_PING_INTERVAL"
+    SSE_STREAM_STALL_THRESHOLD_SECONDS = "SSE_STREAM_STALL_THRESHOLD_SECONDS"
     AGENTEX_SERVER_TASK_QUEUE = "AGENTEX_SERVER_TASK_QUEUE"
     ENABLE_HEALTH_CHECK_WORKFLOW = "ENABLE_HEALTH_CHECK_WORKFLOW"
     ENABLE_AGENT_RUN_SCHEDULES = "ENABLE_AGENT_RUN_SCHEDULES"
@@ -67,12 +68,27 @@ class EnvVarKeys(str, Enum):
     RETENTION_CLEANUP_MAX_IN_FLIGHT = "RETENTION_CLEANUP_MAX_IN_FLIGHT"
     RETENTION_CLEANUP_DRY_RUN = "RETENTION_CLEANUP_DRY_RUN"
     RETENTION_CLEANUP_STALE_RUNNING_DAYS = "RETENTION_CLEANUP_STALE_RUNNING_DAYS"
+    TASK_STATE_STORAGE_PHASE = "TASK_STATE_STORAGE_PHASE"
+    TASK_MESSAGE_STORAGE_PHASE = "TASK_MESSAGE_STORAGE_PHASE"
 
 
 class Environment(str, Enum):
     DEV = "development"
     STAGING = "staging"
     PROD = "production"
+
+
+class StoragePhase(str, Enum):
+    """Which backend serves a document store (task state, task messages).
+
+    POSTGRES becomes selectable per store once that store's Postgres
+    repository lands; until then refresh() rejects it at startup. A future
+    data-migration effort would define its own additional phases; new values
+    are additive, not breaking.
+    """
+
+    MONGODB = "mongodb"
+    POSTGRES = "postgres"
 
 
 refreshed_environment_variables = None
@@ -100,6 +116,30 @@ def _parse_bool_env(key: EnvVarKeys, default: bool) -> bool:
     raise ValueError(
         f"Invalid boolean for {key.value}: {raw!r} (expected true/false/1/0)"
     )
+
+
+def _validate_storage_phases(environment_variables: EnvironmentVariables) -> None:
+    """
+    The Postgres storage path lands store-by-store; until a store's repository
+    exists, selecting its phase must fail here — at process startup, in the
+    API and Temporal workers alike — rather than on first use, where it would
+    surface as request-time 500s or a crash inside worker wiring.
+    """
+    for key, phase in (
+        (
+            EnvVarKeys.TASK_STATE_STORAGE_PHASE,
+            environment_variables.TASK_STATE_STORAGE_PHASE,
+        ),
+        (
+            EnvVarKeys.TASK_MESSAGE_STORAGE_PHASE,
+            environment_variables.TASK_MESSAGE_STORAGE_PHASE,
+        ),
+    ):
+        if phase is not StoragePhase.MONGODB:
+            raise ValueError(
+                f"{key.value}={phase.value!r} is not supported yet; "
+                "only 'mongodb' is currently available"
+            )
 
 
 class EnvironmentVariables(BaseModel):
@@ -150,6 +190,10 @@ class EnvironmentVariables(BaseModel):
         300.0  # HTTPX streaming read timeout in seconds (5 minutes)
     )
     SSE_KEEPALIVE_PING_INTERVAL: int = 15  # SSE keepalive ping interval in seconds
+    # An open stream is counted as stalled once this many seconds pass with no
+    # data event pushed to the client. Kept above the keepalive interval so that
+    # keepalive pings (which are not data events) don't mask a real stall.
+    SSE_STREAM_STALL_THRESHOLD_SECONDS: int = 30
     AGENTEX_SERVER_TASK_QUEUE: str | None = None
     ENABLE_HEALTH_CHECK_WORKFLOW: bool = False
     # Gates the agent run schedules API. Off by default; enabled in development.
@@ -166,6 +210,19 @@ class EnvironmentVariables(BaseModel):
     # are treated as abandoned and become eligible for cleanup. 0 disables the
     # override (RUNNING tasks are never cleaned), preserving prior behavior.
     RETENTION_CLEANUP_STALE_RUNNING_DAYS: int = 0
+    # Storage backend per document store. The mongodb default keeps existing
+    # deployments unchanged; postgres serves that store from the relational
+    # database instead.
+    TASK_STATE_STORAGE_PHASE: StoragePhase = StoragePhase.MONGODB
+    TASK_MESSAGE_STORAGE_PHASE: StoragePhase = StoragePhase.MONGODB
+
+    @property
+    def mongodb_required(self) -> bool:
+        """True while any document store still needs a MongoDB connection."""
+        return not (
+            self.TASK_STATE_STORAGE_PHASE == StoragePhase.POSTGRES
+            and self.TASK_MESSAGE_STORAGE_PHASE == StoragePhase.POSTGRES
+        )
 
     @classmethod
     def refresh(cls, force_refresh: bool = False) -> EnvironmentVariables | None:
@@ -245,6 +302,9 @@ class EnvironmentVariables(BaseModel):
             SSE_KEEPALIVE_PING_INTERVAL=int(
                 os.environ.get(EnvVarKeys.SSE_KEEPALIVE_PING_INTERVAL, "15")
             ),
+            SSE_STREAM_STALL_THRESHOLD_SECONDS=int(
+                os.environ.get(EnvVarKeys.SSE_STREAM_STALL_THRESHOLD_SECONDS, "30")
+            ),
             AGENTEX_SERVER_TASK_QUEUE=os.environ.get(
                 EnvVarKeys.AGENTEX_SERVER_TASK_QUEUE
             ),
@@ -285,7 +345,14 @@ class EnvironmentVariables(BaseModel):
             RETENTION_CLEANUP_STALE_RUNNING_DAYS=int(
                 os.environ.get(EnvVarKeys.RETENTION_CLEANUP_STALE_RUNNING_DAYS, "0")
             ),
+            TASK_STATE_STORAGE_PHASE=os.environ.get(
+                EnvVarKeys.TASK_STATE_STORAGE_PHASE, StoragePhase.MONGODB
+            ),
+            TASK_MESSAGE_STORAGE_PHASE=os.environ.get(
+                EnvVarKeys.TASK_MESSAGE_STORAGE_PHASE, StoragePhase.MONGODB
+            ),
         )
+        _validate_storage_phases(environment_variables)
         refreshed_environment_variables = environment_variables
         return refreshed_environment_variables
 
