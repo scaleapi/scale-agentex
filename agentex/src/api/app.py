@@ -37,6 +37,7 @@ from src.api.routes import (
     deployment_history,
     deployments,
     events,
+    linear,
     messages,
     slack,
     spans,
@@ -204,7 +205,7 @@ fastapi_app.include_router(events.router)
 fastapi_app.include_router(slack.router)
 fastapi_app.include_router(agent_task_tracker.router)
 fastapi_app.include_router(agent_api_keys.router)
-fastapi_app.include_router(slack.router)
+fastapi_app.include_router(linear.router)
 fastapi_app.include_router(deployment_history.router)
 fastapi_app.include_router(deployments.router)
 # Agent run schedules are feature-flagged (off by default, enabled in development).
