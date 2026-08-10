@@ -42,16 +42,19 @@ class AgentsUseCase:
         self.authorization_service = authorization_service
 
     async def _safe_deregister(
-        self, agent_id: str, principal_context: Any = None
+        self, agent_id: str, principal_context: Any = ...
     ) -> None:
         """Best-effort removal of an agent from the authorization graph.
 
         Swallows and logs any failure so a compensating/post-delete deregister
         never masks the in-flight error (create) or fails a delete that already
-        succeeded. ``principal_context`` should be the same resolved principal
-        that was used for the preceding ``register_resource`` call so that
-        register and deregister are symmetric on all paths (including the
-        whitelisted pod path where the middleware principal is None).
+        succeeded. When ``principal_context`` is passed explicitly, use the same
+        resolved principal that was used for the preceding ``register_resource``
+        call so register and deregister are symmetric on all paths (including
+        the whitelisted pod path where the middleware principal is None). The
+        default forwards ``AuthorizationService``'s Ellipsis sentinel so the
+        middleware principal is used; a ``None`` default would defeat that
+        fallback and reach the gateway as-is.
         """
         try:
             await self.authorization_service.deregister_resource(
