@@ -187,7 +187,13 @@ def verify_signature(
     signing_secret: str, signature: str, body: bytes, webhook_timestamp: Any
 ) -> bool:
     """Linear webhook auth: hex HMAC-SHA256 over the RAW body with the webhook signing
-    secret, plus a ``webhookTimestamp`` (ms) freshness guard to prevent replay."""
+    secret, plus a ``webhookTimestamp`` (ms) freshness guard to prevent replay.
+
+    Fail CLOSED on an empty signing secret: an empty HMAC key is publicly known, so
+    accepting it would let anyone forge a valid signature and drive agent turns as the
+    bot. An unconfigured secret must reject every delivery, not authenticate all of them."""
+    if not signing_secret:
+        return False
     try:
         if abs(time.time() * 1000 - int(webhook_timestamp)) > _WEBHOOK_MAX_AGE_MS:
             return False
@@ -434,6 +440,11 @@ class LinearGatewayUseCase:
             content=_turn_content(inbound, prompt),
             format=TextFormat.MARKDOWN,
         )
+        # Target (agent + config) is bound at session creation and applied ONLY on the
+        # first-turn TASK_CREATE below. A Linear agent session is one conversation with
+        # one target, so a follow-up's leading token is treated as part of the message,
+        # not a re-route — the session keeps its original agent/config. (Same first-turn
+        # binding as the Slack gateway; switching target mid-session isn't supported.)
         create_params: dict[str, Any] = {}
         if target.config_id:
             create_params["config_id"] = target.config_id
@@ -509,7 +520,13 @@ class LinearGatewayUseCase:
         quiescence_s: float = 6.0,
     ) -> str | None:
         """Poll for THIS turn's reply: new agent-authored text that settles (unchanged
-        for quiescence_s) or times out. Filters on ids not present before the event."""
+        for quiescence_s) or times out. Filters on ids not present before the event.
+
+        Interim, same as the Slack gateway: reply attribution is by message-id snapshot,
+        not event-level correlation, so two prompts racing on the SAME session can each
+        collect the other's messages (swapped/combined replies). Linear sessions are
+        sequential in practice (prompt → wait → prompt), so the window is narrow; a
+        proper fix is event-correlated streaming, tracked as the shared follow-up."""
         waited, last, stable = 0.0, None, 0.0
         while waited < timeout_s:
             await asyncio.sleep(interval_s)
@@ -642,11 +659,16 @@ class LinearGatewayUseCase:
         for attempt in range(2):
             token = await self._app_token(force_refresh=attempt == 1)
             if not token:
-                logger.info(
-                    "[linear] no app token — would emit %s -> session %s: %s",
+                # No token (missing creds or mint failure): we can't reach Linear, so the
+                # session is left without this activity — a real misconfiguration, hence
+                # WARNING. Do NOT log the body: for a `response` it's agent output that
+                # shouldn't leak into the logging pipeline. Length only.
+                logger.warning(
+                    "[linear] no app token — dropped %s for session %s (%d chars); "
+                    "check LINEAR_CLIENT_ID / LINEAR_CLIENT_SECRET",
                     activity_type,
                     inbound.session_id,
-                    body[:200],
+                    len(body),
                 )
                 return
             try:

@@ -70,6 +70,13 @@ class TestVerifySignature:
     def test_nonnumeric_timestamp_fails(self):
         assert verify_signature("shh", "deadbeef", b"{}", "not-a-number") is False
 
+    def test_empty_secret_fails_closed(self):
+        # An empty HMAC key is publicly known — even a "correctly" computed signature
+        # over the empty key must be rejected, or an unconfigured secret authenticates
+        # every forged delivery.
+        body = b'{"x":1}'
+        assert verify_signature("", _sig("", body), body, _now_ms()) is False
+
 
 @pytest.mark.unit
 class TestNormalize:
