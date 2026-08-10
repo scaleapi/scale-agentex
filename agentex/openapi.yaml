@@ -2985,6 +2985,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /linear/events:
+    post:
+      tags:
+      - Linear
+      summary: Linear agent webhook ingress for the @agentex app
+      operationId: linear_events_linear_events_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Linear Events Linear Events Post
   /deployment-history/{deployment_id}:
     get:
       tags:
