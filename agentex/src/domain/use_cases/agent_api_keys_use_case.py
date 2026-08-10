@@ -29,6 +29,7 @@ from src.domain.repositories.agent_api_key_repository import (
 )
 from src.domain.repositories.agent_repository import DAgentRepository
 from src.domain.services.authorization_service import DAuthorizationService
+from src.utils.acp_url import resolve_acp_url
 from src.utils.ids import orm_id
 from src.utils.logging import make_logger
 
@@ -304,8 +305,9 @@ class AgentAPIKeysUseCase:
         if error_response:
             return error_response
 
-        # Construct the full URL for the agent request
-        agent_url = f"{agent.acp_url}/{path.lstrip('/')}"
+        # Construct the full URL for the agent request. resolve_acp_url rewrites a
+        # host.docker.internal host to the local override in docker-free mode (no-op otherwise).
+        agent_url = f"{resolve_acp_url(agent.acp_url)}/{path.lstrip('/')}"
         if request.url.query:
             agent_url += f"?{request.url.query}"
         logger.info(

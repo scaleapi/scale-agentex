@@ -43,6 +43,9 @@ tmp
 # Dev script logs
 .dev-logs/
 
+# Local (no-Docker) dev datastore data
+agentex/.dev-local/
+
 ### PYTHON
 
 # Byte-compiled / optimized / DLL files
