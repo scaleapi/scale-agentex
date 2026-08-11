@@ -8,7 +8,11 @@ from src.domain.entities.agent_api_keys import AgentAPIKeyType
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
 from src.domain.repositories.agent_api_key_repository import AgentAPIKeyRepository
 from src.domain.repositories.agent_repository import AgentRepository
-from src.domain.use_cases.agent_api_keys_use_case import AgentAPIKeysUseCase
+from src.domain.use_cases.agent_api_keys_use_case import (
+    AgentAPIKeysUseCase,
+    extract_agent_key_from_authorization,
+)
+from starlette.datastructures import Headers
 
 
 @pytest.fixture
@@ -220,3 +224,158 @@ class TestAgentAPIKeysUseCase:
             api_key_type=AgentAPIKeyType.EXTERNAL,
         )
         assert find_after_delete is None
+
+
+class _FakeRequest:
+    """Minimal Request stand-in exposing the header dict the use case reads.
+
+    Uses Starlette's ``Headers`` so lookups are case-insensitive, matching
+    real HTTP request semantics for cases like ``Authorization`` vs
+    ``authorization``.
+    """
+
+    def __init__(self, headers: dict[str, str]):
+        self.headers = Headers(headers)
+
+
+@pytest.mark.unit
+class TestExtractAgentKeyFromAuthorization:
+    """Pure-function tests for the Authorization header parser."""
+
+    def test_returns_none_for_absent_header(self):
+        assert extract_agent_key_from_authorization(None) is None
+        assert extract_agent_key_from_authorization("") is None
+
+    def test_extracts_agent_key(self):
+        assert extract_agent_key_from_authorization("AgentKey abc123") == "abc123"
+
+    def test_scheme_is_case_insensitive(self):
+        # RFC 9110 § 11.6.1 requires case-insensitive scheme matching.
+        assert extract_agent_key_from_authorization("agentkey abc123") == "abc123"
+        assert extract_agent_key_from_authorization("AGENTKEY abc123") == "abc123"
+        assert extract_agent_key_from_authorization("aGeNtKeY abc123") == "abc123"
+
+    def test_ignores_bearer_scheme(self):
+        # Preserves existing ``Authorization: Bearer ...`` semantics for SGP.
+        assert extract_agent_key_from_authorization("Bearer sgp-token") is None
+
+    def test_ignores_basic_scheme(self):
+        assert extract_agent_key_from_authorization("Basic dXNlcjpwYXNz") is None
+
+    def test_returns_none_for_empty_credentials(self):
+        assert extract_agent_key_from_authorization("AgentKey") is None
+        assert extract_agent_key_from_authorization("AgentKey ") is None
+        assert extract_agent_key_from_authorization("AgentKey   ") is None
+
+    def test_strips_surrounding_whitespace(self):
+        assert (
+            extract_agent_key_from_authorization("  AgentKey  abc123  ") == "abc123"
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+class TestValidateAgentIdentityHeadersAuthorizationScheme:
+    """End-to-end coverage of the AgentKey Authorization scheme.
+
+    Each case exercises ``validate_agent_identity_headers`` so both the
+    header parsing and the shared DB verification path are covered.
+    """
+
+    async def test_authorization_agent_key_valid(
+        self, agent_api_keys_use_case, agent_repository, sample_agent
+    ):
+        await create_or_get_agent(agent_repository, sample_agent)
+        created = await agent_api_keys_use_case.create(
+            name="webhook-key",
+            agent_id=sample_agent.id,
+            api_key_type=AgentAPIKeyType.EXTERNAL,
+            api_key="ironclad-secret",
+        )
+        request = _FakeRequest({"Authorization": f"AgentKey {created.api_key}"})
+        result = await agent_api_keys_use_case.validate_agent_identity_headers(
+            sample_agent.id, request, b""
+        )
+        assert result is None
+
+    async def test_authorization_agent_key_invalid_returns_401(
+        self, agent_api_keys_use_case, agent_repository, sample_agent
+    ):
+        await create_or_get_agent(agent_repository, sample_agent)
+        request = _FakeRequest({"Authorization": "AgentKey bogus-key"})
+        result = await agent_api_keys_use_case.validate_agent_identity_headers(
+            sample_agent.id, request, b""
+        )
+        assert result is not None
+        assert result.status_code == 401
+
+    async def test_authorization_agent_key_revoked_returns_401(
+        self, agent_api_keys_use_case, agent_repository, sample_agent
+    ):
+        # Revocation = the key row no longer exists; must produce identical
+        # semantics to ``x-agent-api-key`` (401).
+        await create_or_get_agent(agent_repository, sample_agent)
+        created = await agent_api_keys_use_case.create(
+            name="webhook-key",
+            agent_id=sample_agent.id,
+            api_key_type=AgentAPIKeyType.EXTERNAL,
+            api_key="revoked-secret",
+        )
+        await agent_api_keys_use_case.delete(id=created.id)
+        request = _FakeRequest({"Authorization": f"AgentKey {created.api_key}"})
+        result = await agent_api_keys_use_case.validate_agent_identity_headers(
+            sample_agent.id, request, b""
+        )
+        assert result is not None
+        assert result.status_code == 401
+
+    async def test_authorization_agent_key_wrong_agent_returns_401(
+        self, agent_api_keys_use_case, agent_repository, sample_agent
+    ):
+        # A key registered under one agent must not authenticate a forward
+        # request addressed to a different agent.
+        await create_or_get_agent(agent_repository, sample_agent)
+        created = await agent_api_keys_use_case.create(
+            name="webhook-key",
+            agent_id=sample_agent.id,
+            api_key_type=AgentAPIKeyType.EXTERNAL,
+            api_key="scoped-secret",
+        )
+        request = _FakeRequest({"Authorization": f"AgentKey {created.api_key}"})
+        result = await agent_api_keys_use_case.validate_agent_identity_headers(
+            "some-other-agent-id", request, b""
+        )
+        assert result is not None
+        assert result.status_code == 401
+
+    async def test_authorization_bearer_token_does_not_match_agent_key_path(
+        self, agent_api_keys_use_case, agent_repository, sample_agent
+    ):
+        # Regression: an ``Authorization: Bearer ...`` request must NOT be
+        # consumed by the AgentKey path. With the auth gateway disabled in the
+        # test harness the fallthrough surfaces as the "missing authentication"
+        # 403 rather than a 401 from the AgentKey invalid-key branch.
+        await create_or_get_agent(agent_repository, sample_agent)
+        request = _FakeRequest({"Authorization": "Bearer sgp-token"})
+        result = await agent_api_keys_use_case.validate_agent_identity_headers(
+            sample_agent.id, request, b""
+        )
+        assert result is not None
+        assert result.status_code == 403
+
+    async def test_x_agent_api_key_header_still_authenticates(
+        self, agent_api_keys_use_case, agent_repository, sample_agent
+    ):
+        # Regression: the pre-existing ``X-Agent-API-Key`` path is unchanged.
+        await create_or_get_agent(agent_repository, sample_agent)
+        created = await agent_api_keys_use_case.create(
+            name="legacy-key",
+            agent_id=sample_agent.id,
+            api_key_type=AgentAPIKeyType.EXTERNAL,
+            api_key="legacy-secret",
+        )
+        request = _FakeRequest({"X-Agent-API-Key": created.api_key})
+        result = await agent_api_keys_use_case.validate_agent_identity_headers(
+            sample_agent.id, request, b""
+        )
+        assert result is None

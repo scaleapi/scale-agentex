@@ -34,14 +34,14 @@ A common pattern is to receive the webhook, process the custom JSON payload from
 async def handle_code_changes(request: Request) -> JSONResponse:
     # Parse the webhook payload
     payload = await request.json()
-    
+
     # Extract relevant information
     pr_number = payload.get("pull_request", {}).get("number")
     commit_message = payload.get("commits", [{}])[0].get("message")
-    
+
     # Find or create the appropriate task for this PR
     task_id = await get_or_create_task_for_pr(pr_number)
-    
+
     # Route to your agent via ACP by sending an event
     await adk.events.send_event(
         task_id=task_id,
@@ -51,7 +51,7 @@ async def handle_code_changes(request: Request) -> JSONResponse:
             content=f"Code change detected: {commit_message}"
         )
     )
-    
+
     return JSONResponse(content={"message": "Success"})
 ```
 
@@ -72,6 +72,26 @@ The forward routes described above rely on Agent API Keys to authenticate the re
 For event providers that allow custom headers to be included with their requests, please create a new key for the agent (see below) and include its value as the `x-agent-api-key` header.
 At request time, the backend will verify both that this key still exists and is associated with the agent that is handling the request before passing it through to the handler implementation.
 
+Some providers only permit the standard `Authorization` header for a shared secret and do not allow custom headers such as `x-agent-api-key`.
+For these providers, the forward ingress also accepts the agent API key under a dedicated `Authorization` scheme:
+
+```
+Authorization: AgentKey <agent-api-key>
+```
+
+The `AgentKey` scheme is intentionally distinct from `Bearer`, so existing `Authorization: Bearer ...` requests continue to authenticate through the standard auth gateway.
+The value is validated exactly like `x-agent-api-key`: the key must exist and belong to the agent named in the URL, and invalid, revoked, or wrong-agent keys are rejected with `401 Unauthorized`.
+Use the same key that you would set as `x-agent-api-key` — the `general` API key create flow described below produces a value suitable for either header.
+
+For example, to send a webhook to an agent using the `Authorization` header:
+
+```bash
+curl -X POST $HOST/agents/forward/name/<AGENT_NAME>/<WEBHOOK_PATH> \
+  -H "Content-Type: application/json" \
+  -H "Authorization: AgentKey <agent-api-key>" \
+  -d '{"event": "..."}'
+```
+
 Not everyone supports including custom headers when sending webhook events - a common alternative is a configured secret which is used to sign these requests which can then be confirmed by the backend.
 The way the signature is calculated differs from product to product - we have implemented this for GitHub and Slack as the two most common use cases, but please let us know if you have another use case which require custom logic.
 
@@ -81,7 +101,9 @@ For now, API key management needs to be done by sending the right requests - cUR
 For configuring API keys in the local environment, it is sufficient to access `localhost:5003` without any authentication.
 
 ### Viewing API Keys
+
 You can always check to see all of the existing API keys that have been configured for a given agent by running the following command:
+
 ```bash
 curl http://localhost:5003/agent_api_keys?agent_name=AGENT_NAME
 ```
@@ -92,6 +114,7 @@ The examples below will just use $HOST instead of the local or remote version - 
 #### General
 
 To create an API key that will be included as the `x-agent-api-key` header, pick a memorable name for it (these will be unique per agent) and run the following command:
+
 ```bash
 curl -X POST $HOST/agent_api_keys \
   -H "Content-Type: application/json" \
@@ -107,6 +130,7 @@ You will not be able to retrieve the API key value after you've created the API 
 #### GitHub
 
 To store a GitHub secret that will be used to verify incoming webhook requests, grab the full name of the repository you will be configuring the webhook for and run the following command:
+
 ```bash
 # Replace with your repository name instead of scaleapi/scale-agentex!
 curl -X POST $HOST/agent_api_keys \
@@ -117,8 +141,10 @@ curl -X POST $HOST/agent_api_keys \
     "api_key_type": "github"
   }'
 ```
+
 The backend will generate an API key value for you, store this in the database, and return the value for you in the response so that you can set it in GitHub as the webhook secret.
 If you already have a webhook configured with a secret and you don't want to rotate it, you can also pass it as follows:
+
 ```bash
 # Replace with your repository name instead of scaleapi/scale-agentex
 curl -X POST $HOST/agent_api_keys \
@@ -132,11 +158,14 @@ curl -X POST $HOST/agent_api_keys \
 ```
 
 #### Slack
+
 To store a Slack secret that will be used to verify incoming webhook requests, you will need:
+
 - the App ID you will be configuring the webhook for (you can find this under Your Apps at https://api.slack.com/apps/)
 - the Signing Secret, available in the app admin panel under Basic Info
 
 If these are, for example, `A123ABC456` and `abcdefg12345` respectively, then run the following command:
+
 ```bash
 curl -X POST $HOST/agent_api_keys \
   -H "Content-Type: application/json" \
@@ -149,11 +178,14 @@ curl -X POST $HOST/agent_api_keys \
 ```
 
 ### Deleting API Keys
+
 If you'd like to remove an existing API key for whatever reason, first grab its ID by listing the keys for the appropriate agent as above.
 Once you have it, just send the following command:
+
 ```bash
 curl -X DELETE $HOST/agent_api_keys/API_KEY_ID
 ```
+
 and the key will be removed, allowing you to make a new one with the same name if desired.
 
 ## Enterprise
