@@ -132,9 +132,7 @@ export function ScheduledTasksPage() {
           <p className="text-muted-foreground text-sm">
             {effectiveScope === ScheduleScope.ALL
               ? 'Browse schedules across all agents.'
-              : agentName
-                ? `Run ${agentName} automatically on a cadence.`
-                : 'Select an agent to schedule recurring tasks.'}
+              : `Run ${agentName} automatically on a cadence.`}
           </p>
         </div>
         <ScheduleScopeSelector
@@ -239,6 +237,8 @@ function ScheduleScopeSelector({
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        // Mark the key consumed so global Escape handlers don't also fire.
+        event.preventDefault();
         setIsOpen(false);
         setQuery('');
         triggerRef.current?.focus();

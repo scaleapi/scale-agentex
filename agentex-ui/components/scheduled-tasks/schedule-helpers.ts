@@ -204,6 +204,9 @@ export function useCloseOnOutsideClick<T extends HTMLElement>(
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        // Mark the key consumed so global Escape handlers (e.g. clear
+        // selected agent) don't also fire.
+        event.preventDefault();
         onClose();
       }
     };

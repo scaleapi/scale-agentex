@@ -6,12 +6,7 @@ import { Loader2, Trash2 } from 'lucide-react';
 
 import { CadencePicker } from '@/components/scheduled-tasks/cadence-picker';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { toast } from '@/components/ui/toast';
 import {
   useScheduleAction,
@@ -115,6 +110,12 @@ export function EditScheduleModal({
     agentId,
   });
   const cadenceError = getCadenceValidationError(cadence);
+  const hasUnsavedChanges =
+    name !== schedule.name ||
+    prompt !== schedule.initial_input.content ||
+    timezone !== schedule.timezone ||
+    isActive !== !isSchedulePaused(schedule) ||
+    JSON.stringify(cadence) !== JSON.stringify(scheduleToCadence(schedule));
 
   const handleSave = async () => {
     if (cadenceError) {
@@ -141,7 +142,13 @@ export function EditScheduleModal({
 
   return (
     <>
-      <BasicModal title="Edit scheduled task" onClose={onClose}>
+      <BasicModal
+        title="Edit scheduled task"
+        onClose={onClose}
+        // An accidental Escape or backdrop click must not discard edits or
+        // interrupt a save; Cancel and Close remain the explicit exits.
+        canDismiss={() => !hasUnsavedChanges && !updateSchedule.isPending}
+      >
         <ScheduleNameInput name={name} setName={setName} />
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium">Prompt</span>
@@ -260,26 +267,31 @@ function BasicModal({
   title,
   children,
   onClose,
+  canDismiss,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
+  /**
+   * Gates Escape / backdrop-click dismissal only. The explicit Close and
+   * Cancel buttons always work; use this to keep an accidental dismissal
+   * from discarding in-progress state.
+   */
+  canDismiss?: () => boolean;
 }) {
   return (
     <Dialog
       open
       onOpenChange={open => {
-        if (!open) onClose();
+        if (!open && (canDismiss?.() ?? true)) onClose();
       }}
     >
       <DialogContent showCloseButton={false} aria-describedby={undefined}>
         <div className="flex items-center justify-between">
           <DialogTitle className="text-base">{title}</DialogTitle>
-          <DialogClose asChild>
-            <Button variant="ghost" size="sm">
-              Close
-            </Button>
-          </DialogClose>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Close
+          </Button>
         </div>
         <div className="flex flex-col gap-4">{children}</div>
       </DialogContent>

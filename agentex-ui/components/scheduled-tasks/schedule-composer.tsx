@@ -80,7 +80,11 @@ export function ScheduleComposer({
     setCreationFeedback({
       status: 'pending',
       title: name,
-      cadenceLabel: `${describeCadenceConfig(cadence)} · ${formatTimezone(timezone)}`,
+      // Intervals are epoch-aligned and ignore the timezone, so don't echo it.
+      cadenceLabel:
+        cadence.type === 'interval'
+          ? describeCadenceConfig(cadence)
+          : `${describeCadenceConfig(cadence)} · ${formatTimezone(timezone)}`,
     });
     setPrompt('');
     try {
