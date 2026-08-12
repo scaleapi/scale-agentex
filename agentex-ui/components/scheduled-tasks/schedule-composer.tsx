@@ -120,6 +120,7 @@ export function ScheduleComposer({
             }
           }}
           placeholder="What should this agent do on a schedule?"
+          aria-label="Schedule prompt"
           className="min-h-20 resize-none border-0 bg-transparent text-sm leading-6 outline-none focus:border-0 focus:ring-0 focus:outline-none focus-visible:outline-none"
         />
         <div className="flex flex-wrap items-center gap-3">

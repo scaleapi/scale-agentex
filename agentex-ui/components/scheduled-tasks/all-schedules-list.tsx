@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ButtonHTMLAttributes } from 'react';
+import { useState } from 'react';
 
 import {
   CalendarX2,
@@ -17,6 +17,12 @@ import {
   EditScheduleModal,
 } from '@/components/scheduled-tasks/schedule-modals';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useScheduleAction } from '@/hooks/use-agent-run-schedules';
 import type { AgentRunSchedule } from '@/lib/agent-run-schedules';
 import { describeCadence } from '@/lib/schedule-utils';
@@ -28,7 +34,6 @@ import {
   getNextRun,
   isSchedulePaused,
   type ScheduleListItem,
-  useCloseOnOutsideClick,
 } from './schedule-helpers';
 
 import type AgentexSDK from 'agentex';
@@ -160,9 +165,6 @@ export function ScheduleOverflowMenu({
   isSkipped?: boolean;
 }) {
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
-  const menuRef = useCloseOnOutsideClick<HTMLDivElement>(isOpen, () =>
-    setIsOpen(false)
-  );
   const pause = useScheduleAction({ agentexClient, agentId, action: 'pause' });
   const resume = useScheduleAction({
     agentexClient,
@@ -185,113 +187,93 @@ export function ScheduleOverflowMenu({
 
   return (
     <>
-      <div ref={menuRef} className="relative">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setIsOpen(open => !open)}
-          aria-label={`Open actions for ${schedule.name}`}
-        >
-          <MoreHorizontal className="size-4" />
-        </Button>
-        {isOpen && (
-          <div className="bg-popover text-popover-foreground absolute top-10 right-0 z-50 min-w-48 rounded-md border p-1 shadow-lg">
-            {showScheduleActions && (
-              <MenuButton
-                onClick={() => {
-                  setIsOpen(false);
-                  trigger.mutate(schedule.id);
+      <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={`Open actions for ${schedule.name}`}
+          >
+            <MoreHorizontal className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-48">
+          {showScheduleActions && (
+            <DropdownMenuItem
+              onSelect={() => trigger.mutate(schedule.id)}
+              disabled={trigger.isPending}
+            >
+              <Play className="size-4" />
+              Run now
+            </DropdownMenuItem>
+          )}
+          {isSkipped ? (
+            <DropdownMenuItem
+              onSelect={() => {
+                if (!scheduledTime) return;
+                unskip.mutate({ scheduleId: schedule.id, scheduledTime });
+              }}
+              disabled={unskip.isPending || !scheduledTime}
+            >
+              <Clock3 className="size-4" />
+              Unskip run
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem
+              onSelect={() => {
+                if (!scheduledTime) return;
+                skip.mutate({ scheduleId: schedule.id, scheduledTime });
+              }}
+              disabled={skip.isPending || !canSkip}
+            >
+              <CalendarX2 className="size-4" />
+              {showScheduleActions ? 'Skip next run' : 'Skip run'}
+            </DropdownMenuItem>
+          )}
+          {showScheduleActions && (
+            <DropdownMenuItem disabled title="Snooze support is coming soon">
+              <Clock3 className="size-4" />
+              Snooze — coming soon
+            </DropdownMenuItem>
+          )}
+          {showScheduleActions && (
+            <>
+              <DropdownMenuItem
+                onSelect={() => {
+                  if (isPaused) {
+                    resume.mutate(schedule.id);
+                  } else {
+                    pause.mutate(schedule.id);
+                  }
                 }}
-                disabled={trigger.isPending}
+                disabled={pause.isPending || resume.isPending}
               >
-                <Play className="size-4" />
-                Run now
-              </MenuButton>
-            )}
-            {isSkipped ? (
-              <MenuButton
-                onClick={() => {
-                  if (!scheduledTime) return;
-                  setIsOpen(false);
-                  unskip.mutate({ scheduleId: schedule.id, scheduledTime });
-                }}
-                disabled={unskip.isPending || !scheduledTime}
+                <PauseCircle className="size-4" />
+                {isPaused ? 'Resume' : 'Pause'}
+              </DropdownMenuItem>
+              {onEdit && (
+                <DropdownMenuItem onSelect={() => onEdit?.()}>
+                  <Pencil className="size-4" />
+                  Edit
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem
+                onSelect={() => setIsDeleteConfirmOpen(true)}
+                className="text-destructive focus:text-destructive [&_svg:not([class*='text-'])]:text-destructive"
               >
-                <Clock3 className="size-4" />
-                Unskip run
-              </MenuButton>
-            ) : (
-              <MenuButton
-                onClick={() => {
-                  if (!scheduledTime) return;
-                  setIsOpen(false);
-                  skip.mutate({ scheduleId: schedule.id, scheduledTime });
-                }}
-                disabled={skip.isPending || !canSkip}
-              >
-                <CalendarX2 className="size-4" />
-                {showScheduleActions ? 'Skip next run' : 'Skip run'}
-              </MenuButton>
-            )}
-            {showScheduleActions && (
-              <MenuButton disabled title="Snooze support is coming soon">
-                <Clock3 className="size-4" />
-                Snooze — coming soon
-              </MenuButton>
-            )}
-            {showScheduleActions && (
-              <>
-                <MenuButton
-                  onClick={() => {
-                    setIsOpen(false);
-                    if (isPaused) {
-                      resume.mutate(schedule.id);
-                    } else {
-                      pause.mutate(schedule.id);
-                    }
-                  }}
-                  disabled={pause.isPending || resume.isPending}
-                >
-                  <PauseCircle className="size-4" />
-                  {isPaused ? 'Resume' : 'Pause'}
-                </MenuButton>
-                {onEdit && (
-                  <MenuButton
-                    onClick={() => {
-                      setIsOpen(false);
-                      onEdit();
-                    }}
-                  >
-                    <Pencil className="size-4" />
-                    Edit
-                  </MenuButton>
-                )}
-                <MenuButton
-                  onClick={() => {
-                    setIsOpen(false);
-                    setIsDeleteConfirmOpen(true);
-                  }}
-                  className="text-destructive hover:text-destructive"
-                >
-                  <Trash2 className="size-4" />
-                  Delete
-                </MenuButton>
-              </>
-            )}
-            {!showScheduleActions && onEdit && (
-              <MenuButton
-                onClick={() => {
-                  setIsOpen(false);
-                  onEdit();
-                }}
-              >
-                <Pencil className="size-4" />
-                Edit schedule
-              </MenuButton>
-            )}
-          </div>
-        )}
-      </div>
+                <Trash2 className="size-4" />
+                Delete
+              </DropdownMenuItem>
+            </>
+          )}
+          {!showScheduleActions && onEdit && (
+            <DropdownMenuItem onSelect={() => onEdit?.()}>
+              <Pencil className="size-4" />
+              Edit schedule
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
       {isDeleteConfirmOpen && (
         <DeleteScheduleModal
           agentId={agentId}
@@ -301,24 +283,5 @@ export function ScheduleOverflowMenu({
         />
       )}
     </>
-  );
-}
-
-function MenuButton({
-  children,
-  className,
-  ...props
-}: ButtonHTMLAttributes<HTMLButtonElement>) {
-  return (
-    <button
-      type="button"
-      className={cn(
-        'hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm disabled:pointer-events-none disabled:opacity-50',
-        className
-      )}
-      {...props}
-    >
-      {children}
-    </button>
   );
 }
