@@ -80,18 +80,14 @@ export function sortScheduleItems(
   view: ScheduleView
 ) {
   return [...items].sort((a, b) => {
-    const aNextRun = getNextRunTime(a.schedule);
-    const bNextRun = getNextRunTime(b.schedule);
-
     if (view === 'upcoming') {
-      return (aNextRun ?? 0) - (bNextRun ?? 0);
+      return (
+        (getNextRunTime(a.schedule) ?? 0) - (getNextRunTime(b.schedule) ?? 0)
+      );
     }
 
-    if (aNextRun != null && bNextRun != null) {
-      return aNextRun - bNextRun;
-    }
-    if (aNextRun != null) return -1;
-    if (bNextRun != null) return 1;
+    // Name order keeps the Schedules tab stable: sorting by next run made a
+    // row jump to the bottom the moment its schedule was paused.
     return a.schedule.name.localeCompare(b.schedule.name);
   });
 }

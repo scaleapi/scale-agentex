@@ -36,6 +36,9 @@ import type { Agent } from 'agentex/resources';
 
 export function ScheduledTasksPage() {
   const { agentName, scheduleScope, updateParams } = useSafeSearchParams();
+  // With no agent selected there is nothing to scope to, so browse all
+  // agents instead of showing a "select an agent" empty state.
+  const effectiveScope = agentName ? scheduleScope : ScheduleScope.ALL;
   const { agentexClient } = useAgentexClient();
   const { data: agents = [], isLoading: agentsLoading } =
     useAgents(agentexClient);
@@ -53,7 +56,7 @@ export function ScheduledTasksPage() {
   const allScheduleQueries = useAgentRunSchedulesForAgents(
     agentexClient,
     agents,
-    scheduleScope === ScheduleScope.ALL
+    effectiveScope === ScheduleScope.ALL
   );
 
   const currentItems = useMemo<ScheduleListItem[]>(
@@ -81,7 +84,7 @@ export function ScheduledTasksPage() {
   );
 
   const baseItems =
-    scheduleScope === ScheduleScope.ALL ? allItems : currentItems;
+    effectiveScope === ScheduleScope.ALL ? allItems : currentItems;
   const unavailableLiveDataCount = useMemo(
     () =>
       baseItems.filter(
@@ -105,17 +108,17 @@ export function ScheduledTasksPage() {
   }, [baseItems, scheduleView]);
 
   const isLoading =
-    scheduleScope === ScheduleScope.ALL
+    effectiveScope === ScheduleScope.ALL
       ? agentsLoading || allScheduleQueries.some(query => query.isLoading)
       : schedulesQuery.isLoading;
   const error =
-    scheduleScope === ScheduleScope.ALL
+    effectiveScope === ScheduleScope.ALL
       ? (allScheduleQueries.find(query => query.error)?.error ?? null)
       : schedulesQuery.error;
   const emptyMessage =
     scheduleView === 'upcoming'
       ? 'No upcoming scheduled runs'
-      : scheduleScope === ScheduleScope.ALL
+      : effectiveScope === ScheduleScope.ALL
         ? 'No schedules across agents yet'
         : 'No scheduled tasks yet';
 
@@ -127,7 +130,7 @@ export function ScheduledTasksPage() {
             Scheduled Tasks
           </h1>
           <p className="text-muted-foreground text-sm">
-            {scheduleScope === ScheduleScope.ALL
+            {effectiveScope === ScheduleScope.ALL
               ? 'Browse schedules across all agents.'
               : agentName
                 ? `Run ${agentName} automatically on a cadence.`
@@ -135,7 +138,7 @@ export function ScheduledTasksPage() {
           </p>
         </div>
         <ScheduleScopeSelector
-          scope={scheduleScope}
+          scope={effectiveScope}
           selectedAgent={selectedAgent}
           agents={agents}
           isLoading={agentsLoading}
@@ -155,11 +158,11 @@ export function ScheduledTasksPage() {
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-8 py-6">
-        {scheduleScope === ScheduleScope.CURRENT && !selectedAgent ? (
+        {effectiveScope === ScheduleScope.CURRENT && !selectedAgent ? (
           <EmptyState message="Select an agent to create scheduled tasks." />
         ) : (
           <>
-            {scheduleScope === ScheduleScope.CURRENT && selectedAgent && (
+            {effectiveScope === ScheduleScope.CURRENT && selectedAgent && (
               <ScheduleComposer
                 agentId={selectedAgent.id}
                 agentexClient={agentexClient}
@@ -188,7 +191,7 @@ export function ScheduledTasksPage() {
               isLoading={isLoading}
               error={error}
               emptyMessage={emptyMessage}
-              showAgentName={scheduleScope === ScheduleScope.ALL}
+              showAgentName={effectiveScope === ScheduleScope.ALL}
               view={scheduleView}
             />
           </>

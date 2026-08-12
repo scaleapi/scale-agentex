@@ -6,7 +6,6 @@ import {
   CalendarX2,
   Clock3,
   MoreHorizontal,
-  PauseCircle,
   Pencil,
   Play,
   Trash2,
@@ -111,7 +110,9 @@ function ScheduleRow({
           disabled={pause.isPending || resume.isPending}
           className={cn(
             'flex h-6 w-11 items-center rounded-full p-0.5 transition-colors disabled:opacity-60',
-            isPaused ? 'bg-slate-200 dark:bg-slate-700' : 'bg-[#6F4DFF]'
+            isPaused
+              ? 'bg-slate-200 dark:bg-slate-700'
+              : 'bg-primary-foreground'
           )}
           aria-label={isPaused ? 'Activate schedule' : 'Deactivate schedule'}
         >
@@ -167,12 +168,6 @@ export function ScheduleOverflowMenu({
   isSkipped?: boolean;
 }) {
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
-  const pause = useScheduleAction({ agentexClient, agentId, action: 'pause' });
-  const resume = useScheduleAction({
-    agentexClient,
-    agentId,
-    action: 'resume',
-  });
   const skip = useScheduleAction({ agentexClient, agentId, action: 'skip' });
   const unskip = useScheduleAction({
     agentexClient,
@@ -240,19 +235,6 @@ export function ScheduleOverflowMenu({
           )}
           {showScheduleActions && (
             <>
-              <DropdownMenuItem
-                onSelect={() => {
-                  if (isPaused) {
-                    resume.mutate(schedule.id);
-                  } else {
-                    pause.mutate(schedule.id);
-                  }
-                }}
-                disabled={pause.isPending || resume.isPending}
-              >
-                <PauseCircle className="size-4" />
-                {isPaused ? 'Resume' : 'Pause'}
-              </DropdownMenuItem>
               {onEdit && (
                 <DropdownMenuItem onSelect={() => onEdit?.()}>
                   <Pencil className="size-4" />

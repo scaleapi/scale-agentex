@@ -148,7 +148,6 @@ export function useUpdateAgentRunSchedule({
         scheduleKeys.detail(agentId, schedule.id),
         schedule
       );
-      toast.success('Scheduled task updated');
     },
     onError: error => {
       toast.error({
@@ -235,18 +234,11 @@ export function useScheduleAction({
       });
       if (action === 'trigger') {
         // A manual run creates a task server-side; refresh the task list so it
-        // appears without a page reload.
+        // appears without a page reload. This is also the only action whose
+        // outcome isn't visible in place, so it keeps its success toast.
         queryClient.invalidateQueries({ queryKey: tasksKeys.all });
+        toast.success('Scheduled task triggered');
       }
-      toast.success(
-        action === 'trigger'
-          ? 'Scheduled task triggered'
-          : action === 'skip'
-            ? 'Scheduled run skipped'
-            : action === 'unskip'
-              ? 'Scheduled run restored'
-              : `Scheduled task ${action === 'delete' ? 'deleted' : `${action}d`}`
-      );
     },
     onError: error => {
       toast.error({

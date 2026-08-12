@@ -170,7 +170,9 @@ export function EditScheduleModal({
             onClick={() => setIsActive(current => !current)}
             className={cn(
               'flex h-6 w-11 items-center rounded-full p-0.5 transition-colors',
-              isActive ? 'bg-[#6F4DFF]' : 'bg-slate-200 dark:bg-slate-700'
+              isActive
+                ? 'bg-primary-foreground'
+                : 'bg-slate-200 dark:bg-slate-700'
             )}
             aria-label={isActive ? 'Pause schedule' : 'Activate schedule'}
             aria-pressed={isActive}

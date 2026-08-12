@@ -134,7 +134,7 @@ export function CadencePicker({
                 className={cn(
                   'rounded-lg px-3 py-2 text-sm font-medium capitalize transition-colors',
                   cadence.type === type
-                    ? 'bg-white text-[#5B3FFF] shadow-sm dark:bg-slate-800 dark:text-[#A78BFA]'
+                    ? 'text-primary-foreground bg-white shadow-sm dark:bg-slate-800'
                     : 'text-muted-foreground hover:text-foreground'
                 )}
               >
@@ -156,8 +156,8 @@ export function CadencePicker({
                       className={cn(
                         'flex size-10 items-center justify-center rounded-full border text-sm font-semibold transition-colors',
                         selected
-                          ? 'border-[#6F4DFF] bg-[#6F4DFF] text-white'
-                          : 'border-input text-muted-foreground hover:border-[#6F4DFF]/50'
+                          ? 'border-primary-foreground bg-primary-foreground text-white'
+                          : 'border-input text-muted-foreground hover:border-primary-foreground/50'
                       )}
                       aria-label={label}
                       aria-pressed={selected}

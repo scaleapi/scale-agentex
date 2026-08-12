@@ -120,14 +120,14 @@ function UpcomingScheduleRow({
   return (
     <>
       <div className="relative flex items-center justify-between gap-4">
-        <span className="absolute top-2 -left-8 z-10 size-2 rounded-full bg-[#7C5CFF]" />
+        <span className="bg-primary-foreground absolute top-2 -left-8 z-10 size-2 rounded-full" />
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold">{schedule.name}</div>
           <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-sm">
             <span>{formatUpcomingSubtitle(item.runTime)}</span>
             {showAgentName && <span>· {agentName}</span>}
             {item.isSkipped && (
-              <span className="rounded-full bg-[#7C5CFF]/10 px-2 py-0.5 text-xs font-medium text-[#6F4DFF]">
+              <span className="bg-primary-foreground/10 text-primary-foreground rounded-full px-2 py-0.5 text-xs font-medium">
                 Skipped
               </span>
             )}
@@ -290,7 +290,7 @@ function RunNowOption({
       disabled={disabled}
       className="border-border hover:bg-muted/40 flex w-full items-start gap-3 rounded-xl border p-4 text-left transition-colors disabled:pointer-events-none disabled:opacity-60"
     >
-      <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl bg-[#7C5CFF]/10 text-[#6F4DFF]">
+      <span className="bg-primary-foreground/10 text-primary-foreground mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl">
         {icon}
       </span>
       <span>
