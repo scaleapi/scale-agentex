@@ -138,6 +138,7 @@ export function ScheduledTasksPage() {
           scope={scheduleScope}
           selectedAgent={selectedAgent}
           agents={agents}
+          isLoading={agentsLoading}
           onChange={nextScope =>
             updateParams({
               [SearchParamKey.SCHEDULE_SCOPE]:
@@ -201,12 +202,14 @@ function ScheduleScopeSelector({
   scope,
   selectedAgent,
   agents,
+  isLoading,
   onChange,
   onSelectAgent,
 }: {
   scope: ScheduleScope;
   selectedAgent: Agent | null;
   agents: Agent[];
+  isLoading: boolean;
   onChange: (scope: ScheduleScope) => void;
   onSelectAgent: (agentName: string) => void;
 }) {
@@ -314,6 +317,15 @@ function ScheduleScopeSelector({
               <CalendarClock className="size-4" />
               All agents
             </button>
+            {isLoading && (
+              <div
+                className="text-muted-foreground flex items-center gap-2 px-2 py-3 text-sm"
+                role="status"
+              >
+                <Loader2 className="size-4 animate-spin" />
+                Loading agents…
+              </div>
+            )}
             {filteredAgents.map(agent => (
               <button
                 key={agent.id}
@@ -330,7 +342,7 @@ function ScheduleScopeSelector({
                 <span className="truncate">{agent.name}</span>
               </button>
             ))}
-            {query.trim() && filteredAgents.length === 0 && (
+            {!isLoading && query.trim() && filteredAgents.length === 0 && (
               <p className="text-muted-foreground px-2 py-3 text-center text-sm">
                 No agents found
               </p>

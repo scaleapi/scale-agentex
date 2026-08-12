@@ -95,7 +95,9 @@ function ScheduleRow({
         <div className="truncate text-sm font-semibold">{schedule.name}</div>
         <div className="text-muted-foreground truncate text-sm">
           {describeCadence(schedule)}
-          {` · ${formatTimezone(schedule.timezone)}`}
+          {schedule.interval_seconds == null
+            ? ` · ${formatTimezone(schedule.timezone)}`
+            : ''}
           {showAgentName ? ` · ${agentName}` : ''}
           {` · ${describeRunCount(schedule.num_actions_taken)}`}
         </div>

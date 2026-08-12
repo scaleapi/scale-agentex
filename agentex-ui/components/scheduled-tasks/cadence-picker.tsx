@@ -224,12 +224,19 @@ export function CadencePicker({
               />
             )}
 
-            <div className="flex items-center gap-3">
-              <span className="text-muted-foreground text-sm font-medium">
-                Timezone
-              </span>
-              <TimezoneSelect timezone={timezone} onChange={onTimezoneChange} />
-            </div>
+            {/* Intervals are epoch-aligned; the backend only applies the
+                timezone to cron cadences, so don't offer it for intervals. */}
+            {cadence.type !== 'interval' && (
+              <div className="flex items-center gap-3">
+                <span className="text-muted-foreground text-sm font-medium">
+                  Timezone
+                </span>
+                <TimezoneSelect
+                  timezone={timezone}
+                  onChange={onTimezoneChange}
+                />
+              </div>
+            )}
           </div>
 
           <div

@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 
-import { MessageSquarePlus, PanelLeftOpen } from 'lucide-react';
+import { CalendarClock, MessageSquarePlus, PanelLeftOpen } from 'lucide-react';
 
 import { TaskSidebarBody } from '@/components/task-sidebar/task-sidebar-body';
 import { TaskSidebarFooter } from '@/components/task-sidebar/task-sidebar-footer';
@@ -9,6 +9,7 @@ import { IconButton } from '@/components/ui/icon-button';
 import { ResizableSidebar } from '@/components/ui/resizable-sidebar';
 import { Separator } from '@/components/ui/separator';
 import {
+  AppView,
   SearchParamKey,
   useSafeSearchParams,
 } from '@/hooks/use-safe-search-params';
@@ -25,6 +26,13 @@ export function TaskSidebar({ agentRunSchedulesEnabled }: TaskSidebarProps) {
     updateParams({
       [SearchParamKey.TASK_ID]: null,
       [SearchParamKey.VIEW]: null,
+    });
+  }, [updateParams]);
+
+  const handleScheduledTasks = useCallback(() => {
+    updateParams({
+      [SearchParamKey.TASK_ID]: null,
+      [SearchParamKey.VIEW]: AppView.SCHEDULED_TASKS,
     });
   }, [updateParams]);
 
@@ -55,6 +63,15 @@ export function TaskSidebar({ agentRunSchedulesEnabled }: TaskSidebarProps) {
               className="text-foreground"
               aria-label="New Chat"
             />
+            {agentRunSchedulesEnabled && (
+              <IconButton
+                icon={CalendarClock}
+                onClick={handleScheduledTasks}
+                variant="ghost"
+                className="text-foreground"
+                aria-label="Scheduled Tasks"
+              />
+            )}
           </div>
           <TaskSidebarFooter collapsed className="mt-auto pb-2" />
         </>
@@ -66,7 +83,10 @@ export function TaskSidebar({ agentRunSchedulesEnabled }: TaskSidebarProps) {
         handleNewChat={handleNewChat}
       />
       <Separator />
-      <TaskSidebarBody className="flex-1" />
+      <TaskSidebarBody
+        className="flex-1"
+        agentRunSchedulesEnabled={agentRunSchedulesEnabled}
+      />
       <Separator />
       <TaskSidebarFooter />
     </ResizableSidebar>

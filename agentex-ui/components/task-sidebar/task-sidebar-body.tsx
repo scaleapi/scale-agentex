@@ -15,15 +15,23 @@ import { useInfiniteTasks } from '@/hooks/use-tasks';
 import { cn } from '@/lib/utils';
 
 export type TaskSidebarBodyProps = {
+  agentRunSchedulesEnabled: boolean;
   className?: string;
 };
 
-export const TaskSidebarBody = ({ className }: TaskSidebarBodyProps) => {
+export const TaskSidebarBody = ({
+  agentRunSchedulesEnabled,
+  className,
+}: TaskSidebarBodyProps) => {
   const { agentexClient } = useAgentexClient();
   const { agentName, scheduleScope, view } = useSafeSearchParams();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // Gate on the flag, not just the URL params, so the cross-agent view can't
+  // be reached by URL while the scheduled-tasks feature is off.
   const showTasksAcrossAgents =
-    view === AppView.SCHEDULED_TASKS && scheduleScope === ScheduleScope.ALL;
+    agentRunSchedulesEnabled &&
+    view === AppView.SCHEDULED_TASKS &&
+    scheduleScope === ScheduleScope.ALL;
 
   const {
     data,
