@@ -6,6 +6,7 @@ import {
 } from '@tanstack/react-query';
 
 import { toast } from '@/components/ui/toast';
+import { tasksKeys } from '@/hooks/use-tasks';
 import {
   type AgentRunSchedule,
   type CreateAgentRunScheduleRequest,
@@ -232,6 +233,11 @@ export function useScheduleAction({
         queryKey: scheduleKeys.byAgentId(agentId),
         exact: true,
       });
+      if (action === 'trigger') {
+        // A manual run creates a task server-side; refresh the task list so it
+        // appears without a page reload.
+        queryClient.invalidateQueries({ queryKey: tasksKeys.all });
+      }
       toast.success(
         action === 'trigger'
           ? 'Scheduled task triggered'
