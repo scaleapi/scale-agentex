@@ -35,6 +35,28 @@ from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
 
+# Dedicated Authorization scheme so providers that can only send the standard
+# ``Authorization`` header (e.g. Ironclad) can present an agent API key
+# without needing an intermediary proxy that rewrites headers. Distinct from
+# ``Bearer`` so SGP bearer authentication remains unambiguous.
+AGENT_KEY_AUTHORIZATION_SCHEME = "AgentKey"
+
+
+def extract_agent_key_from_authorization(header_value: str | None) -> str | None:
+    """Return the credentials from an ``Authorization: AgentKey <key>`` header.
+
+    Returns ``None`` when the header is absent, uses a different scheme, or
+    carries no credentials. Scheme matching is case-insensitive per
+    RFC 9110 § 11.6.1.
+    """
+    if not header_value:
+        return None
+    scheme, _, credentials = header_value.strip().partition(" ")
+    if scheme.lower() != AGENT_KEY_AUTHORIZATION_SCHEME.lower():
+        return None
+    credentials = credentials.strip()
+    return credentials or None
+
 
 class AgentAPIKeysUseCase:
     def __init__(
@@ -339,6 +361,19 @@ class AgentAPIKeysUseCase:
         if request.headers.get("X-Agent-API-Key"):
             return await self.validate_agent_api_key(agent_id, request)
 
+        # ``Authorization: AgentKey <key>`` must be checked before the SGP
+        # auth-gateway fallback so a valid agent-key request from a provider
+        # that only supports the standard ``Authorization`` header is not
+        # misrouted to bearer verification. ``Authorization: Bearer ...`` and
+        # any other scheme return ``None`` here and fall through unchanged.
+        authorization_agent_key = extract_agent_key_from_authorization(
+            request.headers.get("Authorization")
+        )
+        if authorization_agent_key is not None:
+            return await self._verify_external_agent_api_key(
+                agent_id, authorization_agent_key
+            )
+
         if request.headers.get("x-hub-signature-256"):
             # This is a GitHub webhook, use the API key from the ACP
             return await self.validate_github_delivery_webhook(
@@ -373,16 +408,25 @@ class AgentAPIKeysUseCase:
         """
         agent_api_key = request.headers.get("X-Agent-API-Key")
         assert agent_api_key, "Missing X-Agent-API-Key header."
+        return await self._verify_external_agent_api_key(agent_id, agent_api_key)
 
+    async def _verify_external_agent_api_key(
+        self, agent_id: str, api_key: str
+    ) -> JSONResponse | None:
+        """Verify an external agent API key belongs to ``agent_id``.
+
+        Shared by the ``X-Agent-API-Key`` header path and the
+        ``Authorization: AgentKey`` scheme path so invalid, revoked, and
+        wrong-agent keys produce identical semantics regardless of transport.
+        """
         api_key_entity = await self.agent_api_key_repo.get_external_by_agent_id_and_key(
-            agent_id=agent_id, api_key=agent_api_key
+            agent_id=agent_id, api_key=api_key
         )
         if not api_key_entity:
             return JSONResponse(
                 status_code=401,
                 content={"detail": f"Invalid API key for agent ID {agent_id}."},
             )
-
         return None
 
     async def validate_github_delivery_webhook(
