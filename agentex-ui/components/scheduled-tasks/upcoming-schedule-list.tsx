@@ -2,11 +2,18 @@
 
 import { useMemo, useState, type ReactNode } from 'react';
 
-import { CalendarX2, ChevronDown, ChevronUp, Play, X } from 'lucide-react';
+import { CalendarX2, ChevronDown, ChevronUp, Play } from 'lucide-react';
 
 import { ScheduleOverflowMenu } from '@/components/scheduled-tasks/all-schedules-list';
 import { EditScheduleModal } from '@/components/scheduled-tasks/schedule-modals';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useScheduleAction } from '@/hooks/use-agent-run-schedules';
 import type { AgentRunSchedule } from '@/lib/agent-run-schedules';
 
@@ -113,14 +120,14 @@ function UpcomingScheduleRow({
   return (
     <>
       <div className="relative flex items-center justify-between gap-4">
-        <span className="absolute top-2 -left-8 z-10 size-2 rounded-full bg-[#7C5CFF]" />
+        <span className="bg-primary-foreground absolute top-2 -left-8 z-10 size-2 rounded-full" />
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold">{schedule.name}</div>
           <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-sm">
             <span>{formatUpcomingSubtitle(item.runTime)}</span>
             {showAgentName && <span>· {agentName}</span>}
             {item.isSkipped && (
-              <span className="rounded-full bg-[#7C5CFF]/10 px-2 py-0.5 text-xs font-medium text-[#6F4DFF]">
+              <span className="bg-primary-foreground/10 text-primary-foreground rounded-full px-2 py-0.5 text-xs font-medium">
                 Skipped
               </span>
             )}
@@ -219,19 +226,19 @@ function RunNowModal({
   const runLabel = formatUpcomingSubtitle(runTime);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-      <div className="bg-background w-full max-w-md rounded-2xl border p-5 shadow-xl">
-        <div className="mb-5 flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold">Run task now</h2>
-            <p className="text-muted-foreground mt-1 text-sm">
-              Choose how to handle the scheduled run at {runLabel}.
-            </p>
-          </div>
-          <Button variant="ghost" size="icon" onClick={onClose}>
-            <X className="size-4" />
-          </Button>
-        </div>
+    <Dialog
+      open
+      onOpenChange={open => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Run task now</DialogTitle>
+          <DialogDescription>
+            Choose how to handle the scheduled run at {runLabel}.
+          </DialogDescription>
+        </DialogHeader>
 
         <div className="flex flex-col gap-2">
           <RunNowOption
@@ -250,7 +257,7 @@ function RunNowModal({
           />
         </div>
 
-        <div className="mt-4 flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-3">
           <p className="text-muted-foreground text-xs">
             Skipping only affects this occurrence; the schedule remains active.
           </p>
@@ -258,8 +265,8 @@ function RunNowModal({
             Cancel
           </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -283,7 +290,7 @@ function RunNowOption({
       disabled={disabled}
       className="border-border hover:bg-muted/40 flex w-full items-start gap-3 rounded-xl border p-4 text-left transition-colors disabled:pointer-events-none disabled:opacity-60"
     >
-      <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl bg-[#7C5CFF]/10 text-[#6F4DFF]">
+      <span className="bg-primary-foreground/10 text-primary-foreground mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl">
         {icon}
       </span>
       <span>

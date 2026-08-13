@@ -23,7 +23,7 @@ type AgentexUIRootProps = {
 export function AgentexUIRoot({
   agentRunSchedulesEnabled,
 }: AgentexUIRootProps) {
-  const { agentName, taskID, sgpAccountID, updateParams } =
+  const { agentName, taskID, view, sgpAccountID, updateParams } =
     useSafeSearchParams();
   const [isTracesSidebarOpen, setIsTracesSidebarOpen] = useState(false);
   const { agentexClient } = useAgentexClient();
@@ -103,8 +103,16 @@ export function AgentexUIRoot({
         event.preventDefault();
         handleSelectTask(null);
       }
-      // Escape to clear the selected agent on the home page
-      if (event.key === 'Escape' && !!agentName && !taskID) {
+      // Escape to clear the selected agent on the home page only. Other
+      // views own their Escape behavior (popovers, dialogs), and a handler
+      // that consumed the key marks it with preventDefault.
+      if (
+        event.key === 'Escape' &&
+        !event.defaultPrevented &&
+        !!agentName &&
+        !taskID &&
+        !view
+      ) {
         updateParams({
           [SearchParamKey.AGENT_NAME]: null,
         });
@@ -117,7 +125,14 @@ export function AgentexUIRoot({
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [handleSelectTask, agentName, taskID, updateParams, setLocalAgentName]);
+  }, [
+    handleSelectTask,
+    agentName,
+    taskID,
+    view,
+    updateParams,
+    setLocalAgentName,
+  ]);
 
   return (
     <>

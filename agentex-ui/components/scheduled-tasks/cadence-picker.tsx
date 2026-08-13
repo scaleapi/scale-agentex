@@ -134,7 +134,9 @@ export function CadencePicker({
                 className={cn(
                   'rounded-lg px-3 py-2 text-sm font-medium capitalize transition-colors',
                   cadence.type === type
-                    ? 'bg-white text-[#5B3FFF] shadow-sm dark:bg-slate-800 dark:text-[#A78BFA]'
+                    ? // violet-400 for dark: the token is #714dff in both
+                      // themes, which fails contrast on dark slate.
+                      'text-primary-foreground bg-white shadow-sm dark:bg-slate-800 dark:text-violet-400'
                     : 'text-muted-foreground hover:text-foreground'
                 )}
               >
@@ -156,8 +158,8 @@ export function CadencePicker({
                       className={cn(
                         'flex size-10 items-center justify-center rounded-full border text-sm font-semibold transition-colors',
                         selected
-                          ? 'border-[#6F4DFF] bg-[#6F4DFF] text-white'
-                          : 'border-input text-muted-foreground hover:border-[#6F4DFF]/50'
+                          ? 'border-primary-foreground bg-primary-foreground text-white'
+                          : 'border-input text-muted-foreground hover:border-primary-foreground/50'
                       )}
                       aria-label={label}
                       aria-pressed={selected}
@@ -224,12 +226,19 @@ export function CadencePicker({
               />
             )}
 
-            <div className="flex items-center gap-3">
-              <span className="text-muted-foreground text-sm font-medium">
-                Timezone
-              </span>
-              <TimezoneSelect timezone={timezone} onChange={onTimezoneChange} />
-            </div>
+            {/* Intervals are epoch-aligned; the backend only applies the
+                timezone to cron cadences, so don't offer it for intervals. */}
+            {cadence.type !== 'interval' && (
+              <div className="flex items-center gap-3">
+                <span className="text-muted-foreground text-sm font-medium">
+                  Timezone
+                </span>
+                <TimezoneSelect
+                  timezone={timezone}
+                  onChange={onTimezoneChange}
+                />
+              </div>
+            )}
           </div>
 
           <div

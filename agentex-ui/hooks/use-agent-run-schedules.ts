@@ -6,6 +6,7 @@ import {
 } from '@tanstack/react-query';
 
 import { toast } from '@/components/ui/toast';
+import { tasksKeys } from '@/hooks/use-tasks';
 import {
   type AgentRunSchedule,
   type CreateAgentRunScheduleRequest,
@@ -147,7 +148,6 @@ export function useUpdateAgentRunSchedule({
         scheduleKeys.detail(agentId, schedule.id),
         schedule
       );
-      toast.success('Scheduled task updated');
     },
     onError: error => {
       toast.error({
@@ -232,15 +232,13 @@ export function useScheduleAction({
         queryKey: scheduleKeys.byAgentId(agentId),
         exact: true,
       });
-      toast.success(
-        action === 'trigger'
-          ? 'Scheduled task triggered'
-          : action === 'skip'
-            ? 'Scheduled run skipped'
-            : action === 'unskip'
-              ? 'Scheduled run restored'
-              : `Scheduled task ${action === 'delete' ? 'deleted' : `${action}d`}`
-      );
+      if (action === 'trigger') {
+        // A manual run creates a task server-side; refresh the task list so it
+        // appears without a page reload. This is also the only action whose
+        // outcome isn't visible in place, so it keeps its success toast.
+        queryClient.invalidateQueries({ queryKey: tasksKeys.all });
+        toast.success('Scheduled task triggered');
+      }
     },
     onError: error => {
       toast.error({

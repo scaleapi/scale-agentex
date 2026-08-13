@@ -6,6 +6,7 @@ import { Loader2, Trash2 } from 'lucide-react';
 
 import { CadencePicker } from '@/components/scheduled-tasks/cadence-picker';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { toast } from '@/components/ui/toast';
 import {
   useScheduleAction,
@@ -109,6 +110,12 @@ export function EditScheduleModal({
     agentId,
   });
   const cadenceError = getCadenceValidationError(cadence);
+  const hasUnsavedChanges =
+    name !== schedule.name ||
+    prompt !== schedule.initial_input.content ||
+    timezone !== schedule.timezone ||
+    isActive !== !isSchedulePaused(schedule) ||
+    JSON.stringify(cadence) !== JSON.stringify(scheduleToCadence(schedule));
 
   const handleSave = async () => {
     if (cadenceError) {
@@ -135,7 +142,13 @@ export function EditScheduleModal({
 
   return (
     <>
-      <BasicModal title="Edit scheduled task" onClose={onClose}>
+      <BasicModal
+        title="Edit scheduled task"
+        onClose={onClose}
+        // An accidental Escape or backdrop click must not discard edits or
+        // interrupt a save; Cancel and Close remain the explicit exits.
+        canDismiss={() => !hasUnsavedChanges && !updateSchedule.isPending}
+      >
         <ScheduleNameInput name={name} setName={setName} />
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium">Prompt</span>
@@ -164,7 +177,9 @@ export function EditScheduleModal({
             onClick={() => setIsActive(current => !current)}
             className={cn(
               'flex h-6 w-11 items-center rounded-full p-0.5 transition-colors',
-              isActive ? 'bg-[#6F4DFF]' : 'bg-slate-200 dark:bg-slate-700'
+              isActive
+                ? 'bg-primary-foreground'
+                : 'bg-slate-200 dark:bg-slate-700'
             )}
             aria-label={isActive ? 'Pause schedule' : 'Activate schedule'}
             aria-pressed={isActive}
@@ -252,22 +267,34 @@ function BasicModal({
   title,
   children,
   onClose,
+  canDismiss,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
+  /**
+   * Gates Escape / backdrop-click dismissal only. The explicit Close and
+   * Cancel buttons always work; use this to keep an accidental dismissal
+   * from discarding in-progress state.
+   */
+  canDismiss?: () => boolean;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-      <div className="bg-background w-full max-w-lg rounded-2xl border p-5 shadow-xl">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold">{title}</h2>
+    <Dialog
+      open
+      onOpenChange={open => {
+        if (!open && (canDismiss?.() ?? true)) onClose();
+      }}
+    >
+      <DialogContent showCloseButton={false} aria-describedby={undefined}>
+        <div className="flex items-center justify-between">
+          <DialogTitle className="text-base">{title}</DialogTitle>
           <Button variant="ghost" size="sm" onClick={onClose}>
             Close
           </Button>
         </div>
         <div className="flex flex-col gap-4">{children}</div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
