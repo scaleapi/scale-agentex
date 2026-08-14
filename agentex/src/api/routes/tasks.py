@@ -23,7 +23,7 @@ from src.api.schemas.tasks import (
 from src.domain.entities.tasks import TaskStatus as DomainTaskStatus
 from src.domain.services.authorization_service import DAuthorizationService
 from src.domain.use_cases.streams_use_case import DStreamsUseCase
-from src.domain.use_cases.tasks_use_case import UNSET, DTaskUseCase
+from src.domain.use_cases.tasks_use_case import DTaskUseCase
 from src.utils.authorization_shortcuts import (
     DAuthorizedId,
     DAuthorizedName,
@@ -200,12 +200,7 @@ async def update_task(
         id=task_id,
         task_metadata=request.task_metadata,
         merge_params=request.merge_params,
-        # Forward only when the client sent the key: explicit null clears, omitted leaves unchanged.
-        current_state=(
-            request.current_state
-            if "current_state" in request.model_fields_set
-            else UNSET
-        ),
+        current_state=request.current_state,
     )
     return Task.model_validate(updated_task_entity)
 
@@ -227,12 +222,7 @@ async def update_task_by_name(
         name=task_name,
         task_metadata=request.task_metadata,
         merge_params=request.merge_params,
-        # Forward only when the client sent the key: explicit null clears, omitted leaves unchanged.
-        current_state=(
-            request.current_state
-            if "current_state" in request.model_fields_set
-            else UNSET
-        ),
+        current_state=request.current_state,
     )
     return Task.model_validate(updated_task_entity)
 

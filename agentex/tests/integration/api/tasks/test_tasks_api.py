@@ -678,7 +678,7 @@ class TestTasksAPIIntegration:
     async def test_update_task_current_state(
         self, isolated_client, isolated_repositories
     ):
-        """PUT current_state: explicit null clears, omitted leaves it, point-read reconciles."""
+        """PUT current_state: set it, omitted leaves it untouched, point-read reconciles."""
         agent_repo = isolated_repositories["agent_repository"]
         agent = AgentEntity(
             id=orm_id(),
@@ -721,15 +721,6 @@ class TestTasksAPIIntegration:
         )
         assert response.status_code == 200
         assert response.json()["current_state"] == "awaiting_input"
-
-        # Explicit null clears the label (distinct from omitting the field).
-        response = await isolated_client.put(
-            f"/tasks/{created_task.id}", json={"current_state": None}
-        )
-        assert response.status_code == 200
-        assert response.json()["current_state"] is None
-        response = await isolated_client.get(f"/tasks/{created_task.id}")
-        assert response.json()["current_state"] is None
 
     async def test_update_task_current_state_and_metadata_together(
         self, isolated_client, isolated_repositories

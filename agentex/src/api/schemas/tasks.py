@@ -120,6 +120,13 @@ class TaskSummary(BaseModel):
         None,
         title="Task metadata",
     )
+    current_state: str | None = Field(
+        None,
+        title=(
+            "Opaque label mirroring the agent's StateMachine current state; "
+            "null when the agent does not emit one. Orthogonal to 'status'."
+        ),
+    )
     agents: list["Agent"] | None = Field(
         default=None,
         title="Agents associated with this task (only populated when 'agents' view is requested)",
@@ -142,10 +149,7 @@ class UpdateTaskRequest(BaseModel):
     current_state: str | None = Field(
         None,
         max_length=CURRENT_STATE_MAX_LENGTH,
-        title=(
-            "If provided, replaces the task's current_state label; "
-            "pass null to clear it, omit to leave it unchanged."
-        ),
+        title="If provided, replaces the task's current_state label.",
     )
 
 

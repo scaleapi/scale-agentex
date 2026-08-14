@@ -615,7 +615,7 @@ class TestTasksUseCaseMetadataUpdate:
     async def test_update_current_state_noop_when_omitted(
         self, tasks_use_case, task_service, agent_repository, sample_agent
     ):
-        """Omitting current_state (the UNSET default) leaves it untouched."""
+        """Omitting current_state leaves an already-set value untouched."""
         await create_or_get_agent(agent_repository, sample_agent)
         task = await task_service.create_task(
             agent=sample_agent, task_name="current-state-omitted-test"
@@ -630,26 +630,6 @@ class TestTasksUseCaseMetadataUpdate:
         )
 
         assert updated.current_state == "set-once"
-
-    async def test_update_current_state_clears_on_explicit_null(
-        self, tasks_use_case, task_service, agent_repository, sample_agent
-    ):
-        """Passing current_state=None explicitly clears the label (vs omitting)."""
-        await create_or_get_agent(agent_repository, sample_agent)
-        task = await task_service.create_task(
-            agent=sample_agent, task_name="current-state-clear-test"
-        )
-        was_set = await tasks_use_case.update_mutable_fields_on_task(
-            id=task.id, current_state="working"
-        )
-        # Confirm it was set, so the clear below is a real transition (not a trivial null→null).
-        assert was_set.current_state == "working"
-
-        cleared = await tasks_use_case.update_mutable_fields_on_task(
-            id=task.id, current_state=None
-        )
-
-        assert cleared.current_state is None
 
     async def test_update_current_state_and_metadata_single_atomic_write(
         self, tasks_use_case, task_service, agent_repository, sample_agent
