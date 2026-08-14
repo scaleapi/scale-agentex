@@ -2567,6 +2567,21 @@ paths:
                 additionalProperties: true
                 type: object
                 title: Response Slack Commands Slack Commands Post
+  /slack/interactions:
+    post:
+      tags:
+      - Slack
+      summary: Slack interactivity ingress (modals, shortcuts)
+      operationId: slack_interactions_slack_interactions_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Slack Interactions Slack Interactions Post
   /tracker/{tracker_id}:
     get:
       tags:
