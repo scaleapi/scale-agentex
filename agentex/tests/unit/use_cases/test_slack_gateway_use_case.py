@@ -6,6 +6,7 @@ mocked). No running stack, no golden_agent, no Slack.
 
 import hashlib
 import hmac
+import json
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -1152,12 +1153,183 @@ class TestHandleSlashCommand:
         assert "pr-bot" in resp["text"]
 
     @pytest.mark.asyncio
+    async def test_agents_command_opens_modal_when_trigger_id_present(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(sg, "_DEV_SKIP_VERIFY", True)
+        uc = SlackGatewayUseCase()
+        opened = AsyncMock(return_value=True)
+        monkeypatch.setattr(uc, "_open_agents_modal", opened)
+        resp = await uc.handle_slash_command(
+            body=b"",
+            headers={},
+            form={"command": "/agents", "trigger_id": "TR1", "channel_id": "C1"},
+        )
+        assert resp == {}  # empty 200; the modal opened out of band
+        opened.assert_awaited_once_with("TR1", "C1")
+
+    @pytest.mark.asyncio
+    async def test_agents_command_falls_back_to_list_when_modal_fails(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(sg, "_DEV_SKIP_VERIFY", True)
+        uc = SlackGatewayUseCase()
+        monkeypatch.setattr(uc, "_open_agents_modal", AsyncMock(return_value=False))
+        monkeypatch.setattr(
+            uc,
+            "_list_agents",
+            AsyncMock(
+                return_value=[SimpleNamespace(name="pr-bot", description="Reviews PRs")]
+            ),
+        )
+        resp = await uc.handle_slash_command(
+            body=b"", headers={}, form={"command": "/agents", "trigger_id": "TR1"}
+        )
+        assert resp["response_type"] == "ephemeral"
+        assert "pr-bot" in resp["text"]
+
+    @pytest.mark.asyncio
     async def test_unknown_command_is_reported(self, monkeypatch):
         monkeypatch.setattr(sg, "_DEV_SKIP_VERIFY", True)
         resp = await SlackGatewayUseCase().handle_slash_command(
             body=b"", headers={}, form={"command": "/whoami"}
         )
         assert "Unsupported command" in resp["text"]
+
+
+@pytest.mark.unit
+class TestHandleInteraction:
+    """The /agents modal's view_submission: post a breadcrumb, then build the SAME
+    InboundSlack an @mention would and dispatch the turn (anchored on the breadcrumb)."""
+
+    def _payload(self, agent="golden-agent", message="summarize this"):
+        return {
+            "type": "view_submission",
+            "user": {"id": "U1"},
+            "team": {"id": "T1"},
+            "view": {
+                "callback_id": "agents_modal",
+                "private_metadata": "C1",
+                "state": {
+                    "values": {
+                        "agent_block": {
+                            "agent_select": {"selected_option": {"value": agent}}
+                        },
+                        "message_block": {"message_input": {"value": message}},
+                    }
+                },
+            },
+        }
+
+    @pytest.mark.asyncio
+    async def test_submission_posts_breadcrumb_and_schedules_turn(self, monkeypatch):
+        monkeypatch.setattr(sg, "_DEV_SKIP_VERIFY", True)
+        uc = SlackGatewayUseCase()
+        api = AsyncMock(return_value={"ok": True, "ts": "1700.5"})
+        monkeypatch.setattr(uc, "_slack_api", api)
+        bg = BackgroundTasks()
+        result = await uc.handle_interaction(
+            body=b"",
+            headers={},
+            form={"payload": json.dumps(self._payload())},
+            background=bg,
+        )
+        assert result == {}  # empty 200 closes the modal
+        # breadcrumb: reconstructed command as the body, attribution as a context footer
+        method, payload = api.await_args.args
+        assert method == "chat.postMessage"
+        assert payload["channel"] == "C1"
+        assert "@agentex golden-agent summarize this" in payload["text"]
+        footer = payload["blocks"][-1]
+        assert footer["type"] == "context"
+        footer_text = footer["elements"][0]["text"]
+        assert "<@U1>" in footer_text and "golden-agent" in footer_text
+        # turn scheduled with an InboundSlack that mirrors an @mention
+        assert len(bg.tasks) == 1
+        inbound = bg.tasks[0].args[0]
+        assert inbound.selector == "golden-agent"
+        assert inbound.text == "golden-agent summarize this"
+        assert inbound.thread_ts == "1700.5"  # reply threads under the breadcrumb
+        assert inbound.channel == "C1"
+        assert inbound.user == "U1"
+
+    @pytest.mark.asyncio
+    async def test_breadcrumb_failure_returns_modal_error(self, monkeypatch):
+        monkeypatch.setattr(sg, "_DEV_SKIP_VERIFY", True)
+        uc = SlackGatewayUseCase()
+        monkeypatch.setattr(
+            uc,
+            "_slack_api",
+            AsyncMock(return_value={"ok": False, "error": "not_in_channel"}),
+        )
+        bg = BackgroundTasks()
+        result = await uc.handle_interaction(
+            body=b"",
+            headers={},
+            form={"payload": json.dumps(self._payload())},
+            background=bg,
+        )
+        assert result["response_action"] == "errors"
+        assert "message_block" in result["errors"]
+        assert len(bg.tasks) == 0  # not-in-channel -> no turn dispatched
+
+    @pytest.mark.asyncio
+    async def test_missing_message_returns_error_without_posting(self, monkeypatch):
+        monkeypatch.setattr(sg, "_DEV_SKIP_VERIFY", True)
+        uc = SlackGatewayUseCase()
+        api = AsyncMock()
+        monkeypatch.setattr(uc, "_slack_api", api)
+        bg = BackgroundTasks()
+        result = await uc.handle_interaction(
+            body=b"",
+            headers={},
+            form={"payload": json.dumps(self._payload(message=""))},
+            background=bg,
+        )
+        assert result["response_action"] == "errors"
+        api.assert_not_awaited()  # no breadcrumb attempted
+        assert len(bg.tasks) == 0
+
+    @pytest.mark.asyncio
+    async def test_non_modal_interaction_is_ignored(self, monkeypatch):
+        monkeypatch.setattr(sg, "_DEV_SKIP_VERIFY", True)
+        uc = SlackGatewayUseCase()
+        api = AsyncMock()
+        monkeypatch.setattr(uc, "_slack_api", api)
+        bg = BackgroundTasks()
+        form = {
+            "payload": json.dumps(
+                {"type": "block_actions", "view": {"callback_id": "other"}}
+            )
+        }
+        result = await uc.handle_interaction(
+            body=b"", headers={}, form=form, background=bg
+        )
+        assert result == {}
+        api.assert_not_awaited()
+        assert len(bg.tasks) == 0
+
+    @pytest.mark.asyncio
+    async def test_bad_signature_drops(self, monkeypatch):
+        monkeypatch.setattr(sg, "_DEV_SKIP_VERIFY", False)
+        uc = SlackGatewayUseCase()
+        monkeypatch.setattr(uc, "_fetch_signing_secret", AsyncMock(return_value="shh"))
+        api = AsyncMock()
+        monkeypatch.setattr(uc, "_slack_api", api)
+        bg = BackgroundTasks()
+        form = {"payload": json.dumps({"api_app_id": "A1", **self._payload()})}
+        result = await uc.handle_interaction(
+            body=b"whatever",
+            headers={
+                "x-slack-request-timestamp": str(int(time.time())),
+                "x-slack-signature": "v0=bad",
+            },
+            form=form,
+            background=bg,
+        )
+        assert result == {}
+        api.assert_not_awaited()
+        assert len(bg.tasks) == 0
 
     @pytest.mark.asyncio
     async def test_bad_signature_rejected(self, monkeypatch):
