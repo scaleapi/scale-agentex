@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import json
 import os
 import re
 import time
@@ -246,6 +247,63 @@ def _agents_list_response(agents) -> dict:
     return {"response_type": "ephemeral", "text": text}
 
 
+_AGENTS_MODAL_CALLBACK = "agents_modal"
+
+
+def _build_agents_modal(agents, channel_id: str) -> dict:
+    """Block Kit view for the /agents picker: a dropdown of invocable agents + a
+    message box. ``channel_id`` rides in ``private_metadata`` so the view_submission
+    knows where to post. The selected value is the agent name, which the submission
+    handler feeds into the SAME selector->target resolution as an @mention."""
+    options = [
+        {
+            "text": {"type": "plain_text", "text": a.name[:75]},
+            "value": a.name[:75],
+            **(
+                {"description": {"type": "plain_text", "text": a.description[:75]}}
+                if getattr(a, "description", None)
+                else {}
+            ),
+        }
+        for a in agents[:100]  # Slack static_select caps at 100 options
+    ]
+    return {
+        "type": "modal",
+        "callback_id": _AGENTS_MODAL_CALLBACK,
+        "private_metadata": channel_id,
+        "title": {"type": "plain_text", "text": "Ask an agent"},
+        "submit": {"type": "plain_text", "text": "Send"},
+        "close": {"type": "plain_text", "text": "Cancel"},
+        "blocks": [
+            {
+                "type": "input",
+                "block_id": "agent_block",
+                "label": {"type": "plain_text", "text": "Agent"},
+                "element": {
+                    "type": "static_select",
+                    "action_id": "agent_select",
+                    "placeholder": {"type": "plain_text", "text": "Choose an agent"},
+                    "options": options,
+                },
+            },
+            {
+                "type": "input",
+                "block_id": "message_block",
+                "label": {"type": "plain_text", "text": "Message"},
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "message_input",
+                    "multiline": True,
+                    "placeholder": {
+                        "type": "plain_text",
+                        "text": "What do you want the agent to do?",
+                    },
+                },
+            },
+        ],
+    }
+
+
 def _agent_text(messages) -> str | None:
     """Join agent-authored text content from a list of task messages."""
     parts = []
@@ -377,11 +435,129 @@ class SlackGatewayUseCase:
 
         command = (form.get("command") or "").strip()
         if command == "/agents":
+            # Open the picker modal; fall back to the plain ephemeral list when we
+            # can't (no trigger_id, no agents, or views.open failed).
+            trigger_id = form.get("trigger_id") or ""
+            channel_id = form.get("channel_id") or ""
+            if trigger_id and await self._open_agents_modal(trigger_id, channel_id):
+                return {}  # empty 200: Slack shows nothing; the modal is already open
             return _agents_list_response(await self._list_agents())
         return {
             "response_type": "ephemeral",
             "text": f"Unsupported command: {command or '(none)'}",
         }
+
+    async def handle_interaction(
+        self,
+        *,
+        body: bytes,
+        headers: dict[str, str],
+        form: dict[str, Any],
+        background: BackgroundTasks,
+    ) -> dict:
+        """Handle a Slack interactivity POST. v1 handles the /agents modal's
+        ``view_submission`` (see _submit_agents_modal). Payload is form-encoded with a
+        JSON ``payload`` field; the signature covers the raw body (verified like slash
+        commands)."""
+        try:
+            payload = json.loads(form.get("payload") or "{}")
+        except (TypeError, ValueError):
+            return {}
+
+        if _DEV_SKIP_VERIFY:
+            logger.warning(
+                "SLACK_GATEWAY_DEV_SKIP_VERIFY is ON — skipping interaction signature "
+                "verification. DEV ONLY."
+            )
+        else:
+            api_app_id = payload.get("api_app_id") or ""
+            signing_secret = await self._fetch_signing_secret(api_app_id)
+            if not verify_signature(
+                signing_secret,
+                headers.get("x-slack-request-timestamp", ""),
+                headers.get("x-slack-signature", ""),
+                body,
+            ):
+                logger.warning(
+                    "slack interaction signature failed for app %s", api_app_id
+                )
+                return {}
+
+        if payload.get("type") != "view_submission":
+            return {}
+        view = payload.get("view") or {}
+        if view.get("callback_id") == _AGENTS_MODAL_CALLBACK:
+            return await self._submit_agents_modal(payload, view, background)
+        return {}  # not ours — ack empty
+
+    async def _submit_agents_modal(
+        self, payload: dict, view: dict, background: BackgroundTasks
+    ) -> dict:
+        """/agents modal submission: post a breadcrumb (records the request + anchors
+        the reply thread) then build the SAME InboundSlack an @mention would and run
+        the turn out-of-band."""
+        values = (view.get("state") or {}).get("values") or {}
+        agent_sel = (values.get("agent_block") or {}).get("agent_select") or {}
+        agent = (agent_sel.get("selected_option") or {}).get("value") or ""
+        message = ((values.get("message_block") or {}).get("message_input") or {}).get(
+            "value"
+        ) or ""
+        channel = view.get("private_metadata") or ""
+        user = (payload.get("user") or {}).get("id") or ""
+        team = (payload.get("team") or {}).get("id") or ""
+
+        if not (agent and message and channel):
+            return {
+                "response_action": "errors",
+                "errors": {"message_block": "Pick an agent and enter a message."},
+            }
+
+        # Breadcrumb: reads like the equivalent @mention, records who asked, and its ts
+        # anchors the reply thread. Posted by the bot, so normalize() ignores it (no
+        # second turn). If the bot isn't in the channel the post fails — the modal can
+        # be launched from anywhere, but we can only post where the bot is a member.
+        command = f"@agentex {agent} {message}"
+        crumb = await self._slack_api(
+            "chat.postMessage",
+            {
+                "channel": channel,
+                "text": command,  # notification / accessibility fallback
+                "blocks": [
+                    {"type": "section", "text": {"type": "mrkdwn", "text": command}},
+                    # Attribution as a context block — Slack renders it as a small,
+                    # muted footer rather than inline body text.
+                    {
+                        "type": "context",
+                        "elements": [
+                            {
+                                "type": "mrkdwn",
+                                "text": f"via <@{user}> through *{agent}*",
+                            }
+                        ],
+                    },
+                ],
+            },
+        )
+        if not crumb.get("ok"):
+            logger.warning("[slack] breadcrumb post failed: %s", crumb.get("error"))
+            return {
+                "response_action": "errors",
+                "errors": {
+                    "message_block": "I couldn't post in that channel — invite me to "
+                    "it (`/invite`), then try again."
+                },
+            }
+
+        inbound = InboundSlack(
+            team_id=team,
+            channel=channel,
+            user=user,
+            text=f"{agent} {message}",  # mirrors an @mention so _resolve_target matches
+            thread_ts=crumb.get("ts") or "",
+            selector=agent,
+        )
+        background.add_task(self._run_turn, inbound)
+        return {}  # empty 200 closes the modal
 
     async def _run_turn(self, inbound: InboundSlack) -> None:
         try:
@@ -855,6 +1031,40 @@ class SlackGatewayUseCase:
             )
         else:
             logger.warning("[slack] chat.postMessage failed: %s", body.get("error"))
+
+    async def _slack_api(self, method: str, payload: dict) -> dict:
+        """POST to the Slack Web API with the bot token; returns the parsed body.
+        Returns ``{"ok": False, ...}`` (never raises) when the token is unset or the
+        request fails, so callers can branch on ``ok`` uniformly."""
+        token = await self._fetch_bot_token()
+        if not token:
+            logger.info("[slack] %s skipped: no bot token", method)
+            return {"ok": False, "error": "no_bot_token"}
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(
+                    f"https://slack.com/api/{method}",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json=payload,
+                )
+            return resp.json()
+        except Exception:
+            logger.warning("[slack] %s request failed", method, exc_info=True)
+            return {"ok": False, "error": "request_failed"}
+
+    async def _open_agents_modal(self, trigger_id: str, channel_id: str) -> bool:
+        """Open the /agents picker modal. Returns False (caller falls back to the plain
+        ephemeral list) when there are no agents or ``views.open`` failed."""
+        agents = await self._list_agents()
+        if not agents:
+            return False
+        body = await self._slack_api(
+            "views.open",
+            {"trigger_id": trigger_id, "view": _build_agents_modal(agents, channel_id)},
+        )
+        if not body.get("ok"):
+            logger.warning("[slack] views.open failed: %s", body.get("error"))
+        return bool(body.get("ok"))
 
 
 DSlackGatewayUseCase = Annotated[SlackGatewayUseCase, Depends(SlackGatewayUseCase)]
