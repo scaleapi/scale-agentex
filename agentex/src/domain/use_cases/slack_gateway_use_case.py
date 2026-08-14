@@ -197,18 +197,37 @@ def _strip_selector(text: str, selector: str) -> str:
     return stripped
 
 
-def _turn_content(inbound: InboundSlack, prompt: str) -> str:
+def _turn_content(
+    inbound: InboundSlack, prompt: str, *, self_posts: bool = False
+) -> str:
     """Prepend the Slack conversation context to the turn.
 
     normalize() is otherwise lossy — it hands the agent only the prompt text and drops
     the channel/thread. But to read channel history the agent needs the channel id to
     point its Slack tools at, so we prefix a short, clearly-delimited context line and
-    put the user's message after a blank line. Harmless when no Slack tool is enabled."""
+    put the user's message after a blank line. Harmless when no Slack tool is enabled.
+
+    ``self_posts`` is set for agents the gateway does NOT relay (golden-agent, which has
+    Slack write tools). For them we add an explicit directive to post their own reply
+    into this thread, because nothing is delivered on their behalf — without it the turn
+    would run and produce text that never reaches Slack."""
     context = (
         f"[Slack context] channel_id={inbound.channel} thread_ts={inbound.thread_ts}. "
         f"This message came from that Slack thread; to read earlier messages or the "
         f"channel's history, use your Slack tools with this channel_id."
     )
+    if self_posts:
+        context += (
+            " IMPORTANT: your text response is NOT posted to Slack for you. Deliver your "
+            f"reply by calling post_message(channel_id={inbound.channel}, "
+            f"thread_ts={inbound.thread_ts}, ...). Posting a message HIDES the 'thinking…' "
+            "indicator, so if a turn produces MORE THAN ONE message, call "
+            f"set_status(channel_id={inbound.channel}, thread_ts={inbound.thread_ts}, "
+            "status='is thinking…') right after each message that is NOT your final one; "
+            "do NOT call it after your final message, so the indicator clears there. Use "
+            "post_message for other channels/DMs too; only this thread's reply is your "
+            "responsibility to post."
+        )
     return f"{context}\n\n{prompt}"
 
 
@@ -378,6 +397,24 @@ class SlackGatewayUseCase:
                 )
                 return
 
+            # golden-agent is the only agent with Slack WRITE tools (SlackBot is
+            # auto-enabled on every slack-origin golden-agent turn, config or not), so it
+            # posts its own reply into the thread. For it we DON'T relay (that would
+            # double-post the answer). We DO still show "thinking…" while it works — that
+            # clears on its own when the agent posts its reply (posting a message clears
+            # the assistant status), so the agent's post IS the done signal. Every other
+            # agent — registered agents (their own name, no config) and SYNC agents — has
+            # no Slack tools, so the gateway is the single writer and relays. Errors still
+            # surface via except. (config_id can't distinguish this: configs are personas
+            # that KEEP the golden-agent name, so the name is the exact self-posting
+            # signal.)
+            if target.agent_name == _DEFAULT_AGENT_NAME:
+                await self._set_status(inbound, "is thinking…")
+                await self._dispatch(
+                    target, inbound, prompt, principal, auth_headers, collect=False
+                )
+                return
+
             # AI-app "thinking…" indicator while the turn runs (assistant pane); cleared
             # automatically when we post the reply. No-op outside an assistant thread.
             await self._set_status(inbound, "is thinking…")
@@ -477,6 +514,8 @@ class SlackGatewayUseCase:
         prompt: str,
         principal: Any,
         auth_headers: dict[str, str],
+        *,
+        collect: bool = True,
     ) -> str | None:
         """Create-or-resume a task on the resolved agent, then inject the turn, acting as
         the shared v1 identity (x-api-key -> principal for authz, delegated downstream as
@@ -500,9 +539,13 @@ class SlackGatewayUseCase:
         )
         agent = await acp.agent_repository.get(name=target.agent_name)
         task_name = f"slack:{inbound.thread_ts}"
+        # golden-agent isn't relayed (it self-posts), so its context gets the directive to
+        # post its own reply. Keyed on the same signal _run_turn uses to skip the relay.
         content = TextContentEntity(
             author=MessageAuthor.USER,
-            content=_turn_content(inbound, prompt),
+            content=_turn_content(
+                inbound, prompt, self_posts=target.agent_name == _DEFAULT_AGENT_NAME
+            ),
             format=TextFormat.MARKDOWN,
         )
         # First-turn task params: golden-agent's agent_config id (when this turn resolved
@@ -556,13 +599,22 @@ class SlackGatewayUseCase:
                 # lagging) replica, which may not have the just-created task yet.
                 task = await self._resolve_task_after_race(acp.task_service, task_name)
 
-        # Snapshot existing messages so we can isolate THIS turn's reply.
-        seen = await self._seen_message_ids(acp.task_message_service, task.id)
+        # Snapshot existing messages so we can isolate THIS turn's reply (only needed
+        # when we're going to collect + relay it).
+        seen = (
+            await self._seen_message_ids(acp.task_message_service, task.id)
+            if collect
+            else set()
+        )
         await acp.handle_rpc_request(
             method=AgentRPCMethod.EVENT_SEND,
             params=SendEventRequestEntity(task_name=task_name, content=content),
             agent_id=agent.id,
         )
+        # Self-posting agents (golden-agent) own their Slack output: send the event and
+        # return without polling — the gateway never relays their reply.
+        if not collect:
+            return None
         # Poll the task's messages for this turn's settled agent reply.
         return await self._collect_reply(acp.task_message_service, task.id, seen)
 
