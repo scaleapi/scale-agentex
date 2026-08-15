@@ -506,8 +506,8 @@ class TestTasksAPIIntegration:
     async def test_list_tasks_omits_params_in_response(
         self, isolated_client, test_task_with_params
     ):
-        """The list summary must omit `params` even when the task has them
-        (they can carry secrets/PII); fetch a single task for the full record."""
+        """The list summary must omit `params` (secrets/PII) but still carry the small
+        opaque `current_state` label; fetch a single task for the full record."""
         # When - Request all tasks
         response = await isolated_client.get("/tasks")
 
@@ -521,6 +521,8 @@ class TestTasksAPIIntegration:
         )
         assert params_task is not None, "Task should be in the list"
         assert "params" not in params_task
+        # current_state is a non-sensitive opaque label, so it IS in the lean summary.
+        assert "current_state" in params_task
 
     #
     async def test_get_task_by_id_includes_params_in_response(
