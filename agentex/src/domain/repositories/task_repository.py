@@ -21,8 +21,7 @@ from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
 
-# Columns update_mutable_fields is allowed to set — a code guardrail (not a comment)
-# so a future caller can't route status/params through it and bypass their atomic CAS.
+# Columns update_mutable_fields is allowed to set (status/params have their own atomic paths).
 _MUTABLE_TASK_COLUMNS = frozenset({"task_metadata", "current_state"})
 
 

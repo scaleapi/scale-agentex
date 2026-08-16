@@ -27,44 +27,21 @@ class TaskStatus(str, Enum):
     DELETED = "DELETED"
 
 
-class Task(BaseModel):
-    id: str = Field(
-        ...,
-        title="Unique Task ID",
-    )
-    name: str | None = Field(
-        None,
-        title="Unique name of the task",
-    )
-    status: TaskStatus | None = Field(
-        None,
-        title="The current status of the task",
-    )
-    status_reason: str | None = Field(
-        None,
-        title="The reason for the current task status",
-    )
-    created_at: datetime | None = Field(
-        None,
-        title="The timestamp when the task was created",
-    )
-    updated_at: datetime | None = Field(
-        None,
-        title="The timestamp when the task was last updated",
-    )
+class _TaskBase(BaseModel):
+    """Shared fields for Task and TaskSummary (everything except `params`)."""
+
+    id: str = Field(..., title="Unique Task ID")
+    name: str | None = Field(None, title="Unique name of the task")
+    status: TaskStatus | None = Field(None, title="The current status of the task")
+    status_reason: str | None = Field(None, title="The reason for the current task status")
+    created_at: datetime | None = Field(None, title="The timestamp when the task was created")
+    updated_at: datetime | None = Field(None, title="The timestamp when the task was last updated")
     cleaned_at: datetime | None = Field(
         None,
         title="The timestamp when the task's content was cleaned for retention compliance; null when active",
     )
-    params: dict[str, Any] | None = Field(
-        None,
-        title="Task parameters",
-    )
-    task_metadata: dict[str, Any] | None = Field(
-        None,
-        title="Task metadata",
-    )
-    # No bound on the read path: enforcing it would 500 if the column is ever widened (writes are already bounded).
+    task_metadata: dict[str, Any] | None = Field(None, title="Task metadata")
+    # Writes are bounded; reads are not, so widening the column won't 500.
     current_state: str | None = Field(
         None,
         title=(
@@ -72,6 +49,10 @@ class Task(BaseModel):
             "null when the agent does not emit one. Orthogonal to 'status'."
         ),
     )
+
+
+class Task(_TaskBase):
+    params: dict[str, Any] | None = Field(None, title="Task parameters")
 
 
 class TaskResponse(Task):
@@ -83,50 +64,11 @@ class TaskResponse(Task):
     )
 
 
-class TaskSummary(BaseModel):
+class TaskSummary(_TaskBase):
     """Lean list-response shape. Omits `params` (the arbitrary create-time
     payload, which can carry per-caller secrets and PII); fetch GET /tasks/{id}
     for the full record."""
 
-    id: str = Field(
-        ...,
-        title="Unique Task ID",
-    )
-    name: str | None = Field(
-        None,
-        title="Unique name of the task",
-    )
-    status: TaskStatus | None = Field(
-        None,
-        title="The current status of the task",
-    )
-    status_reason: str | None = Field(
-        None,
-        title="The reason for the current task status",
-    )
-    created_at: datetime | None = Field(
-        None,
-        title="The timestamp when the task was created",
-    )
-    updated_at: datetime | None = Field(
-        None,
-        title="The timestamp when the task was last updated",
-    )
-    cleaned_at: datetime | None = Field(
-        None,
-        title="The timestamp when the task's content was cleaned for retention compliance; null when active",
-    )
-    task_metadata: dict[str, Any] | None = Field(
-        None,
-        title="Task metadata",
-    )
-    current_state: str | None = Field(
-        None,
-        title=(
-            "Opaque label mirroring the agent's StateMachine current state; "
-            "null when the agent does not emit one. Orthogonal to 'status'."
-        ),
-    )
     agents: list["Agent"] | None = Field(
         default=None,
         title="Agents associated with this task (only populated when 'agents' view is requested)",

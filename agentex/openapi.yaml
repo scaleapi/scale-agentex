@@ -6622,12 +6622,6 @@ components:
           - type: 'null'
           title: The timestamp when the task's content was cleaned for retention compliance;
             null when active
-        params:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Task parameters
         task_metadata:
           anyOf:
           - additionalProperties: true
@@ -6640,6 +6634,12 @@ components:
           - type: 'null'
           title: Opaque label mirroring the agent's StateMachine current state; null
             when the agent does not emit one. Orthogonal to 'status'.
+        params:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task parameters
       type: object
       required:
       - id
@@ -6851,12 +6851,6 @@ components:
           - type: 'null'
           title: The timestamp when the task's content was cleaned for retention compliance;
             null when active
-        params:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Task parameters
         task_metadata:
           anyOf:
           - additionalProperties: true
@@ -6869,6 +6863,12 @@ components:
           - type: 'null'
           title: Opaque label mirroring the agent's StateMachine current state; null
             when the agent does not emit one. Orthogonal to 'status'.
+        params:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task parameters
         agents:
           anyOf:
           - items:
