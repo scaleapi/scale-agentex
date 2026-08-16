@@ -287,8 +287,6 @@ class TestTaskEventStream:
 
         assert updated_task.current_state == "awaiting_input"
 
-        print("✅ current_state update successfully triggered stream event")
-
     async def test_get_task_returns_updated_metadata_after_stream_update(
         self, test_agent_and_task, tasks_use_case
     ):

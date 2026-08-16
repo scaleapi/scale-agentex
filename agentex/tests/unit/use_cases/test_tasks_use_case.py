@@ -662,9 +662,7 @@ class TestTasksUseCaseMetadataUpdate:
         agent_repository,
         sample_agent,
     ):
-        """Regression: a stale RUNNING read racing a COMPLETED transition must not revert
-        status on the current_state write. Fails on the old whole-row merge, passes column-scoped.
-        """
+        """Stale-read race: current_state write must not revert a concurrent status transition."""
         await create_or_get_agent(agent_repository, sample_agent)
         task = await task_service.create_task(
             agent=sample_agent, task_name="current-state-clobber-test"

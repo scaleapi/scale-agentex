@@ -115,11 +115,9 @@ class TasksUseCase:
             else:
                 raise ItemDoesNotExist(f"Task {name} not found")
 
-        # No-op if no mutable field was supplied.
         if task_metadata is None and merge_params is None and current_state is None:
             return task_entity
 
-        # Atomic JSONB shallow-merge; run first so its refreshed entity is the fallback return.
         if merge_params:
             merged = await self.task_service.merge_task_params(
                 task_entity.id, merge_params
@@ -127,7 +125,6 @@ class TasksUseCase:
             if merged is not None:
                 task_entity = merged
 
-        # Single column-scoped write → one task_updated publish, no whole-row clobber.
         fields: dict[str, Any] = {}
         if task_metadata is not None:
             fields["task_metadata"] = task_metadata
@@ -138,7 +135,6 @@ class TasksUseCase:
                 task_entity.id, fields
             )
             if updated is None:
-                # Row vanished mid-flight (defensive; no live hard-delete path). Raise, don't return stale.
                 raise ItemDoesNotExist(f"Task {id or name} not found")
             task_entity = updated
 

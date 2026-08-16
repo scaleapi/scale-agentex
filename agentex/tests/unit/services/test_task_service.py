@@ -992,9 +992,7 @@ class TestAgentTaskService:
     async def test_update_mutable_fields_leaves_status_untouched(
         self, task_service, agent_repository, sample_agent, redis_stream_repository
     ):
-        """The primitive is column-scoped: writing current_state leaves status untouched
-        (the use-case stale-read clobber regression is guarded in test_tasks_use_case.py).
-        """
+        """Writing current_state leaves status untouched (column-scoped update)."""
         await create_or_get_agent(agent_repository, sample_agent)
         created_task = await task_service.create_task(
             agent=sample_agent, task_name="task-for-noclobber"

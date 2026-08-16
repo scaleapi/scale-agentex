@@ -243,11 +243,7 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
     async def update_mutable_fields(
         self, task_id: str, fields: dict[str, Any]
     ) -> TaskEntity | None:
-        """Atomically set the given caller-mutable columns on one task row via
-        ``UPDATE ... RETURNING`` — column-scoped, so (unlike ``update``'s whole-row merge) it
-        can't clobber a concurrently changed ``status``/``params``. Values apply verbatim
-        (``current_state=None`` clears). Returns the updated entity, or ``None`` if absent.
-        """
+        """Column-scoped atomic update; can't clobber status/params. Returns updated entity or None."""
         unknown = fields.keys() - _MUTABLE_TASK_COLUMNS
         if unknown:
             raise ValueError(
@@ -259,9 +255,7 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
     async def _update_returning(
         self, task_id: str, values: dict[str, Any]
     ) -> TaskEntity | None:
-        """``UPDATE tasks SET <values> WHERE id`` → the updated entity, or ``None`` if no
-        such task exists. Shared by merge_params and update_mutable_fields.
-        """
+        """UPDATE … SET … WHERE id → updated entity or None. Shared by merge_params and update_mutable_fields."""
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
