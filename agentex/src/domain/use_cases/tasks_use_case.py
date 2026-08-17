@@ -102,7 +102,8 @@ class TasksUseCase:
         merge_params: dict[str, Any] | None = None,
         current_state: str | None = None,
     ) -> TaskEntity:
-        """Update mutable fields on a task; ``None`` for any field means "not supplied"."""
+        """Update mutable fields on a task; ``None`` for any field means "not supplied".
+        ``current_state=""`` clears the label."""
 
         if not id and not name:
             raise ClientError("Either id or name must be provided")
@@ -129,7 +130,9 @@ class TasksUseCase:
         if task_metadata is not None:
             fields["task_metadata"] = task_metadata
         if current_state is not None:
-            fields["current_state"] = current_state
+            # "" is the explicit clear: an empty label carries no meaning, and without
+            # it a task whose agent died mid-state would stay pinned forever.
+            fields["current_state"] = current_state or None
         if fields:
             updated = await self.task_service.update_mutable_fields(
                 task_entity.id, fields

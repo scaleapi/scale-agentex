@@ -6,7 +6,7 @@ from pydantic import Field
 
 from src.api.schemas.agents import Agent
 from src.utils.model_utils import BaseModel
-from src.utils.task_constants import CURRENT_STATE_MAX_LENGTH
+from src.utils.task_constants import CURRENT_STATE_DESCRIPTION, CURRENT_STATE_MAX_LENGTH
 
 
 class TaskRelationships(str, Enum):
@@ -42,13 +42,7 @@ class _TaskBase(BaseModel):
     )
     task_metadata: dict[str, Any] | None = Field(None, title="Task metadata")
     # Writes are bounded; reads are not, so widening the column won't 500.
-    current_state: str | None = Field(
-        None,
-        title=(
-            "Opaque label mirroring the agent's StateMachine current state; "
-            "null when the agent does not emit one. Orthogonal to 'status'."
-        ),
-    )
+    current_state: str | None = Field(None, title=CURRENT_STATE_DESCRIPTION)
 
 
 class Task(_TaskBase):
@@ -91,7 +85,11 @@ class UpdateTaskRequest(BaseModel):
     current_state: str | None = Field(
         None,
         max_length=CURRENT_STATE_MAX_LENGTH,
-        title="If provided, replaces the task's current_state label.",
+        title=(
+            "If provided, replaces the task's current_state label. Omit to leave it "
+            'untouched; send "" to clear it back to null (how an operator recovers a '
+            "task whose agent died mid-state)."
+        ),
     )
 
 

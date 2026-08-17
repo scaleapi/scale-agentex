@@ -6632,8 +6632,10 @@ components:
           anyOf:
           - type: string
           - type: 'null'
-          title: Opaque label mirroring the agent's StateMachine current state; null
-            when the agent does not emit one. Orthogonal to 'status'.
+          title: 'Opaque label mirroring the agent''s StateMachine current state;
+            null when the agent does not emit one. Orthogonal to ''status''. States
+            the SDK emits today: IDLE, WORKING, AWAITING_INPUT. Treat any other value
+            as unknown rather than assuming this set is closed.'
         params:
           anyOf:
           - additionalProperties: true
@@ -6861,8 +6863,10 @@ components:
           anyOf:
           - type: string
           - type: 'null'
-          title: Opaque label mirroring the agent's StateMachine current state; null
-            when the agent does not emit one. Orthogonal to 'status'.
+          title: 'Opaque label mirroring the agent''s StateMachine current state;
+            null when the agent does not emit one. Orthogonal to ''status''. States
+            the SDK emits today: IDLE, WORKING, AWAITING_INPUT. Treat any other value
+            as unknown rather than assuming this set is closed.'
         params:
           anyOf:
           - additionalProperties: true
@@ -6952,8 +6956,10 @@ components:
           anyOf:
           - type: string
           - type: 'null'
-          title: Opaque label mirroring the agent's StateMachine current state; null
-            when the agent does not emit one. Orthogonal to 'status'.
+          title: 'Opaque label mirroring the agent''s StateMachine current state;
+            null when the agent does not emit one. Orthogonal to ''status''. States
+            the SDK emits today: IDLE, WORKING, AWAITING_INPUT. Treat any other value
+            as unknown rather than assuming this set is closed.'
         agents:
           anyOf:
           - items:
@@ -7527,7 +7533,9 @@ components:
           - type: string
             maxLength: 255
           - type: 'null'
-          title: If provided, replaces the task's current_state label.
+          title: If provided, replaces the task's current_state label. Omit to leave
+            it untouched; send "" to clear it back to null (how an operator recovers
+            a task whose agent died mid-state).
       type: object
       title: UpdateTaskRequest
     ValidationError:

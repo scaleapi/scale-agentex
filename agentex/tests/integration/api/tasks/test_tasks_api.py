@@ -754,15 +754,24 @@ class TestTasksAPIIntegration:
         assert response.status_code == 200
         assert response.json()["current_state"] == "working"
 
-    async def test_update_task_current_state_empty_string(
+    async def test_update_task_current_state_empty_string_clears(
         self, isolated_client, test_running_task
     ):
-        """Empty string is a valid label distinct from null (guards a falsy-check regression)."""
+        """Empty string clears the label, so a task stuck mid-state is recoverable."""
+        response = await isolated_client.put(
+            f"/tasks/{test_running_task.id}", json={"current_state": "WORKING"}
+        )
+        assert response.json()["current_state"] == "WORKING"
+
         response = await isolated_client.put(
             f"/tasks/{test_running_task.id}", json={"current_state": ""}
         )
         assert response.status_code == 200
-        assert response.json()["current_state"] == ""
+        assert response.json()["current_state"] is None
+
+        # The clear is persisted, not just echoed.
+        response = await isolated_client.get(f"/tasks/{test_running_task.id}")
+        assert response.json()["current_state"] is None
 
     async def test_update_task_current_state_too_long_rejected(
         self, isolated_client, test_running_task

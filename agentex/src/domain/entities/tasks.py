@@ -6,6 +6,7 @@ from pydantic import ConfigDict, Field
 
 from src.api.schemas.tasks import Task
 from src.utils.model_utils import BaseModel
+from src.utils.task_constants import CURRENT_STATE_DESCRIPTION
 
 
 class TaskRelationships(str, Enum):
@@ -73,13 +74,7 @@ class TaskEntity(BaseModel):
         None,
         title="Task metadata",
     )
-    current_state: str | None = Field(
-        None,
-        title=(
-            "Opaque label mirroring the agent's StateMachine current state; "
-            "null when the agent does not emit one. Orthogonal to 'status'."
-        ),
-    )
+    current_state: str | None = Field(None, title=CURRENT_STATE_DESCRIPTION)
 
     # allow extra fields for agents relationships
     model_config = ConfigDict(extra="allow")
