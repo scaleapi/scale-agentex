@@ -73,6 +73,18 @@ describe('deriveTaskDisplayName', () => {
     expect(deriveTaskDisplayName(prompt)).toBe('a'.repeat(80));
   });
 
+  it('keeps an astral character whole at the truncation boundary', () => {
+    // '😀' is two UTF-16 units; a unit-based slice(0, 80) would cut it in
+    // half here, leaving a lone surrogate that Postgres JSONB rejects.
+    const prompt = 'a'.repeat(79) + '😀 rest of the prompt';
+    expect(deriveTaskDisplayName(prompt)).toBe('a'.repeat(79) + '😀');
+  });
+
+  it('counts astral characters as single characters when truncating', () => {
+    const prompt = '😀'.repeat(100);
+    expect(deriveTaskDisplayName(prompt)).toBe('😀'.repeat(80));
+  });
+
   it('produces a label createTaskName resolves for a UI-created task', () => {
     // Writer/reader contract: a task shaped like the prompt-input writer's
     // output (display_name set, name null) must not render as "Unnamed task".

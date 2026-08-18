@@ -16,7 +16,10 @@ export function isScheduledTask(
  * a globally-unique get-or-create idempotency key, not a label.
  */
 export function deriveTaskDisplayName(prompt: string): string {
-  return prompt.trim().replace(/\s+/g, ' ').slice(0, 80);
+  // Truncate by code points, not UTF-16 units: a unit-based slice can split a
+  // surrogate pair, and Postgres rejects lone surrogates in JSONB, failing the
+  // whole task/create request.
+  return Array.from(prompt.trim().replace(/\s+/g, ' ')).slice(0, 80).join('');
 }
 
 export function createTaskName(
