@@ -6622,18 +6622,26 @@ components:
           - type: 'null'
           title: The timestamp when the task's content was cleaned for retention compliance;
             null when active
-        params:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Task parameters
         task_metadata:
           anyOf:
           - additionalProperties: true
             type: object
           - type: 'null'
           title: Task metadata
+        current_state:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 'Opaque label mirroring the agent''s StateMachine current state;
+            null when the agent does not emit one. Orthogonal to ''status''. States
+            the SDK emits today: IDLE, WORKING, AWAITING_INPUT. Treat any other value
+            as unknown rather than assuming this set is closed.'
+        params:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task parameters
       type: object
       required:
       - id
@@ -6845,18 +6853,26 @@ components:
           - type: 'null'
           title: The timestamp when the task's content was cleaned for retention compliance;
             null when active
-        params:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Task parameters
         task_metadata:
           anyOf:
           - additionalProperties: true
             type: object
           - type: 'null'
           title: Task metadata
+        current_state:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 'Opaque label mirroring the agent''s StateMachine current state;
+            null when the agent does not emit one. Orthogonal to ''status''. States
+            the SDK emits today: IDLE, WORKING, AWAITING_INPUT. Treat any other value
+            as unknown rather than assuming this set is closed.'
+        params:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Task parameters
         agents:
           anyOf:
           - items:
@@ -6936,6 +6952,14 @@ components:
             type: object
           - type: 'null'
           title: Task metadata
+        current_state:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: 'Opaque label mirroring the agent''s StateMachine current state;
+            null when the agent does not emit one. Orthogonal to ''status''. States
+            the SDK emits today: IDLE, WORKING, AWAITING_INPUT. Treat any other value
+            as unknown rather than assuming this set is closed.'
         agents:
           anyOf:
           - items:
@@ -7504,6 +7528,14 @@ components:
           - type: 'null'
           title: Optional shallow-merge patch applied to the task's params column.
             Top-level keys overwrite; pass full nested objects to change subfields.
+        current_state:
+          anyOf:
+          - type: string
+            maxLength: 255
+          - type: 'null'
+          title: If provided, replaces the task's current_state label. Omit to leave
+            it untouched; send "" to clear it back to null (how an operator recovers
+            a task whose agent died mid-state).
       type: object
       title: UpdateTaskRequest
     ValidationError:

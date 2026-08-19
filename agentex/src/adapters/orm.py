@@ -24,6 +24,7 @@ from src.domain.entities.agents import AgentInputType, AgentStatus
 from src.domain.entities.deployments import DeploymentStatus
 from src.domain.entities.tasks import TaskStatus
 from src.utils.ids import orm_id
+from src.utils.task_constants import CURRENT_STATE_MAX_LENGTH
 
 BaseORM = declarative_base()
 
@@ -75,6 +76,8 @@ class TaskORM(BaseORM):
     cleaned_at = Column(DateTime(timezone=True), nullable=True)
     params = Column(JSONB, nullable=True)
     task_metadata = Column(JSONB, nullable=True)
+    # Opaque agent-state label, orthogonal to `status`; capped since it rides every task_updated SSE payload.
+    current_state = Column(String(CURRENT_STATE_MAX_LENGTH), nullable=True)
     # Many-to-Many relationship with agents
     agents = relationship("AgentORM", secondary="task_agents", back_populates="tasks")
 
