@@ -1,6 +1,6 @@
 [project]
 name = "agentex-backend"
-version = "0.1.0"
+version = "0.2.0"
 description = ""
 authors = [{ name = "Felix Su", email = "felix.su@scale.com" }]
 requires-python = ">=3.12,<3.13"
