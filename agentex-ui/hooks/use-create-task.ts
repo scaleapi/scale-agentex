@@ -78,6 +78,7 @@ export function updateTaskInInfiniteQuery(
 type CreateTaskParams = {
   agentName: string;
   params?: Record<string, unknown>;
+  task_metadata?: Record<string, unknown>;
 };
 
 /**
@@ -101,6 +102,7 @@ export function useCreateTask({
     mutationFn: async ({
       agentName,
       params,
+      task_metadata,
     }: CreateTaskParams): Promise<Task> => {
       const response = await agentRPCNonStreaming(
         agentexClient,
@@ -108,6 +110,7 @@ export function useCreateTask({
         'task/create',
         {
           params: params ?? {},
+          task_metadata: task_metadata ?? null,
         }
       );
 

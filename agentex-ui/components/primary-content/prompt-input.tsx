@@ -21,6 +21,7 @@ import {
 } from '@/hooks/use-safe-search-params';
 import { useSendMessage } from '@/hooks/use-task-messages';
 import { useTask } from '@/hooks/use-tasks';
+import { deriveTaskDisplayName } from '@/lib/task-utils';
 import { TaskStatusEnum } from '@/lib/types';
 
 type PromptInputProps = {
@@ -139,6 +140,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
           description: prompt,
           content: currentPrompt,
         },
+        task_metadata: { display_name: deriveTaskDisplayName(prompt) },
       });
       currentTaskId = task.id;
       updateParams({ [SearchParamKey.TASK_ID]: currentTaskId });
