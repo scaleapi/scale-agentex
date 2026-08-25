@@ -32,6 +32,11 @@ dependencies = [
     "opentelemetry-exporter-otlp>=1.28.0",
     "pyyaml>=6.0,<7",
     "tzdata>=2025.2",
+    # Fernet (authenticated symmetric encryption) for credentials held at rest —
+    # see src/utils/credential_encryption.py. Already present transitively, but
+    # declared directly because correctness of a stored credential shouldn't
+    # depend on another package continuing to pull it in.
+    "cryptography>=44.0.0",
 ]
 
 [dependency-groups]
