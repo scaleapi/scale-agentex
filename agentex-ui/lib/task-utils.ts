@@ -1,3 +1,6 @@
+import { TaskStatusEnum } from '@/lib/types';
+import type { TaskStatus } from '@/lib/types';
+
 import type { TaskListResponse } from 'agentex/resources';
 
 const LEGACY_SCHEDULED_MESSAGE_PREFIX = 'Scheduled Message: ';
@@ -38,4 +41,14 @@ export function createTaskName(
   }
 
   return 'Unnamed task';
+}
+
+/**
+ * Whether a task has stopped — it failed, was cancelled, timed out, or
+ * finished. RUNNING is the only status meaning work may still happen.
+ *
+ * An unset status means "not known yet", which is not the same as ended.
+ */
+export function isTaskEnded(status: TaskStatus | null | undefined): boolean {
+  return status != null && status !== TaskStatusEnum.RUNNING;
 }

@@ -22,6 +22,8 @@ import { ShimmeringText } from '@/components/ui/shimmering-text';
 import { useAgents } from '@/hooks/use-agents';
 import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 import { useTaskMessages } from '@/hooks/use-task-messages';
+import { useTask } from '@/hooks/use-tasks';
+import { isTaskEnded } from '@/lib/task-utils';
 
 import type {
   TaskMessage,
@@ -34,6 +36,7 @@ type TaskMessagesProps = {
   headerRef: React.RefObject<HTMLDivElement | null>;
   scrollContainerRef: React.RefObject<HTMLDivElement | null>;
 };
+
 type MessagePair = {
   id: string;
   userMessage: TaskMessage | null;
@@ -71,6 +74,7 @@ function TaskMessagesImpl({
     hasNextPage,
     isFetchingNextPage,
   } = useTaskMessages({ agentexClient, taskId });
+  const { data: task } = useTask({ agentexClient, taskId });
 
   const toolCallIdToResponseMap = useMemo<
     Map<string, TaskMessage & { content: ToolResponseContent }>
@@ -153,6 +157,9 @@ function TaskMessagesImpl({
     if (messagePairs.length === 0) return false;
     if (rpcStatus !== 'pending' && rpcStatus !== 'success') return false;
 
+    // Only a running task can be working on a reply.
+    if (isTaskEnded(task?.status)) return false;
+
     const lastPair = messagePairs[messagePairs.length - 1]!;
 
     // No agent messages yet — waiting for first response
@@ -178,7 +185,7 @@ function TaskMessagesImpl({
     // Last message is a completed tool_request, tool_response, reasoning, or data
     // with no following text — agent is thinking about the next step
     return true;
-  }, [messagePairs, rpcStatus, pendingToolCallIds]);
+  }, [messagePairs, rpcStatus, pendingToolCallIds, task?.status]);
 
   // Measure container height for last-pair min-height
   useEffect(() => {
