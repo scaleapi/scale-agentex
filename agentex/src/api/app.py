@@ -37,6 +37,7 @@ from src.api.routes import (
     deployment_history,
     deployments,
     events,
+    integrations,
     linear,
     messages,
     slack,
@@ -206,6 +207,10 @@ fastapi_app.include_router(slack.router)
 fastapi_app.include_router(agent_task_tracker.router)
 fastapi_app.include_router(agent_api_keys.router)
 fastapi_app.include_router(linear.router)
+# Identity linking. Deliberately NOT under /slack — that prefix is
+# auth-whitelisted, and this router must run authenticated so the callback can
+# read the caller's SGP identity from their own session.
+fastapi_app.include_router(integrations.router)
 fastapi_app.include_router(deployment_history.router)
 fastapi_app.include_router(deployments.router)
 # Agent run schedules are feature-flagged (off by default, enabled in development).

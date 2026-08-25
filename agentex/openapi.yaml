@@ -3015,6 +3015,66 @@ paths:
                 additionalProperties: true
                 type: object
                 title: Response Linear Events Linear Events Post
+  /integrations/slack/link:
+    get:
+      tags:
+      - Integrations
+      summary: Confirm linking a Slack identity to SGP
+      description: 'Render the confirmation screen. Does NOT consume the nonce, so
+        a refresh or
+
+        a link-prefetching browser doesn''t break the flow.'
+      operationId: slack_link_page_integrations_slack_link_get
+      parameters:
+      - name: nonce
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Nonce
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - Integrations
+      summary: Complete a Slack identity link
+      description: 'Mint a key as the signed-in user and store the mapping.
+
+
+        Order matters: the nonce is consumed only after a successful mint, so a
+
+        transient identity-service failure leaves the link clickable instead of
+
+        burning it and forcing the user back to Slack.'
+      operationId: slack_link_confirm_integrations_slack_link_post
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Body_slack_link_confirm_integrations_slack_link_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /deployment-history/{deployment_id}:
     get:
       tags:
@@ -4728,6 +4788,14 @@ components:
       - version
       - type
       title: BlobResponse
+    Body_slack_link_confirm_integrations_slack_link_post:
+      properties:
+        nonce:
+          type: string
+          title: Nonce
+          default: ''
+      type: object
+      title: Body_slack_link_confirm_integrations_slack_link_post
     CancelTaskRequest:
       properties:
         task_id:
