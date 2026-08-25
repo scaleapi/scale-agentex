@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
@@ -214,6 +214,40 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
             # Return with agents populated
             return TaskEntity.model_validate(modified_orm)
 
+    async def get_current(self, task_id: str) -> TaskEntity:
+        """Read the current task from the primary database."""
+        async with (
+            self.start_async_db_session(allow_writes=True) as session,
+            async_sql_exception_handler(),
+        ):
+            task = await self._get(session, id=task_id, name=None)
+            return TaskEntity.model_validate(task)
+
+    async def replace_params(
+        self, task_id: str, params: dict | None
+    ) -> TaskEntity | None:
+        """Replace only a task's ``params`` and return the current entity.
+
+        The single-column update prevents a stale caller from overwriting status
+        or other fields that changed after it read the task.
+        """
+        async with (
+            self.start_async_db_session(True) as session,
+            async_sql_exception_handler(),
+        ):
+            stmt = (
+                update(TaskORM)
+                .where(TaskORM.id == task_id)
+                .values(params=params)
+                .returning(TaskORM)
+            )
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            await session.commit()
+            if row is None:
+                return None
+            return TaskEntity.model_validate(row)
+
     async def merge_params(self, task_id: str, patch: dict) -> TaskEntity | None:
         """Atomically shallow-merge ``patch`` into the task's ``params``
         JSONB column. Returns the updated entity, or ``None`` if no task
@@ -257,12 +291,13 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
     async def transition_status(
         self,
         task_id: str,
-        expected_status: TaskStatus,
+        expected_status: TaskStatus | Collection[TaskStatus],
         new_status: TaskStatus,
         status_reason: str,
         task_metadata: dict | None = None,
+        expected_updated_at: datetime | None = None,
     ) -> TaskEntity | None:
-        """Atomically transition task status. Returns None if the expected status didn't match (i.e. lost the race)."""
+        """Atomically transition from eligible status/version state."""
 
         async with (
             self.start_async_db_session(True) as session,
@@ -272,11 +307,16 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
             if task_metadata is not None:
                 values["task_metadata"] = task_metadata
 
-            stmt = (
-                update(TaskORM)
-                .where(TaskORM.id == task_id, TaskORM.status == expected_status)
-                .values(**values)
+            status_filter = (
+                TaskORM.status == expected_status
+                if isinstance(expected_status, TaskStatus)
+                else TaskORM.status.in_(expected_status)
             )
+            filters = [TaskORM.id == task_id, status_filter]
+            if expected_updated_at is not None:
+                filters.append(TaskORM.updated_at == expected_updated_at)
+
+            stmt = update(TaskORM).where(*filters).values(**values)
             result = await session.execute(stmt)
             await session.commit()
 

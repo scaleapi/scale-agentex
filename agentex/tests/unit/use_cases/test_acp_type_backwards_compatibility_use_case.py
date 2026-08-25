@@ -3,6 +3,7 @@ Backwards compatibility tests for ACPType.AGENTIC.
 Ensures legacy "agentic" agents continue to work alongside new "async" agents.
 """
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -24,6 +25,8 @@ from src.domain.services.task_service import AgentTaskService
 from src.domain.use_cases.agents_acp_use_case import AgentsACPUseCase
 from src.domain.use_cases.agents_use_case import AgentsUseCase
 from tests.fixtures.services import make_noop_authorization_service
+
+TASK_TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 @pytest.mark.unit
@@ -114,9 +117,19 @@ class TestACPTypeBackwardsCompatibility:
             id=str(uuid4()),
             name="test-task",
             status=TaskStatus.RUNNING,
+            status_reason="Task created, forwarding to ACP server",
+            updated_at=TASK_TIMESTAMP,
+        )
+        forwarded_task = task.model_copy(
+            update={
+                "status_reason": "Task forwarded to ACP server",
+                "updated_at": TASK_TIMESTAMP + timedelta(microseconds=1),
+            }
         )
 
         task_repo.create.return_value = task
+        task_repo.get_current.return_value = task
+        task_repo.transition_status.return_value = forwarded_task
         acp_client.create_task.return_value = None
 
         # Execute
@@ -133,7 +146,7 @@ class TestACPTypeBackwardsCompatibility:
             acp_url=agentic_agent.acp_url,
             params={"test": "params"},
         )
-        assert result == task
+        assert result == forwarded_task
 
     @pytest.mark.asyncio
     async def test_sync_agent_does_not_forward_task_to_acp(self):
@@ -216,9 +229,19 @@ class TestACPTypeBackwardsCompatibility:
             id=str(uuid4()),
             name="test-task",
             status=TaskStatus.RUNNING,
+            status_reason="Task created, forwarding to ACP server",
+            updated_at=TASK_TIMESTAMP,
+        )
+        forwarded_task = task.model_copy(
+            update={
+                "status_reason": "Task forwarded to ACP server",
+                "updated_at": TASK_TIMESTAMP + timedelta(microseconds=1),
+            }
         )
 
         task_repo.create.return_value = task
+        task_repo.get_current.return_value = task
+        task_repo.transition_status.return_value = forwarded_task
         acp_client.create_task.return_value = None
 
         # Execute
@@ -235,7 +258,7 @@ class TestACPTypeBackwardsCompatibility:
             acp_url=async_agent.acp_url,
             params={"test": "params"},
         )
-        assert result == task
+        assert result == forwarded_task
 
     @pytest.mark.asyncio
     async def test_register_agent_defaults_to_async_not_agentic(self):

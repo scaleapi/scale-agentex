@@ -322,8 +322,12 @@ class AgentsACPUseCase(TaskMessageMixin):
                     f"[agent_id={agent.id}] Updating params for task {task.id} "
                     f"from {task.params} to {task_params}"
                 )
-                task.params = task_params
-                task = await self.task_service.update_task(task)
+                updated_task = await self.task_service.replace_task_params(
+                    task.id, task_params
+                )
+                if updated_task is None:
+                    raise ItemDoesNotExist(f"Task {task.id} not found")
+                task = updated_task
             return task
 
         # If task exists and no params provided, return as-is

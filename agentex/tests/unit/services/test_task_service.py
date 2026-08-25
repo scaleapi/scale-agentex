@@ -1,3 +1,5 @@
+import asyncio
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -20,6 +22,8 @@ from src.domain.repositories.task_state_repository import TaskStateRepository
 from src.domain.services.task_service import AgentTaskService
 
 from tests.fixtures.services import make_noop_authorization_service
+
+RACE_TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 async def create_or_get_agent(agent_repository, agent):
@@ -45,6 +49,65 @@ def mock_acp_client():
     mock.cancel_task = AsyncMock()
     mock.send_event = AsyncMock()
     return mock
+
+
+class InMemoryTaskStatusRepository:
+    """Minimal status repository used to control CAS race ordering."""
+
+    def __init__(self, task: TaskEntity):
+        self.task = task.model_copy()
+        self.transition_requests = []
+        self.current_reads = 0
+
+    async def transition_status(
+        self,
+        task_id,
+        expected_status,
+        new_status,
+        status_reason,
+        task_metadata=None,
+        expected_updated_at=None,
+    ):
+        assert task_id == self.task.id
+        self.transition_requests.append(expected_status)
+        eligible_statuses = (
+            (expected_status,)
+            if isinstance(expected_status, TaskStatus)
+            else expected_status
+        )
+        if self.task.status not in eligible_statuses:
+            return None
+        if (
+            expected_updated_at is not None
+            and self.task.updated_at != expected_updated_at
+        ):
+            return None
+
+        updates = {"status": new_status, "status_reason": status_reason}
+        if task_metadata is not None:
+            updates["task_metadata"] = task_metadata
+        updates["updated_at"] = self.task.updated_at + timedelta(microseconds=1)
+        self.task = self.task.model_copy(update=updates)
+        return self.task.model_copy()
+
+    async def get(self, **_kwargs):
+        return self.task.model_copy()
+
+    async def get_current(self, _task_id):
+        self.current_reads += 1
+        return self.task.model_copy()
+
+
+def make_task_service_for_status_race(mock_acp_client, task_repository):
+    """Build a service around a deterministic in-memory status repository."""
+    return AgentTaskService(
+        acp_client=mock_acp_client,
+        task_repository=task_repository,
+        task_state_repository=AsyncMock(),
+        event_repository=AsyncMock(),
+        stream_repository=AsyncMock(),
+        authorization_service=make_noop_authorization_service(),
+    )
 
 
 @pytest.fixture
@@ -276,15 +339,15 @@ class TestAgentTaskService:
         assert result.name == "forwarded-task"
         assert result.params == task_params  # Verify params are stored in the task
         assert result.status == TaskStatus.RUNNING
-        assert result.status_reason == "Task created, forwarding to ACP server"
+        assert result.status_reason == "Task forwarded to ACP server"
 
         # Verify ACP client was called with correct parameters
-        mock_acp_client.create_task.assert_called_once_with(
-            agent=sample_agent,
-            task=result,  # Use the actual created task
-            acp_url=sample_agent.acp_url,
-            params=task_params,
-        )
+        mock_acp_client.create_task.assert_awaited_once()
+        forwarded_call = mock_acp_client.create_task.await_args.kwargs
+        assert forwarded_call["agent"] == sample_agent
+        assert forwarded_call["task"].id == result.id
+        assert forwarded_call["acp_url"] == sample_agent.acp_url
+        assert forwarded_call["params"] == task_params
 
     async def test_create_task_and_forward_sync_agent_skips_acp(
         self,
@@ -403,7 +466,281 @@ class TestAgentTaskService:
         assert refreshed.status == TaskStatus.RUNNING
         assert refreshed.status_reason == "Task forwarded to ACP server"
 
-    async def test_forward_task_to_acp_success_preserves_healthy_status(
+    async def test_forward_task_to_acp_error_preserves_concurrent_completion(
+        self,
+        mock_acp_client,
+        sample_agent,
+    ):
+        """A late forward error must not replace a concurrent terminal state."""
+        task = TaskEntity(
+            id=str(uuid4()),
+            name="concurrently-completed-task",
+            status=TaskStatus.RUNNING,
+            status_reason="Task is running",
+            updated_at=RACE_TIMESTAMP,
+        )
+        repository = InMemoryTaskStatusRepository(task)
+        task_service = make_task_service_for_status_race(mock_acp_client, repository)
+
+        async def complete_then_fail(**_kwargs):
+            repository.task = repository.task.model_copy(
+                update={
+                    "status": TaskStatus.COMPLETED,
+                    "status_reason": "Task completed",
+                    "updated_at": RACE_TIMESTAMP + timedelta(microseconds=1),
+                }
+            )
+            raise RuntimeError("ACP response was lost")
+
+        mock_acp_client.create_task.side_effect = complete_then_fail
+
+        with pytest.raises(RuntimeError, match="ACP response was lost"):
+            await task_service.forward_task_to_acp(agent=sample_agent, task=task)
+
+        assert repository.task.status == TaskStatus.COMPLETED
+        assert repository.task.status_reason == "Task completed"
+
+    async def test_forward_task_to_acp_error_fails_interrupted_task(
+        self,
+        mock_acp_client,
+        sample_agent,
+    ):
+        """A forward error can still fail an interrupted non-terminal task."""
+        task = TaskEntity(
+            id=str(uuid4()),
+            name="interrupted-forward",
+            status=TaskStatus.INTERRUPTED,
+            status_reason="Task interrupted",
+            updated_at=RACE_TIMESTAMP,
+        )
+        repository = InMemoryTaskStatusRepository(task)
+        task_service = make_task_service_for_status_race(mock_acp_client, repository)
+        mock_acp_client.create_task.side_effect = RuntimeError("ACP unavailable")
+
+        with pytest.raises(RuntimeError, match="ACP unavailable"):
+            await task_service.forward_task_to_acp(agent=sample_agent, task=task)
+
+        assert repository.task.status == TaskStatus.FAILED
+        assert repository.task.status_reason == "ACP unavailable"
+        assert repository.transition_requests == [
+            (TaskStatus.RUNNING, TaskStatus.INTERRUPTED)
+        ]
+
+    async def test_forward_task_to_acp_recovery_returns_concurrent_terminal_state(
+        self,
+        mock_acp_client,
+        sample_agent,
+    ):
+        """A lost FAILED recovery race returns the current terminal task."""
+        failed = TaskEntity(
+            id=str(uuid4()),
+            name="concurrently-reconciled-task",
+            status=TaskStatus.FAILED,
+            status_reason="Initial forward failed",
+            updated_at=RACE_TIMESTAMP,
+        )
+        repository = InMemoryTaskStatusRepository(failed)
+        task_service = make_task_service_for_status_race(mock_acp_client, repository)
+
+        async def complete_before_returning(**_kwargs):
+            repository.task = repository.task.model_copy(
+                update={
+                    "status": TaskStatus.COMPLETED,
+                    "status_reason": "Task completed",
+                    "updated_at": RACE_TIMESTAMP + timedelta(microseconds=1),
+                }
+            )
+
+        mock_acp_client.create_task.side_effect = complete_before_returning
+
+        result = await task_service.forward_task_to_acp(agent=sample_agent, task=failed)
+
+        assert result.status == TaskStatus.COMPLETED
+        assert result.status_reason == "Task completed"
+        assert repository.task.status == TaskStatus.COMPLETED
+        assert repository.task.status_reason == "Task completed"
+        assert repository.current_reads == 2
+
+    async def test_failed_retry_error_preserves_concurrently_recovered_task(
+        self,
+        mock_acp_client,
+        sample_agent,
+    ):
+        """A losing FAILED retry cannot fail a task recovered by another retry."""
+        failed = TaskEntity(
+            id=str(uuid4()),
+            name="concurrent-forward-retries",
+            status=TaskStatus.FAILED,
+            status_reason="Initial forward failed",
+            updated_at=RACE_TIMESTAMP,
+        )
+        repository = InMemoryTaskStatusRepository(failed)
+        task_service = make_task_service_for_status_race(mock_acp_client, repository)
+
+        async def recover_then_fail(**_kwargs):
+            repository.task = repository.task.model_copy(
+                update={
+                    "status": TaskStatus.RUNNING,
+                    "status_reason": "Task forwarded by another request",
+                    "updated_at": RACE_TIMESTAMP + timedelta(microseconds=1),
+                }
+            )
+            raise RuntimeError("Duplicate forward rejected")
+
+        mock_acp_client.create_task.side_effect = recover_then_fail
+
+        with pytest.raises(RuntimeError, match="Duplicate forward rejected"):
+            await task_service.forward_task_to_acp(agent=sample_agent, task=failed)
+
+        assert repository.task.status == TaskStatus.RUNNING
+        assert repository.task.status_reason == "Task forwarded by another request"
+
+    async def test_successful_forward_wins_against_same_snapshot_error(
+        self,
+        mock_acp_client,
+        sample_agent,
+    ):
+        """A recorded success makes a later error from the same snapshot stale."""
+        task = TaskEntity(
+            id=str(uuid4()),
+            name="success-wins",
+            status=TaskStatus.RUNNING,
+            status_reason="Task created",
+            updated_at=RACE_TIMESTAMP,
+        )
+        repository = InMemoryTaskStatusRepository(task)
+        task_service = make_task_service_for_status_race(mock_acp_client, repository)
+        both_started = asyncio.Event()
+        release_success = asyncio.Event()
+        release_error = asyncio.Event()
+        started = 0
+
+        async def controlled_forward(**kwargs):
+            nonlocal started
+            started += 1
+            if started == 2:
+                both_started.set()
+            if kwargs["params"]["outcome"] == "success":
+                await release_success.wait()
+                return None
+            await release_error.wait()
+            raise RuntimeError("late forward error")
+
+        mock_acp_client.create_task.side_effect = controlled_forward
+        success_call = asyncio.create_task(
+            task_service.forward_task_to_acp(
+                agent=sample_agent,
+                task=task,
+                task_params={"outcome": "success"},
+            )
+        )
+        error_call = asyncio.create_task(
+            task_service.forward_task_to_acp(
+                agent=sample_agent,
+                task=task,
+                task_params={"outcome": "error"},
+            )
+        )
+
+        await both_started.wait()
+        release_success.set()
+        successful = await success_call
+        assert successful.status == TaskStatus.RUNNING
+        assert successful.status_reason == "Task forwarded to ACP server"
+
+        release_error.set()
+        with pytest.raises(RuntimeError, match="late forward error"):
+            await error_call
+
+        assert repository.task.status == TaskStatus.RUNNING
+        assert repository.task.status_reason == "Task forwarded to ACP server"
+        assert repository.current_reads == 2
+
+    async def test_forward_error_wins_against_same_snapshot_success(
+        self,
+        mock_acp_client,
+        sample_agent,
+    ):
+        """A recorded error makes a later success from the same snapshot stale."""
+        task = TaskEntity(
+            id=str(uuid4()),
+            name="error-wins",
+            status=TaskStatus.RUNNING,
+            status_reason="Task created",
+            updated_at=RACE_TIMESTAMP,
+        )
+        repository = InMemoryTaskStatusRepository(task)
+        task_service = make_task_service_for_status_race(mock_acp_client, repository)
+        both_started = asyncio.Event()
+        release_success = asyncio.Event()
+        release_error = asyncio.Event()
+        started = 0
+
+        async def controlled_forward(**kwargs):
+            nonlocal started
+            started += 1
+            if started == 2:
+                both_started.set()
+            if kwargs["params"]["outcome"] == "success":
+                await release_success.wait()
+                return None
+            await release_error.wait()
+            raise RuntimeError("first forward error")
+
+        mock_acp_client.create_task.side_effect = controlled_forward
+        error_call = asyncio.create_task(
+            task_service.forward_task_to_acp(
+                agent=sample_agent,
+                task=task,
+                task_params={"outcome": "error"},
+            )
+        )
+        success_call = asyncio.create_task(
+            task_service.forward_task_to_acp(
+                agent=sample_agent,
+                task=task,
+                task_params={"outcome": "success"},
+            )
+        )
+
+        await both_started.wait()
+        release_error.set()
+        with pytest.raises(RuntimeError, match="first forward error"):
+            await error_call
+
+        release_success.set()
+        result = await success_call
+
+        assert result.status == TaskStatus.FAILED
+        assert result.status_reason == "first forward error"
+        assert repository.task.status == TaskStatus.FAILED
+        assert repository.task.status_reason == "first forward error"
+        assert repository.current_reads == 3
+
+    async def test_forward_success_without_version_only_reads_current_state(
+        self,
+        mock_acp_client,
+        sample_agent,
+    ):
+        """A missing snapshot version must not permit an unguarded status write."""
+        task = TaskEntity(
+            id=str(uuid4()),
+            name="unversioned-forward",
+            status=TaskStatus.RUNNING,
+            status_reason="Task created",
+        )
+        repository = InMemoryTaskStatusRepository(task)
+        task_service = make_task_service_for_status_race(mock_acp_client, repository)
+        mock_acp_client.create_task.return_value = None
+
+        result = await task_service.forward_task_to_acp(agent=sample_agent, task=task)
+
+        assert result.status == TaskStatus.RUNNING
+        assert result.status_reason == "Task created"
+        assert repository.transition_requests == []
+        assert repository.current_reads == 2
+
+    async def test_forward_task_to_acp_success_confirms_healthy_status(
         self,
         task_service,
         mock_acp_client,
@@ -411,8 +748,7 @@ class TestAgentTaskService:
         agent_repository,
         sample_agent,
     ):
-        """A successful forward returns the task and leaves a non-FAILED status
-        untouched (only a stale FAILED status is rewritten)."""
+        """A successful forward records a versioned RUNNING confirmation."""
         await create_or_get_agent(agent_repository, sample_agent)
         task = await task_service.create_task(
             agent=sample_agent, task_name="healthy-task"
@@ -423,7 +759,7 @@ class TestAgentTaskService:
 
         assert result.id == task.id
         assert result.status == TaskStatus.RUNNING
-        assert result.status_reason == "Task created, forwarding to ACP server"
+        assert result.status_reason == "Task forwarded to ACP server"
 
     async def test_get_task_by_id(
         self, task_service, task_repository, agent_repository, sample_agent
@@ -488,6 +824,48 @@ class TestAgentTaskService:
         assert result.id == created_task.id
         assert result.name == "updated-task"
         assert result.status == TaskStatus.COMPLETED
+
+    async def test_replace_task_params_preserves_concurrent_terminal_status(
+        self,
+        task_service,
+        agent_repository,
+        sample_agent,
+        redis_stream_repository,
+    ):
+        """Param replacement preserves a concurrent status and emits its state."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        stale_task = await task_service.create_task(
+            agent=sample_agent,
+            task_name="replace-params-task",
+            task_params={"keep": "old", "remove": True},
+        )
+        completed_task = await task_service.transition_task_status(
+            task_id=stale_task.id,
+            expected_status=TaskStatus.RUNNING,
+            new_status=TaskStatus.COMPLETED,
+            status_reason="Task completed",
+        )
+        assert completed_task is not None
+        assert stale_task.status == TaskStatus.RUNNING
+        redis_stream_repository.send_data = AsyncMock()
+
+        result = await task_service.replace_task_params(stale_task.id, {"keep": "new"})
+
+        assert result is not None
+        assert result.status == TaskStatus.COMPLETED
+        assert result.status_reason == "Task completed"
+        assert result.params == {"keep": "new"}
+        assert "remove" not in result.params
+        persisted = await task_service.get_task(id=stale_task.id)
+        assert persisted.status == TaskStatus.COMPLETED
+        assert persisted.params == {"keep": "new"}
+
+        redis_stream_repository.send_data.assert_awaited_once()
+        topic, event = redis_stream_repository.send_data.await_args.args
+        assert topic == f"task:{stale_task.id}"
+        assert event["type"] == "task_updated"
+        assert event["task"]["status"] == TaskStatus.COMPLETED
+        assert event["task"]["params"] == {"keep": "new"}
 
     async def test_delete_task(
         self, task_service, task_repository, agent_repository, sample_agent

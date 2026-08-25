@@ -1,4 +1,5 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Collection
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import Depends
@@ -119,18 +120,12 @@ class AgentTaskService:
                 "For sync agents, there are no initialization handlers, skipping ACP call"
             )
             return task_entity
-        try:
-            await self.acp_client.create_task(
-                agent=agent,
-                task=task_entity,
-                acp_url=agent.acp_url,
-                params=task_params,
-            )
-            return task_entity
-        except Exception as e:
-            logger.error(f"Error creating task in ACP: {e}")
-            await self.fail_task(task_entity, str(e))
-            raise e from e
+        return await self.forward_task_to_acp(
+            agent=agent,
+            task=task_entity,
+            task_params=task_params,
+            acp_url=agent.acp_url,
+        )
 
     async def forward_task_to_acp(
         self,
@@ -139,6 +134,10 @@ class AgentTaskService:
         task_params: dict[str, Any] | None = None,
         acp_url: str | None = None,
     ) -> TaskEntity:
+        # Status reconciliation below must be based on the primary's snapshot.
+        # A replica-stale updated_at would make a real forward error lose its CAS
+        # and leave the task incorrectly RUNNING.
+        task = await self.task_repository.get_current(task.id)
         try:
             await self.acp_client.create_task(
                 agent=agent,
@@ -148,20 +147,60 @@ class AgentTaskService:
             )
         except Exception as e:
             logger.error(f"Error creating task in ACP: {e}")
-            await self.fail_task(task, str(e))
+            await self._fail_task_after_acp_forward_error(task, str(e))
             raise e from e
 
-        # The forward succeeded: the agent has accepted the task. If this task
-        # was left FAILED by an earlier forward attempt (e.g. the agent was
-        # unavailable the first time task/create was called), clear that stale
-        # failure now that the agent has accepted it. Otherwise the task — and
-        # the task/create RPC response — would keep reporting the old error even
-        # though the task is actually running.
-        if task.status == TaskStatus.FAILED:
-            task.status = TaskStatus.RUNNING
-            task.status_reason = "Task forwarded to ACP server"
-            task = await self.update_task(task)
-        return task
+        # Confirm this successful forward against the exact task snapshot that
+        # initiated it. Updating even RUNNING -> RUNNING gives concurrent
+        # forwards a single winner: a later error using the old snapshot cannot
+        # overwrite this success, and vice versa.
+        if (
+            task.status
+            not in (
+                TaskStatus.FAILED,
+                TaskStatus.RUNNING,
+                TaskStatus.INTERRUPTED,
+            )
+            or task.updated_at is None
+        ):
+            return await self.task_repository.get_current(task.id)
+
+        forwarded_task = await self.transition_task_status(
+            task_id=task.id,
+            expected_status=task.status,
+            new_status=TaskStatus.RUNNING,
+            status_reason="Task forwarded to ACP server",
+            expected_updated_at=task.updated_at,
+        )
+        if forwarded_task is not None:
+            return forwarded_task
+
+        # Another request changed the task while the ACP call was in flight.
+        # Return its authoritative state instead of reviving a terminal task
+        # from the stale entity supplied by this request.
+        return await self.task_repository.get_current(task.id)
+
+    async def _fail_task_after_acp_forward_error(
+        self, task: TaskEntity, reason: str
+    ) -> None:
+        """Fail a forward attempt only while it still owns the task state."""
+        if (
+            task.status
+            not in (
+                TaskStatus.RUNNING,
+                TaskStatus.INTERRUPTED,
+            )
+            or task.updated_at is None
+        ):
+            return
+
+        await self.transition_task_status(
+            task_id=task.id,
+            expected_status=(TaskStatus.RUNNING, TaskStatus.INTERRUPTED),
+            new_status=TaskStatus.FAILED,
+            status_reason=reason,
+            expected_updated_at=task.updated_at,
+        )
 
     async def fail_task(self, task: TaskEntity, reason: str) -> None:
         task.status = TaskStatus.FAILED
@@ -186,14 +225,15 @@ class AgentTaskService:
     async def transition_task_status(
         self,
         task_id: str,
-        expected_status: TaskStatus,
+        expected_status: TaskStatus | Collection[TaskStatus],
         new_status: TaskStatus,
         status_reason: str,
         task_metadata: dict | None = None,
+        expected_updated_at: datetime | None = None,
     ) -> TaskEntity | None:
         """
-        Atomically transition task status. Returns None if the expected status didn't match.
-        Publishes a task_updated event on success.
+        Atomically transition task status. Returns None if the expected status or
+        version did not match. Publishes a task_updated event on success.
         """
         updated_task = await self.task_repository.transition_status(
             task_id=task_id,
@@ -201,6 +241,7 @@ class AgentTaskService:
             new_status=new_status,
             status_reason=status_reason,
             task_metadata=task_metadata,
+            expected_updated_at=expected_updated_at,
         )
         if updated_task is None:
             return None
@@ -230,6 +271,30 @@ class AgentTaskService:
         try:
             # The Redis adapter now handles binary data properly
             topic = get_task_event_stream_topic(task_id=task.id)
+            await self.stream_repository.send_data(
+                topic,
+                TaskStreamTaskUpdatedEventEntity(
+                    type="task_updated", task=updated_task
+                ).model_dump(mode="json"),
+            )
+            logger.info(f"task_updated event published to topic: {topic}")
+        except Exception as e:
+            logger.error(
+                f"Error sending task_updated event to stream: {e}", exc_info=True
+            )
+
+        return updated_task
+
+    async def replace_task_params(
+        self, task_id: str, params: dict | None
+    ) -> TaskEntity | None:
+        """Replace task params without writing stale values to other fields."""
+        updated_task = await self.task_repository.replace_params(task_id, params)
+        if updated_task is None:
+            return None
+
+        try:
+            topic = get_task_event_stream_topic(task_id=task_id)
             await self.stream_repository.send_data(
                 topic,
                 TaskStreamTaskUpdatedEventEntity(
