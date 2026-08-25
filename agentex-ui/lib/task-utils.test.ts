@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 
-import { createTaskName, deriveTaskDisplayName } from '@/lib/task-utils';
+import {
+  createTaskName,
+  deriveTaskDisplayName,
+  isTaskEnded,
+} from '@/lib/task-utils';
 
 import type { TaskListResponse } from 'agentex/resources';
 
@@ -95,5 +99,23 @@ describe('deriveTaskDisplayName', () => {
     } as unknown as TaskListResponse.TaskListResponseItem;
 
     expect(createTaskName(task)).toBe('say hello');
+  });
+});
+
+describe('isTaskEnded', () => {
+  it('is false while the task is running', () => {
+    expect(isTaskEnded('RUNNING')).toBe(false);
+  });
+
+  it.each(['FAILED', 'CANCELED', 'TERMINATED', 'TIMED_OUT', 'COMPLETED'])(
+    'is true for %s',
+    status => {
+      expect(isTaskEnded(status as never)).toBe(true);
+    }
+  );
+
+  it('treats an unknown status as not ended', () => {
+    expect(isTaskEnded(null)).toBe(false);
+    expect(isTaskEnded(undefined)).toBe(false);
   });
 });
