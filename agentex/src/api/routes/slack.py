@@ -38,3 +38,19 @@ async def slack_commands(
     form = dict(await request.form())
     headers = {k.lower(): v for k, v in request.headers.items()}
     return await use_case.handle_slash_command(body=body, headers=headers, form=form)
+
+
+@router.post("/interactions", summary="Slack interactivity ingress (modals, shortcuts)")
+async def slack_interactions(
+    request: Request,
+    background: BackgroundTasks,
+    use_case: DSlackGatewayUseCase,
+) -> dict:
+    # Interactions are form-encoded with a JSON `payload` field. Raw body first (for
+    # signature verification), then the form. The turn runs out-of-band like events.
+    body = await request.body()
+    form = dict(await request.form())
+    headers = {k.lower(): v for k, v in request.headers.items()}
+    return await use_case.handle_interaction(
+        body=body, headers=headers, form=form, background=background
+    )

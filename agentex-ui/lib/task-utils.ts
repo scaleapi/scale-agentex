@@ -1,3 +1,6 @@
+import { TaskStatusEnum } from '@/lib/types';
+import type { TaskStatus } from '@/lib/types';
+
 import type { TaskListResponse } from 'agentex/resources';
 
 const LEGACY_SCHEDULED_MESSAGE_PREFIX = 'Scheduled Message: ';
@@ -7,6 +10,19 @@ export function isScheduledTask(
 ): boolean {
   const scheduleId = task?.task_metadata?.schedule_id;
   return typeof scheduleId === 'string' && scheduleId.length > 0;
+}
+
+/**
+ * Derives the task_metadata.display_name written at task creation from the
+ * user's prompt. This is the writer-side counterpart of createTaskName, which
+ * reads display_name first — do not write the prompt into task.name, which is
+ * a globally-unique get-or-create idempotency key, not a label.
+ */
+export function deriveTaskDisplayName(prompt: string): string {
+  // Truncate by code points, not UTF-16 units: a unit-based slice can split a
+  // surrogate pair, and Postgres rejects lone surrogates in JSONB, failing the
+  // whole task/create request.
+  return Array.from(prompt.trim().replace(/\s+/g, ' ')).slice(0, 80).join('');
 }
 
 export function createTaskName(
@@ -25,4 +41,14 @@ export function createTaskName(
   }
 
   return 'Unnamed task';
+}
+
+/**
+ * Whether a task has stopped — it failed, was cancelled, timed out, or
+ * finished. RUNNING is the only status meaning work may still happen.
+ *
+ * An unset status means "not known yet", which is not the same as ended.
+ */
+export function isTaskEnded(status: TaskStatus | null | undefined): boolean {
+  return status != null && status !== TaskStatusEnum.RUNNING;
 }

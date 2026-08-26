@@ -65,9 +65,10 @@ export function isSchedulePaused(schedule: AgentRunSchedule) {
   return schedule.state === 'PAUSED' || schedule.paused;
 }
 
+// "Scheduled" is load-bearing: the count is the schedule's own fire count
+// (Temporal num_actions), which manual Run now triggers deliberately bypass.
 export function describeRunCount(count: number) {
-  if (count === 0) return '0 runs';
-  return count === 1 ? '1 run' : `${count} runs`;
+  return count === 1 ? '1 scheduled run' : `${count} scheduled runs`;
 }
 
 export function formatTimezone(timezone: string) {
@@ -79,26 +80,25 @@ export function sortScheduleItems(
   view: ScheduleView
 ) {
   return [...items].sort((a, b) => {
-    const aNextRun = getNextRunTime(a.schedule);
-    const bNextRun = getNextRunTime(b.schedule);
-
     if (view === 'upcoming') {
-      return (aNextRun ?? 0) - (bNextRun ?? 0);
+      return (
+        (getNextRunTime(a.schedule) ?? 0) - (getNextRunTime(b.schedule) ?? 0)
+      );
     }
 
-    if (aNextRun != null && bNextRun != null) {
-      return aNextRun - bNextRun;
-    }
-    if (aNextRun != null) return -1;
-    if (bNextRun != null) return 1;
+    // Name order keeps the Schedules tab stable: sorting by next run made a
+    // row jump to the bottom the moment its schedule was paused.
     return a.schedule.name.localeCompare(b.schedule.name);
   });
 }
 
+// Times render in the browser's timezone; the timezone name makes that
+// visible when the schedule was created in a different zone.
 function formatRunTime(date: Date) {
   return date.toLocaleTimeString(undefined, {
     hour: 'numeric',
     minute: '2-digit',
+    timeZoneName: 'short',
   });
 }
 
@@ -108,6 +108,7 @@ function formatRunDateTime(date: Date) {
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
+    timeZoneName: 'short',
   });
 }
 
@@ -203,6 +204,9 @@ export function useCloseOnOutsideClick<T extends HTMLElement>(
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        // Mark the key consumed so global Escape handlers (e.g. clear
+        // selected agent) don't also fire.
+        event.preventDefault();
         onClose();
       }
     };

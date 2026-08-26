@@ -80,7 +80,11 @@ export function ScheduleComposer({
     setCreationFeedback({
       status: 'pending',
       title: name,
-      cadenceLabel: `${describeCadenceConfig(cadence)} · ${formatTimezone(timezone)}`,
+      // Intervals are epoch-aligned and ignore the timezone, so don't echo it.
+      cadenceLabel:
+        cadence.type === 'interval'
+          ? describeCadenceConfig(cadence)
+          : `${describeCadenceConfig(cadence)} · ${formatTimezone(timezone)}`,
     });
     setPrompt('');
     try {
@@ -120,6 +124,7 @@ export function ScheduleComposer({
             }
           }}
           placeholder="What should this agent do on a schedule?"
+          aria-label="Schedule prompt"
           className="min-h-20 resize-none border-0 bg-transparent text-sm leading-6 outline-none focus:border-0 focus:ring-0 focus:outline-none focus-visible:outline-none"
         />
         <div className="flex flex-wrap items-center gap-3">
@@ -199,13 +204,13 @@ function ScheduleCreationStatus({
           className={cn(
             'border-border bg-card flex items-center gap-3 rounded-2xl border px-4 py-3 shadow-sm',
             feedback.status === 'success' &&
-              'border-emerald-500/30 bg-emerald-500/5'
+              'border-green-600/30 bg-green-600/5'
           )}
           aria-live="polite"
         >
           {feedback.status === 'pending' ? (
             <motion.span
-              className="size-2.5 shrink-0 rounded-full bg-[#7C5CFF]"
+              className="bg-primary-foreground size-2.5 shrink-0 rounded-full"
               animate={
                 reduceMotion
                   ? false
@@ -218,7 +223,7 @@ function ScheduleCreationStatus({
               }}
             />
           ) : (
-            <CheckCircle2 className="size-5 shrink-0 text-emerald-600" />
+            <CheckCircle2 className="size-5 shrink-0 text-green-600 dark:text-green-400" />
           )}
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium">

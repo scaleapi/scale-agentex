@@ -21,7 +21,7 @@ import {
 } from '@/hooks/use-safe-search-params';
 import { useSendMessage } from '@/hooks/use-task-messages';
 import { useTask } from '@/hooks/use-tasks';
-import { TaskStatusEnum } from '@/lib/types';
+import { deriveTaskDisplayName, isTaskEnded } from '@/lib/task-utils';
 
 type PromptInputProps = {
   prompt: string;
@@ -64,7 +64,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
 
   const isTaskTerminal = useMemo(() => {
     if (!taskID || !task) return false;
-    return task.status != null && task.status !== TaskStatusEnum.RUNNING;
+    return isTaskEnded(task.status);
   }, [taskID, task]);
 
   const handleSetJson = useCallback(
@@ -139,6 +139,7 @@ export function PromptInput({ prompt, setPrompt }: PromptInputProps) {
           description: prompt,
           content: currentPrompt,
         },
+        task_metadata: { display_name: deriveTaskDisplayName(prompt) },
       });
       currentTaskId = task.id;
       updateParams({ [SearchParamKey.TASK_ID]: currentTaskId });

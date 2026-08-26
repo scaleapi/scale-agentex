@@ -11,6 +11,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy import (
     Enum as SQLAlchemyEnum,
@@ -22,6 +23,10 @@ from sqlalchemy.orm import relationship
 from src.domain.entities.agent_api_keys import AgentAPIKeyType
 from src.domain.entities.agents import AgentInputType, AgentStatus
 from src.domain.entities.deployments import DeploymentStatus
+from src.domain.entities.identity_links import (
+    IdentityLinkMethod,
+    IdentityProvider,
+)
 from src.domain.entities.tasks import TaskStatus
 from src.utils.ids import orm_id
 
@@ -355,3 +360,53 @@ class CheckpointWriteORM(BaseORM):
     blob = Column(LargeBinary, nullable=False)
     task_path = Column(Text, nullable=False, server_default="")
     __table_args__ = (Index("checkpoint_writes_thread_id_idx", "thread_id"),)
+
+
+class IdentityLinkORM(BaseORM):
+    """Provider identity -> SGP identity mapping, plus that user's encrypted SGP
+    credential (see entities/identity_links.py for why the credential lives here).
+
+    Rows are tombstoned via ``revoked_at`` rather than deleted, so the two
+    uniqueness rules are *partial* indexes scoped to active rows:
+
+    - one active SGP identity per provider identity — the mapping must be a function
+    - one active provider identity per SGP user within a workspace — defense in
+      depth, since two Slack accounts pointing at one SGP user is the shape an
+      identity hijack takes, and no legitimate case needs it
+    """
+
+    __tablename__ = "identity_links"
+    id = Column(String, primary_key=True, default=orm_id)
+    provider = Column(SQLAlchemyEnum(IdentityProvider), nullable=False)
+    external_team_id = Column(String(64), nullable=False)
+    external_user_id = Column(String(64), nullable=False)
+    sgp_user_id = Column(String(64), nullable=False)
+    sgp_account_id = Column(String(64), nullable=False)
+    linked_via = Column(SQLAlchemyEnum(IdentityLinkMethod), nullable=False)
+    # Fernet ciphertext of the user's SGP API key. Nullable: a mapping without a
+    # credential is still useful (attribution), it just can't be acted through.
+    # Never selected into IdentityLinkEntity — read only via the narrow
+    # get_credential() path, so this column can't ride along in logs or caches.
+    credential_ciphertext = Column(Text, nullable=True)
+    credential_expires_at = Column(DateTime(timezone=True), nullable=True)
+    linked_at = Column(DateTime(timezone=True), server_default=func.now())
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index(
+            "uq_identity_links_external_active",
+            "provider",
+            "external_team_id",
+            "external_user_id",
+            unique=True,
+            postgresql_where=text("revoked_at IS NULL"),
+        ),
+        Index(
+            "uq_identity_links_sgp_user_active",
+            "provider",
+            "external_team_id",
+            "sgp_user_id",
+            unique=True,
+            postgresql_where=text("revoked_at IS NULL"),
+        ),
+    )

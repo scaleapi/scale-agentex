@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import json
 import os
 import re
 import time
@@ -197,18 +198,37 @@ def _strip_selector(text: str, selector: str) -> str:
     return stripped
 
 
-def _turn_content(inbound: InboundSlack, prompt: str) -> str:
+def _turn_content(
+    inbound: InboundSlack, prompt: str, *, self_posts: bool = False
+) -> str:
     """Prepend the Slack conversation context to the turn.
 
     normalize() is otherwise lossy — it hands the agent only the prompt text and drops
     the channel/thread. But to read channel history the agent needs the channel id to
     point its Slack tools at, so we prefix a short, clearly-delimited context line and
-    put the user's message after a blank line. Harmless when no Slack tool is enabled."""
+    put the user's message after a blank line. Harmless when no Slack tool is enabled.
+
+    ``self_posts`` is set for agents the gateway does NOT relay (golden-agent, which has
+    Slack write tools). For them we add an explicit directive to post their own reply
+    into this thread, because nothing is delivered on their behalf — without it the turn
+    would run and produce text that never reaches Slack."""
     context = (
         f"[Slack context] channel_id={inbound.channel} thread_ts={inbound.thread_ts}. "
         f"This message came from that Slack thread; to read earlier messages or the "
         f"channel's history, use your Slack tools with this channel_id."
     )
+    if self_posts:
+        context += (
+            " IMPORTANT: your text response is NOT posted to Slack for you. Deliver your "
+            f"reply by calling post_message(channel_id={inbound.channel}, "
+            f"thread_ts={inbound.thread_ts}, ...). Posting a message HIDES the 'thinking…' "
+            "indicator, so if a turn produces MORE THAN ONE message, call "
+            f"set_status(channel_id={inbound.channel}, thread_ts={inbound.thread_ts}, "
+            "status='is thinking…') right after each message that is NOT your final one; "
+            "do NOT call it after your final message, so the indicator clears there. Use "
+            "post_message for other channels/DMs too; only this thread's reply is your "
+            "responsibility to post."
+        )
     return f"{context}\n\n{prompt}"
 
 
@@ -225,6 +245,63 @@ def _agents_list_response(agents) -> dict:
         f"*{_DEFAULT_AGENT_NAME}*.\n\n{lines}"
     )
     return {"response_type": "ephemeral", "text": text}
+
+
+_AGENTS_MODAL_CALLBACK = "agents_modal"
+
+
+def _build_agents_modal(agents, channel_id: str) -> dict:
+    """Block Kit view for the /agents picker: a dropdown of invocable agents + a
+    message box. ``channel_id`` rides in ``private_metadata`` so the view_submission
+    knows where to post. The selected value is the agent name, which the submission
+    handler feeds into the SAME selector->target resolution as an @mention."""
+    options = [
+        {
+            "text": {"type": "plain_text", "text": a.name[:75]},
+            "value": a.name[:75],
+            **(
+                {"description": {"type": "plain_text", "text": a.description[:75]}}
+                if getattr(a, "description", None)
+                else {}
+            ),
+        }
+        for a in agents[:100]  # Slack static_select caps at 100 options
+    ]
+    return {
+        "type": "modal",
+        "callback_id": _AGENTS_MODAL_CALLBACK,
+        "private_metadata": channel_id,
+        "title": {"type": "plain_text", "text": "Ask an agent"},
+        "submit": {"type": "plain_text", "text": "Send"},
+        "close": {"type": "plain_text", "text": "Cancel"},
+        "blocks": [
+            {
+                "type": "input",
+                "block_id": "agent_block",
+                "label": {"type": "plain_text", "text": "Agent"},
+                "element": {
+                    "type": "static_select",
+                    "action_id": "agent_select",
+                    "placeholder": {"type": "plain_text", "text": "Choose an agent"},
+                    "options": options,
+                },
+            },
+            {
+                "type": "input",
+                "block_id": "message_block",
+                "label": {"type": "plain_text", "text": "Message"},
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "message_input",
+                    "multiline": True,
+                    "placeholder": {
+                        "type": "plain_text",
+                        "text": "What do you want the agent to do?",
+                    },
+                },
+            },
+        ],
+    }
 
 
 def _agent_text(messages) -> str | None:
@@ -358,11 +435,129 @@ class SlackGatewayUseCase:
 
         command = (form.get("command") or "").strip()
         if command == "/agents":
+            # Open the picker modal; fall back to the plain ephemeral list when we
+            # can't (no trigger_id, no agents, or views.open failed).
+            trigger_id = form.get("trigger_id") or ""
+            channel_id = form.get("channel_id") or ""
+            if trigger_id and await self._open_agents_modal(trigger_id, channel_id):
+                return {}  # empty 200: Slack shows nothing; the modal is already open
             return _agents_list_response(await self._list_agents())
         return {
             "response_type": "ephemeral",
             "text": f"Unsupported command: {command or '(none)'}",
         }
+
+    async def handle_interaction(
+        self,
+        *,
+        body: bytes,
+        headers: dict[str, str],
+        form: dict[str, Any],
+        background: BackgroundTasks,
+    ) -> dict:
+        """Handle a Slack interactivity POST. v1 handles the /agents modal's
+        ``view_submission`` (see _submit_agents_modal). Payload is form-encoded with a
+        JSON ``payload`` field; the signature covers the raw body (verified like slash
+        commands)."""
+        try:
+            payload = json.loads(form.get("payload") or "{}")
+        except (TypeError, ValueError):
+            return {}
+
+        if _DEV_SKIP_VERIFY:
+            logger.warning(
+                "SLACK_GATEWAY_DEV_SKIP_VERIFY is ON — skipping interaction signature "
+                "verification. DEV ONLY."
+            )
+        else:
+            api_app_id = payload.get("api_app_id") or ""
+            signing_secret = await self._fetch_signing_secret(api_app_id)
+            if not verify_signature(
+                signing_secret,
+                headers.get("x-slack-request-timestamp", ""),
+                headers.get("x-slack-signature", ""),
+                body,
+            ):
+                logger.warning(
+                    "slack interaction signature failed for app %s", api_app_id
+                )
+                return {}
+
+        if payload.get("type") != "view_submission":
+            return {}
+        view = payload.get("view") or {}
+        if view.get("callback_id") == _AGENTS_MODAL_CALLBACK:
+            return await self._submit_agents_modal(payload, view, background)
+        return {}  # not ours — ack empty
+
+    async def _submit_agents_modal(
+        self, payload: dict, view: dict, background: BackgroundTasks
+    ) -> dict:
+        """/agents modal submission: post a breadcrumb (records the request + anchors
+        the reply thread) then build the SAME InboundSlack an @mention would and run
+        the turn out-of-band."""
+        values = (view.get("state") or {}).get("values") or {}
+        agent_sel = (values.get("agent_block") or {}).get("agent_select") or {}
+        agent = (agent_sel.get("selected_option") or {}).get("value") or ""
+        message = ((values.get("message_block") or {}).get("message_input") or {}).get(
+            "value"
+        ) or ""
+        channel = view.get("private_metadata") or ""
+        user = (payload.get("user") or {}).get("id") or ""
+        team = (payload.get("team") or {}).get("id") or ""
+
+        if not (agent and message and channel):
+            return {
+                "response_action": "errors",
+                "errors": {"message_block": "Pick an agent and enter a message."},
+            }
+
+        # Breadcrumb: reads like the equivalent @mention, records who asked, and its ts
+        # anchors the reply thread. Posted by the bot, so normalize() ignores it (no
+        # second turn). If the bot isn't in the channel the post fails — the modal can
+        # be launched from anywhere, but we can only post where the bot is a member.
+        command = f"@agentex {agent} {message}"
+        crumb = await self._slack_api(
+            "chat.postMessage",
+            {
+                "channel": channel,
+                "text": command,  # notification / accessibility fallback
+                "blocks": [
+                    {"type": "section", "text": {"type": "mrkdwn", "text": command}},
+                    # Attribution as a context block — Slack renders it as a small,
+                    # muted footer rather than inline body text.
+                    {
+                        "type": "context",
+                        "elements": [
+                            {
+                                "type": "mrkdwn",
+                                "text": f"via <@{user}> through *{agent}*",
+                            }
+                        ],
+                    },
+                ],
+            },
+        )
+        if not crumb.get("ok"):
+            logger.warning("[slack] breadcrumb post failed: %s", crumb.get("error"))
+            return {
+                "response_action": "errors",
+                "errors": {
+                    "message_block": "I couldn't post in that channel — invite me to "
+                    "it (`/invite`), then try again."
+                },
+            }
+
+        inbound = InboundSlack(
+            team_id=team,
+            channel=channel,
+            user=user,
+            text=f"{agent} {message}",  # mirrors an @mention so _resolve_target matches
+            thread_ts=crumb.get("ts") or "",
+            selector=agent,
+        )
+        background.add_task(self._run_turn, inbound)
+        return {}  # empty 200 closes the modal
 
     async def _run_turn(self, inbound: InboundSlack) -> None:
         try:
@@ -375,6 +570,24 @@ class SlackGatewayUseCase:
             if not await self._authorize(target):
                 await self._deliver(
                     inbound, f"You're not authorized to run {target.label()}."
+                )
+                return
+
+            # golden-agent is the only agent with Slack WRITE tools (SlackBot is
+            # auto-enabled on every slack-origin golden-agent turn, config or not), so it
+            # posts its own reply into the thread. For it we DON'T relay (that would
+            # double-post the answer). We DO still show "thinking…" while it works — that
+            # clears on its own when the agent posts its reply (posting a message clears
+            # the assistant status), so the agent's post IS the done signal. Every other
+            # agent — registered agents (their own name, no config) and SYNC agents — has
+            # no Slack tools, so the gateway is the single writer and relays. Errors still
+            # surface via except. (config_id can't distinguish this: configs are personas
+            # that KEEP the golden-agent name, so the name is the exact self-posting
+            # signal.)
+            if target.agent_name == _DEFAULT_AGENT_NAME:
+                await self._set_status(inbound, "is thinking…")
+                await self._dispatch(
+                    target, inbound, prompt, principal, auth_headers, collect=False
                 )
                 return
 
@@ -477,6 +690,8 @@ class SlackGatewayUseCase:
         prompt: str,
         principal: Any,
         auth_headers: dict[str, str],
+        *,
+        collect: bool = True,
     ) -> str | None:
         """Create-or-resume a task on the resolved agent, then inject the turn, acting as
         the shared v1 identity (x-api-key -> principal for authz, delegated downstream as
@@ -500,9 +715,13 @@ class SlackGatewayUseCase:
         )
         agent = await acp.agent_repository.get(name=target.agent_name)
         task_name = f"slack:{inbound.thread_ts}"
+        # golden-agent isn't relayed (it self-posts), so its context gets the directive to
+        # post its own reply. Keyed on the same signal _run_turn uses to skip the relay.
         content = TextContentEntity(
             author=MessageAuthor.USER,
-            content=_turn_content(inbound, prompt),
+            content=_turn_content(
+                inbound, prompt, self_posts=target.agent_name == _DEFAULT_AGENT_NAME
+            ),
             format=TextFormat.MARKDOWN,
         )
         # First-turn task params: golden-agent's agent_config id (when this turn resolved
@@ -556,13 +775,22 @@ class SlackGatewayUseCase:
                 # lagging) replica, which may not have the just-created task yet.
                 task = await self._resolve_task_after_race(acp.task_service, task_name)
 
-        # Snapshot existing messages so we can isolate THIS turn's reply.
-        seen = await self._seen_message_ids(acp.task_message_service, task.id)
+        # Snapshot existing messages so we can isolate THIS turn's reply (only needed
+        # when we're going to collect + relay it).
+        seen = (
+            await self._seen_message_ids(acp.task_message_service, task.id)
+            if collect
+            else set()
+        )
         await acp.handle_rpc_request(
             method=AgentRPCMethod.EVENT_SEND,
             params=SendEventRequestEntity(task_name=task_name, content=content),
             agent_id=agent.id,
         )
+        # Self-posting agents (golden-agent) own their Slack output: send the event and
+        # return without polling — the gateway never relays their reply.
+        if not collect:
+            return None
         # Poll the task's messages for this turn's settled agent reply.
         return await self._collect_reply(acp.task_message_service, task.id, seen)
 
@@ -803,6 +1031,40 @@ class SlackGatewayUseCase:
             )
         else:
             logger.warning("[slack] chat.postMessage failed: %s", body.get("error"))
+
+    async def _slack_api(self, method: str, payload: dict) -> dict:
+        """POST to the Slack Web API with the bot token; returns the parsed body.
+        Returns ``{"ok": False, ...}`` (never raises) when the token is unset or the
+        request fails, so callers can branch on ``ok`` uniformly."""
+        token = await self._fetch_bot_token()
+        if not token:
+            logger.info("[slack] %s skipped: no bot token", method)
+            return {"ok": False, "error": "no_bot_token"}
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(
+                    f"https://slack.com/api/{method}",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json=payload,
+                )
+            return resp.json()
+        except Exception:
+            logger.warning("[slack] %s request failed", method, exc_info=True)
+            return {"ok": False, "error": "request_failed"}
+
+    async def _open_agents_modal(self, trigger_id: str, channel_id: str) -> bool:
+        """Open the /agents picker modal. Returns False (caller falls back to the plain
+        ephemeral list) when there are no agents or ``views.open`` failed."""
+        agents = await self._list_agents()
+        if not agents:
+            return False
+        body = await self._slack_api(
+            "views.open",
+            {"trigger_id": trigger_id, "view": _build_agents_modal(agents, channel_id)},
+        )
+        if not body.get("ok"):
+            logger.warning("[slack] views.open failed: %s", body.get("error"))
+        return bool(body.get("ok"))
 
 
 DSlackGatewayUseCase = Annotated[SlackGatewayUseCase, Depends(SlackGatewayUseCase)]
