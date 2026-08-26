@@ -93,18 +93,27 @@ class TestResolve:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestActingHeaders:
-    async def test_happy_path_returns_the_users_key_and_account(self):
-        service, _ = _service(_link(), credential="ssk_is_theirs")
+    async def test_happy_path_returns_the_users_session_and_account(self):
+        service, _ = _service(_link(), credential="jwt.header.sig")
         identity = ResolvedIdentity(_link())
 
         headers = await service.acting_headers(identity)
 
-        # This exact header is what becomes x-acting-user-api-key downstream, which
-        # is what makes resolve_user_secrets return THIS user's Notion token.
+        # This exact shape is what becomes x-acting-user-cookie downstream, which is
+        # what makes the secrets service return THIS user's Notion token. The cookie
+        # name has to match the delegation allowlist or it's dropped en route.
         assert headers == {
-            "x-api-key": "ssk_is_theirs",
+            "cookie": "_identityJwt=jwt.header.sig",
             "x-selected-account-id": "acct-1",
         }
+
+    async def test_missing_account_id_returns_none(self):
+        # The secrets service refuses a session credential with no account context,
+        # so a link lacking one cannot be acted through. Returning partial headers
+        # would produce a confusing downstream 400 instead of a clean fallback.
+        service, _ = _service(_link(sgp_account_id=""), credential="jwt.a.b")
+        identity = ResolvedIdentity(_link(sgp_account_id=""))
+        assert await service.acting_headers(identity) is None
 
     async def test_link_without_a_credential_returns_none(self):
         service, repo = _service(_link(has_credential=False))
@@ -121,9 +130,9 @@ class TestActingHeaders:
 
     async def test_credential_with_no_expiry_is_treated_as_valid(self):
         forever = _link(credential_expires_at=None)
-        service, _ = _service(forever, credential="ssk_is_forever")
+        service, _ = _service(forever, credential="jwt.forever.sig")
         headers = await service.acting_headers(ResolvedIdentity(forever))
-        assert headers["x-api-key"] == "ssk_is_forever"
+        assert headers["cookie"] == "_identityJwt=jwt.forever.sig"
 
     async def test_undecryptable_credential_returns_none_not_an_exception(self):
         # A rotated encryption key leaves existing rows unreadable. That must

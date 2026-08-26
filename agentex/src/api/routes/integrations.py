@@ -8,12 +8,30 @@ whole point of this leg is to learn who the caller is in SGP from their own sess
 The flow:
 
     GET  /integrations/slack/link?nonce=…    confirmation screen (does not consume)
-    POST /integrations/slack/link            confirm -> mint -> store
+    POST /integrations/slack/link            confirm -> store the caller's session
 
 By the time the POST runs, both halves of the identity are present in one request:
 the Slack side from the nonce (parked when Slack's HMAC verified the event), the SGP
 side from the authenticated session. That coincidence is the only moment the mapping
 can be established safely.
+
+The credential we keep is the caller's **own session cookie**, not a freshly minted
+API key. Minting was the original design and it does not work: identity-service
+permits one API key per user and every active user already has one, so ``POST
+/api-keys`` answers 409 ("API key already exists for this user") and the secret of
+the existing key cannot be read back. Rotating theirs would silently break whatever
+else uses it.
+
+The session cookie avoids all of that, and is a better credential besides. It is
+already in this request, so there is no outbound call to fail; it carries its own
+expiry in the JWT, where a minted key defaults to none; taking it changes nothing
+about the user's existing credentials; and the secrets service accepts it directly
+(verified: a session cookie plus ``x-selected-account-id`` authenticates, while the
+cookie alone is refused for want of account context).
+
+The tradeoff is that the link now lives and dies with the session: sign-out or
+revocation ends it, which surfaces downstream as a rejected credential and should
+prompt a re-link rather than an error.
 
 Rendered as plain HTML rather than JSON: the user arrives here by clicking a link in
 Slack, so the response is for a human, and the confirmation step is a security
@@ -29,12 +47,6 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
-from src.adapters.identity_service.adapter_identity_service import (
-    IdentityServiceClient,
-    IdentityServiceError,
-    forwardable_headers,
-)
-from src.api.middleware_utils import get_request_headers_to_forward
 from src.config.dependencies import (
     database_async_read_only_session_maker,
     database_async_read_write_engine,
@@ -42,8 +54,12 @@ from src.config.dependencies import (
 )
 from src.domain.entities.identity_links import IdentityLinkMethod, IdentityProvider
 from src.domain.repositories.identity_link_repository import IdentityLinkRepository
-from src.domain.services.identity_link_service import IdentityLinkService
+from src.domain.services.identity_link_service import (
+    SESSION_COOKIE_NAME,
+    IdentityLinkService,
+)
 from src.domain.services.link_nonce_service import LinkNonceService
+from src.utils import session_jwt
 from src.utils.credential_encryption import CredentialEncryptionError
 from src.utils.logging import make_logger
 
@@ -51,12 +67,10 @@ logger = make_logger(__name__)
 
 router = APIRouter(prefix="/integrations", tags=["Integrations"])
 
-# How long a minted key lasts. Bounded on purpose: this is the most sensitive thing
-# agentex stores, and an expiry turns "valid until someone notices" into a known
-# window. Long enough that re-linking isn't a weekly chore.
-_KEY_TTL_DAYS = int(os.getenv("IDENTITY_LINK_KEY_TTL_DAYS", "30"))
-
-_KEY_NAME_PREFIX = "agentex-slack-link"
+# Used only when the session token doesn't declare its own expiry. Never "no
+# expiry": storing a credential with an unbounded lifetime is how you end up
+# holding one indefinitely, so an unknown expiry becomes a short known one.
+_FALLBACK_TTL_DAYS = int(os.getenv("IDENTITY_LINK_FALLBACK_TTL_DAYS", "30"))
 
 
 def _page(title: str, body: str, *, status: int = 200) -> HTMLResponse:
@@ -111,6 +125,23 @@ def _principal(request: Request) -> tuple[str | None, str | None, str | None]:
         ctx.get("account_id"),
         raw_user.get("email") if isinstance(raw_user, dict) else None,
     )
+
+
+def _session_credential(request: Request) -> str | None:
+    """The caller's session cookie value, or None if it isn't on the request.
+
+    Parsed by splitting on ``;`` rather than with ``http.cookies``: a real browser
+    sends a long Cookie header full of analytics morsels that the stdlib parser
+    chokes on, silently dropping every morsel after the first bad one — which can
+    include the session cookie itself. The same reasoning (and the same approach)
+    applies in ``delegation_headers``.
+    """
+    raw = request.headers.get("cookie") or ""
+    for part in raw.split(";"):
+        name, sep, value = part.strip().partition("=")
+        if sep and name.strip() == SESSION_COOKIE_NAME:
+            return value.strip() or None
+    return None
 
 
 @router.get("/slack/link", summary="Confirm linking a Slack identity to SGP")
@@ -179,6 +210,24 @@ async def slack_link_confirm(request: Request, nonce: str = Form("")) -> HTMLRes
             status=401,
         )
 
+    if not sgp_account_id:
+        # The secrets service refuses a session credential with no account context
+        # ("Account ID is required"), so a link without one would store a credential
+        # that can never be used. Better to refuse now than to look connected and
+        # quietly resolve nothing.
+        logger.warning(
+            "identity link refused: principal carried no account id",
+            extra={"sgp_user_id": sgp_user_id},
+        )
+        return _page(
+            "No account selected",
+            "<h1>Couldn't finish connecting</h1>"
+            "<p>Your session isn't scoped to an account.</p>"
+            "<p class=muted>Open SGP, pick the account whose tools you want the "
+            "agent to use, then click the link again.</p>",
+            status=400,
+        )
+
     provider = IdentityProvider(link_request.provider)
     service = _identity_link_service()
 
@@ -198,21 +247,43 @@ async def slack_link_confirm(request: Request, nonce: str = Form("")) -> HTMLRes
             status=409,
         )
 
-    expires_on = datetime.now(UTC) + timedelta(days=_KEY_TTL_DAYS)
-    try:
-        secret, actual_expiry = await IdentityServiceClient().mint_user_api_key(
-            sgp_user_id=sgp_user_id,
-            name=f"{_KEY_NAME_PREFIX}-{link_request.external_user_id}",
-            auth_headers=forwardable_headers(get_request_headers_to_forward(request)),
-            expires_on=expires_on,
+    secret = _session_credential(request)
+    if not secret:
+        # The middleware authenticated this caller somehow, but not by a session
+        # cookie — an api-key or bearer caller, or a cookie under a different name.
+        # There is nothing here we can act through later, so refuse rather than
+        # store an empty credential.
+        logger.warning(
+            "identity link refused: no session cookie on an authenticated request",
+            extra={"sgp_user_id": sgp_user_id, "cookie": SESSION_COOKIE_NAME},
         )
-    except IdentityServiceError as exc:
-        logger.warning("identity link mint failed: %s", exc)
         return _page(
-            "Couldn't create a key",
-            f"<h1>Couldn't finish connecting</h1><p>{html.escape(str(exc))}</p>"
-            "<p class=muted>Your link is still valid — you can retry.</p>",
-            status=502,
+            "Couldn't read your session",
+            "<h1>Couldn't finish connecting</h1>"
+            "<p>This needs to be opened in a browser signed in to SGP.</p>"
+            "<p class=muted>If you're already signed in, open the link again in "
+            "that same browser rather than a new window or a different app.</p>",
+            status=400,
+        )
+
+    # The token's own expiry beats any TTL we could invent — the credential's real
+    # lifetime belongs to the session. Unknown expiry falls back to a bounded
+    # window rather than to "never".
+    actual_expiry = session_jwt.expires_at(secret)
+    if actual_expiry is None:
+        actual_expiry = datetime.now(UTC) + timedelta(days=_FALLBACK_TTL_DAYS)
+        logger.info(
+            "identity link: session token declared no expiry; using fallback",
+            extra={"sgp_user_id": sgp_user_id, "fallback_days": _FALLBACK_TTL_DAYS},
+        )
+    elif actual_expiry <= datetime.now(UTC):
+        # Already expired: the middleware accepted it, but storing it would create a
+        # link that cannot work. Say so instead of failing later and silently.
+        return _page(
+            "Session expired",
+            "<h1>Your session has expired</h1>"
+            "<p class=muted>Sign in to SGP again, then click the link once more.</p>",
+            status=401,
         )
 
     try:
@@ -221,14 +292,14 @@ async def slack_link_confirm(request: Request, nonce: str = Form("")) -> HTMLRes
             external_team_id=link_request.external_team_id,
             external_user_id=link_request.external_user_id,
             sgp_user_id=sgp_user_id,
-            sgp_account_id=sgp_account_id or "",
+            sgp_account_id=sgp_account_id,
             linked_via=IdentityLinkMethod.EXPLICIT,
             credential=secret,
             credential_expires_at=actual_expiry,
         )
     except CredentialEncryptionError:
-        # AGENTEX_CREDENTIAL_ENCRYPTION_KEY is missing or malformed, so the freshly
-        # minted key cannot be stored safely. Deliberately NOT stored in plaintext.
+        # AGENTEX_CREDENTIAL_ENCRYPTION_KEY is missing or malformed, so the session
+        # credential cannot be stored safely. Deliberately NOT stored in plaintext.
         # Reported as an operator problem rather than a 500, because the user can't
         # do anything about it and would otherwise just retry forever. The nonce is
         # left intact so the link still works once the key is configured.

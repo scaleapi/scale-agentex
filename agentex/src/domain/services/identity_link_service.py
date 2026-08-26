@@ -44,8 +44,15 @@ _NEGATIVE_CACHE_TTL_S = int(os.getenv("IDENTITY_LINK_NEGATIVE_CACHE_TTL", "30"))
 # Distinguishes "cached: known to be unlinked" from "not in cache".
 _UNLINKED = "-"
 
-HEADER_API_KEY = "x-api-key"
+HEADER_COOKIE = "cookie"
 HEADER_SELECTED_ACCOUNT_ID = "x-selected-account-id"
+
+# The stored credential is the linking user's own session cookie, so it goes back
+# out as a cookie. ``build_delegation_headers`` filters a Cookie header down to its
+# allowlisted names and re-emits it as ``x-acting-user-cookie``, so this name has to
+# match that allowlist (``AGENTEX_DELEGATION_SESSION_COOKIE_NAMES``, default
+# ``_identityJwt``) or the credential is silently dropped on the way to the agent.
+SESSION_COOKIE_NAME = os.getenv("IDENTITY_LINK_SESSION_COOKIE_NAME", "_identityJwt")
 
 
 def _cache_key(
@@ -111,9 +118,15 @@ class IdentityLinkService:
         """The delegation headers for acting as this user, or None if we can't.
 
         These are what ``build_delegation_headers`` converts into
-        ``x-acting-user-api-key`` on the ACP call, which is what makes the agent's
+        ``x-acting-user-cookie`` on the ACP call, which is what makes the agent's
         user-scoped tools (Notion, Linear, Slack) resolve *this user's* connections
         instead of the gateway bot's.
+
+        The account id is not decoration: the secrets service rejects a session
+        credential presented without one ("Account ID is required"), and an account
+        the user isn't a member of is a 403. It has to be *their* account, captured
+        from their own principal when they linked — which is why it's stored
+        alongside the credential rather than taken from the gateway's config.
 
         Returns None — never raises — for every "can't act as them" case: no stored
         credential, an expired one, or a ciphertext that won't decrypt. The caller
@@ -150,10 +163,19 @@ class IdentityLinkService:
             return None
         if not credential:
             return None
-        headers = {HEADER_API_KEY: credential}
-        if identity.sgp_account_id:
-            headers[HEADER_SELECTED_ACCOUNT_ID] = identity.sgp_account_id
-        return headers
+        if not identity.sgp_account_id:
+            # Without an account the credential is unusable downstream, so this is a
+            # "can't act as them" case rather than a partial identity to pass along.
+            # Reachable only for rows linked before the account id was captured.
+            logger.info(
+                "identity_link_no_account_id",
+                extra={"sgp_user_id": identity.sgp_user_id},
+            )
+            return None
+        return {
+            HEADER_COOKIE: f"{SESSION_COOKIE_NAME}={credential}",
+            HEADER_SELECTED_ACCOUNT_ID: identity.sgp_account_id,
+        }
 
     async def invalidate(
         self,

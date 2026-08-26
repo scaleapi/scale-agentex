@@ -12,13 +12,20 @@ per-agent verifying proxy. This is its own module so Slack-specific logic stays 
 of the generic path.
 
 Identity: a turn runs as the **invoking human** when that Slack user has an active
-identity link with a usable stored credential (see ``_turn_identity``). Their SGP API
-key rides on the delegation headers, becomes ``x-acting-user-api-key`` on the ACP
-call, and is what makes the agent's user-scoped tools resolve *their* connected
-integrations — Notion, Linear, the hosted Slack MCP — rather than a shared account's.
-That per-user resolution is the whole point: the secrets service derives the owner
-from the caller and offers no way to ask for someone else's, so acting as a person
-requires holding a credential belonging to that person.
+identity link with a usable stored credential (see ``_turn_identity``). Their stored
+session credential rides on the delegation headers, becomes ``x-acting-user-cookie``
+on the ACP call, and is what makes the agent's user-scoped tools resolve *their*
+connected integrations — Notion, Linear, the hosted Slack MCP — rather than a shared
+account's. That per-user resolution is the whole point: the secrets service derives
+the owner from the caller and offers no way to ask for someone else's, so acting as
+a person requires holding a credential belonging to that person.
+
+It is their session cookie rather than a per-link API key because identity-service
+allows one API key per user and every active user already has one, so minting
+answers 409 and the existing key's secret cannot be read back. The session cookie is
+also the better credential: it carries its own expiry, and taking it leaves the
+user's existing credentials untouched. The cost is that the link ends when the
+session does.
 
 Everyone else falls back to the gateway's own bot service account
 (``SLACK_GATEWAY_ACTING_BOT_API_KEY`` + ``SLACK_GATEWAY_ACCOUNT_ID``, env /

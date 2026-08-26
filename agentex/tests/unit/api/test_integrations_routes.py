@@ -1,15 +1,16 @@
 """Unit tests for the identity-link routes.
 
-Covers everything that doesn't require a real browser session: nonce handling, the
-unauthenticated path, conflict detection, mint-failure behavior, and the ordering
-guarantee that a failed mint doesn't burn the user's link.
+The credential stored here is the caller's own session cookie, so what needs testing
+is mostly refusals: every path where we could end up storing something unusable, or
+storing nothing while telling the user they're connected.
 
-What these can NOT cover, and why: ``POST /api-keys`` on identity-service is guarded
-by ``CustomerIdentityJwtGuard``, which reads ``_identityJwt`` / ``_jwt`` cookies and
-rejects ``x-api-key``. So the live mint needs a genuine browser session and is
-exercised via scripts/dev_seed_link_nonce.py against a deployed host, not here.
+There is no minting to test. Minting was the original design and it cannot work —
+identity-service permits one API key per user, every active user already has one, so
+the create returns 409 and the existing key's secret can't be read back.
 """
 
+import base64
+import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -22,14 +23,32 @@ from src.domain.services.link_nonce_service import LinkRequest
 _SGP_USER = "11111111-2222-4333-8444-555555555555"
 _SGP_EMAIL = "test.user@example.com"
 _SLACK_HANDLE = "@test.user"
-_GOOD_KEY = "ssk_is_" + "a" * 32
 
 
-def _request(principal: dict | None):
-    """Minimal Request stand-in: what the auth middleware would have populated."""
+def _jwt(exp: datetime | None) -> str:
+    """A JWT-shaped token. Only the payload matters: nothing verifies the signature,
+    and nothing should — see src/utils/session_jwt.py."""
+    claims = {"sub": "abc"}
+    if exp is not None:
+        claims["exp"] = int(exp.timestamp())
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    return f"header.{payload}.signature"
+
+
+_VALID_JWT = _jwt(datetime.now(UTC) + timedelta(days=150))
+
+
+def _request(principal: dict | None, *, cookie: str | None = None):
+    """Minimal Request stand-in: what the auth middleware would have populated.
+
+    ``cookie`` defaults to a realistic browser header — the session cookie buried
+    among unrelated morsels — because that is the case the parser has to survive.
+    """
+    if cookie is None:
+        cookie = f"_ga=GA1.2.x; _identityJwt={_VALID_JWT}; __utmzz=(not set)"
     return SimpleNamespace(
         state=SimpleNamespace(principal_context=principal),
-        headers={"cookie": "_identityJwt=abc"},
+        headers={"cookie": cookie} if cookie else {},
     )
 
 
@@ -55,7 +74,7 @@ _PRINCIPAL = {
 
 @pytest.fixture
 def wiring(monkeypatch):
-    """Stub the three collaborators: nonce store, repository, identity-service."""
+    """Stub the two remaining collaborators: nonce store and repository."""
     nonce = MagicMock()
     nonce.peek = AsyncMock(return_value=_link_request())
     nonce.consume = AsyncMock(return_value=_link_request())
@@ -67,13 +86,7 @@ def wiring(monkeypatch):
     service = SimpleNamespace(repository=repo, invalidate=AsyncMock())
     monkeypatch.setattr(mod, "_identity_link_service", lambda: service)
 
-    client = MagicMock()
-    client.mint_user_api_key = AsyncMock(
-        return_value=(_GOOD_KEY, datetime.now(UTC) + timedelta(days=30))
-    )
-    monkeypatch.setattr(mod, "IdentityServiceClient", lambda *a, **k: client)
-
-    return SimpleNamespace(nonce=nonce, repo=repo, service=service, client=client)
+    return SimpleNamespace(nonce=nonce, repo=repo, service=service)
 
 
 @pytest.mark.unit
@@ -118,57 +131,89 @@ class TestConfirmationPage:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestConfirm:
-    async def test_mints_stores_and_invalidates(self, wiring):
+    async def test_stores_the_callers_session_and_invalidates(self, wiring):
         resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
 
         assert resp.status_code == 200
         assert "connected" in resp.body.decode().lower()
 
-        # Minted as the signed-in user, with an expiry.
-        mint = wiring.client.mint_user_api_key.await_args.kwargs
-        assert mint["sgp_user_id"] == _SGP_USER
-        assert mint["expires_on"] is not None
-        # The caller's cookie is forwarded — an api-key can't satisfy the guard.
-        assert mint["auth_headers"].get("cookie") == "_identityJwt=abc"
-
-        # Stored against the Slack identity from the nonce, with the credential.
         stored = wiring.repo.upsert_link.await_args.kwargs
         assert stored["provider"] == IdentityProvider.SLACK
         assert stored["external_user_id"] == "U1"
         assert stored["sgp_user_id"] == _SGP_USER
-        assert stored["credential"] == _GOOD_KEY
         assert stored["linked_via"] == IdentityLinkMethod.EXPLICIT
+        # The credential is the caller's own session cookie, pulled out of a
+        # realistic Cookie header full of unrelated morsels.
+        assert stored["credential"] == _VALID_JWT
+        # The account has to be stored too: the secrets service refuses a session
+        # credential without one, and it must be the user's own account.
+        assert stored["sgp_account_id"] == "acct-1"
 
         # Negative cache dropped so the next Slack message resolves immediately.
         wiring.service.invalidate.assert_awaited_once()
+
+    async def test_expiry_comes_from_the_token_not_a_guessed_ttl(self, wiring):
+        await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
+        stored = wiring.repo.upsert_link.await_args.kwargs["credential_expires_at"]
+        # ~150 days out, from the JWT's own exp claim.
+        assert 149 <= (stored - datetime.now(UTC)).days <= 150
+
+    async def test_token_without_an_exp_gets_a_bounded_fallback(self, wiring):
+        # Never store an unbounded credential: an unknown expiry becomes a short
+        # known one rather than "valid forever".
+        req = _request(_PRINCIPAL, cookie=f"_identityJwt={_jwt(None)}")
+        resp = await mod.slack_link_confirm(req, nonce="tok")
+
+        assert resp.status_code == 200
+        stored = wiring.repo.upsert_link.await_args.kwargs["credential_expires_at"]
+        assert stored is not None
+        assert 0 < (stored - datetime.now(UTC)).days <= mod._FALLBACK_TTL_DAYS
+
+    async def test_already_expired_token_is_refused(self, wiring):
+        req = _request(
+            _PRINCIPAL,
+            cookie=f"_identityJwt={_jwt(datetime.now(UTC) - timedelta(minutes=1))}",
+        )
+        resp = await mod.slack_link_confirm(req, nonce="tok")
+
+        assert resp.status_code == 401
+        # Storing it would create a link that can never work.
+        wiring.repo.upsert_link.assert_not_awaited()
+        wiring.nonce.consume.assert_not_awaited()
+
+    async def test_no_session_cookie_stores_nothing(self, wiring):
+        # Authenticated by an api-key or bearer rather than a browser session: there
+        # is nothing here we could act through later.
+        req = _request(_PRINCIPAL, cookie="_ga=GA1.2.x; csrftoken=abc")
+        resp = await mod.slack_link_confirm(req, nonce="tok")
+
+        assert resp.status_code == 400
+        wiring.repo.upsert_link.assert_not_awaited()
+        wiring.nonce.consume.assert_not_awaited()
+
+    async def test_principal_without_an_account_is_refused(self, wiring):
+        # The secrets service requires account context, so a link without one would
+        # look connected and resolve nothing.
+        req = _request({**_PRINCIPAL, "account_id": None})
+        resp = await mod.slack_link_confirm(req, nonce="tok")
+
+        assert resp.status_code == 400
+        assert "account" in resp.body.decode().lower()
+        wiring.repo.upsert_link.assert_not_awaited()
 
     async def test_nonce_is_consumed_only_after_a_successful_store(self, wiring):
         await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
         wiring.nonce.consume.assert_awaited_once()
 
-    async def test_failed_mint_leaves_the_link_usable(self, wiring):
-        # A transient identity-service failure must not burn the nonce, or the user
-        # has to go back to Slack to get a new link for no reason.
-        wiring.client.mint_user_api_key = AsyncMock(
-            side_effect=mod.IdentityServiceError("service down")
-        )
-        resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
-
-        assert resp.status_code == 502
-        wiring.nonce.consume.assert_not_awaited()
-        wiring.repo.upsert_link.assert_not_awaited()
-        assert "still valid" in resp.body.decode()
-
     async def test_expired_nonce_is_refused(self, wiring):
         wiring.nonce.peek = AsyncMock(return_value=None)
         resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="stale")
         assert resp.status_code == 400
-        wiring.client.mint_user_api_key.assert_not_awaited()
+        wiring.repo.upsert_link.assert_not_awaited()
 
-    async def test_unauthenticated_mints_nothing(self, wiring):
+    async def test_unauthenticated_stores_nothing(self, wiring):
         resp = await mod.slack_link_confirm(_request(None), nonce="tok")
         assert resp.status_code == 401
-        wiring.client.mint_user_api_key.assert_not_awaited()
         wiring.repo.upsert_link.assert_not_awaited()
 
     async def test_sgp_account_already_linked_to_another_slack_user(self, wiring):
@@ -181,7 +226,7 @@ class TestConfirm:
 
         assert resp.status_code == 409
         assert "already linked" in resp.body.decode().lower()
-        wiring.client.mint_user_api_key.assert_not_awaited()
+        wiring.repo.upsert_link.assert_not_awaited()
 
     async def test_relinking_the_same_slack_user_is_allowed(self, wiring):
         # Same identity re-linking (e.g. after expiry) must go through — it's the
@@ -194,9 +239,10 @@ class TestConfirm:
         wiring.repo.upsert_link.assert_awaited_once()
 
     async def test_unconfigured_encryption_key_is_reported_not_a_500(self, wiring):
-        # If AGENTEX_CREDENTIAL_ENCRYPTION_KEY is missing, the minted key cannot be
-        # stored safely. It must NOT be persisted in plaintext, and the user should
-        # see an operator problem rather than an opaque error they'd retry forever.
+        # If AGENTEX_CREDENTIAL_ENCRYPTION_KEY is missing, the session credential
+        # cannot be stored safely. It must NOT be persisted in plaintext, and the
+        # user should see an operator problem rather than an opaque error they'd
+        # retry forever.
         wiring.repo.upsert_link = AsyncMock(
             side_effect=mod.CredentialEncryptionError("key unset")
         )
