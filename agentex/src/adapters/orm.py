@@ -80,6 +80,8 @@ class TaskORM(BaseORM):
     cleaned_at = Column(DateTime(timezone=True), nullable=True)
     params = Column(JSONB, nullable=True)
     task_metadata = Column(JSONB, nullable=True)
+    # Internal ownership marker for an in-flight or failed ACP forward.
+    failure_source = Column(String, nullable=True)
     # Many-to-Many relationship with agents
     agents = relationship("AgentORM", secondary="task_agents", back_populates="tasks")
 

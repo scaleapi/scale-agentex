@@ -4,7 +4,6 @@ from fastapi import Depends
 
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.domain.entities.tasks import (
-    NON_TERMINAL_TASK_STATUSES,
     TaskEntity,
     TaskRelationships,
     TaskStatus,
@@ -107,7 +106,7 @@ class TasksUseCase:
             raise ClientError("Either id or name must be provided")
 
         # todo: make this a transaction?
-        task_entity = await self.task_service.get_task(id=id, name=name)
+        task_entity = await self.task_service.get_current_task(id=id, name=name)
         if task_entity.status == TaskStatus.DELETED:
             if id:
                 raise ItemDoesNotExist(f"Task {id} not found")
@@ -132,13 +131,15 @@ class TasksUseCase:
                 task_entity = merged
 
         if task_metadata is not None:
-            task_entity.task_metadata = task_metadata
-            task_entity = await self.task_service.update_task(task=task_entity)
+            replaced = await self.task_service.replace_task_metadata(
+                task_entity.id,
+                task_metadata,
+            )
+            if replaced is None:
+                raise ItemDoesNotExist(f"Task {task_entity.id} not found")
+            task_entity = replaced
 
         return task_entity
-
-    # Statuses a task can transition to terminal from (the non-terminal set).
-    _TERMINAL_TRANSITION_SOURCES = NON_TERMINAL_TASK_STATUSES
 
     async def _transition_to_terminal(
         self,
@@ -147,35 +148,33 @@ class TasksUseCase:
         name: str | None = None,
         reason: str | None = None,
     ) -> TaskEntity:
-        """Atomically transition a running or interrupted task to a terminal status."""
+        """Atomically transition an eligible task to a terminal status.
+
+        A terminal owner may also replace a FAILED row whose internal provenance
+        shows that the control plane, rather than the workflow, recorded it.
+        """
         if not id and not name:
             raise ClientError("Either id or name must be provided")
 
-        task_entity = await self.task_service.get_task(id=id, name=name)
+        updated = await self.task_service.transition_task_to_terminal_status(
+            id=id,
+            name=name,
+            new_status=target_status,
+            status_reason=reason or f"Task {target_status.value.lower()}",
+            include_acp_forward_failure=True,
+        )
+        if updated is not None:
+            return updated
+
+        # The atomic predicate did not match. Read the primary only to classify
+        # the failure; lifecycle ownership is never decided from this snapshot.
+        task_entity = await self.task_service.get_current_task(id=id, name=name)
         if task_entity.status == TaskStatus.DELETED:
             raise ItemDoesNotExist(f"Task {id or name} not found")
-        if task_entity.status not in self._TERMINAL_TRANSITION_SOURCES:
-            raise ClientError(
-                f"Task {task_entity.id} cannot be transitioned (current status: {task_entity.status}). "
-                f"Only running or interrupted tasks can have their status updated."
-            )
-
-        # Compare-and-swap on the observed non-terminal source status (RUNNING or
-        # INTERRUPTED) so a concurrent modification is still detected as a lost race.
-        expected_status = task_entity.status
-        status_reason = reason or f"Task {target_status.value.lower()}"
-        updated = await self.task_service.transition_task_status(
-            task_id=task_entity.id,
-            expected_status=expected_status,
-            new_status=target_status,
-            status_reason=status_reason,
+        raise ClientError(
+            f"Task {task_entity.id} cannot be transitioned (current status: {task_entity.status}). "
+            f"Only running or interrupted tasks can have their status updated."
         )
-        if updated is None:
-            raise ClientError(
-                f"Task {task_entity.id} status was concurrently modified. "
-                f"Please retry the request."
-            )
-        return updated
 
     async def interrupt_task(
         self, id: str | None = None, name: str | None = None, reason: str | None = None

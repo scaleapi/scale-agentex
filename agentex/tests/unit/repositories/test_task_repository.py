@@ -1,21 +1,14 @@
 import asyncio
-import os
-
-# Import the repository and entities we need to test
-import sys
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
-
-from adapters.orm import BaseORM
-from domain.entities.agents import ACPType, AgentEntity, AgentStatus
-from domain.entities.tasks import TaskEntity, TaskStatus
-from domain.repositories.agent_repository import AgentRepository
-from domain.repositories.task_repository import TaskRepository
-from utils.ids import orm_id
+from src.adapters.orm import BaseORM
+from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
+from src.domain.entities.tasks import TaskEntity, TaskFailureSource, TaskStatus
+from src.domain.repositories.agent_repository import AgentRepository
+from src.domain.repositories.task_repository import TaskRepository
+from src.utils.ids import orm_id
 
 
 def assert_task_lists_by_name(
@@ -24,6 +17,107 @@ def assert_task_lists_by_name(
     """Assert that two lists of TaskEntity match by name."""
 
     assert [task.name for task in received] == [task.name for task in expected]
+
+
+async def _make_task_repositories(postgres_url):
+    sqlalchemy_asyncpg_url = postgres_url.replace(
+        "postgresql+psycopg2://", "postgresql+asyncpg://"
+    )
+    engine = create_async_engine(sqlalchemy_asyncpg_url)
+    async with engine.begin() as conn:
+        await conn.run_sync(BaseORM.metadata.create_all)
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    return (
+        engine,
+        TaskRepository(session_maker, session_maker),
+        AgentRepository(session_maker, session_maker),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_acp_forward_claim_and_terminal_takeover_are_atomic(postgres_url):
+    engine, task_repo, agent_repo = await _make_task_repositories(postgres_url)
+    try:
+        agent_id = orm_id()
+        await agent_repo.create(
+            AgentEntity(
+                id=agent_id,
+                name=f"claim-agent-{agent_id}",
+                description="Task claim test agent",
+                status=AgentStatus.READY,
+                acp_type=ACPType.ASYNC,
+                acp_url="http://localhost:8000/acp",
+            )
+        )
+        task = await task_repo.create(
+            agent_id,
+            TaskEntity(
+                id=orm_id(),
+                name=f"claim-task-{agent_id}",
+                status=TaskStatus.RUNNING,
+            ),
+        )
+
+        claimed = await task_repo.claim_acp_forward(task.id)
+        assert claimed is not None
+        assert claimed.status == TaskStatus.RUNNING
+        assert claimed.failure_source == TaskFailureSource.ACP_FORWARD
+
+        metadata_updated = await task_repo.replace_metadata(
+            task.id,
+            {"source": "scheduler"},
+        )
+        assert metadata_updated is not None
+        assert metadata_updated.failure_source == TaskFailureSource.ACP_FORWARD
+
+        forward_failed = await task_repo.transition_status(
+            task_id=task.id,
+            expected_status=TaskStatus.RUNNING,
+            new_status=TaskStatus.FAILED,
+            status_reason="response lost",
+            expected_failure_source=TaskFailureSource.ACP_FORWARD,
+            new_failure_source=TaskFailureSource.ACP_FORWARD,
+        )
+        assert forward_failed is not None
+        assert forward_failed.status == TaskStatus.FAILED
+
+        reclaimed = await task_repo.claim_acp_forward(task.id)
+        assert reclaimed is not None
+        assert reclaimed.status == TaskStatus.RUNNING
+
+        completed = await task_repo.transition_to_terminal_status(
+            task_id=task.id,
+            name=None,
+            new_status=TaskStatus.COMPLETED,
+            status_reason="Task completed",
+            include_acp_forward_failure=True,
+        )
+        assert completed is not None
+        assert completed.status == TaskStatus.COMPLETED
+        assert completed.failure_source is None
+        assert await task_repo.claim_acp_forward(task.id) is None
+
+        workflow_owned = await task_repo.create(
+            agent_id,
+            TaskEntity(
+                id=orm_id(),
+                name=f"workflow-owned-failure-{agent_id}",
+                status=TaskStatus.RUNNING,
+            ),
+        )
+        failed = await task_repo.transition_to_terminal_status(
+            task_id=workflow_owned.id,
+            name=None,
+            new_status=TaskStatus.FAILED,
+            status_reason="Workflow failed",
+            include_acp_forward_failure=False,
+        )
+        assert failed is not None
+        assert failed.failure_source is None
+        assert await task_repo.claim_acp_forward(workflow_owned.id) is None
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -119,11 +213,11 @@ async def test_task_repository_crud_operations(postgres_url):
     print("✅ GET agent by task ID operation successful")
 
     # Test UPDATE operation
-    updated_task = TaskEntity(
-        id=task_id,
-        name=task_name,  # Keep same name
-        status=TaskStatus.COMPLETED,
-        status_reason="Task completed successfully",
+    updated_task = created_task.model_copy(
+        update={
+            "status": TaskStatus.COMPLETED,
+            "status_reason": "Task completed successfully",
+        }
     )
 
     result_task = await task_repo.update(updated_task)
@@ -274,12 +368,12 @@ async def test_task_repository_params_support(postgres_url):
         "max_tokens": 2000,
         "new_field": "added",
     }
-    updated_task = TaskEntity(
-        id=task_id,
-        name=task_name,
-        status=TaskStatus.COMPLETED,
-        status_reason="Task completed with updated params",
-        params=updated_params,
+    updated_task = created_task.model_copy(
+        update={
+            "status": TaskStatus.COMPLETED,
+            "status_reason": "Task completed with updated params",
+            "params": updated_params,
+        }
     )
 
     result_task = await task_repo.update(updated_task)
@@ -468,12 +562,12 @@ async def test_task_repository_task_metadata_support(postgres_url):
             "warnings": ["minor issue resolved"],
         },
     }
-    updated_task = TaskEntity(
-        id=task_id,
-        name=task_name,
-        status=TaskStatus.COMPLETED,
-        status_reason="Task completed with updated task_metadata",
-        task_metadata=updated_metadata,
+    updated_task = created_task.model_copy(
+        update={
+            "status": TaskStatus.COMPLETED,
+            "status_reason": "Task completed with updated task_metadata",
+            "task_metadata": updated_metadata,
+        }
     )
 
     result_task = await task_repo.update(updated_task)
@@ -602,12 +696,12 @@ async def test_task_repository_null_task_metadata_handling(postgres_url):
         },
         "data": ["item1", "item2"],
     }
-    updated_task = TaskEntity(
-        id=task_id_null,
-        name=task_name,
-        status=TaskStatus.RUNNING,
-        status_reason="Task updated with populated task_metadata",
-        task_metadata=populated_metadata,
+    updated_task = created_task_null.model_copy(
+        update={
+            "status": TaskStatus.RUNNING,
+            "status_reason": "Task updated with populated task_metadata",
+            "task_metadata": populated_metadata,
+        }
     )
 
     result_task = await task_repo.update(updated_task)
@@ -621,12 +715,12 @@ async def test_task_repository_null_task_metadata_handling(postgres_url):
     print("✅ Populated task_metadata persists after update")
 
     # Test UPDATE from populated back to null task_metadata
-    updated_back_to_null = TaskEntity(
-        id=task_id_null,
-        name=task_name,
-        status=TaskStatus.COMPLETED,
-        status_reason="Task updated back to null task_metadata",
-        task_metadata=None,
+    updated_back_to_null = result_task.model_copy(
+        update={
+            "status": TaskStatus.COMPLETED,
+            "status_reason": "Task updated back to null task_metadata",
+            "task_metadata": None,
+        }
     )
 
     result_null_again = await task_repo.update(updated_back_to_null)

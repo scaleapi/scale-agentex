@@ -12,7 +12,12 @@ from src.domain.entities.events import EventEntity
 from src.domain.entities.task_message_updates import TaskMessageUpdateEntity
 from src.domain.entities.task_messages import TaskMessageContentEntity
 from src.domain.entities.task_stream_events import TaskStreamTaskUpdatedEventEntity
-from src.domain.entities.tasks import TaskEntity, TaskRelationships, TaskStatus
+from src.domain.entities.tasks import (
+    TaskEntity,
+    TaskFailureSource,
+    TaskRelationships,
+    TaskStatus,
+)
 from src.domain.repositories.event_repository import DEventRepository
 from src.domain.repositories.task_repository import DTaskRepository
 from src.domain.repositories.task_state_repository import DTaskStateRepository
@@ -134,10 +139,15 @@ class AgentTaskService:
         task_params: dict[str, Any] | None = None,
         acp_url: str | None = None,
     ) -> TaskEntity:
-        # Status reconciliation below must be based on the primary's snapshot.
-        # A replica-stale updated_at would make a real forward error lose its CAS
-        # and leave the task incorrectly RUNNING.
-        task = await self.task_repository.get_current(task.id)
+        # Claim control-plane ownership before the network call. This both makes
+        # retryable forward failures visible to ACP as RUNNING and gives the
+        # success/error callbacks a lifecycle-specific guard that unrelated row
+        # updates cannot invalidate.
+        claimed_task = await self.task_repository.claim_acp_forward(task.id)
+        if claimed_task is None:
+            return await self.task_repository.get_current(task.id)
+        task = claimed_task
+
         try:
             await self.acp_client.create_task(
                 agent=agent,
@@ -150,27 +160,12 @@ class AgentTaskService:
             await self._fail_task_after_acp_forward_error(task, str(e))
             raise e from e
 
-        # Confirm this successful forward against the exact task snapshot that
-        # initiated it. Updating even RUNNING -> RUNNING gives concurrent
-        # forwards a single winner: a later error using the old snapshot cannot
-        # overwrite this success, and vice versa.
-        if (
-            task.status
-            not in (
-                TaskStatus.FAILED,
-                TaskStatus.RUNNING,
-                TaskStatus.INTERRUPTED,
-            )
-            or task.updated_at is None
-        ):
-            return await self.task_repository.get_current(task.id)
-
         forwarded_task = await self.transition_task_status(
             task_id=task.id,
-            expected_status=task.status,
+            expected_status=(TaskStatus.RUNNING, TaskStatus.FAILED),
             new_status=TaskStatus.RUNNING,
             status_reason="Task forwarded to ACP server",
-            expected_updated_at=task.updated_at,
+            expected_failure_source=TaskFailureSource.ACP_FORWARD,
         )
         if forwarded_task is not None:
             return forwarded_task
@@ -183,31 +178,32 @@ class AgentTaskService:
     async def _fail_task_after_acp_forward_error(
         self, task: TaskEntity, reason: str
     ) -> None:
-        """Fail a forward attempt only while it still owns the task state."""
-        if (
-            task.status
-            not in (
-                TaskStatus.RUNNING,
-                TaskStatus.INTERRUPTED,
-            )
-            or task.updated_at is None
-        ):
-            return
-
+        """Fail a forward only while the control plane still owns the task."""
         await self.transition_task_status(
+            task_id=task.id,
+            expected_status=TaskStatus.RUNNING,
+            new_status=TaskStatus.FAILED,
+            status_reason=reason,
+            expected_failure_source=TaskFailureSource.ACP_FORWARD,
+            new_failure_source=TaskFailureSource.ACP_FORWARD,
+        )
+
+    async def fail_task(self, task: TaskEntity, reason: str) -> None:
+        """Fail only the non-terminal task version observed by this operation."""
+        updated = await self.transition_task_status(
             task_id=task.id,
             expected_status=(TaskStatus.RUNNING, TaskStatus.INTERRUPTED),
             new_status=TaskStatus.FAILED,
             status_reason=reason,
             expected_updated_at=task.updated_at,
         )
-
-    async def fail_task(self, task: TaskEntity, reason: str) -> None:
-        task.status = TaskStatus.FAILED
-        task.status_reason = reason
-        # Publish task_updated so streaming viewers see the failure and end.
-        # Every terminal write must emit; SSE termination relies on it.
-        await self.update_task(task)
+        if updated is not None:
+            # Preserve the historical in-place mutation contract for callers
+            # that inspect the entity they supplied after this method returns.
+            task.status = updated.status
+            task.status_reason = updated.status_reason
+            task.failure_source = updated.failure_source
+            task.updated_at = updated.updated_at
 
     async def get_task(
         self,
@@ -218,9 +214,57 @@ class AgentTaskService:
         """
         Get a task from the repository.
         """
-        return await self.task_repository.get(
-            id=id, name=name, relationships=relationships
+        # Single-task reads drive lifecycle reconciliation and therefore require
+        # read-after-write consistency. Lists remain replica-backed.
+        return await self.task_repository.get_current(
+            task_id=id,
+            name=name,
+            relationships=relationships,
         )
+
+    async def get_current_task(
+        self,
+        id: str | None = None,
+        name: str | None = None,
+    ) -> TaskEntity:
+        """Get an authoritative task snapshot from the primary database."""
+        return await self.task_repository.get_current(task_id=id, name=name)
+
+    async def transition_task_to_terminal_status(
+        self,
+        *,
+        id: str | None,
+        name: str | None,
+        new_status: TaskStatus,
+        status_reason: str,
+        include_acp_forward_failure: bool,
+    ) -> TaskEntity | None:
+        """Atomically take terminal ownership and publish the resulting state."""
+        updated_task = await self.task_repository.transition_to_terminal_status(
+            task_id=id,
+            name=name,
+            new_status=new_status,
+            status_reason=status_reason,
+            include_acp_forward_failure=include_acp_forward_failure,
+        )
+        if updated_task is None:
+            return None
+
+        try:
+            topic = get_task_event_stream_topic(task_id=updated_task.id)
+            await self.stream_repository.send_data(
+                topic,
+                TaskStreamTaskUpdatedEventEntity(
+                    type="task_updated", task=updated_task
+                ).model_dump(mode="json"),
+            )
+            logger.info(f"task_updated event published to topic: {topic}")
+        except Exception as e:
+            logger.error(
+                f"Error sending task_updated event to stream: {e}", exc_info=True
+            )
+
+        return updated_task
 
     async def transition_task_status(
         self,
@@ -230,6 +274,8 @@ class AgentTaskService:
         status_reason: str,
         task_metadata: dict | None = None,
         expected_updated_at: datetime | None = None,
+        expected_failure_source: TaskFailureSource | None = None,
+        new_failure_source: TaskFailureSource | None = None,
     ) -> TaskEntity | None:
         """
         Atomically transition task status. Returns None if the expected status or
@@ -242,6 +288,8 @@ class AgentTaskService:
             status_reason=status_reason,
             task_metadata=task_metadata,
             expected_updated_at=expected_updated_at,
+            expected_failure_source=expected_failure_source,
+            new_failure_source=new_failure_source,
         )
         if updated_task is None:
             return None
@@ -271,6 +319,35 @@ class AgentTaskService:
         try:
             # The Redis adapter now handles binary data properly
             topic = get_task_event_stream_topic(task_id=task.id)
+            await self.stream_repository.send_data(
+                topic,
+                TaskStreamTaskUpdatedEventEntity(
+                    type="task_updated", task=updated_task
+                ).model_dump(mode="json"),
+            )
+            logger.info(f"task_updated event published to topic: {topic}")
+        except Exception as e:
+            logger.error(
+                f"Error sending task_updated event to stream: {e}", exc_info=True
+            )
+
+        return updated_task
+
+    async def replace_task_metadata(
+        self,
+        task_id: str,
+        task_metadata: dict | None,
+    ) -> TaskEntity | None:
+        """Replace only metadata and publish the refreshed task."""
+        updated_task = await self.task_repository.replace_metadata(
+            task_id,
+            task_metadata,
+        )
+        if updated_task is None:
+            return None
+
+        try:
+            topic = get_task_event_stream_topic(task_id=task_id)
             await self.stream_repository.send_data(
                 topic,
                 TaskStreamTaskUpdatedEventEntity(
@@ -421,31 +498,28 @@ class AgentTaskService:
     async def cancel_task(
         self, agent: AgentEntity, task: TaskEntity, acp_url: str
     ) -> TaskEntity:
-        """Cancel a running (or interrupted) task."""
+        """Cancel a live task after the ACP server accepts cancellation."""
         await self.acp_client.cancel_task(agent=agent, task=task, acp_url=acp_url)
 
-        # Compare-and-swap to CANCELED on the observed non-terminal source status
-        # (mirrors interrupt_task). If the task moved to another status during the
-        # ACP call (the agent completed/failed it, or it was concurrently modified),
-        # leave that status intact rather than clobbering it with CANCELED.
-        current = await self.task_repository.get(id=task.id)
-        if current.status not in (TaskStatus.RUNNING, TaskStatus.INTERRUPTED):
-            logger.info(
-                f"Cancel for task {task.id} not applied: task is no longer running "
-                f"(current status: {current.status}); leaving its status intact."
-            )
-            return current
-        updated = await self.transition_task_status(
-            task_id=task.id,
-            expected_status=current.status,
+        # A lost create response can leave a healthy Temporal execution paired
+        # with FAILED + ACP_FORWARD. Cancellation owns that control-plane marker
+        # just as completion/failure do, but cannot replace workflow-owned FAILED.
+        updated = await self.transition_task_to_terminal_status(
+            id=task.id,
+            name=None,
             new_status=TaskStatus.CANCELED,
             status_reason="Task canceled by user",
+            include_acp_forward_failure=True,
         )
-        return (
-            updated
-            if updated is not None
-            else await self.task_repository.get(id=task.id)
+        if updated is not None:
+            return updated
+
+        current = await self.task_repository.get_current(task_id=task.id)
+        logger.info(
+            f"Cancel for task {task.id} not applied: task is already terminal "
+            f"(current status: {current.status}); leaving its status intact."
         )
+        return current
 
     async def interrupt_task(
         self, agent: AgentEntity, task: TaskEntity, acp_url: str

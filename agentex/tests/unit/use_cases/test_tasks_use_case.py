@@ -3,16 +3,79 @@ Unit tests for TasksUseCase - status transition logic via explicit status
 methods (complete_task, fail_task, etc.) and metadata updates.
 """
 
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
-from src.domain.entities.tasks import TaskStatus
+from src.domain.entities.tasks import TaskEntity, TaskFailureSource, TaskStatus
 from src.domain.exceptions import ClientError
 from src.domain.repositories.agent_repository import AgentRepository
 from src.domain.repositories.task_repository import TaskRepository
 from src.domain.use_cases.tasks_use_case import TasksUseCase
+
+RACE_TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestTerminalOwnershipRaces:
+    @pytest.mark.parametrize(
+        ("method_name", "target_status", "reason"),
+        [
+            ("complete_task", TaskStatus.COMPLETED, None),
+            ("fail_task", TaskStatus.FAILED, "Workflow cleanup failed"),
+            ("cancel_task", TaskStatus.CANCELED, "User canceled"),
+        ],
+    )
+    async def test_terminal_write_atomically_takes_eligible_state(
+        self,
+        method_name: str,
+        target_status: TaskStatus,
+        reason: str | None,
+    ):
+        task_id = str(uuid4())
+        terminal = TaskEntity(
+            id=task_id,
+            status=target_status,
+            status_reason=reason or "Task completed",
+            updated_at=RACE_TIMESTAMP + timedelta(microseconds=1),
+        )
+        task_service = AsyncMock()
+        task_service.transition_task_to_terminal_status.return_value = terminal
+        use_case = TasksUseCase(task_service=task_service)
+
+        result = await getattr(use_case, method_name)(id=task_id, reason=reason)
+
+        assert result == terminal
+        task_service.transition_task_to_terminal_status.assert_awaited_once_with(
+            id=task_id,
+            name=None,
+            new_status=target_status,
+            status_reason=reason or f"Task {target_status.value.lower()}",
+            include_acp_forward_failure=True,
+        )
+        task_service.get_current_task.assert_not_awaited()
+
+    async def test_workflow_owned_failed_task_is_rejected_after_atomic_miss(self):
+        task_id = str(uuid4())
+        workflow_failed = TaskEntity(
+            id=task_id,
+            status=TaskStatus.FAILED,
+            status_reason="Workflow cleanup failed",
+            updated_at=RACE_TIMESTAMP,
+        )
+        task_service = AsyncMock()
+        task_service.transition_task_to_terminal_status.return_value = None
+        task_service.get_current_task.return_value = workflow_failed
+        use_case = TasksUseCase(task_service=task_service)
+
+        with pytest.raises(ClientError, match="cannot be transitioned"):
+            await use_case.complete_task(id=task_id)
+
+        task_service.get_current_task.assert_awaited_once_with(id=task_id, name=None)
 
 
 async def create_or_get_agent(agent_repository, agent):
@@ -99,6 +162,129 @@ class TestTasksUseCaseStatusTransitions:
         # Then
         assert updated.status == TaskStatus.FAILED
         assert updated.status_reason == "Something went wrong"
+
+    async def test_workflow_failure_replaces_acp_forward_failure_provenance(
+        self,
+        tasks_use_case,
+        task_service,
+        mock_acp_client,
+        agent_repository,
+        sample_agent,
+    ):
+        """A workflow can take ownership after a lost/failed ACP response."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent,
+            task_name="workflow-failure-after-forward-failure",
+        )
+        mock_acp_client.create_task.side_effect = RuntimeError("response lost")
+        with pytest.raises(RuntimeError, match="response lost"):
+            await task_service.forward_task_to_acp(agent=sample_agent, task=task)
+
+        control_plane_failed = await task_service.get_current_task(id=task.id)
+        assert control_plane_failed.status == TaskStatus.FAILED
+        assert control_plane_failed.failure_source == TaskFailureSource.ACP_FORWARD
+
+        workflow_failed = await tasks_use_case.fail_task(
+            id=task.id,
+            reason="Workflow cleanup failed",
+        )
+
+        assert workflow_failed.status == TaskStatus.FAILED
+        assert workflow_failed.status_reason == "Workflow cleanup failed"
+        assert workflow_failed.failure_source is None
+
+        # Once the workflow owns FAILED, a later create retry cannot revive it.
+        mock_acp_client.create_task.side_effect = None
+        mock_acp_client.create_task.reset_mock()
+        result = await task_service.forward_task_to_acp(
+            agent=sample_agent,
+            task=control_plane_failed,
+        )
+        assert result.status == TaskStatus.FAILED
+        assert result.failure_source is None
+        mock_acp_client.create_task.assert_not_awaited()
+
+    async def test_workflow_completion_replaces_acp_forward_failure_provenance(
+        self,
+        tasks_use_case,
+        task_service,
+        mock_acp_client,
+        agent_repository,
+        sample_agent,
+    ):
+        """A healthy workflow can finish after its ACP response was lost."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent,
+            task_name="workflow-completion-after-forward-failure",
+        )
+        mock_acp_client.create_task.side_effect = RuntimeError("response lost")
+        with pytest.raises(RuntimeError, match="response lost"):
+            await task_service.forward_task_to_acp(agent=sample_agent, task=task)
+
+        control_plane_failed = await task_service.get_current_task(id=task.id)
+        assert control_plane_failed.status == TaskStatus.FAILED
+        assert control_plane_failed.failure_source == TaskFailureSource.ACP_FORWARD
+
+        completed = await tasks_use_case.complete_task(id=task.id)
+
+        assert completed.status == TaskStatus.COMPLETED
+        assert completed.failure_source is None
+
+    async def test_workflow_failure_atomically_wins_after_acp_retry_claim(
+        self,
+        tasks_use_case,
+        task_service,
+        mock_acp_client,
+        agent_repository,
+        sample_agent,
+        monkeypatch,
+    ):
+        """Workflow FAILED wins even when FAILED -> RUNNING claims first."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent,
+            task_name="workflow-failure-races-retry-claim",
+        )
+        mock_acp_client.create_task.side_effect = RuntimeError("response lost")
+        with pytest.raises(RuntimeError, match="response lost"):
+            await task_service.forward_task_to_acp(agent=sample_agent, task=task)
+
+        control_plane_failed = await task_service.get_current_task(id=task.id)
+        original_terminal_transition = task_service.transition_task_to_terminal_status
+        injected_claim = False
+
+        async def terminal_transition_after_retry_claim(**kwargs):
+            nonlocal injected_claim
+            injected_claim = True
+            claimed = await task_service.transition_task_status(
+                task_id=task.id,
+                expected_status=TaskStatus.FAILED,
+                new_status=TaskStatus.RUNNING,
+                status_reason="Retrying task forwarding to ACP server",
+                expected_updated_at=control_plane_failed.updated_at,
+                expected_failure_source=TaskFailureSource.ACP_FORWARD,
+                new_failure_source=TaskFailureSource.ACP_FORWARD,
+            )
+            assert claimed is not None
+            return await original_terminal_transition(**kwargs)
+
+        monkeypatch.setattr(
+            task_service,
+            "transition_task_to_terminal_status",
+            terminal_transition_after_retry_claim,
+        )
+
+        workflow_failed = await tasks_use_case.fail_task(
+            id=task.id,
+            reason="Workflow failed after claim",
+        )
+
+        assert injected_claim
+        assert workflow_failed.status == TaskStatus.FAILED
+        assert workflow_failed.status_reason == "Workflow failed after claim"
+        assert workflow_failed.failure_source is None
 
     async def test_cancel_running_task(
         self, tasks_use_case, task_service, agent_repository, sample_agent

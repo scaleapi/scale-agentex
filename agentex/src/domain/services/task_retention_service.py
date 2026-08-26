@@ -283,8 +283,9 @@ class TaskRetentionService:
 
         # 6c. Mark task as cleaned.
         cleaned_at = datetime.now(UTC)
-        task.cleaned_at = cleaned_at
-        await self.task_repository.update(task)
+        updated_task = await self.task_repository.set_cleaned_at(task.id, cleaned_at)
+        if updated_task is None:
+            raise ClientError(f"Task {task.id} no longer exists")
 
         result = TaskCleanupResultEntity(
             task_id=task_id,
@@ -466,8 +467,9 @@ class TaskRetentionService:
             await self.task_state_repository.batch_create(snapshot.task_states)
 
         # 4. Clear cleaned_at on the task row.
-        task.cleaned_at = None
-        await self.task_repository.update(task)
+        updated_task = await self.task_repository.set_cleaned_at(task.id, None)
+        if updated_task is None:
+            raise ClientError(f"Task {task.id} no longer exists")
 
         logger.info(
             "task_rehydrate_completed",

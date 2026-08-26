@@ -81,7 +81,7 @@ async def test_preview_clean_task_validates_without_writes():
     task_state_repository.delete_by_field.assert_not_awaited()
     event_repository.delete_by_task_id.assert_not_awaited()
     agent_task_tracker_repository.reset_cursors_for_task.assert_not_awaited()
-    task_repository.update.assert_not_awaited()
+    task_repository.set_cleaned_at.assert_not_awaited()
 
 
 @pytest.mark.unit
@@ -102,7 +102,7 @@ async def test_clean_task_cleans_stale_running_task_with_override():
 
     assert result.task_id == "t1"
     service.task_message_service.delete_all_messages.assert_awaited_once_with("t1")
-    service.task_repository.update.assert_awaited_once()
+    service.task_repository.set_cleaned_at.assert_awaited_once()
 
 
 @pytest.mark.unit
@@ -139,7 +139,7 @@ async def test_preview_clean_task_applies_stale_running_override():
 
     assert result.task_id == "t1"
     service.task_message_service.delete_all_messages.assert_not_awaited()
-    service.task_repository.update.assert_not_awaited()
+    service.task_repository.set_cleaned_at.assert_not_awaited()
 
 
 def _completed_task(idle_for_days: int):
@@ -201,7 +201,7 @@ async def test_clean_task_cleans_stale_idle_task_with_unprocessed_events():
 
     assert result.task_id == "t1"
     service.task_message_service.delete_all_messages.assert_awaited_once_with("t1")
-    service.task_repository.update.assert_awaited_once()
+    service.task_repository.set_cleaned_at.assert_awaited_once()
 
 
 @pytest.mark.unit

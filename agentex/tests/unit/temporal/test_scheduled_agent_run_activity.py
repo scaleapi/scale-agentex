@@ -161,7 +161,7 @@ class TestLaunchScheduledAgentRun:
         assert create_params.task_metadata["scheduled_fire_id"] == fire_id
         assert create_params.task_metadata["trigger_type"] == "scheduled"
         assert create_params.task_metadata["fire_time"] == "2026-06-25T20:00:00Z"
-        use_case.task_service.update_task.assert_awaited_once()
+        use_case.task_service.replace_task_metadata.assert_awaited_once()
         # Fire-time authz mirrors the RPC route: agent.execute, then task.create,
         # then task.update on the created task — in that order.
         from src.api.schemas.authorization_types import (
@@ -250,7 +250,7 @@ class TestLaunchScheduledAgentRun:
         assert result["reason"] == "input_already_delivered"
         # Only task/create ran; no second delivery call.
         assert use_case.handle_rpc_request.call_count == 1
-        use_case.task_service.update_task.assert_not_awaited()
+        use_case.task_service.replace_task_metadata.assert_not_awaited()
 
     async def test_skips_when_creator_permission_revoked(
         self, activity_instance, monkeypatch

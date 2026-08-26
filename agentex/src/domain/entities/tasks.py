@@ -29,6 +29,12 @@ class TaskStatus(str, Enum):
     DELETED = "DELETED"
 
 
+class TaskFailureSource(str, Enum):
+    """Internal ownership marker for recoverable ACP forwarding state."""
+
+    ACP_FORWARD = "ACP_FORWARD"
+
+
 # Canonical status partition (state machine + SSE termination).
 # Non-terminal: RUNNING or INTERRUPTED (resumable); terminal is the rest.
 # New statuses are terminal unless added to the non-terminal set.
@@ -72,6 +78,11 @@ class TaskEntity(BaseModel):
     task_metadata: dict[str, Any] | None = Field(
         None,
         title="Task metadata",
+    )
+    failure_source: TaskFailureSource | None = Field(
+        None,
+        title="Internal ACP forwarding ownership",
+        exclude=True,
     )
 
     # allow extra fields for agents relationships

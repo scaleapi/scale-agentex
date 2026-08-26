@@ -15,7 +15,7 @@ from src.domain.entities.agents_rpc import (
     ACP_TYPE_TO_ALLOWED_RPC_METHODS,
     AgentRPCMethod,
 )
-from src.domain.entities.tasks import TaskEntity, TaskStatus
+from src.domain.entities.tasks import TaskEntity, TaskFailureSource, TaskStatus
 from src.domain.repositories.agent_repository import AgentRepository
 from src.domain.repositories.event_repository import EventRepository
 from src.domain.repositories.task_repository import TaskRepository
@@ -120,15 +120,23 @@ class TestACPTypeBackwardsCompatibility:
             status_reason="Task created, forwarding to ACP server",
             updated_at=TASK_TIMESTAMP,
         )
-        forwarded_task = task.model_copy(
+        claimed_task = task.model_copy(
+            update={
+                "status_reason": "Forwarding task to ACP server",
+                "failure_source": TaskFailureSource.ACP_FORWARD,
+                "updated_at": TASK_TIMESTAMP + timedelta(microseconds=1),
+            }
+        )
+        forwarded_task = claimed_task.model_copy(
             update={
                 "status_reason": "Task forwarded to ACP server",
-                "updated_at": TASK_TIMESTAMP + timedelta(microseconds=1),
+                "failure_source": None,
+                "updated_at": TASK_TIMESTAMP + timedelta(microseconds=2),
             }
         )
 
         task_repo.create.return_value = task
-        task_repo.get_current.return_value = task
+        task_repo.claim_acp_forward.return_value = claimed_task
         task_repo.transition_status.return_value = forwarded_task
         acp_client.create_task.return_value = None
 
@@ -142,7 +150,7 @@ class TestACPTypeBackwardsCompatibility:
         # Verify task was forwarded to ACP (not skipped like SYNC agents)
         acp_client.create_task.assert_called_once_with(
             agent=agentic_agent,
-            task=task,
+            task=claimed_task,
             acp_url=agentic_agent.acp_url,
             params={"test": "params"},
         )
@@ -232,15 +240,23 @@ class TestACPTypeBackwardsCompatibility:
             status_reason="Task created, forwarding to ACP server",
             updated_at=TASK_TIMESTAMP,
         )
-        forwarded_task = task.model_copy(
+        claimed_task = task.model_copy(
+            update={
+                "status_reason": "Forwarding task to ACP server",
+                "failure_source": TaskFailureSource.ACP_FORWARD,
+                "updated_at": TASK_TIMESTAMP + timedelta(microseconds=1),
+            }
+        )
+        forwarded_task = claimed_task.model_copy(
             update={
                 "status_reason": "Task forwarded to ACP server",
-                "updated_at": TASK_TIMESTAMP + timedelta(microseconds=1),
+                "failure_source": None,
+                "updated_at": TASK_TIMESTAMP + timedelta(microseconds=2),
             }
         )
 
         task_repo.create.return_value = task
-        task_repo.get_current.return_value = task
+        task_repo.claim_acp_forward.return_value = claimed_task
         task_repo.transition_status.return_value = forwarded_task
         acp_client.create_task.return_value = None
 
@@ -254,7 +270,7 @@ class TestACPTypeBackwardsCompatibility:
         # Verify task was forwarded to ACP (same behavior as AGENTIC)
         acp_client.create_task.assert_called_once_with(
             agent=async_agent,
-            task=task,
+            task=claimed_task,
             acp_url=async_agent.acp_url,
             params={"test": "params"},
         )

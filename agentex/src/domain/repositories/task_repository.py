@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
 from fastapi import Depends
-from sqlalchemy import cast, distinct, func, select, update
+from sqlalchemy import and_, cast, distinct, func, or_, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import selectinload
 from src.adapters.crud_store.adapter_postgres import (
@@ -16,7 +16,14 @@ from src.config.dependencies import (
     DDatabaseAsyncReadOnlySessionMaker,
     DDatabaseAsyncReadWriteSessionMaker,
 )
-from src.domain.entities.tasks import TaskEntity, TaskRelationships, TaskStatus
+from src.domain.entities.tasks import (
+    NON_TERMINAL_TASK_STATUSES,
+    TaskEntity,
+    TaskFailureSource,
+    TaskRelationships,
+    TaskStatus,
+)
+from src.domain.exceptions import ClientError
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
@@ -172,6 +179,11 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
             async_sql_exception_handler(),
         ):
             task_data = task.to_dict()
+            # failure_source is deliberately excluded from public/domain
+            # serialization, but the repository still persists it.
+            task_data["failure_source"] = (
+                task.failure_source.value if task.failure_source is not None else None
+            )
 
             orm = self.orm(**task_data)
             session.add(orm)
@@ -197,31 +209,149 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
             return TaskEntity.model_validate(orm)
 
     async def update(self, task: TaskEntity) -> TaskEntity:
-        """Update task, preserving agent relationships"""
+        """Versioned whole-entity update, preserving agent relationships.
+
+        Callers must supply the ``updated_at`` value they read. This keeps the
+        legacy update surface from replaying stale task status or internal
+        failure provenance over a concurrent lifecycle transition.
+        """
+
+        if task.updated_at is None:
+            raise ClientError(
+                f"Task {task.id} cannot be updated without an updated_at version"
+            )
 
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
         ):
-            # Update task fields only (not relationships)
-            task_data = task.to_dict()
+            # Update task columns only (not relationships or database-managed
+            # timestamps). ``failure_source`` is excluded from normal entity
+            # serialization, so include it explicitly in the versioned write.
+            task_data = task.to_dict(
+                exclude={"id", "created_at", "updated_at", "agents"}
+            )
+            task_data["failure_source"] = (
+                task.failure_source.value if task.failure_source is not None else None
+            )
 
-            orm = self.orm(**task_data)
-            modified_orm = await session.merge(orm)
+            stmt = (
+                update(TaskORM)
+                .where(
+                    TaskORM.id == task.id,
+                    TaskORM.updated_at == task.updated_at,
+                )
+                .values(**task_data)
+                .returning(TaskORM)
+            )
+            result = await session.execute(stmt)
+            modified_orm = result.scalar_one_or_none()
             await session.commit()
-            await session.refresh(modified_orm)
-
-            # Return with agents populated
+            if modified_orm is None:
+                raise ClientError(
+                    f"Task {task.id} was concurrently modified. Please retry the request."
+                )
             return TaskEntity.model_validate(modified_orm)
 
-    async def get_current(self, task_id: str) -> TaskEntity:
+    async def get_current(
+        self,
+        task_id: str | None = None,
+        name: str | None = None,
+        relationships: list[TaskRelationships] | None = None,
+    ) -> TaskEntity:
         """Read the current task from the primary database."""
         async with (
             self.start_async_db_session(allow_writes=True) as session,
             async_sql_exception_handler(),
         ):
-            task = await self._get(session, id=task_id, name=None)
+            task = await self._get(
+                session,
+                id=task_id,
+                name=name,
+                relationships=relationships,
+            )
             return TaskEntity.model_validate(task)
+
+    async def claim_acp_forward(self, task_id: str) -> TaskEntity | None:
+        """Atomically claim a task for an ACP create call.
+
+        Non-terminal tasks remain retryable. A FAILED task is eligible only when
+        the prior failure was written by this forwarding path. The marker remains
+        stable across column-scoped metadata writes, unlike the row timestamp.
+        """
+        eligible_status = or_(
+            TaskORM.status.in_(NON_TERMINAL_TASK_STATUSES),
+            and_(
+                TaskORM.status == TaskStatus.FAILED,
+                TaskORM.failure_source == TaskFailureSource.ACP_FORWARD.value,
+            ),
+        )
+        async with (
+            self.start_async_db_session(True) as session,
+            async_sql_exception_handler(),
+        ):
+            stmt = (
+                update(TaskORM)
+                .where(TaskORM.id == task_id, eligible_status)
+                .values(
+                    status=TaskStatus.RUNNING,
+                    status_reason="Forwarding task to ACP server",
+                    failure_source=TaskFailureSource.ACP_FORWARD.value,
+                )
+                .returning(TaskORM)
+            )
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            await session.commit()
+            if row is None:
+                return None
+            return TaskEntity.model_validate(row)
+
+    async def replace_metadata(
+        self,
+        task_id: str,
+        task_metadata: dict | None,
+    ) -> TaskEntity | None:
+        """Replace only task metadata without replaying a stale task entity."""
+        async with (
+            self.start_async_db_session(True) as session,
+            async_sql_exception_handler(),
+        ):
+            stmt = (
+                update(TaskORM)
+                .where(TaskORM.id == task_id)
+                .values(task_metadata=task_metadata)
+                .returning(TaskORM)
+            )
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            await session.commit()
+            if row is None:
+                return None
+            return TaskEntity.model_validate(row)
+
+    async def set_cleaned_at(
+        self,
+        task_id: str,
+        cleaned_at: datetime | None,
+    ) -> TaskEntity | None:
+        """Set only the retention marker, preserving concurrent lifecycle state."""
+        async with (
+            self.start_async_db_session(True) as session,
+            async_sql_exception_handler(),
+        ):
+            stmt = (
+                update(TaskORM)
+                .where(TaskORM.id == task_id)
+                .values(cleaned_at=cleaned_at)
+                .returning(TaskORM)
+            )
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            await session.commit()
+            if row is None:
+                return None
+            return TaskEntity.model_validate(row)
 
     async def replace_params(
         self, task_id: str, params: dict | None
@@ -296,6 +426,8 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
         status_reason: str,
         task_metadata: dict | None = None,
         expected_updated_at: datetime | None = None,
+        expected_failure_source: TaskFailureSource | None = None,
+        new_failure_source: TaskFailureSource | None = None,
     ) -> TaskEntity | None:
         """Atomically transition from eligible status/version state."""
 
@@ -303,7 +435,16 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
         ):
-            values: dict = {"status": new_status, "status_reason": status_reason}
+            values: dict = {
+                "status": new_status,
+                "status_reason": status_reason,
+                # Every ordinary status transition takes ownership away from a
+                # prior ACP forwarding failure unless the caller explicitly
+                # records a new one.
+                "failure_source": (
+                    new_failure_source.value if new_failure_source is not None else None
+                ),
+            }
             if task_metadata is not None:
                 values["task_metadata"] = task_metadata
 
@@ -315,6 +456,8 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
             filters = [TaskORM.id == task_id, status_filter]
             if expected_updated_at is not None:
                 filters.append(TaskORM.updated_at == expected_updated_at)
+            if expected_failure_source is not None:
+                filters.append(TaskORM.failure_source == expected_failure_source.value)
 
             stmt = update(TaskORM).where(*filters).values(**values)
             result = await session.execute(stmt)
@@ -327,6 +470,60 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
             if refreshed is None:
                 return None
             return TaskEntity.model_validate(refreshed)
+
+    async def transition_to_terminal_status(
+        self,
+        *,
+        task_id: str | None,
+        name: str | None,
+        new_status: TaskStatus,
+        status_reason: str,
+        include_acp_forward_failure: bool,
+    ) -> TaskEntity | None:
+        """Atomically take terminal ownership from every eligible live state.
+
+        The predicate is evaluated by PostgreSQL in the same statement as the
+        write. A workflow terminal transition therefore wins whether an ACP
+        retry is still FAILED, has claimed RUNNING, or has just confirmed the
+        forward. Clearing ``failure_source`` in that statement prevents any
+        later stale retry CAS from reviving the task.
+        """
+        if task_id is None and name is None:
+            raise ClientError("Either task_id or name must be provided")
+
+        identifier_filter = (
+            TaskORM.id == task_id if task_id is not None else TaskORM.name == name
+        )
+        eligible_status = TaskORM.status.in_(NON_TERMINAL_TASK_STATUSES)
+        if include_acp_forward_failure:
+            eligible_status = or_(
+                eligible_status,
+                and_(
+                    TaskORM.status == TaskStatus.FAILED,
+                    TaskORM.failure_source == TaskFailureSource.ACP_FORWARD.value,
+                ),
+            )
+
+        async with (
+            self.start_async_db_session(True) as session,
+            async_sql_exception_handler(),
+        ):
+            stmt = (
+                update(TaskORM)
+                .where(identifier_filter, eligible_status)
+                .values(
+                    status=new_status,
+                    status_reason=status_reason,
+                    failure_source=None,
+                )
+                .returning(TaskORM)
+            )
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            await session.commit()
+            if row is None:
+                return None
+            return TaskEntity.model_validate(row)
 
 
 DTaskRepository = Annotated[TaskRepository, Depends(TaskRepository)]

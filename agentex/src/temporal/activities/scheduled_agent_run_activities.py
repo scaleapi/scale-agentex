@@ -303,11 +303,16 @@ class ScheduledAgentRunActivities:
         # still prevents duplicate tasks). Marker-after is deliberate — claiming
         # before send would instead risk a silent missed delivery. A delivery-level
         # idempotency_key in event/send & message/send is the post-v1 fix.
-        task.task_metadata = {
+        updated_metadata = {
             **(task.task_metadata or {}),
             _INPUT_DELIVERED_MARKER: True,
         }
-        await use_case.task_service.update_task(task)
+        updated_task = await use_case.task_service.replace_task_metadata(
+            task.id,
+            updated_metadata,
+        )
+        if updated_task is None:
+            raise ItemDoesNotExist(f"Task {task.id} not found")
 
         logger.info(
             "scheduled_run_launched",

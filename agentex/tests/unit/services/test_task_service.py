@@ -14,7 +14,7 @@ from src.api.schemas.task_message_updates import (
 from src.api.schemas.task_messages import TextContent
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
 from src.domain.entities.task_messages import MessageAuthor
-from src.domain.entities.tasks import TaskEntity, TaskStatus
+from src.domain.entities.tasks import TaskEntity, TaskFailureSource, TaskStatus
 from src.domain.repositories.agent_repository import AgentRepository
 from src.domain.repositories.event_repository import EventRepository
 from src.domain.repositories.task_repository import TaskRepository
@@ -56,8 +56,35 @@ class InMemoryTaskStatusRepository:
 
     def __init__(self, task: TaskEntity):
         self.task = task.model_copy()
+        self.claim_requests = 0
         self.transition_requests = []
         self.current_reads = 0
+
+    async def claim_acp_forward(self, task_id):
+        assert task_id == self.task.id
+        self.claim_requests += 1
+        eligible = self.task.status in {
+            TaskStatus.RUNNING,
+            TaskStatus.INTERRUPTED,
+        } or (
+            self.task.status == TaskStatus.FAILED
+            and self.task.failure_source == TaskFailureSource.ACP_FORWARD
+        )
+        if not eligible:
+            return None
+
+        updated_at = (self.task.updated_at or RACE_TIMESTAMP) + timedelta(
+            microseconds=1
+        )
+        self.task = self.task.model_copy(
+            update={
+                "status": TaskStatus.RUNNING,
+                "status_reason": "Forwarding task to ACP server",
+                "failure_source": TaskFailureSource.ACP_FORWARD,
+                "updated_at": updated_at,
+            }
+        )
+        return self.task.model_copy()
 
     async def transition_status(
         self,
@@ -67,6 +94,8 @@ class InMemoryTaskStatusRepository:
         status_reason,
         task_metadata=None,
         expected_updated_at=None,
+        expected_failure_source=None,
+        new_failure_source=None,
     ):
         assert task_id == self.task.id
         self.transition_requests.append(expected_status)
@@ -82,8 +111,17 @@ class InMemoryTaskStatusRepository:
             and self.task.updated_at != expected_updated_at
         ):
             return None
+        if (
+            expected_failure_source is not None
+            and self.task.failure_source != expected_failure_source
+        ):
+            return None
 
-        updates = {"status": new_status, "status_reason": status_reason}
+        updates = {
+            "status": new_status,
+            "status_reason": status_reason,
+            "failure_source": new_failure_source,
+        }
         if task_metadata is not None:
             updates["task_metadata"] = task_metadata
         updates["updated_at"] = self.task.updated_at + timedelta(microseconds=1)
@@ -93,8 +131,18 @@ class InMemoryTaskStatusRepository:
     async def get(self, **_kwargs):
         return self.task.model_copy()
 
-    async def get_current(self, _task_id):
+    async def get_current(self, _task_id=None, **_kwargs):
         self.current_reads += 1
+        return self.task.model_copy()
+
+    async def replace_metadata(self, task_id, task_metadata):
+        assert task_id == self.task.id
+        updated_at = (self.task.updated_at or RACE_TIMESTAMP) + timedelta(
+            microseconds=1
+        )
+        self.task = self.task.model_copy(
+            update={"task_metadata": task_metadata, "updated_at": updated_at}
+        )
         return self.task.model_copy()
 
 
@@ -453,6 +501,7 @@ class TestAgentTaskService:
         failed = await task_service.get_task(id=task.id)
         assert failed.status == TaskStatus.FAILED
         assert failed.status_reason == "All connection attempts failed"
+        assert failed.failure_source == TaskFailureSource.ACP_FORWARD
 
         # When - the agent recovers and the same task is forwarded again
         mock_acp_client.create_task.side_effect = None
@@ -462,9 +511,171 @@ class TestAgentTaskService:
         # Then - the returned task and the persisted row reflect RUNNING again
         assert result.status == TaskStatus.RUNNING
         assert result.status_reason == "Task forwarded to ACP server"
+        assert result.failure_source is None
         refreshed = await task_service.get_task(id=task.id)
         assert refreshed.status == TaskStatus.RUNNING
         assert refreshed.status_reason == "Task forwarded to ACP server"
+        assert refreshed.failure_source is None
+
+    async def test_workflow_owned_failed_task_is_not_forwarded(
+        self,
+        mock_acp_client,
+        sample_agent,
+    ):
+        """A workflow-owned failure is terminal, not a retry admission signal."""
+        failed = TaskEntity(
+            id=str(uuid4()),
+            name="workflow-failed-task",
+            status=TaskStatus.FAILED,
+            status_reason="Workflow validation failed",
+            updated_at=RACE_TIMESTAMP,
+        )
+        repository = InMemoryTaskStatusRepository(failed)
+        task_service = make_task_service_for_status_race(mock_acp_client, repository)
+
+        result = await task_service.forward_task_to_acp(
+            agent=sample_agent,
+            task=failed,
+        )
+
+        assert result.status == TaskStatus.FAILED
+        assert result.status_reason == "Workflow validation failed"
+        assert result.failure_source is None
+        assert repository.claim_requests == 1
+        assert repository.transition_requests == []
+        mock_acp_client.create_task.assert_not_awaited()
+
+    async def test_failed_forward_retry_is_claimed_before_acp_call(
+        self,
+        mock_acp_client,
+        sample_agent,
+    ):
+        """ACP observes RUNNING, never the retryable FAILED snapshot."""
+        failed = TaskEntity(
+            id=str(uuid4()),
+            name="preclaimed-retry",
+            status=TaskStatus.FAILED,
+            status_reason="Connection lost",
+            failure_source=TaskFailureSource.ACP_FORWARD,
+            updated_at=RACE_TIMESTAMP,
+        )
+        repository = InMemoryTaskStatusRepository(failed)
+        task_service = make_task_service_for_status_race(mock_acp_client, repository)
+
+        async def assert_claimed_before_forward(**kwargs):
+            forwarded = kwargs["task"]
+            assert forwarded.status == TaskStatus.RUNNING
+            assert forwarded.failure_source == TaskFailureSource.ACP_FORWARD
+            assert repository.task.status == TaskStatus.RUNNING
+
+        mock_acp_client.create_task.side_effect = assert_claimed_before_forward
+
+        result = await task_service.forward_task_to_acp(
+            agent=sample_agent,
+            task=failed,
+        )
+
+        assert result.status == TaskStatus.RUNNING
+        assert result.failure_source is None
+        assert repository.claim_requests == 1
+        assert repository.transition_requests == [
+            (TaskStatus.RUNNING, TaskStatus.FAILED)
+        ]
+
+    async def test_running_forward_recovery_can_take_over_after_claiming_process_dies(
+        self,
+        mock_acp_client,
+        sample_agent,
+    ):
+        """A crash after preclaim does not leave an unrecoverable ownership lock."""
+        claimed = TaskEntity(
+            id=str(uuid4()),
+            name="abandoned-preclaim",
+            status=TaskStatus.RUNNING,
+            status_reason="Retrying task forwarding to ACP server",
+            failure_source=TaskFailureSource.ACP_FORWARD,
+            updated_at=RACE_TIMESTAMP,
+        )
+        repository = InMemoryTaskStatusRepository(claimed)
+        task_service = make_task_service_for_status_race(mock_acp_client, repository)
+
+        result = await task_service.forward_task_to_acp(
+            agent=sample_agent,
+            task=claimed,
+        )
+
+        mock_acp_client.create_task.assert_awaited_once()
+        assert result.status == TaskStatus.RUNNING
+        assert result.status_reason == "Task forwarded to ACP server"
+        assert result.failure_source is None
+
+    async def test_failed_forward_retry_rolls_back_only_its_claim(
+        self,
+        mock_acp_client,
+        sample_agent,
+    ):
+        failed = TaskEntity(
+            id=str(uuid4()),
+            name="retry-rollback",
+            status=TaskStatus.FAILED,
+            status_reason="Initial connection failure",
+            failure_source=TaskFailureSource.ACP_FORWARD,
+            updated_at=RACE_TIMESTAMP,
+        )
+        repository = InMemoryTaskStatusRepository(failed)
+        task_service = make_task_service_for_status_race(mock_acp_client, repository)
+        mock_acp_client.create_task.side_effect = RuntimeError("Still unavailable")
+
+        with pytest.raises(RuntimeError, match="Still unavailable"):
+            await task_service.forward_task_to_acp(
+                agent=sample_agent,
+                task=failed,
+            )
+
+        assert repository.task.status == TaskStatus.FAILED
+        assert repository.task.status_reason == "Still unavailable"
+        assert repository.task.failure_source == TaskFailureSource.ACP_FORWARD
+
+    async def test_workflow_failure_wins_before_failed_retry_claim(
+        self,
+        mock_acp_client,
+        sample_agent,
+    ):
+        """A workflow ownership write prevents a stale retry from reviving FAILED."""
+        failed = TaskEntity(
+            id=str(uuid4()),
+            name="workflow-failure-wins-claim-race",
+            status=TaskStatus.FAILED,
+            status_reason="ACP response lost",
+            failure_source=TaskFailureSource.ACP_FORWARD,
+            updated_at=RACE_TIMESTAMP,
+        )
+        repository = InMemoryTaskStatusRepository(failed)
+
+        async def claim_after_workflow_failure(_task_id):
+            repository.claim_requests += 1
+            repository.task = repository.task.model_copy(
+                update={
+                    "status_reason": "Workflow cleanup failed",
+                    "failure_source": None,
+                    "updated_at": RACE_TIMESTAMP + timedelta(microseconds=1),
+                }
+            )
+            return None
+
+        repository.claim_acp_forward = claim_after_workflow_failure
+        task_service = make_task_service_for_status_race(mock_acp_client, repository)
+
+        result = await task_service.forward_task_to_acp(
+            agent=sample_agent,
+            task=failed,
+        )
+
+        assert result.status == TaskStatus.FAILED
+        assert result.status_reason == "Workflow cleanup failed"
+        assert result.failure_source is None
+        assert repository.claim_requests == 1
+        mock_acp_client.create_task.assert_not_awaited()
 
     async def test_forward_task_to_acp_error_preserves_concurrent_completion(
         self,
@@ -487,6 +698,7 @@ class TestAgentTaskService:
                 update={
                     "status": TaskStatus.COMPLETED,
                     "status_reason": "Task completed",
+                    "failure_source": None,
                     "updated_at": RACE_TIMESTAMP + timedelta(microseconds=1),
                 }
             )
@@ -522,9 +734,8 @@ class TestAgentTaskService:
 
         assert repository.task.status == TaskStatus.FAILED
         assert repository.task.status_reason == "ACP unavailable"
-        assert repository.transition_requests == [
-            (TaskStatus.RUNNING, TaskStatus.INTERRUPTED)
-        ]
+        assert repository.claim_requests == 1
+        assert repository.transition_requests == [TaskStatus.RUNNING]
 
     async def test_forward_task_to_acp_recovery_returns_concurrent_terminal_state(
         self,
@@ -537,6 +748,7 @@ class TestAgentTaskService:
             name="concurrently-reconciled-task",
             status=TaskStatus.FAILED,
             status_reason="Initial forward failed",
+            failure_source=TaskFailureSource.ACP_FORWARD,
             updated_at=RACE_TIMESTAMP,
         )
         repository = InMemoryTaskStatusRepository(failed)
@@ -559,7 +771,7 @@ class TestAgentTaskService:
         assert result.status_reason == "Task completed"
         assert repository.task.status == TaskStatus.COMPLETED
         assert repository.task.status_reason == "Task completed"
-        assert repository.current_reads == 2
+        assert repository.current_reads == 1
 
     async def test_failed_retry_error_preserves_concurrently_recovered_task(
         self,
@@ -572,6 +784,7 @@ class TestAgentTaskService:
             name="concurrent-forward-retries",
             status=TaskStatus.FAILED,
             status_reason="Initial forward failed",
+            failure_source=TaskFailureSource.ACP_FORWARD,
             updated_at=RACE_TIMESTAMP,
         )
         repository = InMemoryTaskStatusRepository(failed)
@@ -582,7 +795,8 @@ class TestAgentTaskService:
                 update={
                     "status": TaskStatus.RUNNING,
                     "status_reason": "Task forwarded by another request",
-                    "updated_at": RACE_TIMESTAMP + timedelta(microseconds=1),
+                    "failure_source": None,
+                    "updated_at": RACE_TIMESTAMP + timedelta(microseconds=2),
                 }
             )
             raise RuntimeError("Duplicate forward rejected")
@@ -594,6 +808,36 @@ class TestAgentTaskService:
 
         assert repository.task.status == TaskStatus.RUNNING
         assert repository.task.status_reason == "Task forwarded by another request"
+
+    async def test_forward_error_survives_unrelated_metadata_update(
+        self,
+        mock_acp_client,
+        sample_agent,
+    ):
+        """Metadata writes do not invalidate the ACP ownership marker."""
+        task = TaskEntity(
+            id=str(uuid4()),
+            name="metadata-race",
+            status=TaskStatus.RUNNING,
+            status_reason="Task created",
+            updated_at=RACE_TIMESTAMP,
+        )
+        repository = InMemoryTaskStatusRepository(task)
+        task_service = make_task_service_for_status_race(mock_acp_client, repository)
+
+        async def update_metadata_then_fail(**_kwargs):
+            await repository.replace_metadata(task.id, {"source": "scheduler"})
+            raise RuntimeError("ACP unavailable")
+
+        mock_acp_client.create_task.side_effect = update_metadata_then_fail
+
+        with pytest.raises(RuntimeError, match="ACP unavailable"):
+            await task_service.forward_task_to_acp(agent=sample_agent, task=task)
+
+        assert repository.task.status == TaskStatus.FAILED
+        assert repository.task.status_reason == "ACP unavailable"
+        assert repository.task.failure_source == TaskFailureSource.ACP_FORWARD
+        assert repository.task.task_metadata == {"source": "scheduler"}
 
     async def test_successful_forward_wins_against_same_snapshot_error(
         self,
@@ -654,14 +898,14 @@ class TestAgentTaskService:
 
         assert repository.task.status == TaskStatus.RUNNING
         assert repository.task.status_reason == "Task forwarded to ACP server"
-        assert repository.current_reads == 2
+        assert repository.current_reads == 0
 
-    async def test_forward_error_wins_against_same_snapshot_success(
+    async def test_forward_success_wins_after_concurrent_error(
         self,
         mock_acp_client,
         sample_agent,
     ):
-        """A recorded error makes a later success from the same snapshot stale."""
+        """An accepted ACP call supersedes another forward's transport error."""
         task = TaskEntity(
             id=str(uuid4()),
             name="error-wins",
@@ -711,18 +955,19 @@ class TestAgentTaskService:
         release_success.set()
         result = await success_call
 
-        assert result.status == TaskStatus.FAILED
-        assert result.status_reason == "first forward error"
-        assert repository.task.status == TaskStatus.FAILED
-        assert repository.task.status_reason == "first forward error"
-        assert repository.current_reads == 3
+        assert result.status == TaskStatus.RUNNING
+        assert result.status_reason == "Task forwarded to ACP server"
+        assert repository.task.status == TaskStatus.RUNNING
+        assert repository.task.status_reason == "Task forwarded to ACP server"
+        assert repository.task.failure_source is None
+        assert repository.current_reads == 0
 
-    async def test_forward_success_without_version_only_reads_current_state(
+    async def test_forward_success_does_not_require_row_version(
         self,
         mock_acp_client,
         sample_agent,
     ):
-        """A missing snapshot version must not permit an unguarded status write."""
+        """ACP ownership is independent of unrelated row-version timestamps."""
         task = TaskEntity(
             id=str(uuid4()),
             name="unversioned-forward",
@@ -736,9 +981,13 @@ class TestAgentTaskService:
         result = await task_service.forward_task_to_acp(agent=sample_agent, task=task)
 
         assert result.status == TaskStatus.RUNNING
-        assert result.status_reason == "Task created"
-        assert repository.transition_requests == []
-        assert repository.current_reads == 2
+        assert result.status_reason == "Task forwarded to ACP server"
+        assert result.failure_source is None
+        assert repository.claim_requests == 1
+        assert repository.transition_requests == [
+            (TaskStatus.RUNNING, TaskStatus.FAILED)
+        ]
+        assert repository.current_reads == 0
 
     async def test_forward_task_to_acp_success_confirms_healthy_status(
         self,
@@ -1079,6 +1328,38 @@ class TestAgentTaskService:
         updated_task = await task_service.get_task(id=created_task.id)
         assert updated_task.status == TaskStatus.CANCELED
         assert updated_task.status_reason == "Task canceled by user"
+
+    async def test_cancel_task_replaces_acp_forward_failure(
+        self,
+        task_service,
+        mock_acp_client,
+        agent_repository,
+        sample_agent,
+    ):
+        """A healthy workflow can be canceled after its create response is lost."""
+        await create_or_get_agent(agent_repository, sample_agent)
+        task = await task_service.create_task(
+            agent=sample_agent,
+            task_name="cancel-after-lost-create-response",
+        )
+        mock_acp_client.create_task.side_effect = RuntimeError("response lost")
+        with pytest.raises(RuntimeError, match="response lost"):
+            await task_service.forward_task_to_acp(agent=sample_agent, task=task)
+
+        failed = await task_service.get_current_task(id=task.id)
+        assert failed.status == TaskStatus.FAILED
+        assert failed.failure_source == TaskFailureSource.ACP_FORWARD
+
+        mock_acp_client.cancel_task.reset_mock()
+        canceled = await task_service.cancel_task(
+            agent=sample_agent,
+            task=failed,
+            acp_url=sample_agent.acp_url,
+        )
+
+        assert canceled.status == TaskStatus.CANCELED
+        assert canceled.failure_source is None
+        mock_acp_client.cancel_task.assert_awaited_once()
 
     async def test_create_event_and_forward_to_acp(
         self,
