@@ -33,9 +33,13 @@ k8s-secret only), which still produces a working turn — just without personal
 integrations. So user scoping is opt-in per person, and NOT an isolation guarantee
 while the fallback is enabled; ``SLACK_GATEWAY_REQUIRE_LINKED_USER`` closes it.
 
-Task keying follows the identity: a linked user gets one task per (thread, user), so
-each participant in a shared thread owns their own conversation and a task never has
-two owners. Unlinked users keep the legacy thread-wide key.
+Task keying follows the identity: a linked user gets one task per (workspace,
+channel, thread, user), so each participant in a shared thread owns their own
+conversation and a task never has two owners. Workspace and channel are in the key
+because ``task/create`` is get-or-create on the name — two turns yielding the same
+name become one task, merging their prompts, config and account context — and
+``thread_ts`` is unique only within a workspace. Unlinked users keep the legacy
+thread-wide key, which carries that same weakness and predates this work.
 
 The bot's Slack credentials (signing secret, bot token) are separate from all of this
 and remain shared — the gateway posts as the app, not as the user.
@@ -755,33 +759,72 @@ class SlackGatewayUseCase:
     def _task_name(self, inbound: InboundSlack, sgp_user_id: str | None) -> str:
         """The conversation key.
 
-        For a linked user the task is per (thread, user): each invoker gets their own
-        task, in their own account, holding only their own turns. That's what makes
-        per-user ownership coherent in a shared thread — one task can't be owned by
-        two people — and it removes the reply-attribution race, since a task now only
-        ever contains one user's messages.
+        For a linked user the task is per (workspace, channel, thread, user): each
+        invoker gets their own task, in their own account, holding only their own
+        turns. That's what makes per-user ownership coherent in a shared thread — one
+        task can't be owned by two people — and it removes the reply-attribution
+        race, since a task now only ever contains one user's messages.
 
         The agent loses the other participants' turns from its own history by design;
         it recovers that context by reading the thread with its Slack tools (the
         ``[Slack context]`` prefix carries the channel and thread for exactly that).
 
+        **Team and channel are in the key deliberately.** ``task/create`` is
+        get-or-create on the name, so two turns that produce the same name become one
+        task — mixing their prompts, metadata, agent config and account context into
+        a single conversation. ``thread_ts`` alone does not rule that out: it is
+        unique within a workspace but nothing makes it unique *across* workspaces,
+        and this gateway is multi-workspace (``team_id`` is part of the identity
+        everywhere else). The odds of two workspaces minting the same microsecond
+        timestamp are tiny, but the failure is silent and cross-tenant, and the two
+        extra segments cost nothing.
+
+        They also bound the damage if ``thread_ts`` is ever empty — ``normalize()``
+        falls back to ``""`` when an event carries neither ``thread_ts`` nor ``ts``.
+        With team and channel present that degrades to one task per (workspace,
+        channel, user), which is a reasonable conversation anyway; on the old key it
+        would have collapsed every such turn into a single global task.
+
         Unlinked users keep the legacy thread-wide key, so turning this on doesn't
-        orphan conversations already in flight.
+        orphan conversations already in flight. That key has the same cross-workspace
+        weakness and predates this change; widening it would re-key live threads, so
+        it's left alone here.
         """
         if sgp_user_id:
-            return f"slack:{inbound.thread_ts}:{sgp_user_id}"
+            return (
+                f"slack:{inbound.team_id}:{inbound.channel}:"
+                f"{inbound.thread_ts}:{sgp_user_id}"
+            )
         return f"slack:{inbound.thread_ts}"
 
     async def _resolve_config_id(
         self, name: str, auth_headers: dict[str, str]
     ) -> str | None:
         """Resolve an agent_config NAME -> id via SGP's directory
-        (GET {SGP}/v5/agent_configs?name=), authenticated with the acting identity's
-        headers (x-api-key + x-selected-account-id). Cached by (account, name) for the
-        process lifetime. Fail-safe -> None (no SGP base / no acting key / any error) so
-        the caller falls back to the fixed default id."""
-        api_key = auth_headers.get("x-api-key")
-        if not (_SGP_BASE_URL and name and api_key):
+        (GET {SGP}/v5/agent_configs?name=), authenticated with whatever credential the
+        acting identity carries. Cached by (account, name) for the process lifetime.
+        Fail-safe -> None (no SGP base / no credential / any error) so the caller
+        falls back to the fixed default id.
+
+        The credential check is deliberately *form-agnostic*. It used to require
+        ``x-api-key``, which the shared bot has but a linked user does not: a linked
+        user's acting headers carry their session cookie instead. That mismatch made
+        this silently return None for exactly the users this feature is for, so they
+        would land on the default config while a bot-run turn resolved the name
+        correctly — a difference in agent behavior with nothing in the logs pointing
+        at the cause. Forward whatever we hold and let the directory decide.
+
+        Unverified: whether that endpoint accepts cookie auth. If it doesn't, the
+        request fails and we fall back to the default id, which is the same outcome
+        as before this change — so this is safe either way, just no longer silently
+        wrong for api-key callers only. It could not be checked because
+        ``SLACK_GATEWAY_SGP_BASE_URL`` is unset in dev, which also means this whole
+        path is inert there today.
+        """
+        has_credential = any(
+            auth_headers.get(h) for h in ("x-api-key", "cookie", "authorization")
+        )
+        if not (_SGP_BASE_URL and name and has_credential):
             return None
         cache_key = (auth_headers.get("x-selected-account-id", ""), name)
         if cache_key in _CONFIG_ID_CACHE:

@@ -940,7 +940,46 @@ class TestConfigIdResolution:
         monkeypatch.setattr(sg, "_SGP_BASE_URL", "")
         assert await uc._resolve_config_id("x", {"x-api-key": "k"}) is None  # no base
         monkeypatch.setattr(sg, "_SGP_BASE_URL", "https://sgp.example")
-        assert await uc._resolve_config_id("x", {}) is None  # no acting key
+        assert await uc._resolve_config_id("x", {}) is None  # no credential at all
+
+    @pytest.mark.asyncio
+    async def test_resolve_config_id_accepts_a_cookie_credential(self, monkeypatch):
+        # REGRESSION: this used to require x-api-key, which the shared bot has and a
+        # linked user does not — their acting headers carry a session cookie. That
+        # made resolution silently return None for exactly the users this feature is
+        # for, so they'd get the default config while a bot turn resolved the name.
+        captured = {}
+
+        class _Resp:
+            def json(self):
+                return {"items": [{"name": "my-config", "id": "cfg-7"}]}
+
+        class _Client:
+            def __init__(self, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def get(self, url, headers=None, params=None):
+                captured.update(url=url, headers=headers, params=params)
+                return _Resp()
+
+        monkeypatch.setattr(sg, "_SGP_BASE_URL", "https://sgp.example")
+        monkeypatch.setattr(sg.httpx, "AsyncClient", _Client)
+        monkeypatch.setattr(sg, "_CONFIG_ID_CACHE", {})
+
+        headers = {
+            "cookie": "_identityJwt=abc",
+            "x-selected-account-id": "acct-1",
+        }
+        got = await SlackGatewayUseCase()._resolve_config_id("my-config", headers)
+        assert got == "cfg-7"
+        # The credential is forwarded as-is; the directory decides whether it likes it.
+        assert captured["headers"]["cookie"] == "_identityJwt=abc"
 
 
 @pytest.mark.unit
@@ -1552,7 +1591,7 @@ class TestTaskName:
         uc = SlackGatewayUseCase()
         assert (
             uc._task_name(_inbound(thread_ts="1700.1"), "sgp-user-1")
-            == "slack:1700.1:sgp-user-1"
+            == "slack:T1:C1:1700.1:sgp-user-1"
         )
 
     def test_two_users_in_one_thread_get_separate_tasks(self):
@@ -1560,7 +1599,35 @@ class TestTaskName:
         inbound = _inbound(thread_ts="1700.1")
         assert uc._task_name(inbound, "sgp-a") != uc._task_name(inbound, "sgp-b")
 
+    def test_same_user_and_thread_ts_in_two_workspaces_do_not_collide(self):
+        # task/create is get-or-create on the name, so a collision merges two
+        # conversations: prompts, metadata, agent config and account context all land
+        # in one task. thread_ts is unique within a workspace but nothing makes it
+        # unique across workspaces, and this gateway is multi-workspace.
+        uc = SlackGatewayUseCase()
+        a = uc._task_name(_inbound(team_id="T_A", thread_ts="1700.1"), "sgp-1")
+        b = uc._task_name(_inbound(team_id="T_B", thread_ts="1700.1"), "sgp-1")
+        assert a != b
+
+    def test_same_user_and_thread_ts_in_two_channels_do_not_collide(self):
+        uc = SlackGatewayUseCase()
+        a = uc._task_name(_inbound(channel="C_A", thread_ts="1700.1"), "sgp-1")
+        b = uc._task_name(_inbound(channel="C_B", thread_ts="1700.1"), "sgp-1")
+        assert a != b
+
+    def test_empty_thread_ts_still_scopes_to_workspace_channel_and_user(self):
+        # normalize() falls back to "" when an event carries neither thread_ts nor
+        # ts. Team and channel keep that from collapsing every such turn into one
+        # global task; it degrades to one task per (workspace, channel, user).
+        uc = SlackGatewayUseCase()
+        a = uc._task_name(_inbound(team_id="T_A", channel="C_A", thread_ts=""), "sgp-1")
+        b = uc._task_name(_inbound(team_id="T_B", channel="C_A", thread_ts=""), "sgp-1")
+        c = uc._task_name(_inbound(team_id="T_A", channel="C_B", thread_ts=""), "sgp-1")
+        assert len({a, b, c}) == 3
+
     def test_unlinked_user_keeps_the_legacy_thread_wide_key(self):
+        # Unchanged on purpose: widening it would re-key threads already in flight.
+        # It carries the same cross-workspace weakness, which predates this work.
         uc = SlackGatewayUseCase()
         assert uc._task_name(_inbound(thread_ts="1700.1"), None) == "slack:1700.1"
 
@@ -1590,7 +1657,9 @@ class TestDispatchAttribution:
         )
 
         create = acp.handle_rpc_request.await_args_list[0].kwargs["params"]
-        assert create.name == "slack:1:sgp-user-1"  # per-user task
+        assert (
+            create.name == "slack:T1:C1:1:sgp-user-1"
+        )  # per (workspace, channel, thread, user)
         assert create.task_metadata["slack_user_id"] == "U1"
         assert create.task_metadata["sgp_user_id"] == "sgp-user-1"
 
