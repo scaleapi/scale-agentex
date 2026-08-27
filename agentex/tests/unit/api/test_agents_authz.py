@@ -325,6 +325,7 @@ class TestListFiltering:
             page_number=1,
             order_by=None,
             order_direction="desc",
+            agent_card_metadata=None,
             id=["agent-a", "agent-c"],
         )
 
@@ -351,6 +352,7 @@ class TestListFiltering:
             page_number=1,
             order_by=None,
             order_direction="desc",
+            agent_card_metadata=None,
         )
 
 
