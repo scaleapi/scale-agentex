@@ -28,6 +28,21 @@ def _sign(secret: str, ts: str, body: bytes) -> str:
     return "v0=" + hmac.new(secret.encode(), basis, hashlib.sha256).hexdigest()
 
 
+def _inbound(**kw) -> sg.InboundSlack:
+    """InboundSlack with defaults, so a test states only what it cares about."""
+    return sg.InboundSlack(
+        **{
+            "team_id": "T1",
+            "channel": "C1",
+            "user": "U1",
+            "text": "hi",
+            "thread_ts": "1",
+            "selector": None,
+            **kw,
+        }
+    )
+
+
 # Captured before the autouse fixture patches the class, so the repo-lookup tests can
 # exercise the real implementation.
 _REAL_GET_AGENT_BY_NAME = SlackGatewayUseCase._get_agent_by_name
@@ -40,6 +55,17 @@ def _no_runtime_agents(monkeypatch):
     monkeypatch.setattr(
         SlackGatewayUseCase, "_get_agent_by_name", AsyncMock(return_value=None)
     )
+
+
+@pytest.fixture(autouse=True)
+def _unlinked_by_default(monkeypatch):
+    """Default: the invoking Slack user has no identity link (no DB hit), and an
+    unlinked user falls back to the shared bot — i.e. pre-user-scoping behavior, which
+    is what the existing tests assert. Tests for the linked path override this."""
+    monkeypatch.setattr(
+        SlackGatewayUseCase, "_resolve_invoking_identity", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(sg, "_REQUIRE_LINKED_USER", False)
 
 
 @pytest.mark.unit
@@ -914,7 +940,46 @@ class TestConfigIdResolution:
         monkeypatch.setattr(sg, "_SGP_BASE_URL", "")
         assert await uc._resolve_config_id("x", {"x-api-key": "k"}) is None  # no base
         monkeypatch.setattr(sg, "_SGP_BASE_URL", "https://sgp.example")
-        assert await uc._resolve_config_id("x", {}) is None  # no acting key
+        assert await uc._resolve_config_id("x", {}) is None  # no credential at all
+
+    @pytest.mark.asyncio
+    async def test_resolve_config_id_accepts_a_cookie_credential(self, monkeypatch):
+        # REGRESSION: this used to require x-api-key, which the shared bot has and a
+        # linked user does not — their acting headers carry a session cookie. That
+        # made resolution silently return None for exactly the users this feature is
+        # for, so they'd get the default config while a bot turn resolved the name.
+        captured = {}
+
+        class _Resp:
+            def json(self):
+                return {"items": [{"name": "my-config", "id": "cfg-7"}]}
+
+        class _Client:
+            def __init__(self, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def get(self, url, headers=None, params=None):
+                captured.update(url=url, headers=headers, params=params)
+                return _Resp()
+
+        monkeypatch.setattr(sg, "_SGP_BASE_URL", "https://sgp.example")
+        monkeypatch.setattr(sg.httpx, "AsyncClient", _Client)
+        monkeypatch.setattr(sg, "_CONFIG_ID_CACHE", {})
+
+        headers = {
+            "cookie": "_identityJwt=abc",
+            "x-selected-account-id": "acct-1",
+        }
+        got = await SlackGatewayUseCase()._resolve_config_id("my-config", headers)
+        assert got == "cfg-7"
+        # The credential is forwarded as-is; the directory decides whether it likes it.
+        assert captured["headers"]["cookie"] == "_identityJwt=abc"
 
 
 @pytest.mark.unit
@@ -1401,3 +1466,220 @@ class TestHandleInteraction:
             form={"command": "/agents", "api_app_id": "A1"},
         )
         assert "Signature verification failed" in resp["text"]
+
+
+def _resolved(sgp_user_id="sgp-user-1", sgp_account_id="acct-1"):
+    """Stand-in for a ResolvedIdentity."""
+    return SimpleNamespace(
+        sgp_user_id=sgp_user_id,
+        sgp_account_id=sgp_account_id,
+        principal={"user_id": sgp_user_id, "account_id": sgp_account_id},
+    )
+
+
+@pytest.mark.unit
+class TestTurnIdentity:
+    """Whose credential gets forwarded. This is the whole feature: the key on the
+    delegation headers is what makes the agent's tools resolve that person's own
+    Notion/Linear rather than a shared account's."""
+
+    @staticmethod
+    def _uc(monkeypatch, *, identity, headers):
+        uc = SlackGatewayUseCase()
+        monkeypatch.setattr(
+            uc,
+            "_acting_identity",
+            AsyncMock(return_value=({"user_id": "bot"}, {"x-api-key": "sk_bot"})),
+        )
+        monkeypatch.setattr(
+            uc, "_resolve_invoking_identity", AsyncMock(return_value=identity)
+        )
+        monkeypatch.setattr(
+            uc,
+            "_identity_link_service",
+            MagicMock(
+                return_value=SimpleNamespace(
+                    acting_headers=AsyncMock(return_value=headers)
+                )
+            ),
+        )
+        return uc
+
+    @pytest.mark.asyncio
+    async def test_linked_user_forwards_their_own_key(self, monkeypatch):
+        user_headers = {"x-api-key": "ssk_is_theirs", "x-selected-account-id": "acct-1"}
+        uc = self._uc(monkeypatch, identity=_resolved(), headers=user_headers)
+
+        principal, headers, sgp_user_id = await uc._turn_identity(_inbound())
+
+        assert principal == {"user_id": "sgp-user-1", "account_id": "acct-1"}
+        assert headers == user_headers  # THEIR key, not the bot's
+        assert sgp_user_id == "sgp-user-1"
+
+    @pytest.mark.asyncio
+    async def test_unlinked_user_falls_back_to_the_bot(self, monkeypatch):
+        monkeypatch.setattr(sg, "_REQUIRE_LINKED_USER", False)
+        uc = self._uc(monkeypatch, identity=None, headers=None)
+
+        principal, headers, sgp_user_id = await uc._turn_identity(_inbound())
+
+        assert principal == {"user_id": "bot"}
+        assert headers == {"x-api-key": "sk_bot"}
+        # None keeps the legacy thread-wide task key, so in-flight conversations
+        # aren't orphaned by enabling this.
+        assert sgp_user_id is None
+
+    @pytest.mark.asyncio
+    async def test_linked_but_unusable_credential_falls_back(self, monkeypatch):
+        # Linked with an expired / undecryptable / absent key: acting_headers returns
+        # None, and the turn still runs — just without personal integrations.
+        monkeypatch.setattr(sg, "_REQUIRE_LINKED_USER", False)
+        uc = self._uc(monkeypatch, identity=_resolved(), headers=None)
+
+        principal, headers, sgp_user_id = await uc._turn_identity(_inbound())
+
+        assert principal == {"user_id": "bot"}
+        assert sgp_user_id is None
+
+    @pytest.mark.asyncio
+    async def test_refuses_when_linking_is_required(self, monkeypatch):
+        monkeypatch.setattr(sg, "_REQUIRE_LINKED_USER", True)
+        uc = self._uc(monkeypatch, identity=None, headers=None)
+
+        assert await uc._turn_identity(_inbound()) == (None, None, None)
+
+    @pytest.mark.asyncio
+    async def test_resolution_failure_propagates_rather_than_falling_back(
+        self, monkeypatch
+    ):
+        # Silently running as the bot because the DB hiccuped is indistinguishable
+        # from "this person isn't linked", and the two need different handling.
+        uc = SlackGatewayUseCase()
+        monkeypatch.setattr(
+            uc, "_resolve_invoking_identity", AsyncMock(side_effect=OSError("db down"))
+        )
+        with pytest.raises(OSError):
+            await uc._turn_identity(_inbound())
+
+    @pytest.mark.asyncio
+    async def test_required_and_unlinked_tells_the_user_and_does_not_dispatch(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(sg, "_REQUIRE_LINKED_USER", True)
+        uc = SlackGatewayUseCase()
+        monkeypatch.setattr(
+            uc, "_turn_identity", AsyncMock(return_value=(None, None, None))
+        )
+        dispatch = AsyncMock()
+        deliver = AsyncMock()
+        monkeypatch.setattr(uc, "_dispatch", dispatch)
+        monkeypatch.setattr(uc, "_deliver", deliver)
+
+        await uc._run_turn(_inbound())
+
+        dispatch.assert_not_awaited()
+        assert "connect your account" in deliver.await_args.args[1].lower()
+
+
+@pytest.mark.unit
+class TestTaskName:
+    """Task-per-(thread, user) for linked users: one task can't be owned by two
+    people, and a task holding only one user's turns removes the reply-attribution
+    race the shared-task design had."""
+
+    def test_linked_user_gets_a_per_user_task(self):
+        uc = SlackGatewayUseCase()
+        assert (
+            uc._task_name(_inbound(thread_ts="1700.1"), "sgp-user-1")
+            == "slack:T1:C1:1700.1:sgp-user-1"
+        )
+
+    def test_two_users_in_one_thread_get_separate_tasks(self):
+        uc = SlackGatewayUseCase()
+        inbound = _inbound(thread_ts="1700.1")
+        assert uc._task_name(inbound, "sgp-a") != uc._task_name(inbound, "sgp-b")
+
+    def test_same_user_and_thread_ts_in_two_workspaces_do_not_collide(self):
+        # task/create is get-or-create on the name, so a collision merges two
+        # conversations: prompts, metadata, agent config and account context all land
+        # in one task. thread_ts is unique within a workspace but nothing makes it
+        # unique across workspaces, and this gateway is multi-workspace.
+        uc = SlackGatewayUseCase()
+        a = uc._task_name(_inbound(team_id="T_A", thread_ts="1700.1"), "sgp-1")
+        b = uc._task_name(_inbound(team_id="T_B", thread_ts="1700.1"), "sgp-1")
+        assert a != b
+
+    def test_same_user_and_thread_ts_in_two_channels_do_not_collide(self):
+        uc = SlackGatewayUseCase()
+        a = uc._task_name(_inbound(channel="C_A", thread_ts="1700.1"), "sgp-1")
+        b = uc._task_name(_inbound(channel="C_B", thread_ts="1700.1"), "sgp-1")
+        assert a != b
+
+    def test_empty_thread_ts_still_scopes_to_workspace_channel_and_user(self):
+        # normalize() falls back to "" when an event carries neither thread_ts nor
+        # ts. Team and channel keep that from collapsing every such turn into one
+        # global task; it degrades to one task per (workspace, channel, user).
+        uc = SlackGatewayUseCase()
+        a = uc._task_name(_inbound(team_id="T_A", channel="C_A", thread_ts=""), "sgp-1")
+        b = uc._task_name(_inbound(team_id="T_B", channel="C_A", thread_ts=""), "sgp-1")
+        c = uc._task_name(_inbound(team_id="T_A", channel="C_B", thread_ts=""), "sgp-1")
+        assert len({a, b, c}) == 3
+
+    def test_unlinked_user_keeps_the_legacy_thread_wide_key(self):
+        # Unchanged on purpose: widening it would re-key threads already in flight.
+        # It carries the same cross-workspace weakness, which predates this work.
+        uc = SlackGatewayUseCase()
+        assert uc._task_name(_inbound(thread_ts="1700.1"), None) == "slack:1700.1"
+
+
+@pytest.mark.unit
+class TestDispatchAttribution:
+    @pytest.mark.asyncio
+    async def test_first_turn_records_who_asked(self, monkeypatch):
+        monkeypatch.setattr(sg, "_ACTING_BOT_API_KEY", "")
+        monkeypatch.setattr(sg, "GlobalDependencies", MagicMock())
+        acp, _ = _fake_acp(existing_task=None)
+        monkeypatch.setattr(
+            "src.temporal.scheduled_agent_run_factory.build_acp_use_case_for_principal",
+            MagicMock(return_value=acp),
+        )
+        monkeypatch.setattr(
+            SlackGatewayUseCase, "_collect_reply", AsyncMock(return_value=None)
+        )
+
+        await SlackGatewayUseCase()._dispatch(
+            Target("golden-agent"),
+            _inbound(user="U1", thread_ts="1"),
+            "hi",
+            None,
+            {},
+            sgp_user_id="sgp-user-1",
+        )
+
+        create = acp.handle_rpc_request.await_args_list[0].kwargs["params"]
+        assert (
+            create.name == "slack:T1:C1:1:sgp-user-1"
+        )  # per (workspace, channel, thread, user)
+        assert create.task_metadata["slack_user_id"] == "U1"
+        assert create.task_metadata["sgp_user_id"] == "sgp-user-1"
+
+    @pytest.mark.asyncio
+    async def test_unlinked_first_turn_omits_the_sgp_user_id(self, monkeypatch):
+        monkeypatch.setattr(sg, "_ACTING_BOT_API_KEY", "")
+        monkeypatch.setattr(sg, "GlobalDependencies", MagicMock())
+        acp, _ = _fake_acp(existing_task=None)
+        monkeypatch.setattr(
+            "src.temporal.scheduled_agent_run_factory.build_acp_use_case_for_principal",
+            MagicMock(return_value=acp),
+        )
+        monkeypatch.setattr(
+            SlackGatewayUseCase, "_collect_reply", AsyncMock(return_value=None)
+        )
+
+        await SlackGatewayUseCase()._dispatch(
+            Target("golden-agent"), _inbound(thread_ts="1"), "hi", None, {}
+        )
+
+        create = acp.handle_rpc_request.await_args_list[0].kwargs["params"]
+        assert create.name == "slack:1"
+        assert "sgp_user_id" not in create.task_metadata

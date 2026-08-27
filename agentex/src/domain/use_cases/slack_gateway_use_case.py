@@ -11,16 +11,38 @@ Deliberately NOT layered onto ``/agents/forward`` — that route is the generic,
 per-agent verifying proxy. This is its own module so Slack-specific logic stays out
 of the generic path.
 
-Identity: every Slack turn acts as the gateway's own SGP identity — a dedicated bot
-service account (``SLACK_GATEWAY_ACTING_BOT_API_KEY`` + ``SLACK_GATEWAY_ACCOUNT_ID``,
-env / k8s-secret only). The key is forwarded as ``x-api-key``, which the platform (a)
-verifies -> principal for authz and (b) converts to ``x-acting-user-api-key`` so the
-agent's tools act as the bot via resolve_user_secrets. The bot is a first-class entity,
-not a proxy for the invoking user: all Slack traffic shares its account and its tasks
-are owned by it — fine for a controlled internal deploy, NOT per-user multi-tenant.
-Deliberately NOT per-user: we don't conflate the invoking user's SGP identity with the
-bot's. The bot's Slack credentials (signing secret, bot token) live in the same
-env / k8s-secret set. Dispatch, delegation, and idempotency are real.
+Identity: a turn runs as the **invoking human** when that Slack user has an active
+identity link with a usable stored credential (see ``_turn_identity``). Their stored
+session credential rides on the delegation headers, becomes ``x-acting-user-cookie``
+on the ACP call, and is what makes the agent's user-scoped tools resolve *their*
+connected integrations — Notion, Linear, the hosted Slack MCP — rather than a shared
+account's. That per-user resolution is the whole point: the secrets service derives
+the owner from the caller and offers no way to ask for someone else's, so acting as
+a person requires holding a credential belonging to that person.
+
+It is their session cookie rather than a per-link API key because identity-service
+allows one API key per user and every active user already has one, so minting
+answers 409 and the existing key's secret cannot be read back. The session cookie is
+also the better credential: it carries its own expiry, and taking it leaves the
+user's existing credentials untouched. The cost is that the link ends when the
+session does.
+
+Everyone else falls back to the gateway's own bot service account
+(``SLACK_GATEWAY_ACTING_BOT_API_KEY`` + ``SLACK_GATEWAY_ACCOUNT_ID``, env /
+k8s-secret only), which still produces a working turn — just without personal
+integrations. So user scoping is opt-in per person, and NOT an isolation guarantee
+while the fallback is enabled; ``SLACK_GATEWAY_REQUIRE_LINKED_USER`` closes it.
+
+Task keying follows the identity: a linked user gets one task per (workspace,
+channel, thread, user), so each participant in a shared thread owns their own
+conversation and a task never has two owners. Workspace and channel are in the key
+because ``task/create`` is get-or-create on the name — two turns yielding the same
+name become one task, merging their prompts, config and account context — and
+``thread_ts`` is unique only within a workspace. Unlinked users keep the legacy
+thread-wide key, which carries that same weakness and predates this work.
+
+The bot's Slack credentials (signing secret, bot token) are separate from all of this
+and remain shared — the gateway posts as the app, not as the user.
 """
 
 from __future__ import annotations
@@ -90,6 +112,24 @@ _DEV_SKIP_VERIFY = os.getenv("SLACK_GATEWAY_DEV_SKIP_VERIFY", "").lower() in (
 )
 
 _MESSAGE_PAGE = 200  # per-poll page size when collecting the reply
+
+# What an unlinked user gets. Default OFF: an unlinked user falls back to the shared
+# bot identity and still gets a working turn, just without their personal
+# integrations. Turn it ON once enough of the workspace has linked.
+#
+# Be clear-eyed about what OFF means: with the fallback in place, running as the
+# invoking human is opt-in, so it is NOT an isolation guarantee — anyone who hasn't
+# linked simply inherits the bot's (much narrower) access instead.
+_REQUIRE_LINKED_USER = os.getenv("SLACK_GATEWAY_REQUIRE_LINKED_USER", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+_UNLINKED_MESSAGE = (
+    "I don't know who you are in SGP yet, so I can't run this as you. "
+    "Connect your account and try again."
+)
 
 # Slack's HTTP Events API is at-least-once — it retries a delivery (up to ~3x, with an
 # X-Slack-Retry-Num header) if we don't 200 within ~3s. Dedup on the envelope's
@@ -561,10 +601,24 @@ class SlackGatewayUseCase:
 
     async def _run_turn(self, inbound: InboundSlack) -> None:
         try:
-            # One shared v1 identity per turn, resolved once and threaded into both target
-            # resolution (the SGP agent_config lookup) and dispatch (principal + the
-            # delegated x-api-key headers).
-            principal, auth_headers = await self._acting_identity()
+            # Whose identity runs this turn.
+            #
+            # If the invoking Slack user has an active link with a usable stored
+            # credential, the turn runs as THEM: their principal for authz/ownership,
+            # and their SGP API key on the delegation headers. That key is what
+            # becomes x-acting-user-api-key on the ACP call, which is what makes the
+            # agent's user-scoped tools (Notion, Linear, the hosted Slack MCP) resolve
+            # that person's own connections instead of a shared account's.
+            #
+            # Otherwise we fall back to the shared gateway bot — unchanged behavior,
+            # so an unlinked user still gets a working turn, just without their
+            # personal integrations. Prompting them to link is a separate concern.
+            principal, auth_headers, sgp_user_id = await self._turn_identity(inbound)
+            if principal is None and auth_headers is None:
+                # Only reachable when linking is mandatory and this user hasn't.
+                await self._deliver(inbound, _UNLINKED_MESSAGE)
+                return
+
             target, prompt = await self._resolve_target(inbound, auth_headers)
 
             if not await self._authorize(target):
@@ -587,7 +641,13 @@ class SlackGatewayUseCase:
             if target.agent_name == _DEFAULT_AGENT_NAME:
                 await self._set_status(inbound, "is thinking…")
                 await self._dispatch(
-                    target, inbound, prompt, principal, auth_headers, collect=False
+                    target,
+                    inbound,
+                    prompt,
+                    principal,
+                    auth_headers,
+                    collect=False,
+                    sgp_user_id=sgp_user_id,
                 )
                 return
 
@@ -595,7 +655,12 @@ class SlackGatewayUseCase:
             # automatically when we post the reply. No-op outside an assistant thread.
             await self._set_status(inbound, "is thinking…")
             reply = await self._dispatch(
-                target, inbound, prompt, principal, auth_headers
+                target,
+                inbound,
+                prompt,
+                principal,
+                auth_headers,
+                sgp_user_id=sgp_user_id,
             )
             note = f"_via {target.label()}_"  # attribution
             await self._deliver(
@@ -610,16 +675,156 @@ class SlackGatewayUseCase:
                 inbound, "Something went wrong handling that. Please retry."
             )
 
+    async def _turn_identity(
+        self, inbound: InboundSlack
+    ) -> tuple[Any, dict[str, str] | None, str | None]:
+        """Decide whose identity this turn runs as.
+
+        Returns ``(principal, auth_headers, sgp_user_id)``:
+
+        - linked user with a usable credential -> their principal, their delegation
+          headers, their SGP user id. The turn acts as them end to end.
+        - otherwise -> the shared bot's principal and headers, and ``None`` for the
+          user id (which keeps the legacy thread-wide task key, so nothing that's
+          already running gets orphaned).
+        - ``(None, None, None)`` only when ``_REQUIRE_LINKED_USER`` is set and this
+          user has no usable link, telling the caller to refuse the turn.
+
+        A resolution *failure* propagates rather than falling back: silently running
+        as the bot because the database hiccuped would be indistinguishable from
+        "this person isn't linked", and the two need different handling.
+        """
+        identity = await self._resolve_invoking_identity(inbound)
+        if identity is not None:
+            headers = await self._identity_link_service().acting_headers(identity)
+            if headers is not None:
+                logger.info(
+                    "[slack] turn acting as sgp user %s (linked from %s)",
+                    identity.sgp_user_id,
+                    inbound.user,
+                )
+                return identity.principal, headers, identity.sgp_user_id
+            # Linked but unusable — no stored key, expired, or undecryptable. The
+            # service has already logged which. Treated the same as unlinked here;
+            # re-link prompting is handled separately.
+
+        if _REQUIRE_LINKED_USER:
+            logger.info(
+                "[slack] refusing turn: user %s in team %s has no usable link",
+                inbound.user,
+                inbound.team_id,
+            )
+            return None, None, None
+
+        bot_principal, bot_headers = await self._acting_identity()
+        logger.info(
+            "[slack] turn falling back to the shared bot identity for user %s",
+            inbound.user,
+        )
+        return bot_principal, bot_headers, None
+
+    def _identity_link_service(self):
+        """Build the identity-link service.
+
+        Constructed inline for the same reason as ``_get_agent_by_name``: this use
+        case is instantiated per-request with no constructor deps, and the identity
+        map is infrastructure the gateway owns rather than something a caller passes
+        in.
+        """
+        # Local imports keep these off the module-load path.
+        from src.domain.repositories.identity_link_repository import (
+            IdentityLinkRepository,
+        )
+        from src.domain.services.identity_link_service import IdentityLinkService
+
+        engine = database_async_read_write_engine()
+        return IdentityLinkService(
+            IdentityLinkRepository(
+                database_async_read_write_session_maker(engine),
+                database_async_read_only_session_maker(engine),
+            )
+        )
+
+    async def _resolve_invoking_identity(self, inbound: InboundSlack):
+        """Resolve the Slack user who triggered this turn to an SGP identity, or
+        None when they have no active link."""
+        from src.domain.entities.identity_links import IdentityProvider
+
+        return await self._identity_link_service().resolve(
+            provider=IdentityProvider.SLACK,
+            external_team_id=inbound.team_id,
+            external_user_id=inbound.user,
+        )
+
+    def _task_name(self, inbound: InboundSlack, sgp_user_id: str | None) -> str:
+        """The conversation key.
+
+        For a linked user the task is per (workspace, channel, thread, user): each
+        invoker gets their own task, in their own account, holding only their own
+        turns. That's what makes per-user ownership coherent in a shared thread — one
+        task can't be owned by two people — and it removes the reply-attribution
+        race, since a task now only ever contains one user's messages.
+
+        The agent loses the other participants' turns from its own history by design;
+        it recovers that context by reading the thread with its Slack tools (the
+        ``[Slack context]`` prefix carries the channel and thread for exactly that).
+
+        **Team and channel are in the key deliberately.** ``task/create`` is
+        get-or-create on the name, so two turns that produce the same name become one
+        task — mixing their prompts, metadata, agent config and account context into
+        a single conversation. ``thread_ts`` alone does not rule that out: it is
+        unique within a workspace but nothing makes it unique *across* workspaces,
+        and this gateway is multi-workspace (``team_id`` is part of the identity
+        everywhere else). The odds of two workspaces minting the same microsecond
+        timestamp are tiny, but the failure is silent and cross-tenant, and the two
+        extra segments cost nothing.
+
+        They also bound the damage if ``thread_ts`` is ever empty — ``normalize()``
+        falls back to ``""`` when an event carries neither ``thread_ts`` nor ``ts``.
+        With team and channel present that degrades to one task per (workspace,
+        channel, user), which is a reasonable conversation anyway; on the old key it
+        would have collapsed every such turn into a single global task.
+
+        Unlinked users keep the legacy thread-wide key, so turning this on doesn't
+        orphan conversations already in flight. That key has the same cross-workspace
+        weakness and predates this change; widening it would re-key live threads, so
+        it's left alone here.
+        """
+        if sgp_user_id:
+            return (
+                f"slack:{inbound.team_id}:{inbound.channel}:"
+                f"{inbound.thread_ts}:{sgp_user_id}"
+            )
+        return f"slack:{inbound.thread_ts}"
+
     async def _resolve_config_id(
         self, name: str, auth_headers: dict[str, str]
     ) -> str | None:
         """Resolve an agent_config NAME -> id via SGP's directory
-        (GET {SGP}/v5/agent_configs?name=), authenticated with the acting identity's
-        headers (x-api-key + x-selected-account-id). Cached by (account, name) for the
-        process lifetime. Fail-safe -> None (no SGP base / no acting key / any error) so
-        the caller falls back to the fixed default id."""
-        api_key = auth_headers.get("x-api-key")
-        if not (_SGP_BASE_URL and name and api_key):
+        (GET {SGP}/v5/agent_configs?name=), authenticated with whatever credential the
+        acting identity carries. Cached by (account, name) for the process lifetime.
+        Fail-safe -> None (no SGP base / no credential / any error) so the caller
+        falls back to the fixed default id.
+
+        The credential check is deliberately *form-agnostic*. It used to require
+        ``x-api-key``, which the shared bot has but a linked user does not: a linked
+        user's acting headers carry their session cookie instead. That mismatch made
+        this silently return None for exactly the users this feature is for, so they
+        would land on the default config while a bot-run turn resolved the name
+        correctly — a difference in agent behavior with nothing in the logs pointing
+        at the cause. Forward whatever we hold and let the directory decide.
+
+        Unverified: whether that endpoint accepts cookie auth. If it doesn't, the
+        request fails and we fall back to the default id, which is the same outcome
+        as before this change — so this is safe either way, just no longer silently
+        wrong for api-key callers only. It could not be checked because
+        ``SLACK_GATEWAY_SGP_BASE_URL`` is unset in dev, which also means this whole
+        path is inert there today.
+        """
+        has_credential = any(
+            auth_headers.get(h) for h in ("x-api-key", "cookie", "authorization")
+        )
+        if not (_SGP_BASE_URL and name and has_credential):
             return None
         cache_key = (auth_headers.get("x-selected-account-id", ""), name)
         if cache_key in _CONFIG_ID_CACHE:
@@ -692,6 +897,7 @@ class SlackGatewayUseCase:
         auth_headers: dict[str, str],
         *,
         collect: bool = True,
+        sgp_user_id: str | None = None,
     ) -> str | None:
         """Create-or-resume a task on the resolved agent, then inject the turn, acting as
         the shared v1 identity (x-api-key -> principal for authz, delegated downstream as
@@ -714,7 +920,7 @@ class SlackGatewayUseCase:
             GlobalDependencies(), principal, request_headers=auth_headers
         )
         agent = await acp.agent_repository.get(name=target.agent_name)
-        task_name = f"slack:{inbound.thread_ts}"
+        task_name = self._task_name(inbound, sgp_user_id)
         # golden-agent isn't relayed (it self-posts), so its context gets the directive to
         # post its own reply. Keyed on the same signal _run_turn uses to skip the relay.
         content = TextContentEntity(
@@ -754,7 +960,13 @@ class SlackGatewayUseCase:
                 "sender_id": target.label(),
                 "thread_ts": inbound.thread_ts,
                 "channel_id": inbound.channel,
+                # Who actually asked. The Slack id is what the agent's Slack tools
+                # act on; the SGP id (present only for a linked user) is what makes
+                # the task attributable to a human rather than to the gateway bot.
+                "slack_user_id": inbound.user,
             }
+            if sgp_user_id:
+                task_metadata["sgp_user_id"] = sgp_user_id
             if target.config_id:
                 task_metadata["config_id"] = target.config_id
             try:
