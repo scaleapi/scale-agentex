@@ -169,15 +169,15 @@ paths:
       - name: agent_card_metadata
         in: query
         required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          description: JSON-encoded object filtered against `registration_metadata.agent_card.metadata`
-            using exact key/value containment semantics (e.g. `{"permits_capable":true}`).
-          title: Agent Card Metadata
-        description: JSON-encoded object filtered against `registration_metadata.agent_card.metadata`
+        description: Object filtered against `registration_metadata.agent_card.metadata`
           using exact key/value containment semantics (e.g. `{"permits_capable":true}`).
+          Sent on the wire as a JSON-encoded query string value.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Agent Card Metadata
       responses:
         '200':
           description: Successful Response

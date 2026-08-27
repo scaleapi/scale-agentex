@@ -64,7 +64,7 @@ class AgentRepository(PostgresCRUDRepository[AgentORM, AgentEntity]):
             query = query.join(
                 TaskAgentORM, AgentORM.id == TaskAgentORM.agent_id
             ).where(TaskAgentORM.task_id == task_id)
-        if agent_card_metadata:
+        if agent_card_metadata is not None:
             # Top-level JSONB `@>` with the caller's dict wrapped under the same
             # nested shape it will occupy in the stored registration_metadata.
             # `@>` matches when every key/value in the right operand exists at

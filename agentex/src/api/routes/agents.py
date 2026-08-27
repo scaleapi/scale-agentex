@@ -1,6 +1,7 @@
 import json
 import secrets
 from collections.abc import AsyncIterator
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -108,11 +109,42 @@ async def get_agent_by_name(
     return Agent.model_validate(agent_entity)
 
 
+_AGENT_CARD_METADATA_DESCRIPTION = (
+    "Object filtered against `registration_metadata.agent_card.metadata` using "
+    'exact key/value containment semantics (e.g. `{"permits_capable":true}`). '
+    "Sent on the wire as a JSON-encoded query string value."
+)
+
+
 @router.get(
     "",
     response_model=list[Agent],
     summary="List Agents",
     description="List all registered agents, optionally filtered by query parameters.",
+    # Declared via `content: application/json` (instead of a plain string schema)
+    # so SDK generators expose a mapping-typed parameter and perform the JSON
+    # encoding themselves. FastAPI can't express content-encoded query params in
+    # the signature, so the runtime param below is schema-hidden and this block
+    # documents it.
+    openapi_extra={
+        "parameters": [
+            {
+                "name": "agent_card_metadata",
+                "in": "query",
+                "required": False,
+                "description": _AGENT_CARD_METADATA_DESCRIPTION,
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": True,
+                            "title": "Agent Card Metadata",
+                        }
+                    }
+                },
+            }
+        ]
+    },
 )
 async def list_agents(
     agents_use_case: DAgentsUseCase,
@@ -122,14 +154,10 @@ async def list_agents(
     page_number: int = Query(1, description="Page number", ge=1),
     order_by: str | None = Query(None, description="Field to order by"),
     order_direction: str = Query("desc", description="Order direction (asc or desc)"),
-    agent_card_metadata: str | None = Query(
-        None,
-        description=(
-            "JSON-encoded object filtered against "
-            "`registration_metadata.agent_card.metadata` using exact key/value "
-            "containment semantics (e.g. `{\"permits_capable\":true}`)."
-        ),
-    ),
+    agent_card_metadata: Annotated[
+        str | None,
+        Query(include_in_schema=False),
+    ] = None,
 ):
     """List all registered agents."""
     agent_card_metadata_filter: dict | None = None

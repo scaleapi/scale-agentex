@@ -809,3 +809,37 @@ class TestAgentsAPIIntegration:
 
         response = await isolated_client.get("/agents?agent_card_metadata=[1,2,3]")
         assert response.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_list_agents_agent_card_metadata_empty_object_requires_metadata(
+        self, isolated_client
+    ):
+        """An explicit `{}` filter still applies the containment predicate: agents
+        must have a card metadata object, but any contents match."""
+        await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-empty-with",
+                "description": "has card metadata",
+                "acp_url": "http://with-agent:8000",
+                "acp_type": "sync",
+                "registration_metadata": {
+                    "agent_card": {"metadata": {"anything": "at-all"}}
+                },
+            },
+        )
+        await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-empty-without",
+                "description": "no card metadata",
+                "acp_url": "http://without-agent:8000",
+                "acp_type": "sync",
+            },
+        )
+
+        response = await isolated_client.get("/agents?agent_card_metadata={}")
+        assert response.status_code == 200
+        names = {a["name"] for a in response.json()}
+        assert "card-metadata-empty-with" in names
+        assert "card-metadata-empty-without" not in names
