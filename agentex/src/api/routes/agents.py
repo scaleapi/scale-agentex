@@ -1,3 +1,4 @@
+import json
 import secrets
 from collections.abc import AsyncIterator
 
@@ -121,14 +122,39 @@ async def list_agents(
     page_number: int = Query(1, description="Page number", ge=1),
     order_by: str | None = Query(None, description="Field to order by"),
     order_direction: str = Query("desc", description="Order direction (asc or desc)"),
+    agent_card_metadata: str | None = Query(
+        None,
+        description=(
+            "JSON-encoded object filtered against "
+            "`registration_metadata.agent_card.metadata` using exact key/value "
+            "containment semantics (e.g. `{\"permits_capable\":true}`)."
+        ),
+    ),
 ):
     """List all registered agents."""
+    agent_card_metadata_filter: dict | None = None
+    if agent_card_metadata is not None:
+        try:
+            parsed = json.loads(agent_card_metadata)
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"agent_card_metadata is not valid JSON: {e}",
+            ) from e
+        if not isinstance(parsed, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="agent_card_metadata must be a JSON object",
+            )
+        agent_card_metadata_filter = parsed
+
     agent_entities = await agents_use_case.list(
         task_id=task_id,
         limit=limit,
         page_number=page_number,
         order_by=order_by,
         order_direction=order_direction,
+        agent_card_metadata=agent_card_metadata_filter,
         **{"id": _authorized_ids} if _authorized_ids is not None else {},
     )
     return [Agent.model_validate(agent_entity) for agent_entity in agent_entities]
