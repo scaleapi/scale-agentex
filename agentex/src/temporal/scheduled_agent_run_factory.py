@@ -67,8 +67,9 @@ class _ScheduledRunRequest:
         )
         # Default empty = scheduled-run behavior (no live credentials forwarded).
         # Callers that DO want delegation (e.g. the Slack gateway acting as a user)
-        # pass headers carrying x-api-key, which build_delegation_headers converts to
-        # x-acting-user-api-key downstream.
+        # pass a credential header, which build_delegation_headers converts to its
+        # x-acting-user-* form downstream: x-api-key for the shared bot, or a
+        # session cookie for a linked user.
         self.headers: dict[str, str] = headers or {}
 
 
@@ -95,10 +96,11 @@ def build_acp_use_case_for_principal(
     *creator_principal* instead of the request principal.
 
     ``request_headers`` (default: none) are forwarded downstream for runtime
-    delegation — e.g. an ``x-api-key`` becomes ``x-acting-user-api-key`` on the ACP
-    call so the agent's tools act as that user. Scheduled runs pass nothing (they
-    deliberately forward no live credentials); the Slack gateway passes the shared
-    acting-user key.
+    delegation — an ``x-api-key`` becomes ``x-acting-user-api-key`` on the ACP call,
+    and a session cookie becomes ``x-acting-user-cookie``, so the agent's tools act
+    as that identity. Scheduled runs pass nothing (they deliberately forward no live
+    credentials); the Slack gateway passes the shared bot's key, or the linked user's
+    session cookie when the turn runs as them.
     """
     env = EnvironmentVariables.refresh()
     engine = database_async_read_write_engine()
