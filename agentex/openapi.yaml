@@ -166,6 +166,18 @@ paths:
           default: desc
           title: Order Direction
         description: Order direction (asc or desc)
+      - name: agent_card_metadata
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: JSON-encoded object filtered against `registration_metadata.agent_card.metadata`
+            using exact key/value containment semantics (e.g. `{"permits_capable":true}`).
+          title: Agent Card Metadata
+        description: JSON-encoded object filtered against `registration_metadata.agent_card.metadata`
+          using exact key/value containment semantics (e.g. `{"permits_capable":true}`).
       responses:
         '200':
           description: Successful Response
