@@ -1683,3 +1683,123 @@ class TestDispatchAttribution:
         create = acp.handle_rpc_request.await_args_list[0].kwargs["params"]
         assert create.name == "slack:1"
         assert "sgp_user_id" not in create.task_metadata
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestLinkOffer:
+    """DMing an unlinked user a connect link.
+
+    The security-critical property under test is that the link goes to a DM and
+    NOWHERE else. The nonce is a bearer token: whoever opens it gets linked to this
+    Slack identity by signing in as themselves, so a link posted in a channel lets
+    the first reader bind someone else's Slack identity to their own SGP account.
+    """
+
+    def _wire(self, monkeypatch, *, allowed=True, cooldown_ok=True, open_ok=True):
+        uc = SlackGatewayUseCase()
+        monkeypatch.setattr(sg, "_PUBLIC_BASE_URL", "https://agentex.example.com")
+        monkeypatch.setattr(
+            sg, "slack_user_profile", AsyncMock(return_value={"display_name": "@ada"})
+        )
+        monkeypatch.setattr(
+            uc, "_claim_offer_cooldown", AsyncMock(return_value=cooldown_ok)
+        )
+
+        nonce = MagicMock()
+        nonce.create_or_reuse = AsyncMock(return_value=("TOKEN123", False))
+        nonce.claim_send = AsyncMock(return_value=allowed)
+        monkeypatch.setattr(
+            "src.domain.services.link_nonce_service.LinkNonceService",
+            lambda *a, **k: nonce,
+        )
+
+        def _api(method, payload):
+            if method == "conversations.open":
+                return (
+                    {"ok": True, "channel": {"id": "D_DM"}}
+                    if open_ok
+                    else {"ok": False, "error": "cannot_dm_bot"}
+                )
+            return {"ok": True}
+
+        api = AsyncMock(side_effect=_api)
+        monkeypatch.setattr(uc, "_slack_api", api)
+        return uc, api, nonce
+
+    async def test_dms_the_link_and_acknowledges_in_channel(self, monkeypatch):
+        uc, api, _ = self._wire(monkeypatch)
+        assert await uc._offer_link(_inbound()) is True
+
+        calls = dict(c.args for c in api.await_args_list)
+        assert set(calls) == {
+            "conversations.open",
+            "chat.postMessage",
+            "chat.postEphemeral",
+        }
+        dm = calls["chat.postMessage"]
+        assert dm["channel"] == "D_DM"
+        assert "TOKEN123" in dm["text"]
+        assert "/integrations/slack/link?nonce=" in dm["text"]
+        # The nudge is ephemeral, so a channel isn't littered with one person's
+        # onboarding.
+        assert calls["chat.postEphemeral"]["user"] == "U1"
+
+    async def test_the_link_never_goes_to_the_origin_channel(self, monkeypatch):
+        uc, api, _ = self._wire(monkeypatch)
+        await uc._offer_link(_inbound(channel="C_PUBLIC"))
+        for method, payload in (c.args for c in api.await_args_list):
+            if payload.get("channel") == "C_PUBLIC":
+                assert "TOKEN123" not in str(
+                    payload
+                ), f"{method} leaked the nonce into the origin channel"
+
+    async def test_dm_warns_against_forwarding(self, monkeypatch):
+        uc, api, _ = self._wire(monkeypatch)
+        await uc._offer_link(_inbound())
+        dm = next(
+            p
+            for m, p in (c.args for c in api.await_args_list)
+            if m == "chat.postMessage"
+        )
+        assert "forward" in dm["text"].lower()
+
+    async def test_no_offer_without_a_public_base_url(self, monkeypatch):
+        uc, api, _ = self._wire(monkeypatch)
+        monkeypatch.setattr(sg, "_PUBLIC_BASE_URL", "")
+        # A link the user can't reach is worse than no link.
+        assert await uc._offer_link(_inbound()) is False
+        api.assert_not_awaited()
+
+    async def test_failed_dm_does_not_fall_back_to_the_channel(self, monkeypatch):
+        uc, api, _ = self._wire(monkeypatch, open_ok=False)
+        assert await uc._offer_link(_inbound()) is False
+        for _method, payload in (c.args for c in api.await_args_list):
+            assert "TOKEN123" not in str(payload)
+
+    async def test_send_cap_reached_says_so_without_a_second_dm(self, monkeypatch):
+        uc, api, _ = self._wire(monkeypatch, allowed=False)
+        assert await uc._offer_link(_inbound()) is False
+        methods = [m for m, _ in (c.args for c in api.await_args_list)]
+        # Acknowledge in-channel rather than going silent, but send no new DM.
+        assert methods == ["chat.postEphemeral"]
+
+    async def test_cooldown_suppresses_the_offer_entirely(self, monkeypatch):
+        uc, api, nonce = self._wire(monkeypatch, cooldown_ok=False)
+        assert await uc._offer_link(_inbound()) is False
+        nonce.create_or_reuse.assert_not_awaited()
+        api.assert_not_awaited()
+
+    async def test_redis_failure_is_swallowed(self, monkeypatch):
+        # The turn is already proceeding; a nonce-store outage must not break it.
+        uc, api, nonce = self._wire(monkeypatch)
+        nonce.create_or_reuse = AsyncMock(side_effect=RuntimeError("redis down"))
+        assert await uc._offer_link(_inbound()) is False
+
+    async def test_pending_turn_is_stashed_for_later_replay(self, monkeypatch):
+        uc, _api, nonce = self._wire(monkeypatch)
+        await uc._offer_link(_inbound(text="what's in my linear?", channel="C9"))
+        req = nonce.create_or_reuse.await_args.args[0]
+        assert req.external_user_id == "U1"
+        assert req.pending_turn["text"] == "what's in my linear?"
+        assert req.pending_turn["channel"] == "C9"

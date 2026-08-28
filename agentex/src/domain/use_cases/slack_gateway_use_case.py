@@ -131,6 +131,18 @@ _UNLINKED_MESSAGE = (
     "Connect your account and try again."
 )
 
+# Public origin for the link we DM. Must be a host the user's browser can reach AND
+# a sibling subdomain of the SGP host, or their session cookie never arrives and the
+# callback can't tell who they are. Unset => no offers (a broken link is worse than
+# no link).
+_PUBLIC_BASE_URL = os.getenv("SLACK_GATEWAY_PUBLIC_BASE_URL", "").rstrip("/")
+
+# How long before an unlinked user is offered the link again. ``claim_send`` already
+# caps DMs at 2 per live nonce, but a nonce only lives ~10 minutes, so without this a
+# persistent mentioner re-arms that budget every 10 minutes. Worst case becomes ~2
+# DMs an hour instead of ~12.
+_LINK_OFFER_COOLDOWN_S = int(os.getenv("SLACK_LINK_OFFER_COOLDOWN_S", "3600"))
+
 # Slack's HTTP Events API is at-least-once — it retries a delivery (up to ~3x, with an
 # X-Slack-Retry-Num header) if we don't 200 within ~3s. Dedup on the envelope's
 # ``event_id`` via Redis with a short TTL so a retry can't start a duplicate turn.
@@ -358,6 +370,46 @@ def _agent_text(messages) -> str | None:
             if text:
                 parts.append(text)
     return "\n\n".join(parts) if parts else None
+
+
+async def slack_user_profile(user_id: str) -> dict[str, str | None]:
+    """``{"display_name": …, "email": …}`` for a Slack user, best-effort.
+
+    Both fields can be None and callers must cope: ``display_name`` is only used to
+    make the confirmation page legible, and ``email`` requires the
+    ``users:read.email`` scope, which is *not* granted by default. A missing email is
+    therefore "unknown", never "does not match" — see the email-match check in the
+    link route, which refuses rather than assuming when it can't read one.
+
+    Never raises: an identity-link attempt shouldn't fail because a Slack lookup
+    hiccupped.
+    """
+    token = os.getenv("SLACK_BOT_TOKEN", "")
+    if not token or not user_id:
+        return {"display_name": None, "email": None}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://slack.com/api/users.info",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"user": user_id},
+            )
+        body = resp.json()
+    except Exception:  # noqa: BLE001 - best-effort lookup
+        logger.warning("[slack] users.info failed for %s", user_id, exc_info=True)
+        return {"display_name": None, "email": None}
+    if not body.get("ok"):
+        # missing_scope here means users:read.email isn't granted; that's expected
+        # until the app is reinstalled, so it's info rather than a warning.
+        logger.info("[slack] users.info -> %s", body.get("error"))
+        return {"display_name": None, "email": None}
+    user = body.get("user") or {}
+    profile = user.get("profile") or {}
+    handle = user.get("name")
+    return {
+        "display_name": f"@{handle}" if handle else profile.get("real_name"),
+        "email": profile.get("email"),
+    }
 
 
 # --------------------------------------------------------------------------- use case
@@ -614,6 +666,15 @@ class SlackGatewayUseCase:
             # so an unlinked user still gets a working turn, just without their
             # personal integrations. Prompting them to link is a separate concern.
             principal, auth_headers, sgp_user_id = await self._turn_identity(inbound)
+
+            if sgp_user_id is None:
+                # Not running as a person: either unlinked, or linked with a
+                # credential we can't use (expired session, undecryptable). Offer the
+                # link either way — a dead credential needs the same fix as no
+                # credential. Rate-limited and best-effort; it never affects the turn,
+                # which continues as the bot below (or is refused just after).
+                await self._offer_link(inbound)
+
             if principal is None and auth_headers is None:
                 # Only reachable when linking is mandatory and this user hasn't.
                 await self._deliver(inbound, _UNLINKED_MESSAGE)
@@ -1179,6 +1240,156 @@ class SlackGatewayUseCase:
     async def _fetch_bot_token(self) -> str:
         # Bot token from env / k8s-secret.
         return os.getenv("SLACK_BOT_TOKEN", "")
+
+    async def _offer_link(self, inbound: InboundSlack) -> bool:
+        """DM the invoking user a one-time link to connect their SGP account.
+
+        Returns True only when a DM actually went out. Entirely best-effort: this runs
+        alongside a turn that is already proceeding (as the shared bot, or being
+        refused), and no failure here may change that outcome.
+
+        **The link is DMed, never posted in channel.** The nonce is a bearer token —
+        whoever holds it gets linked to this Slack identity by signing in as
+        themselves. In a channel, the first person to click it would bind *this*
+        user's Slack identity to *their own* SGP account. So if the DM can't be sent
+        we say so and stop, rather than falling back to somewhere visible.
+
+        Rate limiting is two-layer and deliberately so: ``claim_send`` caps DMs about
+        one live link (default 2, so a re-mention re-sends rather than going quiet),
+        and a cooldown key stops a fresh nonce from re-arming that budget on every
+        mention once the old one expires.
+        """
+        if not _PUBLIC_BASE_URL:
+            logger.info(
+                "[slack] link offer skipped: SLACK_GATEWAY_PUBLIC_BASE_URL is unset"
+            )
+            return False
+
+        from src.domain.services.link_nonce_service import LinkNonceService, LinkRequest
+
+        if not await self._claim_offer_cooldown(inbound):
+            logger.info(
+                "[slack] link offer suppressed by cooldown for %s", inbound.user
+            )
+            return False
+
+        profile = await slack_user_profile(inbound.user)
+        request = LinkRequest(
+            provider="slack",
+            external_team_id=inbound.team_id,
+            external_user_id=inbound.user,
+            display_name=profile.get("display_name") or inbound.user,
+            # Stored so a later change can answer the original question; nothing
+            # replays it yet.
+            pending_turn={
+                "text": inbound.text,
+                "channel": inbound.channel,
+                "thread_ts": inbound.thread_ts,
+            },
+        )
+
+        service = LinkNonceService()
+        try:
+            token, reused = await service.create_or_reuse(request)
+            allowed = await service.claim_send(request)
+        except Exception:  # noqa: BLE001 - Redis down: no offer, turn unaffected
+            logger.warning("[slack] link offer failed to mint a nonce", exc_info=True)
+            return False
+
+        if not allowed:
+            # Already DMed about this link. Acknowledge in-channel (ephemerally) so
+            # the user isn't left wondering, but don't send another DM.
+            await self._post_ephemeral(
+                inbound,
+                "I've already sent you a DM with a link to connect your account — "
+                "check your direct messages with me.",
+            )
+            return False
+
+        opened = await self._slack_api("conversations.open", {"users": inbound.user})
+        dm_channel = (
+            (opened.get("channel") or {}).get("id") if opened.get("ok") else None
+        )
+        if not dm_channel:
+            logger.warning(
+                "[slack] conversations.open failed for %s: %s",
+                inbound.user,
+                opened.get("error"),
+            )
+            return False
+
+        url = f"{_PUBLIC_BASE_URL}/integrations/slack/link?nonce={token}"
+        posted = await self._slack_api(
+            "chat.postMessage",
+            {
+                "channel": dm_channel,
+                "unfurl_links": False,
+                "text": (
+                    "Connect your SGP account and I'll use *your* tools "
+                    "(Notion, Linear, …) when you ask me things in Slack.\n\n"
+                    f"<{url}|Connect my account>\n\n"
+                    "This link is just for you and expires in a few minutes. "
+                    "Don't forward it — anyone who opens it could connect your "
+                    "Slack identity to their own SGP account."
+                ),
+            },
+        )
+        if not posted.get("ok"):
+            logger.warning(
+                "[slack] link DM failed for %s: %s", inbound.user, posted.get("error")
+            )
+            return False
+
+        logger.info(
+            "[slack] link offer DMed to %s (nonce %s)",
+            inbound.user,
+            "reused" if reused else "new",
+        )
+        await self._post_ephemeral(
+            inbound,
+            "I've DM'd you a link to connect your SGP account — once you do, I'll "
+            "use your own tools when you ask me things here.",
+        )
+        return True
+
+    async def _claim_offer_cooldown(self, inbound: InboundSlack) -> bool:
+        """True if we may offer this user a link now, and records the offer.
+
+        Fails *open* on a Redis problem: the alternative is never offering, and the
+        per-link ``claim_send`` cap still bounds the damage.
+        """
+        key = f"slack:link_offer:{inbound.team_id}:{inbound.user}"
+        try:
+            pool = GlobalDependencies().redis_pool
+            if pool is None:
+                return True
+            import redis.asyncio as redis
+
+            client = redis.Redis(connection_pool=pool)
+            # SET NX: only the first caller in the window wins.
+            return bool(await client.set(key, "1", nx=True, ex=_LINK_OFFER_COOLDOWN_S))
+        except Exception:  # noqa: BLE001 - see docstring
+            logger.warning("[slack] link offer cooldown check failed", exc_info=True)
+            return True
+
+    async def _post_ephemeral(self, inbound: InboundSlack, text: str) -> None:
+        """Post a message only the invoking user sees. Best-effort.
+
+        Ephemeral so a channel isn't cluttered with onboarding nudges aimed at one
+        person — and Slack rejects it outside a channel context (e.g. an assistant
+        pane), which we swallow.
+        """
+        body = await self._slack_api(
+            "chat.postEphemeral",
+            {
+                "channel": inbound.channel,
+                "user": inbound.user,
+                "thread_ts": inbound.thread_ts,
+                "text": text,
+            },
+        )
+        if not body.get("ok"):
+            logger.info("[slack] postEphemeral -> %s", body.get("error"))
 
     async def _set_status(self, inbound: InboundSlack, status: str) -> None:
         """AI-app 'thinking…' indicator (assistant.threads.setStatus). Shows in the
