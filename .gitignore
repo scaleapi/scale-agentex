@@ -22,6 +22,9 @@ pids
 # VSCode
 *.code-workspace
 
+# Neovim
+.nvim.lua
+
 # filesystem files
 .DS_Store
 
