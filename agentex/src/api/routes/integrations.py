@@ -72,6 +72,26 @@ router = APIRouter(prefix="/integrations", tags=["Integrations"])
 # holding one indefinitely, so an unknown expiry becomes a short known one.
 _FALLBACK_TTL_DAYS = int(os.getenv("IDENTITY_LINK_FALLBACK_TTL_DAYS", "30"))
 
+# Require the Slack account's email to match the signed-in SGP account's.
+#
+# This is the only real defence against a *forwarded* link. The nonce stops an
+# attacker forging someone else's Slack identity, but nothing stops them sending
+# their OWN link to a victim: if the victim clicks it while signed in, the
+# attacker's Slack identity binds to the victim's SGP account, and thereafter the
+# attacker's Slack messages run as the victim, using the victim's integrations. The
+# confirmation page names both identities, which catches a mis-click but reduces to
+# user vigilance against a deliberate attempt.
+#
+# OFF by default because it needs the ``users:read.email`` Slack scope, which is not
+# granted until the app is reinstalled. Enabling it without the scope would refuse
+# every link (the check treats an unreadable email as a mismatch, deliberately), so
+# the flag and the scope have to be turned on together.
+_REQUIRE_EMAIL_MATCH = os.getenv("IDENTITY_LINK_REQUIRE_EMAIL_MATCH", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 
 def _page(title: str, body: str, *, status: int = 200) -> HTMLResponse:
     """Minimal self-contained page. No external assets — this renders inside
@@ -246,6 +266,38 @@ async def slack_link_confirm(request: Request, nonce: str = Form("")) -> HTMLRes
             "workspace. Disconnect that one first.</p>",
             status=409,
         )
+
+    if _REQUIRE_EMAIL_MATCH:
+        # Local import: the gateway module owns the Slack token and HTTP calls, and
+        # importing it at module load would pull the use case into the route's import
+        # graph for a feature that is off by default.
+        from src.domain.use_cases.slack_gateway_use_case import slack_user_profile
+
+        slack_email = (await slack_user_profile(link_request.external_user_id)).get(
+            "email"
+        )
+        # An unreadable email is treated as a mismatch, not as "skip the check".
+        # Failing open here would silently disable the only defence against a
+        # forwarded link the moment the Slack scope lapsed.
+        if not slack_email or not email or slack_email.lower() != email.lower():
+            logger.warning(
+                "identity link refused: Slack/SGP email mismatch",
+                extra={
+                    "sgp_user_id": sgp_user_id,
+                    "external_user_id": link_request.external_user_id,
+                    "slack_email_known": bool(slack_email),
+                },
+            )
+            return _page(
+                "Accounts don't match",
+                "<h1>Those accounts don't match</h1>"
+                "<p>The Slack account this link was made for and the SGP account "
+                "you're signed in as belong to different people.</p>"
+                "<p class=muted>If someone sent you this link, don't use it — it "
+                "would let their Slack messages run as you. Mention the agent in "
+                "Slack yourself to get your own link.</p>",
+                status=403,
+            )
 
     secret = _session_credential(request)
     if not secret:
