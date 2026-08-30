@@ -10,6 +10,7 @@ the create returns 409 and the existing key's secret can't be read back.
 """
 
 import base64
+import html
 import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -343,3 +344,86 @@ class TestEmailMatch:
         await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
         probe.assert_awaited_once()
         assert probe.await_args.args[0] == "U1"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestNoRawIdentifiersOnThePage:
+    """The confirmation page never prints an internal id.
+
+    The identity rows exist so someone can answer "is this *my* account?". Nobody
+    recognises their own Slack `U…` id or SGP uuid, so falling back to one doesn't
+    make the check possible — it exposes an internal identifier while making an
+    unanswerable question look answered.
+    """
+
+    def _no_slack_lookup(self, monkeypatch, name=None):
+        import src.domain.use_cases.slack_gateway_use_case as sg
+
+        monkeypatch.setattr(
+            sg, "slack_user_profile", AsyncMock(return_value={"display_name": name})
+        )
+
+    async def test_named_identities_are_shown(self, wiring, monkeypatch):
+        self._no_slack_lookup(monkeypatch)
+        body = (
+            await mod.slack_link_page(_request(_PRINCIPAL), nonce="tok")
+        ).body.decode()
+        assert _SLACK_HANDLE in body and _SGP_EMAIL in body
+
+    async def test_missing_slack_name_does_not_fall_back_to_the_member_id(
+        self, wiring, monkeypatch
+    ):
+        wiring.nonce.peek = AsyncMock(return_value=_link_request(display_name=""))
+        self._no_slack_lookup(monkeypatch)  # live lookup also comes back empty
+
+        body = (
+            await mod.slack_link_page(_request(_PRINCIPAL), nonce="tok")
+        ).body.decode()
+
+        assert "U1" not in body
+        assert html.escape(mod._UNKNOWN_IDENTITY) in body
+
+    async def test_missing_slack_name_is_re_read_live(self, wiring, monkeypatch):
+        # A transient Slack failure when the nonce was minted shouldn't permanently
+        # degrade the page — users:read is enough to recover the handle.
+        wiring.nonce.peek = AsyncMock(return_value=_link_request(display_name=""))
+        self._no_slack_lookup(monkeypatch, name="@recovered")
+
+        body = (
+            await mod.slack_link_page(_request(_PRINCIPAL), nonce="tok")
+        ).body.decode()
+        assert "@recovered" in body
+
+    async def test_missing_email_does_not_fall_back_to_the_uuid(
+        self, wiring, monkeypatch
+    ):
+        self._no_slack_lookup(monkeypatch)
+        body = (
+            await mod.slack_link_page(
+                _request({**_PRINCIPAL, "raw_user": {}}), nonce="tok"
+            )
+        ).body.decode()
+
+        assert _SGP_USER not in body
+        assert html.escape(mod._UNKNOWN_IDENTITY) in body
+
+    async def test_unnamed_identity_says_the_check_is_unavailable(
+        self, wiring, monkeypatch
+    ):
+        # Don't imply someone verified a match they had no way to verify.
+        self._no_slack_lookup(monkeypatch)
+        body = (
+            await mod.slack_link_page(
+                _request({**_PRINCIPAL, "raw_user": {}}), nonce="tok"
+            )
+        ).body.decode()
+        assert "couldn&#x27;t be identified" in body or "couldn't be identified" in body
+
+    async def test_success_page_does_not_print_the_uuid(self, wiring, monkeypatch):
+        self._no_slack_lookup(monkeypatch)
+        resp = await mod.slack_link_confirm(
+            _request({**_PRINCIPAL, "raw_user": {}}), nonce="tok"
+        )
+        assert resp.status_code == 200
+        assert _SGP_USER not in resp.body.decode()

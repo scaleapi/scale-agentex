@@ -74,6 +74,12 @@ _FALLBACK_TTL_DAYS = 30
 # Email matching has no flag: it enforces itself whenever Slack will tell us the
 # email, and stands down when it won't. See ``_email_mismatch``.
 
+# Shown when an identity can't be named. Deliberately not the underlying id: a raw
+# Slack member id or SGP uuid is meaningless to the person being asked to check it,
+# so printing one exposes an internal identifier while making an unanswerable
+# question look answered.
+_UNKNOWN_IDENTITY = "(couldn't identify this account)"
+
 
 def _page(title: str, body: str, *, status: int = 200) -> HTMLResponse:
     """Minimal self-contained page. No external assets — this renders inside
@@ -154,6 +160,26 @@ def _session_credential(request: Request) -> str | None:
     return None
 
 
+async def _slack_display_name(link_request) -> str | None:
+    """A human-recognisable name for the Slack side, or None.
+
+    Never falls back to the Slack member ID. The identity rows exist so someone can
+    answer "is this *my* account?", and nobody recognises their own ``U…`` id — so a
+    raw identifier doesn't make the check possible, it only makes an unanswerable
+    check look answered, while exposing an internal id for nothing.
+
+    The name is normally captured when the nonce is minted. This re-reads it when
+    that lookup came back empty (a transient Slack failure at offer time shouldn't
+    permanently degrade the page), which needs only ``users:read``.
+    """
+    if link_request.display_name:
+        return link_request.display_name
+    from src.domain.use_cases.slack_gateway_use_case import slack_user_profile
+
+    profile = await slack_user_profile(link_request.external_user_id)
+    return profile.get("display_name") or None
+
+
 async def _email_mismatch(external_user_id: str, sgp_email: str | None) -> bool:
     """True when Slack and SGP demonstrably identify different people.
 
@@ -225,21 +251,30 @@ async def slack_link_page(request: Request, nonce: str = "") -> HTMLResponse:
             status=401,
         )
 
-    slack_who = link_request.display_name or link_request.external_user_id
+    slack_who = await _slack_display_name(link_request)
+    unnamed = slack_who is None or not email
+    caution = (
+        # When a side can't be named, the check the user is being asked to perform
+        # is not available to them. Say that, rather than implying they verified
+        # something they couldn't.
+        "One of these accounts couldn't be identified, so you can't confirm the "
+        "match here. Only continue if you just asked for this link yourself."
+        if unnamed
+        else "If either name above isn't you, close this page and don't continue."
+    )
     return _page(
         "Connect your account",
         "<h1>Connect your Slack account?</h1>"
         "<p>This lets the agent use <strong>your</strong> connected tools "
         "(Notion, Linear, …) when you ask it something in Slack.</p>"
         "<dl>"
-        f"<dt>Slack</dt><dd>{html.escape(slack_who)}</dd>"
-        f"<dt>SGP</dt><dd>{html.escape(email or sgp_user_id)}</dd>"
+        f"<dt>Slack</dt><dd>{html.escape(slack_who or _UNKNOWN_IDENTITY)}</dd>"
+        f"<dt>SGP</dt><dd>{html.escape(email or _UNKNOWN_IDENTITY)}</dd>"
         "</dl>"
         "<form method=post>"
         f"<input type=hidden name=nonce value='{html.escape(nonce)}'>"
         "<button type=submit>Connect</button></form>"
-        "<p class=muted style='margin-top:1.5rem'>If either name above isn't you, "
-        "close this page and don't continue.</p>",
+        f"<p class=muted style='margin-top:1.5rem'>{caution}</p>",
     )
 
 
@@ -416,7 +451,7 @@ async def slack_link_confirm(request: Request, nonce: str = Form("")) -> HTMLRes
         "Connected",
         "<h1>You're connected</h1>"
         f"<p>The agent will now use your own tools when you ask it something in "
-        f"Slack, as <strong>{html.escape(email or sgp_user_id)}</strong>.</p>"
+        f"Slack, as <strong>{html.escape(email or 'your SGP account')}</strong>.</p>"
         f"<p class=muted>This connection is valid until {html.escape(when)}, after "
         "which the agent will ask you to reconnect. You can close this page and go "
         "back to Slack.</p>",
