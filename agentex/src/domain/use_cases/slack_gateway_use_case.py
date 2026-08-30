@@ -1297,16 +1297,10 @@ class SlackGatewayUseCase:
             logger.warning("[slack] link offer failed to mint a nonce", exc_info=True)
             return False
 
-        if not allowed:
-            # Already DMed about this link. Acknowledge in-channel (ephemerally) so
-            # the user isn't left wondering, but don't send another DM.
-            await self._post_ephemeral(
-                inbound,
-                "I've already sent you a DM with a link to connect your account — "
-                "check your direct messages with me.",
-            )
-            return False
-
+        # Opened before the send-cap check because BOTH branches need the channel id
+        # to build the deep link below — telling someone to "check your DMs" without
+        # taking them there is the failure this method exists to avoid. Idempotent:
+        # conversations.open returns the existing DM rather than creating another.
         opened = await self._slack_api("conversations.open", {"users": inbound.user})
         dm_channel = (
             (opened.get("channel") or {}).get("id") if opened.get("ok") else None
@@ -1319,7 +1313,38 @@ class SlackGatewayUseCase:
             )
             return False
 
+        # Slack files bot conversations under "Apps", NOT in the Direct messages
+        # list, so a person told to check their DMs looks in the one place the
+        # message isn't. Observed in the field: the first real offer was delivered
+        # correctly, confirmed present via conversations.history, and still reported
+        # as never received. app_redirect works on web and desktop, unlike a
+        # slack:// URI.
+        dm_deeplink = f"https://slack.com/app_redirect?channel={dm_channel}&team={inbound.team_id}"
         url = f"{_PUBLIC_BASE_URL}/integrations/slack/link?nonce={token}"
+
+        # The connect link goes in the ephemeral as well as the DM. An ephemeral is
+        # single-viewer — Slack renders it for one user, keeps it out of channel
+        # history and out of search — so it has exactly the same audience as the DM,
+        # and putting the link there costs a round trip through a conversation people
+        # cannot find. The DM stays because ephemerals are transient: reload Slack
+        # before clicking and it's gone, and the offer cooldown would then block a
+        # retry for an hour.
+        #
+        # This is NOT licence to put the link in an ordinary channel message. The
+        # nonce is a bearer token; the first reader of a broadcast could bind this
+        # user's Slack identity to their own SGP account. Single-viewer is the
+        # property that makes the ephemeral safe, not "it's in the channel anyway".
+        if not allowed:
+            # Past the DM cap — but an ephemeral costs nothing and is what the user
+            # is actually looking at, so still hand them the live link.
+            await self._post_ephemeral(
+                inbound,
+                f"<{url}|Connect your SGP account> to let me use your own tools "
+                f"when you ask me things here.\n"
+                f"_Only you can see this. The same link is in "
+                f"<{dm_deeplink}|our DM>._",
+            )
+            return False
         posted = await self._slack_api(
             "chat.postMessage",
             {
@@ -1348,8 +1373,10 @@ class SlackGatewayUseCase:
         )
         await self._post_ephemeral(
             inbound,
-            "I've DM'd you a link to connect your SGP account — once you do, I'll "
-            "use your own tools when you ask me things here.",
+            f"<{url}|Connect your SGP account> and I'll use your own tools "
+            f"(Notion, Linear, …) when you ask me things here.\n"
+            f"_Only you can see this message. I've also sent the link to "
+            f"<{dm_deeplink}|our DM>, in case this one disappears._",
         )
         return True
 
