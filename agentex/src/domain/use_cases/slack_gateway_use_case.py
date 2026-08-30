@@ -141,7 +141,7 @@ _PUBLIC_BASE_URL = os.getenv("SLACK_GATEWAY_PUBLIC_BASE_URL", "").rstrip("/")
 # caps DMs at 2 per live nonce, but a nonce only lives ~10 minutes, so without this a
 # persistent mentioner re-arms that budget every 10 minutes. Worst case becomes ~2
 # DMs an hour instead of ~12.
-_LINK_OFFER_COOLDOWN_S = int(os.getenv("SLACK_LINK_OFFER_COOLDOWN_S", "3600"))
+_LINK_OFFER_COOLDOWN_S = 3600
 
 # Slack's HTTP Events API is at-least-once — it retries a delivery (up to ~3x, with an
 # X-Slack-Retry-Num header) if we don't 200 within ~3s. Dedup on the envelope's
@@ -373,20 +373,20 @@ def _agent_text(messages) -> str | None:
 
 
 async def slack_user_profile(user_id: str) -> dict[str, str | None]:
-    """``{"display_name": …, "email": …}`` for a Slack user, best-effort.
+    """``{"display_name": …, "email": …, "error": …}`` for a Slack user.
 
-    Both fields can be None and callers must cope: ``display_name`` is only used to
-    make the confirmation page legible, and ``email`` requires the
-    ``users:read.email`` scope, which is *not* granted by default. A missing email is
-    therefore "unknown", never "does not match" — see the email-match check in the
-    link route, which refuses rather than assuming when it can't read one.
+    All three can be None. ``display_name`` only makes the confirmation page legible.
+    ``email`` requires the ``users:read.email`` scope, which may not be granted —
+    ``error`` is how a caller tells "Slack won't tell us" apart from "Slack told us
+    and there's no email", which the link route needs to decide whether it can
+    perform its identity check at all.
 
     Never raises: an identity-link attempt shouldn't fail because a Slack lookup
     hiccupped.
     """
     token = os.getenv("SLACK_BOT_TOKEN", "")
     if not token or not user_id:
-        return {"display_name": None, "email": None}
+        return {"display_name": None, "email": None, "error": "no_token"}
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
@@ -397,18 +397,19 @@ async def slack_user_profile(user_id: str) -> dict[str, str | None]:
         body = resp.json()
     except Exception:  # noqa: BLE001 - best-effort lookup
         logger.warning("[slack] users.info failed for %s", user_id, exc_info=True)
-        return {"display_name": None, "email": None}
+        return {"display_name": None, "email": None, "error": "request_failed"}
     if not body.get("ok"):
-        # missing_scope here means users:read.email isn't granted; that's expected
-        # until the app is reinstalled, so it's info rather than a warning.
+        # missing_scope means users:read.email isn't granted — expected until the app
+        # is reinstalled, so info rather than warning.
         logger.info("[slack] users.info -> %s", body.get("error"))
-        return {"display_name": None, "email": None}
+        return {"display_name": None, "email": None, "error": body.get("error")}
     user = body.get("user") or {}
     profile = user.get("profile") or {}
     handle = user.get("name")
     return {
         "display_name": f"@{handle}" if handle else profile.get("real_name"),
         "email": profile.get("email"),
+        "error": None,
     }
 
 
@@ -1296,16 +1297,10 @@ class SlackGatewayUseCase:
             logger.warning("[slack] link offer failed to mint a nonce", exc_info=True)
             return False
 
-        if not allowed:
-            # Already DMed about this link. Acknowledge in-channel (ephemerally) so
-            # the user isn't left wondering, but don't send another DM.
-            await self._post_ephemeral(
-                inbound,
-                "I've already sent you a DM with a link to connect your account — "
-                "check your direct messages with me.",
-            )
-            return False
-
+        # Opened before the send-cap check because BOTH branches need the channel id
+        # to build the deep link below — telling someone to "check your DMs" without
+        # taking them there is the failure this method exists to avoid. Idempotent:
+        # conversations.open returns the existing DM rather than creating another.
         opened = await self._slack_api("conversations.open", {"users": inbound.user})
         dm_channel = (
             (opened.get("channel") or {}).get("id") if opened.get("ok") else None
@@ -1318,7 +1313,38 @@ class SlackGatewayUseCase:
             )
             return False
 
+        # Slack files bot conversations under "Apps", NOT in the Direct messages
+        # list, so a person told to check their DMs looks in the one place the
+        # message isn't. Observed in the field: the first real offer was delivered
+        # correctly, confirmed present via conversations.history, and still reported
+        # as never received. app_redirect works on web and desktop, unlike a
+        # slack:// URI.
+        dm_deeplink = f"https://slack.com/app_redirect?channel={dm_channel}&team={inbound.team_id}"
         url = f"{_PUBLIC_BASE_URL}/integrations/slack/link?nonce={token}"
+
+        # The connect link goes in the ephemeral as well as the DM. An ephemeral is
+        # single-viewer — Slack renders it for one user, keeps it out of channel
+        # history and out of search — so it has exactly the same audience as the DM,
+        # and putting the link there costs a round trip through a conversation people
+        # cannot find. The DM stays because ephemerals are transient: reload Slack
+        # before clicking and it's gone, and the offer cooldown would then block a
+        # retry for an hour.
+        #
+        # This is NOT licence to put the link in an ordinary channel message. The
+        # nonce is a bearer token; the first reader of a broadcast could bind this
+        # user's Slack identity to their own SGP account. Single-viewer is the
+        # property that makes the ephemeral safe, not "it's in the channel anyway".
+        if not allowed:
+            # Past the DM cap — but an ephemeral costs nothing and is what the user
+            # is actually looking at, so still hand them the live link.
+            await self._post_ephemeral(
+                inbound,
+                f"<{url}|Connect your SGP account> to let me use your own tools "
+                f"when you ask me things here.\n"
+                f"_Only you can see this. The same link is in "
+                f"<{dm_deeplink}|our DM>._",
+            )
+            return False
         posted = await self._slack_api(
             "chat.postMessage",
             {
@@ -1347,8 +1373,10 @@ class SlackGatewayUseCase:
         )
         await self._post_ephemeral(
             inbound,
-            "I've DM'd you a link to connect your SGP account — once you do, I'll "
-            "use your own tools when you ask me things here.",
+            f"<{url}|Connect your SGP account> and I'll use your own tools "
+            f"(Notion, Linear, …) when you ask me things here.\n"
+            f"_Only you can see this message. I've also sent the link to "
+            f"<{dm_deeplink}|our DM>, in case this one disappears._",
         )
         return True
 

@@ -10,6 +10,7 @@ the create returns 409 and the existing key's secret can't be read back.
 """
 
 import base64
+import html
 import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -260,77 +261,234 @@ class TestConfirm:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestEmailMatch:
-    """The flagged defence against a *forwarded* link.
+    """The self-enabling defence against a *forwarded* link.
 
     The nonce stops an attacker forging someone else's Slack identity. It does not
-    stop them sending their OWN link to a victim: if the victim clicks it while
-    signed in, the attacker's Slack identity binds to the victim's SGP account, and
-    from then on the attacker's Slack messages run as the victim. Comparing the two
-    accounts' emails is what closes that.
+    stop them sending their OWN link to a victim: clicking it while signed in binds
+    the attacker's Slack identity to the victim's SGP account, and from then on the
+    attacker's Slack messages run as the victim with the victim's integrations.
+    Comparing the two accounts' emails is what closes that.
 
-    Off by default: it needs the `users:read.email` Slack scope, which isn't granted
-    until the app is reinstalled.
+    There is deliberately no flag. The check needs the `users:read.email` Slack
+    scope, and gating it on config means the flag and the scope must be flipped
+    together — flipping one alone either refuses every link or silently protects
+    nothing. Instead it enforces whenever Slack answers with an email and stands
+    down when it won't, so granting the scope turns the protection on by itself.
+
+    The asymmetry that follows is the thing to pin: **verified different -> refuse,
+    unverifiable -> allow**.
     """
 
-    def _slack_email(self, monkeypatch, email):
+    def _slack_profile(self, monkeypatch, **profile):
         import src.domain.use_cases.slack_gateway_use_case as sg
 
-        monkeypatch.setattr(
-            sg, "slack_user_profile", AsyncMock(return_value={"email": email})
-        )
-
-    async def test_disabled_by_default_does_not_call_slack(self, wiring, monkeypatch):
-        import src.domain.use_cases.slack_gateway_use_case as sg
-
-        probe = AsyncMock(return_value={"email": "someone.else@example.com"})
+        full = {"display_name": "@x", "email": None, "error": None, **profile}
+        probe = AsyncMock(return_value=full)
         monkeypatch.setattr(sg, "slack_user_profile", probe)
-        monkeypatch.setattr(mod, "_REQUIRE_EMAIL_MATCH", False)
-
-        resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
-        assert resp.status_code == 200
-        probe.assert_not_awaited()
+        return probe
 
     async def test_matching_emails_link_successfully(self, wiring, monkeypatch):
-        monkeypatch.setattr(mod, "_REQUIRE_EMAIL_MATCH", True)
-        self._slack_email(monkeypatch, _SGP_EMAIL)
+        self._slack_profile(monkeypatch, email=_SGP_EMAIL)
         resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
         assert resp.status_code == 200
         wiring.repo.upsert_link.assert_awaited_once()
 
-    async def test_match_is_case_insensitive(self, wiring, monkeypatch):
-        monkeypatch.setattr(mod, "_REQUIRE_EMAIL_MATCH", True)
-        self._slack_email(monkeypatch, _SGP_EMAIL.upper())
+    async def test_match_ignores_case_and_surrounding_space(self, wiring, monkeypatch):
+        self._slack_profile(monkeypatch, email=f"  {_SGP_EMAIL.upper()} ")
         resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
         assert resp.status_code == 200
 
     async def test_mismatch_is_refused_and_stores_nothing(self, wiring, monkeypatch):
-        monkeypatch.setattr(mod, "_REQUIRE_EMAIL_MATCH", True)
-        self._slack_email(monkeypatch, "attacker@example.com")
+        self._slack_profile(monkeypatch, email="attacker@example.com")
 
         resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
 
         assert resp.status_code == 403
         wiring.repo.upsert_link.assert_not_awaited()
-        # The nonce survives, so a legitimate owner can still use their own link.
+        # The nonce survives a refusal, so the link's legitimate owner can still use
+        # it — refusing the wrong clicker must not burn the right one's link.
         wiring.nonce.consume.assert_not_awaited()
         body = resp.body.decode().lower()
         assert "don&#x27;t use it" in body or "don't use it" in body
 
-    async def test_unreadable_slack_email_fails_closed(self, wiring, monkeypatch):
-        # Missing scope, deleted user, API hiccup -> None. Treating that as "skip the
-        # check" would silently disable the defence the moment the scope lapsed.
-        monkeypatch.setattr(mod, "_REQUIRE_EMAIL_MATCH", True)
-        self._slack_email(monkeypatch, None)
-
+    async def test_missing_scope_allows_the_link(self, wiring, monkeypatch):
+        # The current production state: users:read.email isn't granted, so Slack
+        # won't tell us. Refusing here would block every link in the workspace, so
+        # the check stands down rather than failing closed.
+        self._slack_profile(monkeypatch, email=None, error="missing_scope")
         resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
-        assert resp.status_code == 403
-        wiring.repo.upsert_link.assert_not_awaited()
+        assert resp.status_code == 200
+        wiring.repo.upsert_link.assert_awaited_once()
 
-    async def test_missing_sgp_email_fails_closed(self, wiring, monkeypatch):
-        monkeypatch.setattr(mod, "_REQUIRE_EMAIL_MATCH", True)
-        self._slack_email(monkeypatch, "someone@example.com")
-        principal = {**_PRINCIPAL, "raw_user": {}}
+    async def test_lookup_failure_allows_the_link(self, wiring, monkeypatch):
+        # Same rule for a transient failure. Failing closed on an unreadable email
+        # would make linking fail randomly, and the gap isn't attacker-reachable:
+        # nobody outside our infrastructure decides whether our Slack call succeeds.
+        self._slack_profile(monkeypatch, email=None, error="request_failed")
+        resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
+        assert resp.status_code == 200
 
-        resp = await mod.slack_link_confirm(_request(principal), nonce="tok")
-        assert resp.status_code == 403
-        wiring.repo.upsert_link.assert_not_awaited()
+    async def test_missing_sgp_email_allows_the_link(self, wiring, monkeypatch):
+        # Slack told us, but the SGP principal carries no email: nothing to compare
+        # against, so the same "can't verify, don't block" rule applies.
+        self._slack_profile(monkeypatch, email="someone@example.com")
+        resp = await mod.slack_link_confirm(
+            _request({**_PRINCIPAL, "raw_user": {}}), nonce="tok"
+        )
+        assert resp.status_code == 200
+
+    async def test_the_check_runs_on_every_confirm(self, wiring, monkeypatch):
+        # No flag means no way to accidentally leave it off: granting the scope is
+        # the only thing standing between here and enforcement.
+        probe = self._slack_profile(monkeypatch, email=_SGP_EMAIL)
+        await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
+        probe.assert_awaited_once()
+        assert probe.await_args.args[0] == "U1"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestNoRawIdentifiersOnThePage:
+    """The confirmation page never prints an internal id.
+
+    The identity rows exist so someone can answer "is this *my* account?". Nobody
+    recognises their own Slack `U…` id or SGP uuid, so falling back to one doesn't
+    make the check possible — it exposes an internal identifier while making an
+    unanswerable question look answered.
+    """
+
+    def _no_slack_lookup(self, monkeypatch, name=None):
+        import src.domain.use_cases.slack_gateway_use_case as sg
+
+        monkeypatch.setattr(
+            sg, "slack_user_profile", AsyncMock(return_value={"display_name": name})
+        )
+
+    async def test_named_identities_are_shown(self, wiring, monkeypatch):
+        self._no_slack_lookup(monkeypatch)
+        body = (
+            await mod.slack_link_page(_request(_PRINCIPAL), nonce="tok")
+        ).body.decode()
+        assert _SLACK_HANDLE in body and _SGP_EMAIL in body
+
+    async def test_missing_slack_name_does_not_fall_back_to_the_member_id(
+        self, wiring, monkeypatch
+    ):
+        wiring.nonce.peek = AsyncMock(return_value=_link_request(display_name=""))
+        self._no_slack_lookup(monkeypatch)  # live lookup also comes back empty
+
+        body = (
+            await mod.slack_link_page(_request(_PRINCIPAL), nonce="tok")
+        ).body.decode()
+
+        assert "U1" not in body
+        assert html.escape(mod._UNKNOWN_IDENTITY) in body
+
+    async def test_missing_slack_name_is_re_read_live(self, wiring, monkeypatch):
+        # A transient Slack failure when the nonce was minted shouldn't permanently
+        # degrade the page — users:read is enough to recover the handle.
+        wiring.nonce.peek = AsyncMock(return_value=_link_request(display_name=""))
+        self._no_slack_lookup(monkeypatch, name="@recovered")
+
+        body = (
+            await mod.slack_link_page(_request(_PRINCIPAL), nonce="tok")
+        ).body.decode()
+        assert "@recovered" in body
+
+    async def test_missing_email_does_not_fall_back_to_the_uuid(
+        self, wiring, monkeypatch
+    ):
+        self._no_slack_lookup(monkeypatch)
+        body = (
+            await mod.slack_link_page(
+                _request({**_PRINCIPAL, "raw_user": {}}), nonce="tok"
+            )
+        ).body.decode()
+
+        assert _SGP_USER not in body
+        assert html.escape(mod._UNKNOWN_IDENTITY) in body
+
+    async def test_unnamed_identity_says_the_check_is_unavailable(
+        self, wiring, monkeypatch
+    ):
+        # Don't imply someone verified a match they had no way to verify.
+        self._no_slack_lookup(monkeypatch)
+        body = (
+            await mod.slack_link_page(
+                _request({**_PRINCIPAL, "raw_user": {}}), nonce="tok"
+            )
+        ).body.decode()
+        assert "couldn&#x27;t be identified" in body or "couldn't be identified" in body
+
+    async def test_success_page_does_not_print_the_uuid(self, wiring, monkeypatch):
+        self._no_slack_lookup(monkeypatch)
+        resp = await mod.slack_link_confirm(
+            _request({**_PRINCIPAL, "raw_user": {}}), nonce="tok"
+        )
+        assert resp.status_code == 200
+        assert _SGP_USER not in resp.body.decode()
+
+
+@pytest.mark.unit
+class TestMultiNameCookieAllowlist:
+    """A session may arrive under ANY allowlisted cookie name.
+
+    REGRESSION: this used to read only the first entry of
+    AGENTEX_DELEGATION_SESSION_COOKIE_NAMES. With a multi-name allowlist, a session
+    carried by a later name was rejected — linking failed with "couldn't read your
+    session" for a cookie the delegation layer would have forwarded quite happily.
+    The allowlist is a set of names the deployment treats as valid, so second is as
+    legitimate as first.
+    """
+
+    def _request(self, cookie: str):
+        return SimpleNamespace(headers={"cookie": cookie})
+
+    def _allow(self, monkeypatch, names: str):
+        from src.domain.delegation_headers import ENV_SESSION_COOKIE_NAMES
+
+        monkeypatch.setenv(ENV_SESSION_COOKIE_NAMES, names)
+
+    def test_session_under_a_later_name_is_accepted(self, monkeypatch):
+        self._allow(monkeypatch, "_identityJwt,_jwt")
+        assert mod._session_credential(self._request("_jwt=BBB")) == "BBB"
+
+    def test_allowlist_order_wins_when_several_are_present(self, monkeypatch):
+        # Deterministic, and prefers the deployment's canonical cookie — which is
+        # also the name acting_headers() emits under.
+        self._allow(monkeypatch, "_identityJwt,_jwt")
+        got = mod._session_credential(self._request("_jwt=BBB; _identityJwt=AAA"))
+        assert got == "AAA"
+
+    def test_later_name_survives_a_messy_browser_header(self, monkeypatch):
+        self._allow(monkeypatch, "_identityJwt,_jwt")
+        cookie = "_ga=GA1.2.x; __utmzz=(not set); _jwt=BBB; fs_uid=a#b"
+        assert mod._session_credential(self._request(cookie)) == "BBB"
+
+    def test_names_outside_the_allowlist_are_still_rejected(self, monkeypatch):
+        # Widening to "any cookie that looks like a session" would let an attacker
+        # nominate the credential we store.
+        self._allow(monkeypatch, "_identityJwt")
+        assert mod._session_credential(self._request("_jwt=BBB")) is None
+
+    def test_empty_allowlist_reads_nothing(self, monkeypatch):
+        self._allow(monkeypatch, "")
+        assert mod._session_credential(self._request("_identityJwt=AAA")) is None
+
+    def test_blank_value_is_not_a_session(self, monkeypatch):
+        self._allow(monkeypatch, "_identityJwt,_jwt")
+        assert (
+            mod._session_credential(self._request("_identityJwt=; _jwt=BBB")) == "BBB"
+        )
+
+    def test_emitted_name_stays_canonical(self, monkeypatch):
+        # Reading accepts many; writing must choose one. The stored value is a JWT
+        # validated on its contents, not on the label it travels under.
+        from src.domain.services.identity_link_service import (
+            session_cookie_name,
+            session_cookie_names,
+        )
+
+        self._allow(monkeypatch, "_identityJwt,_jwt")
+        assert session_cookie_names() == ("_identityJwt", "_jwt")
+        assert session_cookie_name() == "_identityJwt"

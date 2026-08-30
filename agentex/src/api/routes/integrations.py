@@ -41,7 +41,6 @@ control — naming both identities is what makes a mis-clicked link visible.
 from __future__ import annotations
 
 import html
-import os
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Form, Request
@@ -55,8 +54,8 @@ from src.config.dependencies import (
 from src.domain.entities.identity_links import IdentityLinkMethod, IdentityProvider
 from src.domain.repositories.identity_link_repository import IdentityLinkRepository
 from src.domain.services.identity_link_service import (
-    SESSION_COOKIE_NAME,
     IdentityLinkService,
+    session_cookie_names,
 )
 from src.domain.services.link_nonce_service import LinkNonceService
 from src.utils import session_jwt
@@ -70,27 +69,16 @@ router = APIRouter(prefix="/integrations", tags=["Integrations"])
 # Used only when the session token doesn't declare its own expiry. Never "no
 # expiry": storing a credential with an unbounded lifetime is how you end up
 # holding one indefinitely, so an unknown expiry becomes a short known one.
-_FALLBACK_TTL_DAYS = int(os.getenv("IDENTITY_LINK_FALLBACK_TTL_DAYS", "30"))
+_FALLBACK_TTL_DAYS = 30
 
-# Require the Slack account's email to match the signed-in SGP account's.
-#
-# This is the only real defence against a *forwarded* link. The nonce stops an
-# attacker forging someone else's Slack identity, but nothing stops them sending
-# their OWN link to a victim: if the victim clicks it while signed in, the
-# attacker's Slack identity binds to the victim's SGP account, and thereafter the
-# attacker's Slack messages run as the victim, using the victim's integrations. The
-# confirmation page names both identities, which catches a mis-click but reduces to
-# user vigilance against a deliberate attempt.
-#
-# OFF by default because it needs the ``users:read.email`` Slack scope, which is not
-# granted until the app is reinstalled. Enabling it without the scope would refuse
-# every link (the check treats an unreadable email as a mismatch, deliberately), so
-# the flag and the scope have to be turned on together.
-_REQUIRE_EMAIL_MATCH = os.getenv("IDENTITY_LINK_REQUIRE_EMAIL_MATCH", "").lower() in (
-    "1",
-    "true",
-    "yes",
-)
+# Email matching has no flag: it enforces itself whenever Slack will tell us the
+# email, and stands down when it won't. See ``_email_mismatch``.
+
+# Shown when an identity can't be named. Deliberately not the underlying id: a raw
+# Slack member id or SGP uuid is meaningless to the person being asked to check it,
+# so printing one exposes an internal identifier while making an unanswerable
+# question look answered.
+_UNKNOWN_IDENTITY = "(couldn't identify this account)"
 
 
 def _page(title: str, body: str, *, status: int = 200) -> HTMLResponse:
@@ -155,13 +143,100 @@ def _session_credential(request: Request) -> str | None:
     chokes on, silently dropping every morsel after the first bad one — which can
     include the session cookie itself. The same reasoning (and the same approach)
     applies in ``delegation_headers``.
+
+    Accepts **any** name on the delegation allowlist, not only the first. The
+    allowlist is the set of cookie names this deployment treats as valid sessions,
+    so a session arriving under the second entry is exactly as legitimate as one
+    under the first — matching only the first would reject a perfectly good session
+    and fail the link with "couldn't read your session", while the delegation layer
+    would happily have forwarded it.
+
+    Allowlist order wins over header order when a request carries more than one, so
+    the credential we keep is the deployment's canonical cookie whenever it's
+    present. None when cookie delegation is disabled: there would be no way to act
+    through the credential, so there is no point storing one.
     """
-    raw = request.headers.get("cookie") or ""
-    for part in raw.split(";"):
+    allowed = session_cookie_names()
+    if not allowed:
+        return None
+    jar: dict[str, str] = {}
+    for part in (request.headers.get("cookie") or "").split(";"):
         name, sep, value = part.strip().partition("=")
-        if sep and name.strip() == SESSION_COOKIE_NAME:
-            return value.strip() or None
+        if sep:
+            # First occurrence wins, matching delegation_headers' parsing.
+            jar.setdefault(name.strip(), value.strip())
+    for name in allowed:
+        if jar.get(name):
+            return jar[name]
     return None
+
+
+async def _slack_display_name(link_request) -> str | None:
+    """A human-recognisable name for the Slack side, or None.
+
+    Never falls back to the Slack member ID. The identity rows exist so someone can
+    answer "is this *my* account?", and nobody recognises their own ``U…`` id — so a
+    raw identifier doesn't make the check possible, it only makes an unanswerable
+    check look answered, while exposing an internal id for nothing.
+
+    The name is normally captured when the nonce is minted. This re-reads it when
+    that lookup came back empty (a transient Slack failure at offer time shouldn't
+    permanently degrade the page), which needs only ``users:read``.
+    """
+    if link_request.display_name:
+        return link_request.display_name
+    from src.domain.use_cases.slack_gateway_use_case import slack_user_profile
+
+    profile = await slack_user_profile(link_request.external_user_id)
+    return profile.get("display_name") or None
+
+
+async def _email_mismatch(external_user_id: str, sgp_email: str | None) -> bool:
+    """True when Slack and SGP demonstrably identify different people.
+
+    This is the only real defence against a *forwarded* link. The nonce stops an
+    attacker forging someone else's Slack identity; it does not stop them sending
+    their OWN link to a victim, who — clicking it while signed in — would bind the
+    attacker's Slack identity to their SGP account, after which the attacker's Slack
+    messages run as them with their integrations.
+
+    **Self-enabling, with no flag.** The check needs the ``users:read.email`` Slack
+    scope, which may not be granted. Rather than gate that on configuration — where
+    the flag and the scope must be flipped together, and flipping one alone either
+    breaks every link or silently protects nothing — it simply enforces whenever
+    Slack answers with an email and stands down when it won't. Granting the scope
+    turns the protection on by itself.
+
+    So the asymmetry is deliberate: **verified different -> refuse; unverifiable ->
+    allow and warn.** Failing closed on an unreadable email would be stronger, but
+    with no flag to distinguish "scope missing" from "Slack had a bad minute" it
+    would make linking fail randomly. The gap it leaves is not attacker-reachable:
+    nobody outside our infrastructure influences whether our own Slack lookup
+    succeeds.
+    """
+    from src.domain.use_cases.slack_gateway_use_case import slack_user_profile
+
+    profile = await slack_user_profile(external_user_id)
+    slack_email = profile.get("email")
+    if not slack_email:
+        logger.warning(
+            "identity link: email not verified (Slack would not tell us)",
+            extra={
+                "external_user_id": external_user_id,
+                "slack_error": profile.get("error"),
+                "hint": "grant users:read.email to enable this check",
+            },
+        )
+        return False
+    if not sgp_email:
+        # Slack gave us an email but the SGP session didn't. Nothing to compare, so
+        # the same rule applies: can't verify, don't block.
+        logger.warning(
+            "identity link: email not verified (no email on the SGP principal)",
+            extra={"external_user_id": external_user_id},
+        )
+        return False
+    return slack_email.strip().lower() != sgp_email.strip().lower()
 
 
 @router.get("/slack/link", summary="Confirm linking a Slack identity to SGP")
@@ -187,21 +262,30 @@ async def slack_link_page(request: Request, nonce: str = "") -> HTMLResponse:
             status=401,
         )
 
-    slack_who = link_request.display_name or link_request.external_user_id
+    slack_who = await _slack_display_name(link_request)
+    unnamed = slack_who is None or not email
+    caution = (
+        # When a side can't be named, the check the user is being asked to perform
+        # is not available to them. Say that, rather than implying they verified
+        # something they couldn't.
+        "One of these accounts couldn't be identified, so you can't confirm the "
+        "match here. Only continue if you just asked for this link yourself."
+        if unnamed
+        else "If either name above isn't you, close this page and don't continue."
+    )
     return _page(
         "Connect your account",
         "<h1>Connect your Slack account?</h1>"
         "<p>This lets the agent use <strong>your</strong> connected tools "
         "(Notion, Linear, …) when you ask it something in Slack.</p>"
         "<dl>"
-        f"<dt>Slack</dt><dd>{html.escape(slack_who)}</dd>"
-        f"<dt>SGP</dt><dd>{html.escape(email or sgp_user_id)}</dd>"
+        f"<dt>Slack</dt><dd>{html.escape(slack_who or _UNKNOWN_IDENTITY)}</dd>"
+        f"<dt>SGP</dt><dd>{html.escape(email or _UNKNOWN_IDENTITY)}</dd>"
         "</dl>"
         "<form method=post>"
         f"<input type=hidden name=nonce value='{html.escape(nonce)}'>"
         "<button type=submit>Connect</button></form>"
-        "<p class=muted style='margin-top:1.5rem'>If either name above isn't you, "
-        "close this page and don't continue.</p>",
+        f"<p class=muted style='margin-top:1.5rem'>{caution}</p>",
     )
 
 
@@ -267,47 +351,37 @@ async def slack_link_confirm(request: Request, nonce: str = Form("")) -> HTMLRes
             status=409,
         )
 
-    if _REQUIRE_EMAIL_MATCH:
-        # Local import: the gateway module owns the Slack token and HTTP calls, and
-        # importing it at module load would pull the use case into the route's import
-        # graph for a feature that is off by default.
-        from src.domain.use_cases.slack_gateway_use_case import slack_user_profile
-
-        slack_email = (await slack_user_profile(link_request.external_user_id)).get(
-            "email"
+    if await _email_mismatch(link_request.external_user_id, email):
+        logger.warning(
+            "identity link refused: Slack/SGP email mismatch",
+            extra={
+                "sgp_user_id": sgp_user_id,
+                "external_user_id": link_request.external_user_id,
+            },
         )
-        # An unreadable email is treated as a mismatch, not as "skip the check".
-        # Failing open here would silently disable the only defence against a
-        # forwarded link the moment the Slack scope lapsed.
-        if not slack_email or not email or slack_email.lower() != email.lower():
-            logger.warning(
-                "identity link refused: Slack/SGP email mismatch",
-                extra={
-                    "sgp_user_id": sgp_user_id,
-                    "external_user_id": link_request.external_user_id,
-                    "slack_email_known": bool(slack_email),
-                },
-            )
-            return _page(
-                "Accounts don't match",
-                "<h1>Those accounts don't match</h1>"
-                "<p>The Slack account this link was made for and the SGP account "
-                "you're signed in as belong to different people.</p>"
-                "<p class=muted>If someone sent you this link, don't use it — it "
-                "would let their Slack messages run as you. Mention the agent in "
-                "Slack yourself to get your own link.</p>",
-                status=403,
-            )
+        return _page(
+            "Accounts don't match",
+            "<h1>Those accounts don't match</h1>"
+            "<p>The Slack account this link was made for and the SGP account "
+            "you're signed in as belong to different people.</p>"
+            "<p class=muted>If someone sent you this link, don't use it — it "
+            "would let their Slack messages run as you. Mention the agent in "
+            "Slack yourself to get your own link.</p>",
+            status=403,
+        )
 
     secret = _session_credential(request)
     if not secret:
         # The middleware authenticated this caller somehow, but not by a session
-        # cookie — an api-key or bearer caller, or a cookie under a different name.
-        # There is nothing here we can act through later, so refuse rather than
-        # store an empty credential.
+        # cookie — an api-key or bearer caller, a cookie under a different name, or
+        # cookie delegation switched off entirely. There is nothing here we can act
+        # through later, so refuse rather than store an empty credential.
         logger.warning(
             "identity link refused: no session cookie on an authenticated request",
-            extra={"sgp_user_id": sgp_user_id, "cookie": SESSION_COOKIE_NAME},
+            extra={
+                "sgp_user_id": sgp_user_id,
+                "accepted_cookies": session_cookie_names(),
+            },
         )
         return _page(
             "Couldn't read your session",
@@ -391,7 +465,7 @@ async def slack_link_confirm(request: Request, nonce: str = Form("")) -> HTMLRes
         "Connected",
         "<h1>You're connected</h1>"
         f"<p>The agent will now use your own tools when you ask it something in "
-        f"Slack, as <strong>{html.escape(email or sgp_user_id)}</strong>.</p>"
+        f"Slack, as <strong>{html.escape(email or 'your SGP account')}</strong>.</p>"
         f"<p class=muted>This connection is valid until {html.escape(when)}, after "
         "which the agent will ask you to reconnect. You can close this page and go "
         "back to Slack.</p>",

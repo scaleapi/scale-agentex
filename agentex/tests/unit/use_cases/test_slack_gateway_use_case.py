@@ -1745,14 +1745,31 @@ class TestLinkOffer:
         # onboarding.
         assert calls["chat.postEphemeral"]["user"] == "U1"
 
-    async def test_the_link_never_goes_to_the_origin_channel(self, monkeypatch):
+    async def test_the_link_is_never_broadcast(self, monkeypatch):
+        """The invariant is single-viewer, not "not in the channel".
+
+        The nonce is a bearer token, so the first reader of a channel-visible message
+        could bind this user's Slack identity to their own SGP account. It may ride
+        in the DM and in an ephemeral — both of which exactly one person can see —
+        but a chat.postMessage must never carry it anywhere but that user's own DM.
+        """
         uc, api, _ = self._wire(monkeypatch)
         await uc._offer_link(_inbound(channel="C_PUBLIC"))
+
         for method, payload in (c.args for c in api.await_args_list):
-            if payload.get("channel") == "C_PUBLIC":
-                assert "TOKEN123" not in str(
-                    payload
-                ), f"{method} leaked the nonce into the origin channel"
+            if method == "chat.postMessage":
+                assert (
+                    payload["channel"] == "D_DM"
+                ), f"the nonce was posted to {payload['channel']}, not the DM"
+        # Nothing that lands in channel history mentions it.
+        broadcast = [
+            p
+            for m, p in (c.args for c in api.await_args_list)
+            if m == "chat.postMessage"
+        ]
+        assert all(
+            "TOKEN123" not in str(p) or p["channel"] == "D_DM" for p in broadcast
+        )
 
     async def test_dm_warns_against_forwarding(self, monkeypatch):
         uc, api, _ = self._wire(monkeypatch)
@@ -1782,7 +1799,10 @@ class TestLinkOffer:
         assert await uc._offer_link(_inbound()) is False
         methods = [m for m, _ in (c.args for c in api.await_args_list)]
         # Acknowledge in-channel rather than going silent, but send no new DM.
-        assert methods == ["chat.postEphemeral"]
+        # conversations.open still runs first — it's idempotent, and this branch
+        # needs the channel id to deep-link the user to the DM they can't find.
+        assert methods == ["conversations.open", "chat.postEphemeral"]
+        assert "chat.postMessage" not in methods
 
     async def test_cooldown_suppresses_the_offer_entirely(self, monkeypatch):
         uc, api, nonce = self._wire(monkeypatch, cooldown_ok=False)
@@ -1803,3 +1823,96 @@ class TestLinkOffer:
         assert req.external_user_id == "U1"
         assert req.pending_turn["text"] == "what's in my linear?"
         assert req.pending_turn["channel"] == "C9"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestLinkOfferDiscoverability:
+    """The offer has to be findable, not merely delivered.
+
+    Observed in production on the first real offer: the DM was posted successfully
+    and confirmed present via conversations.history, and the recipient still reported
+    never receiving it — because Slack files bot conversations under "Apps" rather
+    than in the Direct messages list. "Check your DMs" points at the one place the
+    message isn't, so the ephemeral carries a deep link into the conversation.
+    """
+
+    def _wire(self, monkeypatch, *, allowed=True):
+        uc = SlackGatewayUseCase()
+        monkeypatch.setattr(sg, "_PUBLIC_BASE_URL", "https://agentex.example.com")
+        monkeypatch.setattr(
+            sg, "slack_user_profile", AsyncMock(return_value={"display_name": "@ada"})
+        )
+        monkeypatch.setattr(uc, "_claim_offer_cooldown", AsyncMock(return_value=True))
+        nonce = MagicMock()
+        nonce.create_or_reuse = AsyncMock(return_value=("TOKEN123", False))
+        nonce.claim_send = AsyncMock(return_value=allowed)
+        monkeypatch.setattr(
+            "src.domain.services.link_nonce_service.LinkNonceService",
+            lambda *a, **k: nonce,
+        )
+        api = AsyncMock(
+            side_effect=lambda m, p: (
+                {"ok": True, "channel": {"id": "D_DM"}}
+                if m == "conversations.open"
+                else {"ok": True}
+            )
+        )
+        monkeypatch.setattr(uc, "_slack_api", api)
+        return uc, api
+
+    def _ephemeral(self, api):
+        return next(
+            p
+            for m, p in (c.args for c in api.await_args_list)
+            if m == "chat.postEphemeral"
+        )
+
+    async def test_ephemeral_points_at_the_durable_copy(self, monkeypatch):
+        # The link is inline now, so the deep link is no longer how you reach it —
+        # it's the pointer to the copy that survives a reload, since ephemerals
+        # don't. app_redirect rather than a slack:// URI, which fails on web.
+        uc, api = self._wire(monkeypatch)
+        await uc._offer_link(_inbound(team_id="T_ACME"))
+
+        text = self._ephemeral(api)["text"]
+        assert "https://slack.com/app_redirect?channel=D_DM&team=T_ACME" in text
+        assert "TOKEN123" in text
+
+    async def test_the_ephemeral_carries_the_link_itself(self, monkeypatch):
+        # Same audience as the DM (one person), and it's where the user is already
+        # looking — which is the whole point, since bot DMs are filed under "Apps"
+        # where people don't think to look.
+        uc, api = self._wire(monkeypatch)
+        await uc._offer_link(_inbound())
+        eph = self._ephemeral(api)
+        assert "TOKEN123" in eph["text"]
+        assert eph["user"] == "U1"
+        # Still says where the durable copy is, since ephemerals vanish on reload.
+        assert "app_redirect" in eph["text"]
+
+    async def test_send_cap_ephemeral_also_deep_links(self, monkeypatch):
+        # The "already sent" path is exactly when someone can't find the DM, so it
+        # needs the link more than the happy path does.
+        uc, api = self._wire(monkeypatch, allowed=False)
+        assert await uc._offer_link(_inbound(team_id="T_ACME")) is False
+
+        text = self._ephemeral(api)["text"]
+        # Past the DM cap the user still gets the live link — the cap limits DMs,
+        # not what we're allowed to show the person in front of us.
+        assert "TOKEN123" in text
+        assert "https://slack.com/app_redirect?channel=D_DM&team=T_ACME" in text
+        # But no second DM.
+        methods = [m for m, _ in (c.args for c in api.await_args_list)]
+        assert "chat.postMessage" not in methods
+
+    async def test_unreachable_dm_offers_nothing(self, monkeypatch):
+        # If we can't open the DM we can't link to it either, so pointing someone at
+        # a conversation that doesn't exist would be worse than staying quiet.
+        uc, api = self._wire(monkeypatch)
+        monkeypatch.setattr(
+            uc,
+            "_slack_api",
+            AsyncMock(return_value={"ok": False, "error": "cannot_dm_bot"}),
+        )
+        assert await uc._offer_link(_inbound()) is False

@@ -23,12 +23,12 @@ and would silently downgrade a user-scoped turn.
 from __future__ import annotations
 
 import json
-import os
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import Depends
 
+from src.domain.delegation_headers import session_cookie_names_to_forward
 from src.domain.entities.identity_links import IdentityLinkEntity, IdentityProvider
 from src.domain.repositories.identity_link_repository import DIdentityLinkRepository
 from src.utils.credential_encryption import CredentialEncryptionError
@@ -38,8 +38,8 @@ logger = make_logger(__name__)
 
 # Positive entries are stable — a link changes only on an explicit link/unlink, and
 # both paths invalidate. Negatives expire fast so linking feels immediate.
-_CACHE_TTL_S = int(os.getenv("IDENTITY_LINK_CACHE_TTL", "300"))
-_NEGATIVE_CACHE_TTL_S = int(os.getenv("IDENTITY_LINK_NEGATIVE_CACHE_TTL", "30"))
+_CACHE_TTL_S = 300
+_NEGATIVE_CACHE_TTL_S = 30
 
 # Distinguishes "cached: known to be unlinked" from "not in cache".
 _UNLINKED = "-"
@@ -47,12 +47,40 @@ _UNLINKED = "-"
 HEADER_COOKIE = "cookie"
 HEADER_SELECTED_ACCOUNT_ID = "x-selected-account-id"
 
-# The stored credential is the linking user's own session cookie, so it goes back
-# out as a cookie. ``build_delegation_headers`` filters a Cookie header down to its
-# allowlisted names and re-emits it as ``x-acting-user-cookie``, so this name has to
-# match that allowlist (``AGENTEX_DELEGATION_SESSION_COOKIE_NAMES``, default
-# ``_identityJwt``) or the credential is silently dropped on the way to the agent.
-SESSION_COOKIE_NAME = os.getenv("IDENTITY_LINK_SESSION_COOKIE_NAME", "_identityJwt")
+
+def session_cookie_names() -> tuple[str, ...]:
+    """Every cookie name a session may arrive under, in preference order.
+
+    **Derived from the delegation allowlist, never separately configurable.** The
+    stored credential leaves as a Cookie header that ``build_delegation_headers``
+    filters down to these same names before re-emitting as ``x-acting-user-cookie``.
+    If the two could disagree, the credential would be dropped in transit and every
+    linked turn would silently lose its acting identity — with a stored, valid,
+    apparently-healthy link. One source of truth removes that failure mode.
+
+    Callers reading an inbound request must accept **any** of these, not just the
+    first: the allowlist is a set of names the deployment considers valid, so a
+    session arriving under the second one is exactly as legitimate as the first.
+    Empty means cookie delegation is disabled.
+    """
+    return session_cookie_names_to_forward()
+
+
+def session_cookie_name() -> str | None:
+    """The single name to **emit** under, or None if cookie delegation is off.
+
+    Distinct from ``session_cookie_names()`` on purpose. Reading accepts any
+    allowlisted name; writing has to choose one, and the first is the deployment's
+    canonical choice.
+
+    A stored credential is a session JWT, validated downstream on its own contents
+    rather than on the label it travels under, so emitting a value that arrived
+    under a later allowlisted name as the canonical one is safe. If a downstream
+    ever became name-sensitive this would need the originating name stored
+    alongside the credential.
+    """
+    names = session_cookie_names()
+    return names[0] if names else None
 
 
 def _cache_key(
@@ -172,8 +200,18 @@ class IdentityLinkService:
                 extra={"sgp_user_id": identity.sgp_user_id},
             )
             return None
+        cookie_name = session_cookie_name()
+        if cookie_name is None:
+            # Cookie delegation is disabled, so build_delegation_headers would strip
+            # whatever we emit. Refuse rather than hand back headers that get
+            # silently dropped between here and the agent.
+            logger.warning(
+                "identity_link_cookie_delegation_disabled",
+                extra={"sgp_user_id": identity.sgp_user_id},
+            )
+            return None
         return {
-            HEADER_COOKIE: f"{SESSION_COOKIE_NAME}={credential}",
+            HEADER_COOKIE: f"{cookie_name}={credential}",
             HEADER_SELECTED_ACCOUNT_ID: identity.sgp_account_id,
         }
 
