@@ -55,7 +55,7 @@ from src.domain.entities.identity_links import IdentityLinkMethod, IdentityProvi
 from src.domain.repositories.identity_link_repository import IdentityLinkRepository
 from src.domain.services.identity_link_service import (
     IdentityLinkService,
-    session_cookie_name,
+    session_cookie_names,
 )
 from src.domain.services.link_nonce_service import LinkNonceService
 from src.utils import session_jwt
@@ -144,19 +144,30 @@ def _session_credential(request: Request) -> str | None:
     include the session cookie itself. The same reasoning (and the same approach)
     applies in ``delegation_headers``.
 
-    The name comes from the delegation allowlist, so what we store here is by
-    construction what the delegation layer will forward later. None when cookie
-    delegation is disabled: there would be no way to act through the credential, so
-    there is no point storing one.
+    Accepts **any** name on the delegation allowlist, not only the first. The
+    allowlist is the set of cookie names this deployment treats as valid sessions,
+    so a session arriving under the second entry is exactly as legitimate as one
+    under the first — matching only the first would reject a perfectly good session
+    and fail the link with "couldn't read your session", while the delegation layer
+    would happily have forwarded it.
+
+    Allowlist order wins over header order when a request carries more than one, so
+    the credential we keep is the deployment's canonical cookie whenever it's
+    present. None when cookie delegation is disabled: there would be no way to act
+    through the credential, so there is no point storing one.
     """
-    wanted = session_cookie_name()
-    if wanted is None:
+    allowed = session_cookie_names()
+    if not allowed:
         return None
-    raw = request.headers.get("cookie") or ""
-    for part in raw.split(";"):
+    jar: dict[str, str] = {}
+    for part in (request.headers.get("cookie") or "").split(";"):
         name, sep, value = part.strip().partition("=")
-        if sep and name.strip() == wanted:
-            return value.strip() or None
+        if sep:
+            # First occurrence wins, matching delegation_headers' parsing.
+            jar.setdefault(name.strip(), value.strip())
+    for name in allowed:
+        if jar.get(name):
+            return jar[name]
     return None
 
 
@@ -367,7 +378,10 @@ async def slack_link_confirm(request: Request, nonce: str = Form("")) -> HTMLRes
         # through later, so refuse rather than store an empty credential.
         logger.warning(
             "identity link refused: no session cookie on an authenticated request",
-            extra={"sgp_user_id": sgp_user_id, "cookie": session_cookie_name()},
+            extra={
+                "sgp_user_id": sgp_user_id,
+                "accepted_cookies": session_cookie_names(),
+            },
         )
         return _page(
             "Couldn't read your session",

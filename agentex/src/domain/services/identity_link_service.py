@@ -48,22 +48,38 @@ HEADER_COOKIE = "cookie"
 HEADER_SELECTED_ACCOUNT_ID = "x-selected-account-id"
 
 
-def session_cookie_name() -> str | None:
-    """The cookie name to store and emit, or None if cookie delegation is off.
+def session_cookie_names() -> tuple[str, ...]:
+    """Every cookie name a session may arrive under, in preference order.
 
     **Derived from the delegation allowlist, never separately configurable.** The
     stored credential leaves as a Cookie header that ``build_delegation_headers``
-    filters down to its allowlisted names before re-emitting as
-    ``x-acting-user-cookie``. If this name and that allowlist could disagree, the
-    credential would be dropped in transit and every linked turn would silently lose
-    its acting identity — with a stored, valid, apparently-healthy link. One source
-    of truth removes that failure mode entirely.
+    filters down to these same names before re-emitting as ``x-acting-user-cookie``.
+    If the two could disagree, the credential would be dropped in transit and every
+    linked turn would silently lose its acting identity — with a stored, valid,
+    apparently-healthy link. One source of truth removes that failure mode.
 
-    None when the allowlist is empty (cookie delegation explicitly disabled): there
-    is then no way to act through a stored session, so callers must refuse rather
-    than store or emit something that cannot work.
+    Callers reading an inbound request must accept **any** of these, not just the
+    first: the allowlist is a set of names the deployment considers valid, so a
+    session arriving under the second one is exactly as legitimate as the first.
+    Empty means cookie delegation is disabled.
     """
-    names = session_cookie_names_to_forward()
+    return session_cookie_names_to_forward()
+
+
+def session_cookie_name() -> str | None:
+    """The single name to **emit** under, or None if cookie delegation is off.
+
+    Distinct from ``session_cookie_names()`` on purpose. Reading accepts any
+    allowlisted name; writing has to choose one, and the first is the deployment's
+    canonical choice.
+
+    A stored credential is a session JWT, validated downstream on its own contents
+    rather than on the label it travels under, so emitting a value that arrived
+    under a later allowlisted name as the canonical one is safe. If a downstream
+    ever became name-sensitive this would need the originating name stored
+    alongside the credential.
+    """
+    names = session_cookie_names()
     return names[0] if names else None
 
 

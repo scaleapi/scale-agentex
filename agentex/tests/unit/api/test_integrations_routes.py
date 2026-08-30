@@ -427,3 +427,68 @@ class TestNoRawIdentifiersOnThePage:
         )
         assert resp.status_code == 200
         assert _SGP_USER not in resp.body.decode()
+
+
+@pytest.mark.unit
+class TestMultiNameCookieAllowlist:
+    """A session may arrive under ANY allowlisted cookie name.
+
+    REGRESSION: this used to read only the first entry of
+    AGENTEX_DELEGATION_SESSION_COOKIE_NAMES. With a multi-name allowlist, a session
+    carried by a later name was rejected — linking failed with "couldn't read your
+    session" for a cookie the delegation layer would have forwarded quite happily.
+    The allowlist is a set of names the deployment treats as valid, so second is as
+    legitimate as first.
+    """
+
+    def _request(self, cookie: str):
+        return SimpleNamespace(headers={"cookie": cookie})
+
+    def _allow(self, monkeypatch, names: str):
+        from src.domain.delegation_headers import ENV_SESSION_COOKIE_NAMES
+
+        monkeypatch.setenv(ENV_SESSION_COOKIE_NAMES, names)
+
+    def test_session_under_a_later_name_is_accepted(self, monkeypatch):
+        self._allow(monkeypatch, "_identityJwt,_jwt")
+        assert mod._session_credential(self._request("_jwt=BBB")) == "BBB"
+
+    def test_allowlist_order_wins_when_several_are_present(self, monkeypatch):
+        # Deterministic, and prefers the deployment's canonical cookie — which is
+        # also the name acting_headers() emits under.
+        self._allow(monkeypatch, "_identityJwt,_jwt")
+        got = mod._session_credential(self._request("_jwt=BBB; _identityJwt=AAA"))
+        assert got == "AAA"
+
+    def test_later_name_survives_a_messy_browser_header(self, monkeypatch):
+        self._allow(monkeypatch, "_identityJwt,_jwt")
+        cookie = "_ga=GA1.2.x; __utmzz=(not set); _jwt=BBB; fs_uid=a#b"
+        assert mod._session_credential(self._request(cookie)) == "BBB"
+
+    def test_names_outside_the_allowlist_are_still_rejected(self, monkeypatch):
+        # Widening to "any cookie that looks like a session" would let an attacker
+        # nominate the credential we store.
+        self._allow(monkeypatch, "_identityJwt")
+        assert mod._session_credential(self._request("_jwt=BBB")) is None
+
+    def test_empty_allowlist_reads_nothing(self, monkeypatch):
+        self._allow(monkeypatch, "")
+        assert mod._session_credential(self._request("_identityJwt=AAA")) is None
+
+    def test_blank_value_is_not_a_session(self, monkeypatch):
+        self._allow(monkeypatch, "_identityJwt,_jwt")
+        assert (
+            mod._session_credential(self._request("_identityJwt=; _jwt=BBB")) == "BBB"
+        )
+
+    def test_emitted_name_stays_canonical(self, monkeypatch):
+        # Reading accepts many; writing must choose one. The stored value is a JWT
+        # validated on its contents, not on the label it travels under.
+        from src.domain.services.identity_link_service import (
+            session_cookie_name,
+            session_cookie_names,
+        )
+
+        self._allow(monkeypatch, "_identityJwt,_jwt")
+        assert session_cookie_names() == ("_identityJwt", "_jwt")
+        assert session_cookie_name() == "_identityJwt"
