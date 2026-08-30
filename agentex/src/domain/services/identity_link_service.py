@@ -23,12 +23,12 @@ and would silently downgrade a user-scoped turn.
 from __future__ import annotations
 
 import json
-import os
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import Depends
 
+from src.domain.delegation_headers import session_cookie_names_to_forward
 from src.domain.entities.identity_links import IdentityLinkEntity, IdentityProvider
 from src.domain.repositories.identity_link_repository import DIdentityLinkRepository
 from src.utils.credential_encryption import CredentialEncryptionError
@@ -38,8 +38,8 @@ logger = make_logger(__name__)
 
 # Positive entries are stable — a link changes only on an explicit link/unlink, and
 # both paths invalidate. Negatives expire fast so linking feels immediate.
-_CACHE_TTL_S = int(os.getenv("IDENTITY_LINK_CACHE_TTL", "300"))
-_NEGATIVE_CACHE_TTL_S = int(os.getenv("IDENTITY_LINK_NEGATIVE_CACHE_TTL", "30"))
+_CACHE_TTL_S = 300
+_NEGATIVE_CACHE_TTL_S = 30
 
 # Distinguishes "cached: known to be unlinked" from "not in cache".
 _UNLINKED = "-"
@@ -47,12 +47,24 @@ _UNLINKED = "-"
 HEADER_COOKIE = "cookie"
 HEADER_SELECTED_ACCOUNT_ID = "x-selected-account-id"
 
-# The stored credential is the linking user's own session cookie, so it goes back
-# out as a cookie. ``build_delegation_headers`` filters a Cookie header down to its
-# allowlisted names and re-emits it as ``x-acting-user-cookie``, so this name has to
-# match that allowlist (``AGENTEX_DELEGATION_SESSION_COOKIE_NAMES``, default
-# ``_identityJwt``) or the credential is silently dropped on the way to the agent.
-SESSION_COOKIE_NAME = os.getenv("IDENTITY_LINK_SESSION_COOKIE_NAME", "_identityJwt")
+
+def session_cookie_name() -> str | None:
+    """The cookie name to store and emit, or None if cookie delegation is off.
+
+    **Derived from the delegation allowlist, never separately configurable.** The
+    stored credential leaves as a Cookie header that ``build_delegation_headers``
+    filters down to its allowlisted names before re-emitting as
+    ``x-acting-user-cookie``. If this name and that allowlist could disagree, the
+    credential would be dropped in transit and every linked turn would silently lose
+    its acting identity — with a stored, valid, apparently-healthy link. One source
+    of truth removes that failure mode entirely.
+
+    None when the allowlist is empty (cookie delegation explicitly disabled): there
+    is then no way to act through a stored session, so callers must refuse rather
+    than store or emit something that cannot work.
+    """
+    names = session_cookie_names_to_forward()
+    return names[0] if names else None
 
 
 def _cache_key(
@@ -172,8 +184,18 @@ class IdentityLinkService:
                 extra={"sgp_user_id": identity.sgp_user_id},
             )
             return None
+        cookie_name = session_cookie_name()
+        if cookie_name is None:
+            # Cookie delegation is disabled, so build_delegation_headers would strip
+            # whatever we emit. Refuse rather than hand back headers that get
+            # silently dropped between here and the agent.
+            logger.warning(
+                "identity_link_cookie_delegation_disabled",
+                extra={"sgp_user_id": identity.sgp_user_id},
+            )
+            return None
         return {
-            HEADER_COOKIE: f"{SESSION_COOKIE_NAME}={credential}",
+            HEADER_COOKIE: f"{cookie_name}={credential}",
             HEADER_SELECTED_ACCOUNT_ID: identity.sgp_account_id,
         }
 

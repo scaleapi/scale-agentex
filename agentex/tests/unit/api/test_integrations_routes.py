@@ -260,77 +260,86 @@ class TestConfirm:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestEmailMatch:
-    """The flagged defence against a *forwarded* link.
+    """The self-enabling defence against a *forwarded* link.
 
     The nonce stops an attacker forging someone else's Slack identity. It does not
-    stop them sending their OWN link to a victim: if the victim clicks it while
-    signed in, the attacker's Slack identity binds to the victim's SGP account, and
-    from then on the attacker's Slack messages run as the victim. Comparing the two
-    accounts' emails is what closes that.
+    stop them sending their OWN link to a victim: clicking it while signed in binds
+    the attacker's Slack identity to the victim's SGP account, and from then on the
+    attacker's Slack messages run as the victim with the victim's integrations.
+    Comparing the two accounts' emails is what closes that.
 
-    Off by default: it needs the `users:read.email` Slack scope, which isn't granted
-    until the app is reinstalled.
+    There is deliberately no flag. The check needs the `users:read.email` Slack
+    scope, and gating it on config means the flag and the scope must be flipped
+    together — flipping one alone either refuses every link or silently protects
+    nothing. Instead it enforces whenever Slack answers with an email and stands
+    down when it won't, so granting the scope turns the protection on by itself.
+
+    The asymmetry that follows is the thing to pin: **verified different -> refuse,
+    unverifiable -> allow**.
     """
 
-    def _slack_email(self, monkeypatch, email):
+    def _slack_profile(self, monkeypatch, **profile):
         import src.domain.use_cases.slack_gateway_use_case as sg
 
-        monkeypatch.setattr(
-            sg, "slack_user_profile", AsyncMock(return_value={"email": email})
-        )
-
-    async def test_disabled_by_default_does_not_call_slack(self, wiring, monkeypatch):
-        import src.domain.use_cases.slack_gateway_use_case as sg
-
-        probe = AsyncMock(return_value={"email": "someone.else@example.com"})
+        full = {"display_name": "@x", "email": None, "error": None, **profile}
+        probe = AsyncMock(return_value=full)
         monkeypatch.setattr(sg, "slack_user_profile", probe)
-        monkeypatch.setattr(mod, "_REQUIRE_EMAIL_MATCH", False)
-
-        resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
-        assert resp.status_code == 200
-        probe.assert_not_awaited()
+        return probe
 
     async def test_matching_emails_link_successfully(self, wiring, monkeypatch):
-        monkeypatch.setattr(mod, "_REQUIRE_EMAIL_MATCH", True)
-        self._slack_email(monkeypatch, _SGP_EMAIL)
+        self._slack_profile(monkeypatch, email=_SGP_EMAIL)
         resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
         assert resp.status_code == 200
         wiring.repo.upsert_link.assert_awaited_once()
 
-    async def test_match_is_case_insensitive(self, wiring, monkeypatch):
-        monkeypatch.setattr(mod, "_REQUIRE_EMAIL_MATCH", True)
-        self._slack_email(monkeypatch, _SGP_EMAIL.upper())
+    async def test_match_ignores_case_and_surrounding_space(self, wiring, monkeypatch):
+        self._slack_profile(monkeypatch, email=f"  {_SGP_EMAIL.upper()} ")
         resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
         assert resp.status_code == 200
 
     async def test_mismatch_is_refused_and_stores_nothing(self, wiring, monkeypatch):
-        monkeypatch.setattr(mod, "_REQUIRE_EMAIL_MATCH", True)
-        self._slack_email(monkeypatch, "attacker@example.com")
+        self._slack_profile(monkeypatch, email="attacker@example.com")
 
         resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
 
         assert resp.status_code == 403
         wiring.repo.upsert_link.assert_not_awaited()
-        # The nonce survives, so a legitimate owner can still use their own link.
+        # The nonce survives a refusal, so the link's legitimate owner can still use
+        # it — refusing the wrong clicker must not burn the right one's link.
         wiring.nonce.consume.assert_not_awaited()
         body = resp.body.decode().lower()
         assert "don&#x27;t use it" in body or "don't use it" in body
 
-    async def test_unreadable_slack_email_fails_closed(self, wiring, monkeypatch):
-        # Missing scope, deleted user, API hiccup -> None. Treating that as "skip the
-        # check" would silently disable the defence the moment the scope lapsed.
-        monkeypatch.setattr(mod, "_REQUIRE_EMAIL_MATCH", True)
-        self._slack_email(monkeypatch, None)
-
+    async def test_missing_scope_allows_the_link(self, wiring, monkeypatch):
+        # The current production state: users:read.email isn't granted, so Slack
+        # won't tell us. Refusing here would block every link in the workspace, so
+        # the check stands down rather than failing closed.
+        self._slack_profile(monkeypatch, email=None, error="missing_scope")
         resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
-        assert resp.status_code == 403
-        wiring.repo.upsert_link.assert_not_awaited()
+        assert resp.status_code == 200
+        wiring.repo.upsert_link.assert_awaited_once()
 
-    async def test_missing_sgp_email_fails_closed(self, wiring, monkeypatch):
-        monkeypatch.setattr(mod, "_REQUIRE_EMAIL_MATCH", True)
-        self._slack_email(monkeypatch, "someone@example.com")
-        principal = {**_PRINCIPAL, "raw_user": {}}
+    async def test_lookup_failure_allows_the_link(self, wiring, monkeypatch):
+        # Same rule for a transient failure. Failing closed on an unreadable email
+        # would make linking fail randomly, and the gap isn't attacker-reachable:
+        # nobody outside our infrastructure decides whether our Slack call succeeds.
+        self._slack_profile(monkeypatch, email=None, error="request_failed")
+        resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
+        assert resp.status_code == 200
 
-        resp = await mod.slack_link_confirm(_request(principal), nonce="tok")
-        assert resp.status_code == 403
-        wiring.repo.upsert_link.assert_not_awaited()
+    async def test_missing_sgp_email_allows_the_link(self, wiring, monkeypatch):
+        # Slack told us, but the SGP principal carries no email: nothing to compare
+        # against, so the same "can't verify, don't block" rule applies.
+        self._slack_profile(monkeypatch, email="someone@example.com")
+        resp = await mod.slack_link_confirm(
+            _request({**_PRINCIPAL, "raw_user": {}}), nonce="tok"
+        )
+        assert resp.status_code == 200
+
+    async def test_the_check_runs_on_every_confirm(self, wiring, monkeypatch):
+        # No flag means no way to accidentally leave it off: granting the scope is
+        # the only thing standing between here and enforcement.
+        probe = self._slack_profile(monkeypatch, email=_SGP_EMAIL)
+        await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
+        probe.assert_awaited_once()
+        assert probe.await_args.args[0] == "U1"

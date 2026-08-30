@@ -40,7 +40,6 @@ capped by ``claim_send`` so the DMs stop while the link stays valid.
 from __future__ import annotations
 
 import json
-import os
 import secrets
 from dataclasses import asdict, dataclass, field, replace
 from typing import Annotated, Any
@@ -53,7 +52,7 @@ logger = make_logger(__name__)
 
 # Long enough for a human to switch windows and sign in, short enough that an
 # abandoned link stops being interesting.
-_TTL_S = int(os.getenv("IDENTITY_LINK_NONCE_TTL", "600"))
+_TTL_S = 600
 
 # 32 bytes of urlsafe randomness. Guessing is not a threat model at this size, but
 # the token is still consumed on first use rather than relying on entropy alone.
@@ -63,7 +62,7 @@ _TOKEN_BYTES = 32
 # reuse the live nonce rather than minting another, so this caps DM noise without
 # multiplying live tokens. Past the cap the caller should fall back to an ephemeral
 # in-channel notice rather than going silent.
-_MAX_SENDS = int(os.getenv("IDENTITY_LINK_MAX_DMS", "2"))
+_MAX_SENDS = 2
 
 _KEY_PREFIX = "link_nonce:"
 # identity -> its one live token, so a second mention finds the first nonce instead

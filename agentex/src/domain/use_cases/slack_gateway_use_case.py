@@ -141,7 +141,7 @@ _PUBLIC_BASE_URL = os.getenv("SLACK_GATEWAY_PUBLIC_BASE_URL", "").rstrip("/")
 # caps DMs at 2 per live nonce, but a nonce only lives ~10 minutes, so without this a
 # persistent mentioner re-arms that budget every 10 minutes. Worst case becomes ~2
 # DMs an hour instead of ~12.
-_LINK_OFFER_COOLDOWN_S = int(os.getenv("SLACK_LINK_OFFER_COOLDOWN_S", "3600"))
+_LINK_OFFER_COOLDOWN_S = 3600
 
 # Slack's HTTP Events API is at-least-once — it retries a delivery (up to ~3x, with an
 # X-Slack-Retry-Num header) if we don't 200 within ~3s. Dedup on the envelope's
@@ -373,20 +373,20 @@ def _agent_text(messages) -> str | None:
 
 
 async def slack_user_profile(user_id: str) -> dict[str, str | None]:
-    """``{"display_name": …, "email": …}`` for a Slack user, best-effort.
+    """``{"display_name": …, "email": …, "error": …}`` for a Slack user.
 
-    Both fields can be None and callers must cope: ``display_name`` is only used to
-    make the confirmation page legible, and ``email`` requires the
-    ``users:read.email`` scope, which is *not* granted by default. A missing email is
-    therefore "unknown", never "does not match" — see the email-match check in the
-    link route, which refuses rather than assuming when it can't read one.
+    All three can be None. ``display_name`` only makes the confirmation page legible.
+    ``email`` requires the ``users:read.email`` scope, which may not be granted —
+    ``error`` is how a caller tells "Slack won't tell us" apart from "Slack told us
+    and there's no email", which the link route needs to decide whether it can
+    perform its identity check at all.
 
     Never raises: an identity-link attempt shouldn't fail because a Slack lookup
     hiccupped.
     """
     token = os.getenv("SLACK_BOT_TOKEN", "")
     if not token or not user_id:
-        return {"display_name": None, "email": None}
+        return {"display_name": None, "email": None, "error": "no_token"}
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
@@ -397,18 +397,19 @@ async def slack_user_profile(user_id: str) -> dict[str, str | None]:
         body = resp.json()
     except Exception:  # noqa: BLE001 - best-effort lookup
         logger.warning("[slack] users.info failed for %s", user_id, exc_info=True)
-        return {"display_name": None, "email": None}
+        return {"display_name": None, "email": None, "error": "request_failed"}
     if not body.get("ok"):
-        # missing_scope here means users:read.email isn't granted; that's expected
-        # until the app is reinstalled, so it's info rather than a warning.
+        # missing_scope means users:read.email isn't granted — expected until the app
+        # is reinstalled, so info rather than warning.
         logger.info("[slack] users.info -> %s", body.get("error"))
-        return {"display_name": None, "email": None}
+        return {"display_name": None, "email": None, "error": body.get("error")}
     user = body.get("user") or {}
     profile = user.get("profile") or {}
     handle = user.get("name")
     return {
         "display_name": f"@{handle}" if handle else profile.get("real_name"),
         "email": profile.get("email"),
+        "error": None,
     }
 
 

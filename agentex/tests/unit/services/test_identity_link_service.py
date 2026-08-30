@@ -245,3 +245,67 @@ class TestCaching:
         monkeypatch.setattr(type(service), "_redis", IdentityLinkService._redis)
         assert await service.resolve(IdentityProvider.SLACK, "T1", "U1") is not None
         repo.get_active_by_external_user.assert_awaited_once()
+
+
+@pytest.mark.unit
+class TestSessionCookieName:
+    """The cookie name has exactly one source of truth.
+
+    It used to be separately configurable here AND in delegation_headers. If the two
+    diverged, acting_headers() would emit a Cookie header under a name the delegation
+    allowlist filters out — the agent would get no acting credential at all, silently,
+    while the link itself looked stored, valid and healthy. Deriving it removes the
+    possibility rather than documenting it.
+    """
+
+    def test_follows_the_delegation_allowlist(self, monkeypatch):
+        from src.domain.delegation_headers import ENV_SESSION_COOKIE_NAMES
+        from src.domain.services.identity_link_service import session_cookie_name
+
+        monkeypatch.setenv(ENV_SESSION_COOKIE_NAMES, "_sgpSession")
+        assert session_cookie_name() == "_sgpSession"
+
+    def test_defaults_with_the_delegation_module(self, monkeypatch):
+        from src.domain.delegation_headers import ENV_SESSION_COOKIE_NAMES
+        from src.domain.services.identity_link_service import session_cookie_name
+
+        monkeypatch.delenv(ENV_SESSION_COOKIE_NAMES, raising=False)
+        assert session_cookie_name() == "_identityJwt"
+
+    def test_none_when_cookie_delegation_is_disabled(self, monkeypatch):
+        from src.domain.delegation_headers import ENV_SESSION_COOKIE_NAMES
+        from src.domain.services.identity_link_service import session_cookie_name
+
+        monkeypatch.setenv(ENV_SESSION_COOKIE_NAMES, "")
+        assert session_cookie_name() is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestActingHeadersFollowDelegation:
+    async def test_emitted_cookie_survives_the_delegation_filter(self, monkeypatch):
+        """The end-to-end property: whatever name is configured, what acting_headers
+        emits is what build_delegation_headers forwards."""
+        from src.domain.delegation_headers import (
+            ENV_SESSION_COOKIE_NAMES,
+            build_delegation_headers,
+        )
+
+        monkeypatch.setenv(ENV_SESSION_COOKIE_NAMES, "_sgpSession")
+        service, _ = _service(_link(), credential="jwt.value.sig")
+
+        headers = await service.acting_headers(ResolvedIdentity(_link()))
+        assert headers["cookie"] == "_sgpSession=jwt.value.sig"
+
+        forwarded = build_delegation_headers({"user_id": "u"}, dict(headers))
+        # Not dropped in transit — the whole point of deriving the name.
+        assert forwarded["x-acting-user-cookie"] == "_sgpSession=jwt.value.sig"
+
+    async def test_refuses_when_cookie_delegation_is_disabled(self, monkeypatch):
+        # Emitting a credential the delegation layer will strip would look like a
+        # working link and deliver nothing, so refuse instead.
+        from src.domain.delegation_headers import ENV_SESSION_COOKIE_NAMES
+
+        monkeypatch.setenv(ENV_SESSION_COOKIE_NAMES, "")
+        service, _ = _service(_link(), credential="jwt.value.sig")
+        assert await service.acting_headers(ResolvedIdentity(_link())) is None
