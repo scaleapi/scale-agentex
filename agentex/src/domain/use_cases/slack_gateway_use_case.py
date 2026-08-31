@@ -251,7 +251,11 @@ def _strip_selector(text: str, selector: str) -> str:
 
 
 def _turn_content(
-    inbound: InboundSlack, prompt: str, *, self_posts: bool = False
+    inbound: InboundSlack,
+    prompt: str,
+    *,
+    self_posts: bool = False,
+    unlinked: bool = False,
 ) -> str:
     """Prepend the Slack conversation context to the turn.
 
@@ -263,12 +267,37 @@ def _turn_content(
     ``self_posts`` is set for agents the gateway does NOT relay (golden-agent, which has
     Slack write tools). For them we add an explicit directive to post their own reply
     into this thread, because nothing is delivered on their behalf — without it the turn
-    would run and produce text that never reaches Slack."""
+    would run and produce text that never reaches Slack.
+
+    ``unlinked`` tells the agent it is NOT running as the person who asked. Without it
+    the turn runs on the shared bot identity and cannot tell — so it answers about
+    *its own* access as though it were theirs. Observed: confidently reporting "no
+    Linear access, verified two ways" and separately overstating GitHub, while the
+    gateway was simultaneously DMing that person a link to connect. Two messages that
+    contradict each other, one of them wrong about the user's capabilities.
+
+    It also stops the agent inventing its own authorization flow. Lacking a
+    credential, the harness offers an OAuth URL with a localhost redirect — a dead end
+    from Slack, and indistinguishable from a real instruction. Telling the agent a
+    link has already been sent removes the reason to improvise one."""
     context = (
         f"[Slack context] channel_id={inbound.channel} thread_ts={inbound.thread_ts}. "
         f"This message came from that Slack thread; to read earlier messages or the "
         f"channel's history, use your Slack tools with this channel_id."
     )
+    if unlinked:
+        context += (
+            " IMPORTANT: you are NOT running as the person who sent this message. This "
+            "turn uses a shared service identity, so you do NOT have access to their "
+            "personal integrations (Notion, Linear, GitHub, …) — any such tool you can "
+            "reach belongs to the shared account, not to them. Do not describe your own "
+            "access as if it were theirs, and do not conclude anything about what they "
+            "have connected. They have ALREADY been sent a link to connect their "
+            "account, so do NOT generate authorization or OAuth links of your own. "
+            "Answer what you can from this thread and from shared tools; if the request "
+            "needs their personal data, say plainly that it needs their account "
+            "connected first and that a link has been sent."
+        )
     if self_posts:
         context += (
             " IMPORTANT: your text response is NOT posted to Slack for you. Deliver your "
@@ -652,7 +681,9 @@ class SlackGatewayUseCase:
         background.add_task(self._run_turn, inbound)
         return {}  # empty 200 closes the modal
 
-    async def _run_turn(self, inbound: InboundSlack) -> None:
+    async def _run_turn(
+        self, inbound: InboundSlack, *, offer_link: bool = True
+    ) -> None:
         try:
             # Whose identity runs this turn.
             #
@@ -668,12 +699,18 @@ class SlackGatewayUseCase:
             # personal integrations. Prompting them to link is a separate concern.
             principal, auth_headers, sgp_user_id = await self._turn_identity(inbound)
 
-            if sgp_user_id is None:
+            if sgp_user_id is None and offer_link:
                 # Not running as a person: either unlinked, or linked with a
                 # credential we can't use (expired session, undecryptable). Offer the
                 # link either way — a dead credential needs the same fix as no
                 # credential. Rate-limited and best-effort; it never affects the turn,
                 # which continues as the bot below (or is refused just after).
+                #
+                # ``offer_link`` is False for a replay fired by the link callback. That
+                # turn exists *because* the user just linked, so nudging them again
+                # would be absurd — and if the fresh link somehow still doesn't
+                # resolve, offering would mint another nonce, DM another link, and
+                # invite the same loop again on the next click.
                 await self._offer_link(inbound)
 
             if principal is None and auth_headers is None:
@@ -759,16 +796,18 @@ class SlackGatewayUseCase:
         identity = await self._resolve_invoking_identity(inbound)
         if identity is not None:
             headers = await self._identity_link_service().acting_headers(identity)
-            if headers is not None:
+            if headers is not None and await self._credential_still_accepted(
+                identity, headers
+            ):
                 logger.info(
                     "[slack] turn acting as sgp user %s (linked from %s)",
                     identity.sgp_user_id,
                     inbound.user,
                 )
                 return identity.principal, headers, identity.sgp_user_id
-            # Linked but unusable — no stored key, expired, or undecryptable. The
-            # service has already logged which. Treated the same as unlinked here;
-            # re-link prompting is handled separately.
+            # Linked but unusable — no stored credential, locally expired,
+            # undecryptable, or rejected upstream. Falls through to the bot with
+            # sgp_user_id=None, which is what makes the caller offer a re-link.
 
         if _REQUIRE_LINKED_USER:
             logger.info(
@@ -784,6 +823,134 @@ class SlackGatewayUseCase:
             inbound.user,
         )
         return bot_principal, bot_headers, None
+
+    async def replay_pending_turn(
+        self, *, team_id: str, user_id: str, pending_turn: dict[str, Any] | None
+    ) -> bool:
+        """Re-run the message that prompted a link, now that the user has linked.
+
+        Called by the link callback. Without it the flow is ask -> get a link ->
+        click -> **ask again**, and the question the person actually had is dropped on
+        the floor at the exact moment we finally could have answered it.
+
+        The replay lands in a *new* task, for free: the task key includes the SGP user
+        id, so the same Slack thread keys differently once linked
+        (``slack:{ts}`` -> ``slack:{team}:{channel}:{ts}:{sgp_user}``). That means a
+        fresh turn-1 session with their credentials — none of the toolset pinning that
+        makes enabling an MCP mid-conversation a no-op. The pre-link exchange isn't in
+        that task's history, but the agent can read the Slack thread with its own
+        tools, which the context prefix tells it how to do.
+
+        Returns whether a replay was started. Best-effort by contract: the caller has
+        already stored the link and must not fail, or roll it back, because a replay
+        didn't happen.
+        """
+        if not pending_turn:
+            return False
+        text = (pending_turn.get("text") or "").strip()
+        channel = pending_turn.get("channel") or ""
+        if not (text and channel and team_id and user_id):
+            logger.info(
+                "[slack] link replay skipped: incomplete pending turn",
+                extra={"has_text": bool(text), "has_channel": bool(channel)},
+            )
+            return False
+
+        inbound = InboundSlack(
+            team_id=team_id,
+            channel=channel,
+            user=user_id,
+            text=text,
+            thread_ts=pending_turn.get("thread_ts") or "",
+            # Re-derived exactly as normalize() does, so a selector-driven turn
+            # ("@agent some-config ...") resolves to the same target it would have.
+            selector=text.split(maxsplit=1)[0] if text else None,
+        )
+        # The indicator matters here: the answer arrives minutes after the user
+        # clicked a web page, so without it a reply appears from nowhere.
+        await self._set_status(inbound, "is thinking…")
+        # offer_link=False: see _run_turn. A replay must never nudge again.
+        await self._run_turn(inbound, offer_link=False)
+        return True
+
+    async def _credential_still_accepted(
+        self, identity: Any, headers: dict[str, str]
+    ) -> bool:
+        """Whether the stored session is still accepted upstream.
+
+        ``credential_expires_at`` is an upper bound, not a guarantee. A session JWT
+        stops being honoured the moment its owner signs out or it is revoked, while
+        the stored expiry still reads months away — so without this check the gateway
+        hands the agent a dead cookie, every user-scoped tool call fails with a 401
+        the agent can only report as "I can't reach your Notion", and nothing ever
+        prompts a re-link because locally the credential looks fine.
+
+        **A rejection is not the same as a failure**, and conflating them is the trap
+        here. If the auth service is misconfigured or down it will reject or error on
+        *everyone*, and concluding "your credential is bad" would tell an entire
+        workspace to re-link — which would fix nothing, because nothing is wrong with
+        their credentials. The distinction comes from the adapter's own exception
+        types rather than from guesswork:
+
+        - ``AuthenticationError`` / ``AuthorizationError`` — this credential was
+          refused. Re-linking is the remedy, so report it unusable. 403 counts: a
+          valid session that can no longer use the stored account needs a re-link to
+          pick up a current one.
+        - anything else (gateway error, service unavailable, timeout, surprise) —
+          the *check* failed, not the credential. Assume it's good and proceed. An
+          outage in a verification step must not revoke everyone's access.
+
+        Deliberately non-destructive: nothing is deleted or tombstoned on rejection.
+        The row keeps its credential, so a systemic 401 costs a bot-fallback turn and
+        a rate-limited nudge, and recovers by itself when the upstream does. Cheap
+        enough to run per turn — the shared-bot path already verifies its own key on
+        every turn, so this is the same cost profile, not a new one.
+        """
+        # Local imports avoid an import cycle at module load.
+        from src.adapters.authentication.adapter_agentex_authn_proxy import (
+            AgentexAuthenticationProxy,
+        )
+        from src.config.dependencies import resolve_environment_variable_dependency
+        from src.config.environment_variables import EnvVarKeys
+
+        # ClientError is the 4xx base and a *sibling* of ServiceError, not a parent —
+        # so catching it gets "your credential was refused" and never "the service
+        # broke". That split is the whole reason this can be safe.
+        from src.domain.exceptions import ClientError
+
+        try:
+            auth_url = resolve_environment_variable_dependency(
+                EnvVarKeys.AGENTEX_AUTH_URL
+            )
+        except Exception:  # noqa: BLE001 - authz off locally: nothing to verify against
+            return True
+        if not auth_url:
+            return True
+
+        authn = AgentexAuthenticationProxy(
+            agentex_auth_url=auth_url,
+            environment=resolve_environment_variable_dependency(EnvVarKeys.ENVIRONMENT),
+        )
+        try:
+            await authn.verify_headers(dict(headers))
+            return True
+        except ClientError as exc:
+            # 4xx: upstream looked at this credential and refused it.
+            logger.info(
+                "identity_link_credential_rejected",
+                extra={
+                    "sgp_user_id": getattr(identity, "sgp_user_id", None),
+                    "reason": type(exc).__name__,
+                },
+            )
+            return False
+        except Exception:  # noqa: BLE001 - the check failed, not the credential
+            logger.warning(
+                "identity_link_credential_check_failed",
+                extra={"sgp_user_id": getattr(identity, "sgp_user_id", None)},
+                exc_info=True,
+            )
+            return True
 
     def _identity_link_service(self):
         """Build the identity-link service.
@@ -988,7 +1155,14 @@ class SlackGatewayUseCase:
         content = TextContentEntity(
             author=MessageAuthor.USER,
             content=_turn_content(
-                inbound, prompt, self_posts=target.agent_name == _DEFAULT_AGENT_NAME
+                inbound,
+                prompt,
+                self_posts=target.agent_name == _DEFAULT_AGENT_NAME,
+                # sgp_user_id is None exactly when the turn is NOT running as a
+                # person — the same signal that triggers the link offer. So the agent
+                # is told it's unlinked precisely when the user is being asked to
+                # link, and the two messages agree instead of contradicting.
+                unlinked=sgp_user_id is None,
             ),
             format=TextFormat.MARKDOWN,
         )

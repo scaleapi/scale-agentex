@@ -43,7 +43,7 @@ from __future__ import annotations
 import html
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, BackgroundTasks, Form, Request
 from fastapi.responses import HTMLResponse
 
 from src.config.dependencies import (
@@ -290,7 +290,11 @@ async def slack_link_page(request: Request, nonce: str = "") -> HTMLResponse:
 
 
 @router.post("/slack/link", summary="Complete a Slack identity link")
-async def slack_link_confirm(request: Request, nonce: str = Form("")) -> HTMLResponse:
+async def slack_link_confirm(
+    request: Request,
+    background: BackgroundTasks,
+    nonce: str = Form(""),
+) -> HTMLResponse:
     """Mint a key as the signed-in user and store the mapping.
 
     Order matters: the nonce is consumed only after a successful mint, so a
@@ -460,13 +464,40 @@ async def slack_link_confirm(request: Request, nonce: str = Form("")) -> HTMLRes
         },
     )
 
+    # Answer the question that prompted this link, instead of making them ask again.
+    #
+    # Scheduled in the background on purpose: this returns an HTML page to a waiting
+    # browser, and an agent turn takes far longer than a page load should. Ordered
+    # last on purpose too — the link is already stored and the cache already
+    # invalidated, so the replay resolves the fresh link rather than a stale negative
+    # cache entry, and a replay failure cannot undo a link that succeeded.
+    replayed = False
+    if link_request.pending_turn:
+        try:
+            from src.domain.use_cases.slack_gateway_use_case import SlackGatewayUseCase
+
+            background.add_task(
+                SlackGatewayUseCase().replay_pending_turn,
+                team_id=link_request.external_team_id,
+                user_id=link_request.external_user_id,
+                pending_turn=link_request.pending_turn,
+            )
+            replayed = True
+        except Exception:  # noqa: BLE001 - the link stands regardless
+            logger.warning("identity link: could not schedule a replay", exc_info=True)
+
     when = actual_expiry.date().isoformat() if actual_expiry else "further notice"
     return _page(
         "Connected",
         "<h1>You're connected</h1>"
         f"<p>The agent will now use your own tools when you ask it something in "
         f"Slack, as <strong>{html.escape(email or 'your SGP account')}</strong>.</p>"
-        f"<p class=muted>This connection is valid until {html.escape(when)}, after "
-        "which the agent will ask you to reconnect. You can close this page and go "
-        "back to Slack.</p>",
+        + (
+            "<p>I'm answering the message you sent in Slack now — head back to that "
+            "thread.</p>"
+            if replayed
+            else "<p>Go back to Slack and ask again.</p>"
+        )
+        + f"<p class=muted>This connection is valid until {html.escape(when)}, after "
+        "which the agent will ask you to reconnect.</p>",
     )

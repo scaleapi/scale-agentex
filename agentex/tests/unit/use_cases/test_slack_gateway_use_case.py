@@ -4,6 +4,7 @@ app: signature verification, event normalization, the handle_slack_event control
 mocked). No running stack, no golden_agent, no Slack.
 """
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -1916,3 +1917,396 @@ class TestLinkOfferDiscoverability:
             AsyncMock(return_value={"ok": False, "error": "cannot_dm_bot"}),
         )
         assert await uc._offer_link(_inbound()) is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestStoredCredentialStillAccepted:
+    """A stored session can die before its recorded expiry — and a rejection is not
+    the same thing as a failure.
+
+    credential_expires_at is an upper bound. Sign out and the JWT stops being
+    honoured while the stored expiry still reads months away, so without this check
+    the gateway hands the agent a dead cookie, every user-scoped tool call 401s, and
+    nothing prompts a re-link because locally the credential looks fine.
+
+    The trap is over-applying it. A misconfigured or down auth service rejects
+    EVERYONE, and concluding "your credential is bad" would tell a whole workspace to
+    re-link — fixing nothing, since nothing is wrong with their credentials. The
+    adapter's exception types carry the distinction: ClientError (4xx) is a refusal
+    of this credential; ServiceError (5xx) and anything else mean the check broke.
+    """
+
+    def _verify(self, monkeypatch, raises=None, auth_url="http://auth.test"):
+        """Stub the verifier, and the env RESOLVER rather than os.environ.
+
+        resolve_environment_variable_dependency reads a GlobalDependencies singleton
+        built once per process, so monkeypatch.setenv never reaches it — a test that
+        set the variable would silently take the "authz disabled" path and pass for
+        the wrong reason.
+        """
+        import src.adapters.authentication.adapter_agentex_authn_proxy as ap
+        import src.config.dependencies as deps
+
+        async def verify(_self, _headers):
+            if raises is not None:
+                raise raises
+            return {"user_id": "sgp-1"}
+
+        monkeypatch.setattr(ap.AgentexAuthenticationProxy, "verify_headers", verify)
+        monkeypatch.setattr(
+            deps,
+            "resolve_environment_variable_dependency",
+            lambda key: auth_url if "AUTH_URL" in str(key) else "development",
+        )
+
+    @staticmethod
+    def _identity():
+        return SimpleNamespace(sgp_user_id="sgp-1")
+
+    @staticmethod
+    def _headers():
+        return {"cookie": "_identityJwt=abc", "x-selected-account-id": "acct-1"}
+
+    async def test_accepted_credential_is_usable(self, monkeypatch):
+        self._verify(monkeypatch)
+        uc = SlackGatewayUseCase()
+        assert await uc._credential_still_accepted(self._identity(), self._headers())
+
+    async def test_401_means_relink(self, monkeypatch):
+        from src.adapters.authentication.exceptions import AuthenticationError
+
+        self._verify(monkeypatch, raises=AuthenticationError("revoked"))
+        uc = SlackGatewayUseCase()
+        assert not await uc._credential_still_accepted(
+            self._identity(), self._headers()
+        )
+
+    async def test_403_also_means_relink(self, monkeypatch):
+        # A valid session that can no longer use the stored account needs a re-link
+        # to capture a current one.
+        from src.domain.exceptions import ClientError
+
+        class Forbidden(ClientError):
+            code = 403
+
+        self._verify(monkeypatch, raises=Forbidden("not in account"))
+        uc = SlackGatewayUseCase()
+        assert not await uc._credential_still_accepted(
+            self._identity(), self._headers()
+        )
+
+    @pytest.mark.parametrize(
+        "exc_name",
+        ["AuthenticationGatewayError", "AuthenticationServiceUnavailableError"],
+    )
+    async def test_service_errors_do_not_blame_the_credential(
+        self, monkeypatch, exc_name
+    ):
+        # 5xx from the verifier means the CHECK failed. Revoking everyone's access
+        # because a verification dependency is unwell is the outage-amplifying move.
+        import src.adapters.authentication.exceptions as exceptions
+
+        self._verify(monkeypatch, raises=getattr(exceptions, exc_name)("upstream"))
+        uc = SlackGatewayUseCase()
+        assert await uc._credential_still_accepted(self._identity(), self._headers())
+
+    @pytest.mark.parametrize("exc", [TimeoutError("slow"), RuntimeError("surprise")])
+    async def test_unexpected_failures_assume_the_credential_is_fine(
+        self, monkeypatch, exc
+    ):
+        self._verify(monkeypatch, raises=exc)
+        uc = SlackGatewayUseCase()
+        assert await uc._credential_still_accepted(self._identity(), self._headers())
+
+    async def test_skipped_entirely_when_authz_is_off(self, monkeypatch):
+        # Local dev with no auth service: nothing to verify against, and refusing
+        # every credential would make the feature untestable offline.
+        from src.adapters.authentication.exceptions import AuthenticationError
+
+        # Would reject if it were ever called — so a pass proves it wasn't.
+        self._verify(monkeypatch, raises=AuthenticationError("nope"), auth_url="")
+        uc = SlackGatewayUseCase()
+        assert await uc._credential_still_accepted(self._identity(), self._headers())
+
+    async def test_rejection_falls_back_to_the_bot_and_prompts(self, monkeypatch):
+        # End to end: a rejected credential must yield sgp_user_id=None, because that
+        # is precisely the condition _run_turn uses to offer a re-link.
+        from src.adapters.authentication.exceptions import AuthenticationError
+
+        uc = SlackGatewayUseCase()
+        identity = SimpleNamespace(
+            sgp_user_id="sgp-1", principal={"user_id": "sgp-1"}, sgp_account_id="acct-1"
+        )
+        monkeypatch.setattr(
+            uc, "_resolve_invoking_identity", AsyncMock(return_value=identity)
+        )
+        monkeypatch.setattr(
+            uc,
+            "_identity_link_service",
+            lambda: SimpleNamespace(
+                acting_headers=AsyncMock(return_value=self._headers())
+            ),
+        )
+        self._verify(monkeypatch, raises=AuthenticationError("revoked"))
+        monkeypatch.setattr(
+            uc, "_acting_identity", AsyncMock(return_value=("bot", {"x-api-key": "k"}))
+        )
+        monkeypatch.setattr(sg, "_REQUIRE_LINKED_USER", False)
+
+        principal, headers, sgp_user_id = await uc._turn_identity(_inbound())
+
+        assert principal == "bot"
+        assert headers == {"x-api-key": "k"}
+        assert sgp_user_id is None  # <- what makes _run_turn offer a re-link
+
+    async def test_credential_is_not_deleted_on_rejection(self, monkeypatch):
+        # Non-destructive on purpose: a systemic 401 costs a bot-fallback turn and a
+        # rate-limited nudge, then recovers by itself. Tombstoning rows would not.
+        from src.adapters.authentication.exceptions import AuthenticationError
+
+        uc = SlackGatewayUseCase()
+        repo = MagicMock()
+        service = SimpleNamespace(
+            acting_headers=AsyncMock(return_value=self._headers()), repository=repo
+        )
+        monkeypatch.setattr(
+            uc,
+            "_resolve_invoking_identity",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    sgp_user_id="sgp-1", principal={}, sgp_account_id="a"
+                )
+            ),
+        )
+        monkeypatch.setattr(uc, "_identity_link_service", lambda: service)
+        self._verify(monkeypatch, raises=AuthenticationError("revoked"))
+        monkeypatch.setattr(uc, "_acting_identity", AsyncMock(return_value=("bot", {})))
+        monkeypatch.setattr(sg, "_REQUIRE_LINKED_USER", False)
+
+        await uc._turn_identity(_inbound())
+
+        repo.revoke.assert_not_called()
+        assert not any(
+            "revoke" in str(c) or "delete" in str(c) for c in repo.mock_calls
+        )
+
+
+@pytest.mark.unit
+class TestUnlinkedTurnContext:
+    """An unlinked turn must tell the agent it isn't the user.
+
+    Without it the turn runs on the shared bot identity and can't tell, so it reports
+    on ITS OWN access as though it were the asker's. Observed in production:
+    confidently "no Linear access, verified two ways" plus an overstated GitHub claim,
+    while the gateway was simultaneously DMing that person a connect link. Two
+    messages that contradicted each other, one of them wrong about the user.
+
+    It also removes the reason the agent invents its own OAuth link — a URL with a
+    localhost redirect, which cannot work from Slack and reads like a real
+    instruction.
+    """
+
+    def test_unlinked_context_disclaims_personal_access(self):
+        text = sg._turn_content(_inbound(), "what's in my linear?", unlinked=True)
+        assert "NOT running as the person" in text
+        # Must not let the agent pass its own reach off as the user's.
+        assert "personal integrations" in text
+        assert "as if it were theirs" in text
+
+    def test_unlinked_context_forbids_inventing_oauth_links(self):
+        text = sg._turn_content(_inbound(), "hi", unlinked=True)
+        assert "do NOT generate authorization or OAuth links" in text
+        # And explains why there's no need: one is already on its way.
+        assert "ALREADY been sent a link" in text
+
+    def test_linked_turn_says_none_of_it(self):
+        text = sg._turn_content(_inbound(), "what's in my linear?", unlinked=False)
+        assert "NOT running as the person" not in text
+        assert "OAuth" not in text
+
+    def test_channel_context_survives_either_way(self):
+        # The disclaimer is additive: the agent still needs the channel id to read
+        # thread history with its Slack tools.
+        for unlinked in (True, False):
+            text = sg._turn_content(_inbound(channel="C9"), "hi", unlinked=unlinked)
+            assert "channel_id=C9" in text
+
+    def test_composes_with_the_self_posts_directive(self):
+        # golden-agent is both self-posting AND commonly unlinked; it needs both.
+        text = sg._turn_content(_inbound(), "hi", self_posts=True, unlinked=True)
+        assert "post_message" in text
+        assert "NOT running as the person" in text
+
+    def test_user_prompt_is_still_last(self):
+        # The prompt must follow the context, or the agent reads the directives as
+        # part of the question.
+        text = sg._turn_content(_inbound(), "MY QUESTION", unlinked=True)
+        assert text.rstrip().endswith("MY QUESTION")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestUnlinkedFlagIsWiredToIdentity:
+    """The flag tracks sgp_user_id — the same signal that offers the link — so the
+    agent is told it's unlinked exactly when the user is being asked to link, and the
+    two messages agree instead of contradicting each other."""
+
+    @staticmethod
+    def _acp(monkeypatch):
+        acp = MagicMock()
+        acp.agent_repository = MagicMock(get=AsyncMock(return_value=MagicMock()))
+        # Fails AFTER _turn_content has been built, which is all this test needs.
+        acp.handle_rpc_request = AsyncMock(side_effect=RuntimeError("stop here"))
+        monkeypatch.setattr(
+            "src.temporal.scheduled_agent_run_factory.build_acp_use_case_for_principal",
+            lambda *a, **k: acp,
+        )
+
+    @pytest.mark.parametrize(
+        "sgp_user_id, expect_unlinked", [("sgp-1", False), (None, True)]
+    )
+    async def test_flag_mirrors_whether_the_turn_runs_as_a_person(
+        self, monkeypatch, sgp_user_id, expect_unlinked
+    ):
+        captured = {}
+
+        def fake_turn_content(inbound, prompt, *, self_posts=False, unlinked=False):
+            captured["unlinked"] = unlinked
+            return "ctx"
+
+        monkeypatch.setattr(sg, "_turn_content", fake_turn_content)
+        self._acp(monkeypatch)
+
+        with contextlib.suppress(Exception):
+            await SlackGatewayUseCase()._dispatch(
+                sg.Target(agent_name="golden-agent", config_id=None),
+                _inbound(),
+                "hi",
+                {"user_id": "u"},
+                {"x-api-key": "k"},
+                sgp_user_id=sgp_user_id,
+            )
+
+        assert captured.get("unlinked") is expect_unlinked
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestReplayPendingTurn:
+    """Re-running the message that prompted a link."""
+
+    def _wire(self, monkeypatch):
+        uc = SlackGatewayUseCase()
+        ran = {}
+
+        async def run_turn(inbound, *, offer_link=True):
+            ran["inbound"] = inbound
+            ran["offer_link"] = offer_link
+
+        monkeypatch.setattr(uc, "_run_turn", run_turn)
+        monkeypatch.setattr(uc, "_set_status", AsyncMock())
+        return uc, ran
+
+    async def test_reconstructs_the_original_turn(self, monkeypatch):
+        uc, ran = self._wire(monkeypatch)
+        ok = await uc.replay_pending_turn(
+            team_id="T1",
+            user_id="U1",
+            pending_turn={
+                "text": "what's in my linear?",
+                "channel": "C9",
+                "thread_ts": "1700.1",
+            },
+        )
+        assert ok
+        inbound = ran["inbound"]
+        assert (inbound.team_id, inbound.user) == ("T1", "U1")
+        assert (inbound.channel, inbound.thread_ts) == ("C9", "1700.1")
+        assert inbound.text == "what's in my linear?"
+
+    async def test_selector_is_rederived_like_normalize(self, monkeypatch):
+        # A selector-driven turn must resolve to the same target it would have; the
+        # nonce stores only the text, so the selector is re-derived the same way.
+        uc, ran = self._wire(monkeypatch)
+        await uc.replay_pending_turn(
+            team_id="T1",
+            user_id="U1",
+            pending_turn={"text": "some-config summarise this", "channel": "C1"},
+        )
+        assert ran["inbound"].selector == "some-config"
+
+    async def test_never_offers_another_link(self, monkeypatch):
+        # The loop guard. This turn exists BECAUSE they just linked; offering again
+        # would mint a nonce, DM a link, and invite the same loop on the next click.
+        uc, ran = self._wire(monkeypatch)
+        await uc.replay_pending_turn(
+            team_id="T1", user_id="U1", pending_turn={"text": "hi", "channel": "C1"}
+        )
+        assert ran["offer_link"] is False
+
+    async def test_sets_the_thinking_indicator(self, monkeypatch):
+        # The answer lands minutes after the user clicked a web page, so without this
+        # a reply appears out of nowhere.
+        uc, _ran = self._wire(monkeypatch)
+        await uc.replay_pending_turn(
+            team_id="T1", user_id="U1", pending_turn={"text": "hi", "channel": "C1"}
+        )
+        uc._set_status.assert_awaited_once()
+
+    @pytest.mark.parametrize(
+        "pending",
+        [
+            None,
+            {},
+            {"text": "", "channel": "C1"},
+            {"text": "hi", "channel": ""},
+            {"text": "   ", "channel": "C1"},
+        ],
+    )
+    async def test_incomplete_pending_turn_does_nothing(self, monkeypatch, pending):
+        uc, ran = self._wire(monkeypatch)
+        assert (
+            await uc.replay_pending_turn(
+                team_id="T1", user_id="U1", pending_turn=pending
+            )
+            is False
+        )
+        assert ran == {}
+
+    async def test_missing_identity_does_nothing(self, monkeypatch):
+        uc, ran = self._wire(monkeypatch)
+        assert (
+            await uc.replay_pending_turn(
+                team_id="", user_id="U1", pending_turn={"text": "hi", "channel": "C1"}
+            )
+            is False
+        )
+        assert ran == {}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestOfferLinkSuppression:
+    async def test_run_turn_skips_the_offer_when_told_to(self, monkeypatch):
+        uc = SlackGatewayUseCase()
+        offered = []
+        monkeypatch.setattr(
+            uc, "_offer_link", AsyncMock(side_effect=lambda i: offered.append(i))
+        )
+        # Unlinked: normally this is exactly when an offer fires.
+        monkeypatch.setattr(
+            uc,
+            "_turn_identity",
+            AsyncMock(return_value=("bot", {"x-api-key": "k"}, None)),
+        )
+        monkeypatch.setattr(
+            uc, "_resolve_target", AsyncMock(side_effect=RuntimeError("stop"))
+        )
+        monkeypatch.setattr(uc, "_deliver", AsyncMock())
+
+        await uc._run_turn(_inbound(), offer_link=False)
+        assert offered == []
+
+        await uc._run_turn(_inbound(), offer_link=True)
+        assert len(offered) == 1
