@@ -251,7 +251,11 @@ def _strip_selector(text: str, selector: str) -> str:
 
 
 def _turn_content(
-    inbound: InboundSlack, prompt: str, *, self_posts: bool = False
+    inbound: InboundSlack,
+    prompt: str,
+    *,
+    self_posts: bool = False,
+    unlinked: bool = False,
 ) -> str:
     """Prepend the Slack conversation context to the turn.
 
@@ -263,12 +267,37 @@ def _turn_content(
     ``self_posts`` is set for agents the gateway does NOT relay (golden-agent, which has
     Slack write tools). For them we add an explicit directive to post their own reply
     into this thread, because nothing is delivered on their behalf — without it the turn
-    would run and produce text that never reaches Slack."""
+    would run and produce text that never reaches Slack.
+
+    ``unlinked`` tells the agent it is NOT running as the person who asked. Without it
+    the turn runs on the shared bot identity and cannot tell — so it answers about
+    *its own* access as though it were theirs. Observed: confidently reporting "no
+    Linear access, verified two ways" and separately overstating GitHub, while the
+    gateway was simultaneously DMing that person a link to connect. Two messages that
+    contradict each other, one of them wrong about the user's capabilities.
+
+    It also stops the agent inventing its own authorization flow. Lacking a
+    credential, the harness offers an OAuth URL with a localhost redirect — a dead end
+    from Slack, and indistinguishable from a real instruction. Telling the agent a
+    link has already been sent removes the reason to improvise one."""
     context = (
         f"[Slack context] channel_id={inbound.channel} thread_ts={inbound.thread_ts}. "
         f"This message came from that Slack thread; to read earlier messages or the "
         f"channel's history, use your Slack tools with this channel_id."
     )
+    if unlinked:
+        context += (
+            " IMPORTANT: you are NOT running as the person who sent this message. This "
+            "turn uses a shared service identity, so you do NOT have access to their "
+            "personal integrations (Notion, Linear, GitHub, …) — any such tool you can "
+            "reach belongs to the shared account, not to them. Do not describe your own "
+            "access as if it were theirs, and do not conclude anything about what they "
+            "have connected. They have ALREADY been sent a link to connect their "
+            "account, so do NOT generate authorization or OAuth links of your own. "
+            "Answer what you can from this thread and from shared tools; if the request "
+            "needs their personal data, say plainly that it needs their account "
+            "connected first and that a link has been sent."
+        )
     if self_posts:
         context += (
             " IMPORTANT: your text response is NOT posted to Slack for you. Deliver your "
@@ -1069,7 +1098,14 @@ class SlackGatewayUseCase:
         content = TextContentEntity(
             author=MessageAuthor.USER,
             content=_turn_content(
-                inbound, prompt, self_posts=target.agent_name == _DEFAULT_AGENT_NAME
+                inbound,
+                prompt,
+                self_posts=target.agent_name == _DEFAULT_AGENT_NAME,
+                # sgp_user_id is None exactly when the turn is NOT running as a
+                # person — the same signal that triggers the link offer. So the agent
+                # is told it's unlinked precisely when the user is being asked to
+                # link, and the two messages agree instead of contradicting.
+                unlinked=sgp_user_id is None,
             ),
             format=TextFormat.MARKDOWN,
         )

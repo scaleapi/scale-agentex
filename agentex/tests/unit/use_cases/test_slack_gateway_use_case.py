@@ -4,6 +4,7 @@ app: signature verification, event normalization, the handle_slack_event control
 mocked). No running stack, no golden_agent, no Slack.
 """
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -2089,3 +2090,102 @@ class TestStoredCredentialStillAccepted:
         assert not any(
             "revoke" in str(c) or "delete" in str(c) for c in repo.mock_calls
         )
+
+
+@pytest.mark.unit
+class TestUnlinkedTurnContext:
+    """An unlinked turn must tell the agent it isn't the user.
+
+    Without it the turn runs on the shared bot identity and can't tell, so it reports
+    on ITS OWN access as though it were the asker's. Observed in production:
+    confidently "no Linear access, verified two ways" plus an overstated GitHub claim,
+    while the gateway was simultaneously DMing that person a connect link. Two
+    messages that contradicted each other, one of them wrong about the user.
+
+    It also removes the reason the agent invents its own OAuth link — a URL with a
+    localhost redirect, which cannot work from Slack and reads like a real
+    instruction.
+    """
+
+    def test_unlinked_context_disclaims_personal_access(self):
+        text = sg._turn_content(_inbound(), "what's in my linear?", unlinked=True)
+        assert "NOT running as the person" in text
+        # Must not let the agent pass its own reach off as the user's.
+        assert "personal integrations" in text
+        assert "as if it were theirs" in text
+
+    def test_unlinked_context_forbids_inventing_oauth_links(self):
+        text = sg._turn_content(_inbound(), "hi", unlinked=True)
+        assert "do NOT generate authorization or OAuth links" in text
+        # And explains why there's no need: one is already on its way.
+        assert "ALREADY been sent a link" in text
+
+    def test_linked_turn_says_none_of_it(self):
+        text = sg._turn_content(_inbound(), "what's in my linear?", unlinked=False)
+        assert "NOT running as the person" not in text
+        assert "OAuth" not in text
+
+    def test_channel_context_survives_either_way(self):
+        # The disclaimer is additive: the agent still needs the channel id to read
+        # thread history with its Slack tools.
+        for unlinked in (True, False):
+            text = sg._turn_content(_inbound(channel="C9"), "hi", unlinked=unlinked)
+            assert "channel_id=C9" in text
+
+    def test_composes_with_the_self_posts_directive(self):
+        # golden-agent is both self-posting AND commonly unlinked; it needs both.
+        text = sg._turn_content(_inbound(), "hi", self_posts=True, unlinked=True)
+        assert "post_message" in text
+        assert "NOT running as the person" in text
+
+    def test_user_prompt_is_still_last(self):
+        # The prompt must follow the context, or the agent reads the directives as
+        # part of the question.
+        text = sg._turn_content(_inbound(), "MY QUESTION", unlinked=True)
+        assert text.rstrip().endswith("MY QUESTION")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestUnlinkedFlagIsWiredToIdentity:
+    """The flag tracks sgp_user_id — the same signal that offers the link — so the
+    agent is told it's unlinked exactly when the user is being asked to link, and the
+    two messages agree instead of contradicting each other."""
+
+    @staticmethod
+    def _acp(monkeypatch):
+        acp = MagicMock()
+        acp.agent_repository = MagicMock(get=AsyncMock(return_value=MagicMock()))
+        # Fails AFTER _turn_content has been built, which is all this test needs.
+        acp.handle_rpc_request = AsyncMock(side_effect=RuntimeError("stop here"))
+        monkeypatch.setattr(
+            "src.temporal.scheduled_agent_run_factory.build_acp_use_case_for_principal",
+            lambda *a, **k: acp,
+        )
+
+    @pytest.mark.parametrize(
+        "sgp_user_id, expect_unlinked", [("sgp-1", False), (None, True)]
+    )
+    async def test_flag_mirrors_whether_the_turn_runs_as_a_person(
+        self, monkeypatch, sgp_user_id, expect_unlinked
+    ):
+        captured = {}
+
+        def fake_turn_content(inbound, prompt, *, self_posts=False, unlinked=False):
+            captured["unlinked"] = unlinked
+            return "ctx"
+
+        monkeypatch.setattr(sg, "_turn_content", fake_turn_content)
+        self._acp(monkeypatch)
+
+        with contextlib.suppress(Exception):
+            await SlackGatewayUseCase()._dispatch(
+                sg.Target(agent_name="golden-agent", config_id=None),
+                _inbound(),
+                "hi",
+                {"user_id": "u"},
+                {"x-api-key": "k"},
+                sgp_user_id=sgp_user_id,
+            )
+
+        assert captured.get("unlinked") is expect_unlinked
