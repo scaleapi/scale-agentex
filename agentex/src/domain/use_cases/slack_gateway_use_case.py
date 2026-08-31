@@ -653,7 +653,7 @@ class SlackGatewayUseCase:
                         "elements": [
                             {
                                 "type": "mrkdwn",
-                                "text": f"via <@{user}> through *{agent}*",
+                                "text": f"<@{user}> asked *{agent}*",
                             }
                         ],
                     },

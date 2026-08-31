@@ -6,11 +6,20 @@ is the auth, verified in the use case against the app's signing secret from the
 secrets microservice. Delegates all logic to SlackGatewayUseCase.
 """
 
-from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi import APIRouter, BackgroundTasks, Request, Response
+from fastapi.responses import JSONResponse
 
 from src.domain.use_cases.slack_gateway_use_case import DSlackGatewayUseCase
 
 router = APIRouter(prefix="/slack", tags=["Slack"])
+
+
+def _slack_ack(result: dict) -> Response:
+    """Serialize a slash-command / interaction response for Slack. An ack-only result
+    (empty dict) becomes a truly EMPTY 200 body — Slack renders a bare ``{}`` JSON body
+    as a stray message, so "show nothing" must send no body, not ``{}``. A non-empty
+    result (ephemeral message / response_action) is sent as JSON."""
+    return JSONResponse(result) if result else Response(status_code=200)
 
 
 @router.post("/events", summary="Slack Events API ingress for the @agent app")
@@ -31,13 +40,15 @@ async def slack_events(
 async def slack_commands(
     request: Request,
     use_case: DSlackGatewayUseCase,
-) -> dict:
+) -> Response:
     # Slash commands are application/x-www-form-urlencoded, not JSON. Read the raw
     # body first (needed for signature verification), then parse the form.
     body = await request.body()
     form = dict(await request.form())
     headers = {k.lower(): v for k, v in request.headers.items()}
-    return await use_case.handle_slash_command(body=body, headers=headers, form=form)
+    return _slack_ack(
+        await use_case.handle_slash_command(body=body, headers=headers, form=form)
+    )
 
 
 @router.post("/interactions", summary="Slack interactivity ingress (modals, shortcuts)")
@@ -45,12 +56,14 @@ async def slack_interactions(
     request: Request,
     background: BackgroundTasks,
     use_case: DSlackGatewayUseCase,
-) -> dict:
+) -> Response:
     # Interactions are form-encoded with a JSON `payload` field. Raw body first (for
     # signature verification), then the form. The turn runs out-of-band like events.
     body = await request.body()
     form = dict(await request.form())
     headers = {k.lower(): v for k, v in request.headers.items()}
-    return await use_case.handle_interaction(
-        body=body, headers=headers, form=form, background=background
+    return _slack_ack(
+        await use_case.handle_interaction(
+            body=body, headers=headers, form=form, background=background
+        )
     )
