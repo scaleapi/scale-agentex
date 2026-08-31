@@ -1916,3 +1916,176 @@ class TestLinkOfferDiscoverability:
             AsyncMock(return_value={"ok": False, "error": "cannot_dm_bot"}),
         )
         assert await uc._offer_link(_inbound()) is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestStoredCredentialStillAccepted:
+    """A stored session can die before its recorded expiry — and a rejection is not
+    the same thing as a failure.
+
+    credential_expires_at is an upper bound. Sign out and the JWT stops being
+    honoured while the stored expiry still reads months away, so without this check
+    the gateway hands the agent a dead cookie, every user-scoped tool call 401s, and
+    nothing prompts a re-link because locally the credential looks fine.
+
+    The trap is over-applying it. A misconfigured or down auth service rejects
+    EVERYONE, and concluding "your credential is bad" would tell a whole workspace to
+    re-link — fixing nothing, since nothing is wrong with their credentials. The
+    adapter's exception types carry the distinction: ClientError (4xx) is a refusal
+    of this credential; ServiceError (5xx) and anything else mean the check broke.
+    """
+
+    def _verify(self, monkeypatch, raises=None, auth_url="http://auth.test"):
+        """Stub the verifier, and the env RESOLVER rather than os.environ.
+
+        resolve_environment_variable_dependency reads a GlobalDependencies singleton
+        built once per process, so monkeypatch.setenv never reaches it — a test that
+        set the variable would silently take the "authz disabled" path and pass for
+        the wrong reason.
+        """
+        import src.adapters.authentication.adapter_agentex_authn_proxy as ap
+        import src.config.dependencies as deps
+
+        async def verify(_self, _headers):
+            if raises is not None:
+                raise raises
+            return {"user_id": "sgp-1"}
+
+        monkeypatch.setattr(ap.AgentexAuthenticationProxy, "verify_headers", verify)
+        monkeypatch.setattr(
+            deps,
+            "resolve_environment_variable_dependency",
+            lambda key: auth_url if "AUTH_URL" in str(key) else "development",
+        )
+
+    @staticmethod
+    def _identity():
+        return SimpleNamespace(sgp_user_id="sgp-1")
+
+    @staticmethod
+    def _headers():
+        return {"cookie": "_identityJwt=abc", "x-selected-account-id": "acct-1"}
+
+    async def test_accepted_credential_is_usable(self, monkeypatch):
+        self._verify(monkeypatch)
+        uc = SlackGatewayUseCase()
+        assert await uc._credential_still_accepted(self._identity(), self._headers())
+
+    async def test_401_means_relink(self, monkeypatch):
+        from src.adapters.authentication.exceptions import AuthenticationError
+
+        self._verify(monkeypatch, raises=AuthenticationError("revoked"))
+        uc = SlackGatewayUseCase()
+        assert not await uc._credential_still_accepted(
+            self._identity(), self._headers()
+        )
+
+    async def test_403_also_means_relink(self, monkeypatch):
+        # A valid session that can no longer use the stored account needs a re-link
+        # to capture a current one.
+        from src.domain.exceptions import ClientError
+
+        class Forbidden(ClientError):
+            code = 403
+
+        self._verify(monkeypatch, raises=Forbidden("not in account"))
+        uc = SlackGatewayUseCase()
+        assert not await uc._credential_still_accepted(
+            self._identity(), self._headers()
+        )
+
+    @pytest.mark.parametrize(
+        "exc_name",
+        ["AuthenticationGatewayError", "AuthenticationServiceUnavailableError"],
+    )
+    async def test_service_errors_do_not_blame_the_credential(
+        self, monkeypatch, exc_name
+    ):
+        # 5xx from the verifier means the CHECK failed. Revoking everyone's access
+        # because a verification dependency is unwell is the outage-amplifying move.
+        import src.adapters.authentication.exceptions as exceptions
+
+        self._verify(monkeypatch, raises=getattr(exceptions, exc_name)("upstream"))
+        uc = SlackGatewayUseCase()
+        assert await uc._credential_still_accepted(self._identity(), self._headers())
+
+    @pytest.mark.parametrize("exc", [TimeoutError("slow"), RuntimeError("surprise")])
+    async def test_unexpected_failures_assume_the_credential_is_fine(
+        self, monkeypatch, exc
+    ):
+        self._verify(monkeypatch, raises=exc)
+        uc = SlackGatewayUseCase()
+        assert await uc._credential_still_accepted(self._identity(), self._headers())
+
+    async def test_skipped_entirely_when_authz_is_off(self, monkeypatch):
+        # Local dev with no auth service: nothing to verify against, and refusing
+        # every credential would make the feature untestable offline.
+        from src.adapters.authentication.exceptions import AuthenticationError
+
+        # Would reject if it were ever called — so a pass proves it wasn't.
+        self._verify(monkeypatch, raises=AuthenticationError("nope"), auth_url="")
+        uc = SlackGatewayUseCase()
+        assert await uc._credential_still_accepted(self._identity(), self._headers())
+
+    async def test_rejection_falls_back_to_the_bot_and_prompts(self, monkeypatch):
+        # End to end: a rejected credential must yield sgp_user_id=None, because that
+        # is precisely the condition _run_turn uses to offer a re-link.
+        from src.adapters.authentication.exceptions import AuthenticationError
+
+        uc = SlackGatewayUseCase()
+        identity = SimpleNamespace(
+            sgp_user_id="sgp-1", principal={"user_id": "sgp-1"}, sgp_account_id="acct-1"
+        )
+        monkeypatch.setattr(
+            uc, "_resolve_invoking_identity", AsyncMock(return_value=identity)
+        )
+        monkeypatch.setattr(
+            uc,
+            "_identity_link_service",
+            lambda: SimpleNamespace(
+                acting_headers=AsyncMock(return_value=self._headers())
+            ),
+        )
+        self._verify(monkeypatch, raises=AuthenticationError("revoked"))
+        monkeypatch.setattr(
+            uc, "_acting_identity", AsyncMock(return_value=("bot", {"x-api-key": "k"}))
+        )
+        monkeypatch.setattr(sg, "_REQUIRE_LINKED_USER", False)
+
+        principal, headers, sgp_user_id = await uc._turn_identity(_inbound())
+
+        assert principal == "bot"
+        assert headers == {"x-api-key": "k"}
+        assert sgp_user_id is None  # <- what makes _run_turn offer a re-link
+
+    async def test_credential_is_not_deleted_on_rejection(self, monkeypatch):
+        # Non-destructive on purpose: a systemic 401 costs a bot-fallback turn and a
+        # rate-limited nudge, then recovers by itself. Tombstoning rows would not.
+        from src.adapters.authentication.exceptions import AuthenticationError
+
+        uc = SlackGatewayUseCase()
+        repo = MagicMock()
+        service = SimpleNamespace(
+            acting_headers=AsyncMock(return_value=self._headers()), repository=repo
+        )
+        monkeypatch.setattr(
+            uc,
+            "_resolve_invoking_identity",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    sgp_user_id="sgp-1", principal={}, sgp_account_id="a"
+                )
+            ),
+        )
+        monkeypatch.setattr(uc, "_identity_link_service", lambda: service)
+        self._verify(monkeypatch, raises=AuthenticationError("revoked"))
+        monkeypatch.setattr(uc, "_acting_identity", AsyncMock(return_value=("bot", {})))
+        monkeypatch.setattr(sg, "_REQUIRE_LINKED_USER", False)
+
+        await uc._turn_identity(_inbound())
+
+        repo.revoke.assert_not_called()
+        assert not any(
+            "revoke" in str(c) or "delete" in str(c) for c in repo.mock_calls
+        )

@@ -759,16 +759,18 @@ class SlackGatewayUseCase:
         identity = await self._resolve_invoking_identity(inbound)
         if identity is not None:
             headers = await self._identity_link_service().acting_headers(identity)
-            if headers is not None:
+            if headers is not None and await self._credential_still_accepted(
+                identity, headers
+            ):
                 logger.info(
                     "[slack] turn acting as sgp user %s (linked from %s)",
                     identity.sgp_user_id,
                     inbound.user,
                 )
                 return identity.principal, headers, identity.sgp_user_id
-            # Linked but unusable — no stored key, expired, or undecryptable. The
-            # service has already logged which. Treated the same as unlinked here;
-            # re-link prompting is handled separately.
+            # Linked but unusable — no stored credential, locally expired,
+            # undecryptable, or rejected upstream. Falls through to the bot with
+            # sgp_user_id=None, which is what makes the caller offer a re-link.
 
         if _REQUIRE_LINKED_USER:
             logger.info(
@@ -784,6 +786,85 @@ class SlackGatewayUseCase:
             inbound.user,
         )
         return bot_principal, bot_headers, None
+
+    async def _credential_still_accepted(
+        self, identity: Any, headers: dict[str, str]
+    ) -> bool:
+        """Whether the stored session is still accepted upstream.
+
+        ``credential_expires_at`` is an upper bound, not a guarantee. A session JWT
+        stops being honoured the moment its owner signs out or it is revoked, while
+        the stored expiry still reads months away — so without this check the gateway
+        hands the agent a dead cookie, every user-scoped tool call fails with a 401
+        the agent can only report as "I can't reach your Notion", and nothing ever
+        prompts a re-link because locally the credential looks fine.
+
+        **A rejection is not the same as a failure**, and conflating them is the trap
+        here. If the auth service is misconfigured or down it will reject or error on
+        *everyone*, and concluding "your credential is bad" would tell an entire
+        workspace to re-link — which would fix nothing, because nothing is wrong with
+        their credentials. The distinction comes from the adapter's own exception
+        types rather than from guesswork:
+
+        - ``AuthenticationError`` / ``AuthorizationError`` — this credential was
+          refused. Re-linking is the remedy, so report it unusable. 403 counts: a
+          valid session that can no longer use the stored account needs a re-link to
+          pick up a current one.
+        - anything else (gateway error, service unavailable, timeout, surprise) —
+          the *check* failed, not the credential. Assume it's good and proceed. An
+          outage in a verification step must not revoke everyone's access.
+
+        Deliberately non-destructive: nothing is deleted or tombstoned on rejection.
+        The row keeps its credential, so a systemic 401 costs a bot-fallback turn and
+        a rate-limited nudge, and recovers by itself when the upstream does. Cheap
+        enough to run per turn — the shared-bot path already verifies its own key on
+        every turn, so this is the same cost profile, not a new one.
+        """
+        # Local imports avoid an import cycle at module load.
+        from src.adapters.authentication.adapter_agentex_authn_proxy import (
+            AgentexAuthenticationProxy,
+        )
+        from src.config.dependencies import resolve_environment_variable_dependency
+        from src.config.environment_variables import EnvVarKeys
+
+        # ClientError is the 4xx base and a *sibling* of ServiceError, not a parent —
+        # so catching it gets "your credential was refused" and never "the service
+        # broke". That split is the whole reason this can be safe.
+        from src.domain.exceptions import ClientError
+
+        try:
+            auth_url = resolve_environment_variable_dependency(
+                EnvVarKeys.AGENTEX_AUTH_URL
+            )
+        except Exception:  # noqa: BLE001 - authz off locally: nothing to verify against
+            return True
+        if not auth_url:
+            return True
+
+        authn = AgentexAuthenticationProxy(
+            agentex_auth_url=auth_url,
+            environment=resolve_environment_variable_dependency(EnvVarKeys.ENVIRONMENT),
+        )
+        try:
+            await authn.verify_headers(dict(headers))
+            return True
+        except ClientError as exc:
+            # 4xx: upstream looked at this credential and refused it.
+            logger.info(
+                "identity_link_credential_rejected",
+                extra={
+                    "sgp_user_id": getattr(identity, "sgp_user_id", None),
+                    "reason": type(exc).__name__,
+                },
+            )
+            return False
+        except Exception:  # noqa: BLE001 - the check failed, not the credential
+            logger.warning(
+                "identity_link_credential_check_failed",
+                extra={"sgp_user_id": getattr(identity, "sgp_user_id", None)},
+                exc_info=True,
+            )
+            return True
 
     def _identity_link_service(self):
         """Build the identity-link service.
