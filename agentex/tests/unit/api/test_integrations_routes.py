@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import BackgroundTasks
 from src.api.routes import integrations as mod
 from src.domain.entities.identity_links import IdentityLinkMethod, IdentityProvider
 from src.domain.services.link_nonce_service import LinkRequest
@@ -71,6 +72,15 @@ _PRINCIPAL = {
     "account_id": "acct-1",
     "raw_user": {"email": _SGP_EMAIL},
 }
+
+
+async def _confirm(request, nonce: str = "tok", background=None):
+    """Call the confirm handler with a BackgroundTasks, which it needs for the replay."""
+    return await mod.slack_link_confirm(
+        request,
+        background if background is not None else BackgroundTasks(),
+        nonce=nonce,
+    )
 
 
 @pytest.fixture
@@ -133,7 +143,7 @@ class TestConfirmationPage:
 @pytest.mark.asyncio
 class TestConfirm:
     async def test_stores_the_callers_session_and_invalidates(self, wiring):
-        resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
+        resp = await _confirm(_request(_PRINCIPAL), nonce="tok")
 
         assert resp.status_code == 200
         assert "connected" in resp.body.decode().lower()
@@ -154,7 +164,7 @@ class TestConfirm:
         wiring.service.invalidate.assert_awaited_once()
 
     async def test_expiry_comes_from_the_token_not_a_guessed_ttl(self, wiring):
-        await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
+        await _confirm(_request(_PRINCIPAL), nonce="tok")
         stored = wiring.repo.upsert_link.await_args.kwargs["credential_expires_at"]
         # ~150 days out, from the JWT's own exp claim.
         assert 149 <= (stored - datetime.now(UTC)).days <= 150
@@ -163,7 +173,7 @@ class TestConfirm:
         # Never store an unbounded credential: an unknown expiry becomes a short
         # known one rather than "valid forever".
         req = _request(_PRINCIPAL, cookie=f"_identityJwt={_jwt(None)}")
-        resp = await mod.slack_link_confirm(req, nonce="tok")
+        resp = await _confirm(req, nonce="tok")
 
         assert resp.status_code == 200
         stored = wiring.repo.upsert_link.await_args.kwargs["credential_expires_at"]
@@ -175,7 +185,7 @@ class TestConfirm:
             _PRINCIPAL,
             cookie=f"_identityJwt={_jwt(datetime.now(UTC) - timedelta(minutes=1))}",
         )
-        resp = await mod.slack_link_confirm(req, nonce="tok")
+        resp = await _confirm(req, nonce="tok")
 
         assert resp.status_code == 401
         # Storing it would create a link that can never work.
@@ -186,7 +196,7 @@ class TestConfirm:
         # Authenticated by an api-key or bearer rather than a browser session: there
         # is nothing here we could act through later.
         req = _request(_PRINCIPAL, cookie="_ga=GA1.2.x; csrftoken=abc")
-        resp = await mod.slack_link_confirm(req, nonce="tok")
+        resp = await _confirm(req, nonce="tok")
 
         assert resp.status_code == 400
         wiring.repo.upsert_link.assert_not_awaited()
@@ -196,24 +206,24 @@ class TestConfirm:
         # The secrets service requires account context, so a link without one would
         # look connected and resolve nothing.
         req = _request({**_PRINCIPAL, "account_id": None})
-        resp = await mod.slack_link_confirm(req, nonce="tok")
+        resp = await _confirm(req, nonce="tok")
 
         assert resp.status_code == 400
         assert "account" in resp.body.decode().lower()
         wiring.repo.upsert_link.assert_not_awaited()
 
     async def test_nonce_is_consumed_only_after_a_successful_store(self, wiring):
-        await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
+        await _confirm(_request(_PRINCIPAL), nonce="tok")
         wiring.nonce.consume.assert_awaited_once()
 
     async def test_expired_nonce_is_refused(self, wiring):
         wiring.nonce.peek = AsyncMock(return_value=None)
-        resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="stale")
+        resp = await _confirm(_request(_PRINCIPAL), nonce="stale")
         assert resp.status_code == 400
         wiring.repo.upsert_link.assert_not_awaited()
 
     async def test_unauthenticated_stores_nothing(self, wiring):
-        resp = await mod.slack_link_confirm(_request(None), nonce="tok")
+        resp = await _confirm(_request(None), nonce="tok")
         assert resp.status_code == 401
         wiring.repo.upsert_link.assert_not_awaited()
 
@@ -223,7 +233,7 @@ class TestConfirm:
         wiring.repo.get_active_by_sgp_user = AsyncMock(
             return_value=SimpleNamespace(external_user_id="U-someone-else")
         )
-        resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
+        resp = await _confirm(_request(_PRINCIPAL), nonce="tok")
 
         assert resp.status_code == 409
         assert "already linked" in resp.body.decode().lower()
@@ -235,7 +245,7 @@ class TestConfirm:
         wiring.repo.get_active_by_sgp_user = AsyncMock(
             return_value=SimpleNamespace(external_user_id="U1")
         )
-        resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
+        resp = await _confirm(_request(_PRINCIPAL), nonce="tok")
         assert resp.status_code == 200
         wiring.repo.upsert_link.assert_awaited_once()
 
@@ -247,7 +257,7 @@ class TestConfirm:
         wiring.repo.upsert_link = AsyncMock(
             side_effect=mod.CredentialEncryptionError("key unset")
         )
-        resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
+        resp = await _confirm(_request(_PRINCIPAL), nonce="tok")
 
         assert resp.status_code == 503
         assert (
@@ -289,19 +299,19 @@ class TestEmailMatch:
 
     async def test_matching_emails_link_successfully(self, wiring, monkeypatch):
         self._slack_profile(monkeypatch, email=_SGP_EMAIL)
-        resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
+        resp = await _confirm(_request(_PRINCIPAL), nonce="tok")
         assert resp.status_code == 200
         wiring.repo.upsert_link.assert_awaited_once()
 
     async def test_match_ignores_case_and_surrounding_space(self, wiring, monkeypatch):
         self._slack_profile(monkeypatch, email=f"  {_SGP_EMAIL.upper()} ")
-        resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
+        resp = await _confirm(_request(_PRINCIPAL), nonce="tok")
         assert resp.status_code == 200
 
     async def test_mismatch_is_refused_and_stores_nothing(self, wiring, monkeypatch):
         self._slack_profile(monkeypatch, email="attacker@example.com")
 
-        resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
+        resp = await _confirm(_request(_PRINCIPAL), nonce="tok")
 
         assert resp.status_code == 403
         wiring.repo.upsert_link.assert_not_awaited()
@@ -316,7 +326,7 @@ class TestEmailMatch:
         # won't tell us. Refusing here would block every link in the workspace, so
         # the check stands down rather than failing closed.
         self._slack_profile(monkeypatch, email=None, error="missing_scope")
-        resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
+        resp = await _confirm(_request(_PRINCIPAL), nonce="tok")
         assert resp.status_code == 200
         wiring.repo.upsert_link.assert_awaited_once()
 
@@ -325,23 +335,21 @@ class TestEmailMatch:
         # would make linking fail randomly, and the gap isn't attacker-reachable:
         # nobody outside our infrastructure decides whether our Slack call succeeds.
         self._slack_profile(monkeypatch, email=None, error="request_failed")
-        resp = await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
+        resp = await _confirm(_request(_PRINCIPAL), nonce="tok")
         assert resp.status_code == 200
 
     async def test_missing_sgp_email_allows_the_link(self, wiring, monkeypatch):
         # Slack told us, but the SGP principal carries no email: nothing to compare
         # against, so the same "can't verify, don't block" rule applies.
         self._slack_profile(monkeypatch, email="someone@example.com")
-        resp = await mod.slack_link_confirm(
-            _request({**_PRINCIPAL, "raw_user": {}}), nonce="tok"
-        )
+        resp = await _confirm(_request({**_PRINCIPAL, "raw_user": {}}), nonce="tok")
         assert resp.status_code == 200
 
     async def test_the_check_runs_on_every_confirm(self, wiring, monkeypatch):
         # No flag means no way to accidentally leave it off: granting the scope is
         # the only thing standing between here and enforcement.
         probe = self._slack_profile(monkeypatch, email=_SGP_EMAIL)
-        await mod.slack_link_confirm(_request(_PRINCIPAL), nonce="tok")
+        await _confirm(_request(_PRINCIPAL), nonce="tok")
         probe.assert_awaited_once()
         assert probe.await_args.args[0] == "U1"
 
@@ -422,9 +430,7 @@ class TestNoRawIdentifiersOnThePage:
 
     async def test_success_page_does_not_print_the_uuid(self, wiring, monkeypatch):
         self._no_slack_lookup(monkeypatch)
-        resp = await mod.slack_link_confirm(
-            _request({**_PRINCIPAL, "raw_user": {}}), nonce="tok"
-        )
+        resp = await _confirm(_request({**_PRINCIPAL, "raw_user": {}}), nonce="tok")
         assert resp.status_code == 200
         assert _SGP_USER not in resp.body.decode()
 
@@ -492,3 +498,66 @@ class TestMultiNameCookieAllowlist:
         self._allow(monkeypatch, "_identityJwt,_jwt")
         assert session_cookie_names() == ("_identityJwt", "_jwt")
         assert session_cookie_name() == "_identityJwt"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestPendingTurnReplay:
+    """Linking should answer the question that prompted it.
+
+    Without a replay the flow is ask -> get a link -> click -> ASK AGAIN, dropping the
+    person's actual question at the exact moment we could finally answer it.
+    """
+
+    async def test_replay_is_scheduled_after_a_successful_link(self, wiring):
+        bg = BackgroundTasks()
+        resp = await _confirm(_request(_PRINCIPAL), background=bg)
+
+        assert resp.status_code == 200
+        assert len(bg.tasks) == 1
+        task = bg.tasks[0]
+        assert task.kwargs["team_id"] == "T1"
+        assert task.kwargs["user_id"] == "U1"
+        assert task.kwargs["pending_turn"]["text"] == "hi"
+
+    async def test_page_says_the_answer_is_coming(self, wiring):
+        resp = await _confirm(_request(_PRINCIPAL))
+        assert "answering the message you sent" in resp.body.decode()
+
+    async def test_no_pending_turn_schedules_nothing(self, wiring):
+        wiring.nonce.peek = AsyncMock(return_value=_link_request(pending_turn=None))
+        bg = BackgroundTasks()
+        resp = await _confirm(_request(_PRINCIPAL), background=bg)
+
+        assert resp.status_code == 200
+        assert bg.tasks == []
+        # And the copy tells them to ask again, rather than promising an answer.
+        assert "ask again" in resp.body.decode().lower()
+
+    async def test_a_refused_link_replays_nothing(self, wiring, monkeypatch):
+        # 403 on an email mismatch: no link was stored, so there is nobody to answer
+        # as. Replaying here would run the question as the shared bot.
+        import src.domain.use_cases.slack_gateway_use_case as sg
+
+        monkeypatch.setattr(
+            sg,
+            "slack_user_profile",
+            AsyncMock(return_value={"email": "attacker@example.com", "error": None}),
+        )
+        bg = BackgroundTasks()
+        resp = await _confirm(_request(_PRINCIPAL), background=bg)
+
+        assert resp.status_code == 403
+        assert bg.tasks == []
+        wiring.repo.upsert_link.assert_not_awaited()
+
+    async def test_replay_ordered_after_the_nonce_and_cache_work(self, wiring):
+        # The replay resolves the link it just created, so it must run after the cache
+        # invalidation — otherwise a negative cache entry makes it run as the bot.
+        bg = BackgroundTasks()
+        await _confirm(_request(_PRINCIPAL), background=bg)
+
+        wiring.repo.upsert_link.assert_awaited_once()
+        wiring.nonce.consume.assert_awaited_once()
+        wiring.service.invalidate.assert_awaited_once()
+        assert len(bg.tasks) == 1  # scheduled, so it runs after this response

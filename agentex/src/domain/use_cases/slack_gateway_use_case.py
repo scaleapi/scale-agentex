@@ -681,7 +681,9 @@ class SlackGatewayUseCase:
         background.add_task(self._run_turn, inbound)
         return {}  # empty 200 closes the modal
 
-    async def _run_turn(self, inbound: InboundSlack) -> None:
+    async def _run_turn(
+        self, inbound: InboundSlack, *, offer_link: bool = True
+    ) -> None:
         try:
             # Whose identity runs this turn.
             #
@@ -697,12 +699,18 @@ class SlackGatewayUseCase:
             # personal integrations. Prompting them to link is a separate concern.
             principal, auth_headers, sgp_user_id = await self._turn_identity(inbound)
 
-            if sgp_user_id is None:
+            if sgp_user_id is None and offer_link:
                 # Not running as a person: either unlinked, or linked with a
                 # credential we can't use (expired session, undecryptable). Offer the
                 # link either way — a dead credential needs the same fix as no
                 # credential. Rate-limited and best-effort; it never affects the turn,
                 # which continues as the bot below (or is refused just after).
+                #
+                # ``offer_link`` is False for a replay fired by the link callback. That
+                # turn exists *because* the user just linked, so nudging them again
+                # would be absurd — and if the fresh link somehow still doesn't
+                # resolve, offering would mint another nonce, DM another link, and
+                # invite the same loop again on the next click.
                 await self._offer_link(inbound)
 
             if principal is None and auth_headers is None:
@@ -815,6 +823,55 @@ class SlackGatewayUseCase:
             inbound.user,
         )
         return bot_principal, bot_headers, None
+
+    async def replay_pending_turn(
+        self, *, team_id: str, user_id: str, pending_turn: dict[str, Any] | None
+    ) -> bool:
+        """Re-run the message that prompted a link, now that the user has linked.
+
+        Called by the link callback. Without it the flow is ask -> get a link ->
+        click -> **ask again**, and the question the person actually had is dropped on
+        the floor at the exact moment we finally could have answered it.
+
+        The replay lands in a *new* task, for free: the task key includes the SGP user
+        id, so the same Slack thread keys differently once linked
+        (``slack:{ts}`` -> ``slack:{team}:{channel}:{ts}:{sgp_user}``). That means a
+        fresh turn-1 session with their credentials — none of the toolset pinning that
+        makes enabling an MCP mid-conversation a no-op. The pre-link exchange isn't in
+        that task's history, but the agent can read the Slack thread with its own
+        tools, which the context prefix tells it how to do.
+
+        Returns whether a replay was started. Best-effort by contract: the caller has
+        already stored the link and must not fail, or roll it back, because a replay
+        didn't happen.
+        """
+        if not pending_turn:
+            return False
+        text = (pending_turn.get("text") or "").strip()
+        channel = pending_turn.get("channel") or ""
+        if not (text and channel and team_id and user_id):
+            logger.info(
+                "[slack] link replay skipped: incomplete pending turn",
+                extra={"has_text": bool(text), "has_channel": bool(channel)},
+            )
+            return False
+
+        inbound = InboundSlack(
+            team_id=team_id,
+            channel=channel,
+            user=user_id,
+            text=text,
+            thread_ts=pending_turn.get("thread_ts") or "",
+            # Re-derived exactly as normalize() does, so a selector-driven turn
+            # ("@agent some-config ...") resolves to the same target it would have.
+            selector=text.split(maxsplit=1)[0] if text else None,
+        )
+        # The indicator matters here: the answer arrives minutes after the user
+        # clicked a web page, so without it a reply appears from nowhere.
+        await self._set_status(inbound, "is thinking…")
+        # offer_link=False: see _run_turn. A replay must never nudge again.
+        await self._run_turn(inbound, offer_link=False)
+        return True
 
     async def _credential_still_accepted(
         self, identity: Any, headers: dict[str, str]

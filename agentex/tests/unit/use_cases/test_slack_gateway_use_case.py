@@ -2189,3 +2189,124 @@ class TestUnlinkedFlagIsWiredToIdentity:
             )
 
         assert captured.get("unlinked") is expect_unlinked
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestReplayPendingTurn:
+    """Re-running the message that prompted a link."""
+
+    def _wire(self, monkeypatch):
+        uc = SlackGatewayUseCase()
+        ran = {}
+
+        async def run_turn(inbound, *, offer_link=True):
+            ran["inbound"] = inbound
+            ran["offer_link"] = offer_link
+
+        monkeypatch.setattr(uc, "_run_turn", run_turn)
+        monkeypatch.setattr(uc, "_set_status", AsyncMock())
+        return uc, ran
+
+    async def test_reconstructs_the_original_turn(self, monkeypatch):
+        uc, ran = self._wire(monkeypatch)
+        ok = await uc.replay_pending_turn(
+            team_id="T1",
+            user_id="U1",
+            pending_turn={
+                "text": "what's in my linear?",
+                "channel": "C9",
+                "thread_ts": "1700.1",
+            },
+        )
+        assert ok
+        inbound = ran["inbound"]
+        assert (inbound.team_id, inbound.user) == ("T1", "U1")
+        assert (inbound.channel, inbound.thread_ts) == ("C9", "1700.1")
+        assert inbound.text == "what's in my linear?"
+
+    async def test_selector_is_rederived_like_normalize(self, monkeypatch):
+        # A selector-driven turn must resolve to the same target it would have; the
+        # nonce stores only the text, so the selector is re-derived the same way.
+        uc, ran = self._wire(monkeypatch)
+        await uc.replay_pending_turn(
+            team_id="T1",
+            user_id="U1",
+            pending_turn={"text": "some-config summarise this", "channel": "C1"},
+        )
+        assert ran["inbound"].selector == "some-config"
+
+    async def test_never_offers_another_link(self, monkeypatch):
+        # The loop guard. This turn exists BECAUSE they just linked; offering again
+        # would mint a nonce, DM a link, and invite the same loop on the next click.
+        uc, ran = self._wire(monkeypatch)
+        await uc.replay_pending_turn(
+            team_id="T1", user_id="U1", pending_turn={"text": "hi", "channel": "C1"}
+        )
+        assert ran["offer_link"] is False
+
+    async def test_sets_the_thinking_indicator(self, monkeypatch):
+        # The answer lands minutes after the user clicked a web page, so without this
+        # a reply appears out of nowhere.
+        uc, _ran = self._wire(monkeypatch)
+        await uc.replay_pending_turn(
+            team_id="T1", user_id="U1", pending_turn={"text": "hi", "channel": "C1"}
+        )
+        uc._set_status.assert_awaited_once()
+
+    @pytest.mark.parametrize(
+        "pending",
+        [
+            None,
+            {},
+            {"text": "", "channel": "C1"},
+            {"text": "hi", "channel": ""},
+            {"text": "   ", "channel": "C1"},
+        ],
+    )
+    async def test_incomplete_pending_turn_does_nothing(self, monkeypatch, pending):
+        uc, ran = self._wire(monkeypatch)
+        assert (
+            await uc.replay_pending_turn(
+                team_id="T1", user_id="U1", pending_turn=pending
+            )
+            is False
+        )
+        assert ran == {}
+
+    async def test_missing_identity_does_nothing(self, monkeypatch):
+        uc, ran = self._wire(monkeypatch)
+        assert (
+            await uc.replay_pending_turn(
+                team_id="", user_id="U1", pending_turn={"text": "hi", "channel": "C1"}
+            )
+            is False
+        )
+        assert ran == {}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestOfferLinkSuppression:
+    async def test_run_turn_skips_the_offer_when_told_to(self, monkeypatch):
+        uc = SlackGatewayUseCase()
+        offered = []
+        monkeypatch.setattr(
+            uc, "_offer_link", AsyncMock(side_effect=lambda i: offered.append(i))
+        )
+        # Unlinked: normally this is exactly when an offer fires.
+        monkeypatch.setattr(
+            uc,
+            "_turn_identity",
+            AsyncMock(return_value=("bot", {"x-api-key": "k"}, None)),
+        )
+        monkeypatch.setattr(
+            uc, "_resolve_target", AsyncMock(side_effect=RuntimeError("stop"))
+        )
+        monkeypatch.setattr(uc, "_deliver", AsyncMock())
+
+        await uc._run_turn(_inbound(), offer_link=False)
+        assert offered == []
+
+        await uc._run_turn(_inbound(), offer_link=True)
+        assert len(offered) == 1
