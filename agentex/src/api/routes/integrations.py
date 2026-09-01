@@ -276,8 +276,9 @@ async def slack_link_page(request: Request, nonce: str = "") -> HTMLResponse:
     return _page(
         "Connect your account",
         "<h1>Connect your Slack account?</h1>"
-        "<p>This lets the agent use <strong>your</strong> connected tools "
-        "(Notion, Linear, …) when you ask it something in Slack.</p>"
+        "<p>Anything you ask in Slack will run as <strong>you</strong> — any agent "
+        "you @mention acts with your identity and your own access, instead of a "
+        "shared account.</p>"
         "<dl>"
         f"<dt>Slack</dt><dd>{html.escape(slack_who or _UNKNOWN_IDENTITY)}</dd>"
         f"<dt>SGP</dt><dd>{html.escape(email or _UNKNOWN_IDENTITY)}</dd>"

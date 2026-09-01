@@ -1513,8 +1513,8 @@ class SlackGatewayUseCase:
             # is actually looking at, so still hand them the live link.
             await self._post_ephemeral(
                 inbound,
-                f"<{url}|Connect your SGP account> to let me use your own tools "
-                f"when you ask me things here.\n"
+                f"<{url}|Connect your SGP account> so what you ask here runs as "
+                f"you, with your own access, instead of a shared account.\n"
                 f"_Only you can see this. The same link is in "
                 f"<{dm_deeplink}|our DM>._",
             )
@@ -1525,8 +1525,11 @@ class SlackGatewayUseCase:
                 "channel": dm_channel,
                 "unfurl_links": False,
                 "text": (
-                    "Connect your SGP account and I'll use *your* tools "
-                    "(Notion, Linear, …) when you ask me things in Slack.\n\n"
+                    "Connect your SGP account so anything you ask in Slack runs "
+                    "as *you*.\n\n"
+                    "Any agent you @mention will act with your identity and your "
+                    "own access, instead of a shared account. You only need to do "
+                    "this once.\n\n"
                     f"<{url}|Connect my account>\n\n"
                     "This link is just for you and expires in a few minutes. "
                     "Don't forward it — anyone who opens it could connect your "
@@ -1547,8 +1550,8 @@ class SlackGatewayUseCase:
         )
         await self._post_ephemeral(
             inbound,
-            f"<{url}|Connect your SGP account> and I'll use your own tools "
-            f"(Notion, Linear, …) when you ask me things here.\n"
+            f"<{url}|Connect your SGP account> so what you ask here runs as you, "
+            f"with your own access, instead of a shared account.\n"
             f"_Only you can see this message. I've also sent the link to "
             f"<{dm_deeplink}|our DM>, in case this one disappears._",
         )
