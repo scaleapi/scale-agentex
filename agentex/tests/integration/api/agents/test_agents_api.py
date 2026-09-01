@@ -810,6 +810,30 @@ class TestAgentsAPIIntegration:
         response = await isolated_client.get("/agents?agent_card_metadata=[1,2,3]")
         assert response.status_code == 400
 
+    @pytest.mark.parametrize(
+        "raw_filter",
+        [
+            '{"x": NaN}',
+            '{"x": Infinity}',
+            '{"x": -Infinity}',
+            '{"x": 1e1000000}',
+            '{"x": [1, NaN]}',
+            '{"x": {"nested": Infinity}}',
+            '{"x": ' + "9" * 5000 + "}",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_list_agents_agent_card_metadata_non_finite_numbers_return_400(
+        self, isolated_client, raw_filter
+    ):
+        """Values Python's json accepts but JSON doesn't are rejected as 400, not
+        passed through to the JSONB bind parameter where they'd surface as a 500."""
+        response = await isolated_client.get(
+            "/agents", params={"agent_card_metadata": raw_filter}
+        )
+        assert response.status_code == 400
+        assert "agent_card_metadata" in response.json()["message"]
+
     @pytest.mark.asyncio
     async def test_list_agents_agent_card_metadata_empty_object_requires_metadata(
         self, isolated_client
