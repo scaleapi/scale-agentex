@@ -2563,10 +2563,7 @@ paths:
           description: Successful Response
           content:
             application/json:
-              schema:
-                additionalProperties: true
-                type: object
-                title: Response Slack Commands Slack Commands Post
+              schema: {}
   /slack/interactions:
     post:
       tags:
@@ -2578,10 +2575,7 @@ paths:
           description: Successful Response
           content:
             application/json:
-              schema:
-                additionalProperties: true
-                type: object
-                title: Response Slack Interactions Slack Interactions Post
+              schema: {}
   /tracker/{tracker_id}:
     get:
       tags:
