@@ -46,6 +46,9 @@ class HealthCheckWorkflow:
         agent_id = workflow_args["agent_id"]
         acp_url = workflow_args["acp_url"]
 
+        # Fresh runs arm recovery; pre-patch histories retain their original commands.
+        recover_on_next_success = workflow.patched("recover-unhealthy-on-success")
+
         logger.info(f"Starting execution for agent {agent_id}")
 
         failure_counter = workflow_args.get("failure_counter", 0)
@@ -73,26 +76,32 @@ class HealthCheckWorkflow:
                 failure_counter += 1
             if failure_counter >= 5:
                 # Agent is officially unhealthy
-                await workflow.execute_activity(
-                    UPDATE_AGENT_STATUS_ACTIVITY,
-                    args=[agent_id, "Unhealthy"],
-                    start_to_close_timeout=timedelta(seconds=30),
-                    retry_policy=RetryPolicy(
-                        maximum_attempts=3,
-                        initial_interval=timedelta(seconds=1),
-                        backoff_coefficient=2.0,
-                    ),
-                )
+                await self._update_agent_status(agent_id, "Unhealthy")
                 # Stop health check workflow until agent registers again
                 return
 
             # If health check succeeds, reset the counter
             if success:
                 failure_counter = 0
+                if recover_on_next_success:
+                    await self._update_agent_status(agent_id, "Ready")
+                    recover_on_next_success = False
 
         workflow_args["failure_counter"] = failure_counter
         workflow.continue_as_new(
             arg=workflow_args,
+        )
+
+    async def _update_agent_status(self, agent_id: str, status: str) -> None:
+        await workflow.execute_activity(
+            UPDATE_AGENT_STATUS_ACTIVITY,
+            args=[agent_id, status],
+            start_to_close_timeout=timedelta(seconds=30),
+            retry_policy=RetryPolicy(
+                maximum_attempts=3,
+                initial_interval=timedelta(seconds=1),
+                backoff_coefficient=2.0,
+            ),
         )
 
     def should_continue_as_new(self) -> bool:

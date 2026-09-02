@@ -2310,3 +2310,30 @@ class TestOfferLinkSuppression:
 
         await uc._run_turn(_inbound(), offer_link=True)
         assert len(offered) == 1
+
+
+# --- route-level ack shape -------------------------------------------------
+#
+# Slack renders a slash-command / interaction response body verbatim, so "show
+# nothing" has to be an EMPTY body. Returning {} from the route made FastAPI
+# serialize a literal `{}`, which Slack printed in the channel after /agents had
+# already opened its modal.
+
+
+def test_slack_ack_empty_payload_sends_no_body():
+    from src.api.routes.slack import _slack_ack
+
+    resp = _slack_ack({})
+    assert resp.status_code == 200
+    assert resp.body == b""
+
+
+def test_slack_ack_passes_through_a_real_message():
+    from src.api.routes.slack import _slack_ack
+
+    resp = _slack_ack({"response_type": "ephemeral", "text": "Unsupported command: /x"})
+    assert resp.status_code == 200
+    assert json.loads(resp.body) == {
+        "response_type": "ephemeral",
+        "text": "Unsupported command: /x",
+    }
