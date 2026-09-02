@@ -1,0 +1,5 @@
+{
+  "openapi_spec": "../agentex/openapi.yaml",
+  "stainless_config": "stainless.yml",
+  "output_path": "./sdks"
+}
