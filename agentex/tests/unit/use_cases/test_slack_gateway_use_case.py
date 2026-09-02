@@ -330,7 +330,8 @@ class TestTurnContent:
 @pytest.mark.unit
 class TestResolveTarget:
     @pytest.mark.asyncio
-    async def test_unmatched_selector_falls_back_to_default_config(self):
+    async def test_unmatched_selector_falls_back_to_default_config(self, monkeypatch):
+        monkeypatch.setattr(sg, "_DEFAULT_CONFIG_ID", "pinned-default")
         # selector names no SGP config and no registered agent -> golden-agent + the
         # default config id; the whole message stays the prompt (nothing stripped).
         uc = SlackGatewayUseCase()
@@ -343,7 +344,7 @@ class TestResolveTarget:
             selector="pr-bot",
         )
         target, prompt = await uc._resolve_target(inbound, {})
-        assert target == Target("golden-agent", config_id=sg._DEFAULT_CONFIG_ID)
+        assert target == Target("golden-agent", config_id="pinned-default")
         assert prompt == "pr-bot do it"
 
     @pytest.mark.asyncio
@@ -437,7 +438,7 @@ class TestDispatch:
             selector=None,
         )
         await SlackGatewayUseCase()._dispatch(
-            Target("golden-agent", config_id=sg._DEFAULT_CONFIG_ID),
+            Target("golden-agent", config_id="cfg-1"),
             inbound,
             "hello",
             None,
@@ -448,9 +449,9 @@ class TestDispatch:
         first, second = acp.handle_rpc_request.await_args_list
         assert first.kwargs["method"] == AgentRPCMethod.TASK_CREATE
         assert first.kwargs["params"].name == "slack:1700000000.000100"
-        # First turn passes the default agent_config id so golden-agent resolves its
+        # First turn passes the resolved agent_config id so golden-agent resolves its
         # full turn config (prompt/model/tools) from it.
-        assert first.kwargs["params"].params["config_id"] == sg._DEFAULT_CONFIG_ID
+        assert first.kwargs["params"].params["config_id"] == "cfg-1"
         assert second.kwargs["method"] == AgentRPCMethod.EVENT_SEND
         # The turn content carries the user's prompt plus the Slack channel context so
         # the agent can point its Slack tools at the right conversation.
@@ -908,6 +909,8 @@ class TestConfigIdResolution:
         captured = {}
 
         class _Resp:
+            status_code = 200
+
             def json(self):
                 return {"items": [{"id": "cfg-123", "name": "my-config"}]}
 
@@ -933,7 +936,7 @@ class TestConfigIdResolution:
         assert captured["url"].endswith("/v5/agent_configs")
         assert captured["params"] == {"name": "my-config"}
         assert captured["headers"]["x-api-key"] == "k"
-        assert sg._CONFIG_ID_CACHE[("acct1", "my-config")] == "cfg-123"  # cached
+        assert sg._cache_get(("acct1", "", "my-config")) == "cfg-123"  # cached
 
     @pytest.mark.asyncio
     async def test_resolve_config_id_none_without_base_or_key(self, monkeypatch):
@@ -952,6 +955,8 @@ class TestConfigIdResolution:
         captured = {}
 
         class _Resp:
+            status_code = 200
+
             def json(self):
                 return {"items": [{"name": "my-config", "id": "cfg-7"}]}
 
@@ -1046,6 +1051,8 @@ class TestDeliver:
         captured = {}
 
         class _Resp:
+            status_code = 200
+
             def json(self):
                 return {"ok": True}
 
@@ -2337,3 +2344,515 @@ def test_slack_ack_passes_through_a_real_message():
         "response_type": "ephemeral",
         "text": "Unsupported command: /x",
     }
+
+
+# --- per-user Slack config -------------------------------------------------
+#
+# An SGP agent_config belongs to whoever created it and is invisible to everyone
+# else, and golden-agent reads the config AS THE TURN'S IDENTITY. So a linked
+# user pointed at a shared config fails turn-1 resolution, the event is dropped,
+# and Slack shows a hang. Each linked user therefore gets their own config named
+# `slack-agentex-bot`, created on demand.
+
+
+class _FakeSGP:
+    """Stands in for SGP's agent_configs endpoints. Records POSTs."""
+
+    def __init__(self, existing=(), create_status=200, create_id="new-cfg"):
+        self.existing = list(existing)
+        self.create_status = create_status
+        self.create_id = create_id
+        self.posts: list[dict] = []
+
+    def client(self):
+        outer = self
+
+        class _Resp:
+            def __init__(self, payload, status=200):
+                self._p, self.status_code = payload, status
+
+            def json(self):
+                return self._p
+
+        class _Client:
+            def __init__(self, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def get(self, url, headers=None, params=None):
+                return _Resp({"items": outer.existing})
+
+            async def post(self, url, headers=None, json=None):
+                outer.posts.append({"url": url, "headers": headers, "json": json})
+                return _Resp({"id": outer.create_id}, outer.create_status)
+
+        return _Client
+
+
+def _user_headers(user_key: str, account: str = "acct1") -> dict[str, str]:
+    return {"cookie": f"_identityJwt={user_key}", "x-selected-account-id": account}
+
+
+@pytest.mark.asyncio
+async def test_user_config_reuses_an_existing_one(monkeypatch):
+    monkeypatch.setattr(sg, "_SGP_BASE_URL", "https://sgp.example")
+    monkeypatch.setattr(sg, "_CONFIG_ID_CACHE", {})
+    fake = _FakeSGP(existing=[{"id": "mine-1", "name": sg._USER_CONFIG_NAME}])
+    monkeypatch.setattr(sg.httpx, "AsyncClient", fake.client())
+
+    cid = await SlackGatewayUseCase()._own_config_id(_user_headers("alice"), "u-alice")
+    assert cid == "mine-1"
+    assert fake.posts == []  # nothing created when one already exists
+
+
+@pytest.mark.asyncio
+async def test_user_config_is_created_when_absent(monkeypatch):
+    monkeypatch.setattr(sg, "_SGP_BASE_URL", "https://sgp.example")
+    monkeypatch.setattr(sg, "_CONFIG_ID_CACHE", {})
+    fake = _FakeSGP(existing=[], create_id="fresh-1")
+    monkeypatch.setattr(sg.httpx, "AsyncClient", fake.client())
+
+    cid = await SlackGatewayUseCase()._own_config_id(_user_headers("bob"), "u-bob")
+    assert cid == "fresh-1"
+    assert len(fake.posts) == 1
+    body = fake.posts[0]["json"]
+    assert body["name"] == sg._USER_CONFIG_NAME
+    # Created as THEM, so it is theirs to read and edit.
+    assert fake.posts[0]["headers"]["cookie"] == "_identityJwt=bob"
+    # A shared-workspace bot has no business running shell commands.
+    assert "Bash" not in body["allowed_tools"]
+    assert "Write" not in body["allowed_tools"]
+
+
+@pytest.mark.asyncio
+async def test_two_users_do_not_share_a_cached_config_id(monkeypatch):
+    """The regression the cache key exists to prevent.
+
+    Config names are NOT unique and every linked user has one called
+    `slack-agentex-bot`. Keyed by account alone, the first caller would populate
+    the entry for everyone in that account and hand them all one person's config
+    id — which then fails to read for all but its owner: the original hang, via a
+    cache.
+    """
+    monkeypatch.setattr(sg, "_SGP_BASE_URL", "https://sgp.example")
+    monkeypatch.setattr(sg, "_CONFIG_ID_CACHE", {})
+    uc = SlackGatewayUseCase()
+
+    a = _FakeSGP(existing=[{"id": "alice-cfg", "name": sg._USER_CONFIG_NAME}])
+    monkeypatch.setattr(sg.httpx, "AsyncClient", a.client())
+    assert await uc._own_config_id(_user_headers("alice"), "u-alice") == "alice-cfg"
+
+    b = _FakeSGP(existing=[{"id": "bob-cfg", "name": sg._USER_CONFIG_NAME}])
+    monkeypatch.setattr(sg.httpx, "AsyncClient", b.client())
+    assert await uc._own_config_id(_user_headers("bob"), "u-bob") == "bob-cfg"
+
+    assert sg._cache_get(("acct1", "u-alice", sg._USER_CONFIG_NAME)) == "alice-cfg"
+    assert sg._cache_get(("acct1", "u-bob", sg._USER_CONFIG_NAME)) == "bob-cfg"
+
+
+@pytest.mark.asyncio
+async def test_user_config_returns_none_when_creation_fails(monkeypatch):
+    """Caller must be able to tell, so it can drop to the bot rather than point a
+    linked user at a config they cannot read (which would be a silent drop)."""
+    monkeypatch.setattr(sg, "_SGP_BASE_URL", "https://sgp.example")
+    monkeypatch.setattr(sg, "_CONFIG_ID_CACHE", {})
+    fake = _FakeSGP(existing=[], create_status=403)
+    monkeypatch.setattr(sg.httpx, "AsyncClient", fake.client())
+
+    cid = await SlackGatewayUseCase()._own_config_id(_user_headers("carol"), "u-carol")
+    assert cid is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_target_prefers_the_users_own_config(monkeypatch):
+    inbound = sg.InboundSlack(
+        team_id="T1",
+        channel="C1",
+        user="U1",
+        text="hello",
+        selector="",
+        thread_ts="1.0",
+    )
+    monkeypatch.setattr(sg, "_DEFAULT_CONFIG_ID", "shared-default")
+    target, prompt = await SlackGatewayUseCase()._resolve_target(
+        inbound, {}, sgp_user_id="u-alice", user_config_id="alice-cfg"
+    )
+    assert target.config_id == "alice-cfg"
+    assert prompt == "hello"
+
+
+@pytest.mark.asyncio
+async def test_resolve_target_uses_the_shared_default_when_unlinked(monkeypatch):
+    """Unlinked turns run as the bot, which CAN read the shared config, so that
+    path is deliberately unchanged."""
+    inbound = sg.InboundSlack(
+        team_id="T1",
+        channel="C1",
+        user="U1",
+        text="hello",
+        selector="",
+        thread_ts="1.0",
+    )
+    monkeypatch.setattr(sg, "_DEFAULT_CONFIG_ID", "shared-default")
+    target, _ = await SlackGatewayUseCase()._resolve_target(inbound, {})
+    assert target.config_id == "shared-default"
+
+
+def test_unlinked_turns_need_a_pinned_config_id():
+    """The bot cannot resolve one by name: it may not create configs (403), and its
+    credential can read EVERY config in the account, so a by-name match would return
+    an arbitrary user's `slack-agentex-bot` once users start making their own."""
+    assert sg._DEFAULT_CONFIG_ID == "" or sg._DEFAULT_CONFIG_ID
+
+
+@pytest.mark.parametrize(
+    "dd_env,expect_host",
+    [("sgp-dev", True), ("sgp-prod", False), ("", False), ("staging", False)],
+)
+def test_dev_defaults_are_opt_in_by_exact_environment(monkeypatch, dd_env, expect_host):
+    """An unset base URL must mean "no host", not "somebody else's host".
+
+    auth_headers carry a live credential — a linked user's _identityJwt session
+    cookie, or the bot's api key — and both SGP calls forward them verbatim. A default
+    pointing at another environment would SEND those credentials there. Only a
+    deployment that is demonstrably sgp-dev gets the baked-in host; everything else
+    resolves to "" and makes no request at all.
+
+    ENVIRONMENT is deliberately not the signal: the sgp-dev deployment reports
+    ENVIRONMENT=staging, hence the "staging" case here expecting no host.
+    """
+    monkeypatch.delenv("SLACK_GATEWAY_SGP_BASE_URL", raising=False)
+    monkeypatch.delenv("SLACK_GATEWAY_DEFAULT_CONFIG_ID", raising=False)
+    monkeypatch.setenv("DD_ENV", dd_env)
+
+    base, config_id = sg._resolve_sgp_base_url(), sg._resolve_default_config_id()
+
+    if expect_host:
+        assert base == sg._DEV_SGP_BASE_URL and config_id == sg._DEV_SGP_CONFIG_ID
+    else:
+        assert base == "" and config_id == "", "must fail closed, not fall back"
+
+
+def test_explicit_configuration_always_wins(monkeypatch):
+    monkeypatch.setenv("DD_ENV", "sgp-prod")
+    monkeypatch.setenv("SLACK_GATEWAY_SGP_BASE_URL", "https://api.prod.example/")
+    monkeypatch.setenv("SLACK_GATEWAY_DEFAULT_CONFIG_ID", "prod-cfg")
+    assert (
+        sg._resolve_sgp_base_url() == "https://api.prod.example"
+    )  # trailing / trimmed
+    assert sg._resolve_default_config_id() == "prod-cfg"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sgp_user_id,expected",
+    [
+        (None, []),  # bot-run turn -> user-scoped MCPs withheld
+        ("u-alice", None),  # linked turn  -> left to the config
+    ],
+)
+async def test_bot_run_turns_withhold_user_scoped_mcps(
+    monkeypatch, sgp_user_id, expected
+):
+    """No personal identity behind the turn -> no personal integrations.
+
+    Leaving them on is worse than useless: the config's MCP list resolves against
+    whoever the turn acts as, so the bot would either reach ITS OWN connected accounts
+    while answering someone else's question, or resolve nothing and still start a
+    server per MCP with an empty Authorization header. SlackBot is unaffected — it is
+    auto-enabled by Slack origin, not requested here.
+    """
+    monkeypatch.setattr(sg, "_ACTING_BOT_API_KEY", "")
+    monkeypatch.setattr(sg, "GlobalDependencies", MagicMock())
+    monkeypatch.setattr(sg, "_DEFAULT_MCPS", [])
+    acp, _ = _fake_acp(existing_task=None)
+    monkeypatch.setattr(
+        "src.temporal.scheduled_agent_run_factory.build_acp_use_case_for_principal",
+        MagicMock(return_value=acp),
+    )
+    monkeypatch.setattr(
+        SlackGatewayUseCase, "_collect_reply", AsyncMock(return_value=None)
+    )
+    inbound = sg.InboundSlack(
+        team_id="T", channel="C1", user="U", text="hi", thread_ts="1.0", selector=None
+    )
+    await SlackGatewayUseCase()._dispatch(
+        Target("golden-agent", config_id="cfg-1"),
+        inbound,
+        "hi",
+        None,
+        {},
+        sgp_user_id=sgp_user_id,
+    )
+    params = acp.handle_rpc_request.await_args_list[0].kwargs["params"].params
+    assert params["config_id"] == "cfg-1"
+    if expected is None:
+        assert "mcps" not in params
+    else:
+        assert params["mcps"] == expected
+
+
+# --- watching a self-posting turn ------------------------------------------
+
+
+class _Msg:
+    def __init__(self, mid, author, text="hi"):
+        self.id = mid
+        self.content = SimpleNamespace(author=author, content=text, type="text")
+
+
+@pytest.mark.asyncio
+async def test_watch_says_something_when_the_turn_is_silent(monkeypatch):
+    """A dead turn posts nothing and leaves "thinking…" up forever, which is
+    indistinguishable from the agent still working — so nobody reports it."""
+    monkeypatch.setattr(sg, "_GOLDEN_REPLY_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(sg, "_GOLDEN_REPLY_POLL_S", 0.01)
+    uc = SlackGatewayUseCase()
+    svc = MagicMock()
+    svc.get_messages = AsyncMock(return_value=[])  # nothing ever appears
+    status, delivered = [], []
+    monkeypatch.setattr(
+        uc, "_set_status", AsyncMock(side_effect=lambda i, s: status.append(s))
+    )
+    monkeypatch.setattr(
+        uc, "_deliver", AsyncMock(side_effect=lambda i, t: delivered.append(t))
+    )
+    inbound = sg.InboundSlack(
+        team_id="T", channel="C1", user="U", text="hi", thread_ts="1.0", selector=None
+    )
+
+    await uc._watch_self_posting_turn(svc, "task-1", set(), inbound)
+
+    assert status == [""], "the indicator must be cleared first"
+    assert len(delivered) == 1
+    assert "didn't respond" in delivered[0]
+
+
+@pytest.mark.asyncio
+async def test_watch_stays_quiet_once_the_agent_talks(monkeypatch):
+    """Returns on the first agent-authored text — a liveness signal, not completion.
+    The agent posts to Slack itself and posting clears the indicator, so once it is
+    talking there is nothing for the gateway to do."""
+    monkeypatch.setattr(sg, "_GOLDEN_REPLY_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(sg, "_GOLDEN_REPLY_POLL_S", 0.01)
+    uc = SlackGatewayUseCase()
+    svc = MagicMock()
+    svc.get_messages = AsyncMock(return_value=[_Msg("m2", "agent", "working on it")])
+    monkeypatch.setattr(uc, "_set_status", AsyncMock())
+    monkeypatch.setattr(uc, "_deliver", AsyncMock())
+    inbound = sg.InboundSlack(
+        team_id="T", channel="C1", user="U", text="hi", thread_ts="1.0", selector=None
+    )
+
+    await uc._watch_self_posting_turn(svc, "task-1", {"m1"}, inbound)
+
+    uc._deliver.assert_not_awaited()
+    uc._set_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_watch_ignores_our_own_user_message(monkeypatch):
+    """The event we just sent creates a USER message immediately, so "any new message"
+    would always look like success and the watch would never fire."""
+    monkeypatch.setattr(sg, "_GOLDEN_REPLY_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(sg, "_GOLDEN_REPLY_POLL_S", 0.01)
+    uc = SlackGatewayUseCase()
+    svc = MagicMock()
+    svc.get_messages = AsyncMock(return_value=[_Msg("m2", "user", "hi")])
+    monkeypatch.setattr(uc, "_set_status", AsyncMock())
+    delivered = []
+    monkeypatch.setattr(
+        uc, "_deliver", AsyncMock(side_effect=lambda i, t: delivered.append(t))
+    )
+    inbound = sg.InboundSlack(
+        team_id="T", channel="C1", user="U", text="hi", thread_ts="1.0", selector=None
+    )
+
+    await uc._watch_self_posting_turn(svc, "task-1", {"m1"}, inbound)
+
+    assert len(delivered) == 1, "a user message alone must not count as agent output"
+
+
+# --- duplicate-config guards -----------------------------------------------
+
+
+class _FailingSGP(_FakeSGP):
+    """Lookup fails. Distinct from 'lookup returned nothing'."""
+
+    def client(self):
+        outer = self
+
+        class _Client:
+            def __init__(self, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def get(self, url, headers=None, params=None):
+                raise RuntimeError("sgp unreachable")
+
+            async def post(self, url, headers=None, json=None):
+                outer.posts.append({"url": url, "headers": headers, "json": json})
+
+                class _R:
+                    status_code, _p = 200, {"id": "should-not-happen"}
+
+                    def json(self):
+                        return self._p
+
+                return _R()
+
+        return _Client
+
+
+@pytest.mark.asyncio
+async def test_a_failed_lookup_never_creates_a_duplicate(monkeypatch):
+    """A blip must not become a second config with the same name — after that,
+    by-name resolution returns whichever the list happens to yield first."""
+    monkeypatch.setattr(sg, "_SGP_BASE_URL", "https://sgp.example")
+    monkeypatch.setattr(sg, "_CONFIG_ID_CACHE", {})
+    fake = _FailingSGP()
+    monkeypatch.setattr(sg.httpx, "AsyncClient", fake.client())
+
+    cid = await SlackGatewayUseCase()._own_config_id(_user_headers("dave"), "u-dave")
+
+    assert cid is None, "unknown state -> degrade this turn, don't create"
+    assert fake.posts == [], "must not POST when we don't know if one exists"
+
+
+@pytest.mark.asyncio
+async def test_a_definitively_empty_lookup_does_create(monkeypatch):
+    """The other half: [] means 'definitively none', so creating is correct."""
+    monkeypatch.setattr(sg, "_SGP_BASE_URL", "https://sgp.example")
+    monkeypatch.setattr(sg, "_CONFIG_ID_CACHE", {})
+    fake = _FakeSGP(existing=[], create_id="made-1")
+    monkeypatch.setattr(sg.httpx, "AsyncClient", fake.client())
+
+    cid = await SlackGatewayUseCase()._own_config_id(_user_headers("erin"), "u-erin")
+
+    assert cid == "made-1"
+    assert len(fake.posts) == 1
+
+
+def test_duplicate_names_resolve_the_same_way_for_every_worker():
+    """Two workers must agree, forever, regardless of edits.
+
+    Ordered on created_at + id, both immutable. updated_at is deliberately ignored:
+    editing a duplicate would otherwise MOVE which one is canonical, and workers whose
+    caches were populated either side of that edit would serve different configs for
+    the same user.
+    """
+    older = {
+        "id": "b-older",
+        "name": "slack-agentex-bot",
+        "created_at": "2026-01-01T00:00:00",
+        "updated_at": "2026-01-01T00:00:00",
+    }
+    newer = {
+        "id": "a-newer",
+        "name": "slack-agentex-bot",
+        "created_at": "2026-09-01T00:00:00",
+        "updated_at": "2026-12-31T00:00:00",  # edited most recently
+    }
+    other = {"id": "x", "name": "something-else", "created_at": "2020-01-01T00:00:00"}
+
+    for order in ([older, newer, other], [newer, other, older], [other, newer, older]):
+        assert (
+            sg._canonical_named(order, "slack-agentex-bot") == "b-older"
+        ), "list order must not change the answer"
+    assert sg._canonical_named([older, newer], "absent") is None
+
+
+# --- concurrent first turns ------------------------------------------------
+#
+# The deployment runs multiple replicas and the cache is process-local, so two
+# first turns for one user can both miss the cache, both see [], and both
+# create. What must NOT happen is the two ending up on different configs.
+
+
+@pytest.mark.asyncio
+async def test_concurrent_create_converges_on_one_config(monkeypatch):
+    """Worker A creates, then lists and sees B's too. It must adopt the canonical
+    pick rather than trusting its own POST, or A and B serve different prompts and
+    toolsets for the same user, turn to turn."""
+    monkeypatch.setattr(sg, "_SGP_BASE_URL", "https://sgp.example")
+    monkeypatch.setattr(sg, "_CONFIG_ID_CACHE", {})
+
+    mine = {
+        "id": "mine-second",
+        "name": sg._USER_CONFIG_NAME,
+        "created_at": "2026-09-02T00:00:01",
+    }
+    theirs = {
+        "id": "theirs-first",
+        "name": sg._USER_CONFIG_NAME,
+        "created_at": "2026-09-02T00:00:00",
+    }
+    calls = {"gets": 0}
+
+    class _Client:
+        def __init__(self, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url, headers=None, params=None):
+            calls["gets"] += 1
+            # First list: empty, so we create. Second (post-create): both exist.
+            items = [] if calls["gets"] == 1 else [mine, theirs]
+
+            class _R:
+                status_code = 200
+
+                def json(self):
+                    return {"items": items}
+
+            return _R()
+
+        async def post(self, url, headers=None, json=None):
+            class _R:
+                status_code = 200
+
+                def json(self):
+                    return {"id": "mine-second"}
+
+            return _R()
+
+    monkeypatch.setattr(sg.httpx, "AsyncClient", _Client)
+
+    got = await SlackGatewayUseCase()._own_config_id(_user_headers("f"), "u-f")
+
+    assert got == "theirs-first", "must adopt the canonical id, not its own creation"
+    assert sg._cache_get(("acct1", "u-f", sg._USER_CONFIG_NAME)) == "theirs-first"
+
+
+@pytest.mark.asyncio
+async def test_cache_expires_so_a_divergence_can_heal(monkeypatch):
+    """If two workers do end up cached on different ids, entries must expire —
+    otherwise they serve different configs until someone restarts a pod."""
+    monkeypatch.setattr(sg, "_CONFIG_ID_CACHE", {})
+    key = ("acct1", "u-g", sg._USER_CONFIG_NAME)
+    sg._cache_put(key, "cfg-a")
+    assert sg._cache_get(key) == "cfg-a"
+
+    real_monotonic = sg.time.monotonic
+    monkeypatch.setattr(
+        sg.time,
+        "monotonic",
+        lambda: real_monotonic() + sg._CONFIG_ID_CACHE_TTL_S + 1,
+    )
+    assert sg._cache_get(key) is None, "expired entries must not be served"
+    assert key not in sg._CONFIG_ID_CACHE, "and should be evicted"
