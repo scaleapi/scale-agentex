@@ -103,6 +103,11 @@ class HealthCheckActivities:
             new_status = AgentStatus(status)
             if agent.status == new_status:
                 return
+            if (
+                new_status == AgentStatus.READY
+                and agent.status != AgentStatus.UNHEALTHY
+            ):
+                return
             agent.status = new_status
             agent.status_reason = "Agent health check reported " + status
             await self.agent_repo.update(item=agent)
