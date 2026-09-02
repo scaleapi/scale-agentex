@@ -279,6 +279,35 @@ def _cache_put(key: tuple[str, str, str], config_id: str) -> None:
 #   - enabling an MCP is their own decision and affects nobody else.
 _USER_CONFIG_NAME = "slack-agentex-bot"
 
+# A 403 from SGP is PERMANENT — the account lacks the access — unlike a timeout or a
+# 5xx. It covers both halves: reading the config directory and creating a config in it. Worth telling the person once: they have just been through the
+# whole link flow, which promised their turns would run as them, and without a config
+# every turn silently falls back to the shared bot. Left unsaid they would never learn
+# why their own integrations never work.
+#
+# Once per day per user, not once ever: role grants change, and a stale "ask an admin"
+# is better repeated occasionally than never retracted.
+_SGP_FORBIDDEN_NOTICE_COOLDOWN_S = 86400
+_SGP_FORBIDDEN_MESSAGE = (
+    "I'll answer as the shared bot for now — your SGP account doesn't have access to "
+    "agent configs, which is where your own integrations get connected. Ask an SGP "
+    "admin for *editor* access on this account, then mention me again."
+)
+
+
+class _SgpAccessForbidden(Exception):
+    """SGP refused this account (HTTP 403) — reading configs or creating one.
+
+    Distinct from returning None, which means "could not resolve one right now" and is
+    handled by degrading quietly. A 403 is an authorization decision: retrying changes
+    nothing, so it warrants telling the person, once.
+
+    Raised for BOTH halves deliberately. An account can be unable to create a config,
+    or unable to list them at all, and the consequence is identical — no config of
+    their own, so every turn silently falls back to the shared bot. Treating only the
+    create half as permanent left the read half looking like a transient blip forever.
+    """
+
 
 # Seed for a freshly created user config. Hardcoded rather than copied from a canonical
 # config on purpose: copying would need a service-account read of a config the new user
@@ -901,7 +930,12 @@ class SlackGatewayUseCase:
             # which fails turn-1 resolution, drops the event, and shows up in Slack as
             # a hang with nothing logged in the channel.
             if sgp_user_id:
-                config_id = await self._own_config_id(auth_headers, sgp_user_id)
+                try:
+                    config_id = await self._own_config_id(auth_headers, sgp_user_id)
+                except _SgpAccessForbidden:
+                    # Permanent, so say it once instead of degrading silently forever.
+                    config_id = None
+                    await self._notify_config_forbidden(inbound)
                 if not config_id:
                     # Couldn't find or create theirs. Staying as them and pointing at
                     # any other config fails identically, so drop to the bot: they lose
@@ -1267,7 +1301,15 @@ class SlackGatewayUseCase:
         cached = _cache_get(cache_key)
         if cached:
             return cached
-        items = await self._list_configs(auth_headers, name)
+        try:
+            items = await self._list_configs(auth_headers, name)
+        except _SgpAccessForbidden:
+            # Selector resolution is best-effort and its caller falls back to the
+            # default config. The user-facing notice belongs to _own_config_id, the
+            # path that actually needs a config of their own; raising here would error
+            # a turn that can still be answered.
+            logger.warning("[slack] config directory forbidden; using the default")
+            return None
         if items is None:
             return None
         match = _canonical_named(items, name)
@@ -1299,12 +1341,23 @@ class SlackGatewayUseCase:
                     headers=auth_headers,
                     params={"name": name},
                 )
+            if resp.status_code == 403:
+                raise _SgpAccessForbidden("list")
+            if resp.status_code == 401:
+                # The credential reached SGP and was rejected. Logged apart from the
+                # 4xx/5xx bucket because the remedy is a re-link, not a role grant,
+                # and the re-link prompt is driven elsewhere — this only needs to be
+                # diagnosable, not messaged twice.
+                logger.warning("[slack] agent_config lookup unauthorized (401)")
+                return None
             if resp.status_code >= 400:
                 logger.warning(
                     "[slack] agent_config lookup failed: status=%s", resp.status_code
                 )
                 return None
             return list((resp.json() or {}).get("items") or [])
+        except _SgpAccessForbidden:
+            raise
         except Exception:  # noqa: BLE001 - unknown, not empty; caller must not create
             logger.warning("[slack] agent_config lookup errored", exc_info=True)
             return None
@@ -1365,6 +1418,10 @@ class SlackGatewayUseCase:
                     headers={**auth_headers, "content-type": "application/json"},
                     json=_USER_CONFIG_TEMPLATE,
                 )
+            if resp.status_code == 403:
+                # Permanent: the account lacks the role. Surfaced to the caller so it
+                # can say so once, rather than degrading silently on every turn.
+                raise _SgpAccessForbidden(_USER_CONFIG_NAME)
             if resp.status_code >= 400:
                 logger.warning(
                     "[slack] creating %r failed: status=%s",
@@ -1373,6 +1430,8 @@ class SlackGatewayUseCase:
                 )
                 return None
             config_id = (resp.json() or {}).get("id")
+        except _SgpAccessForbidden:
+            raise
         except Exception:  # noqa: BLE001 - degrade to a bot-run turn, never a silent drop
             logger.warning(
                 "[slack] creating %r errored", _USER_CONFIG_NAME, exc_info=True
@@ -1385,7 +1444,12 @@ class SlackGatewayUseCase:
         # is process-local, and a list issued right after a create may not show the
         # other worker's yet. Re-resolving makes both converge on the same id instead
         # of each caching its own creation and serving a different config per turn.
-        confirmed = await self._list_configs(auth_headers, _USER_CONFIG_NAME)
+        try:
+            confirmed = await self._list_configs(auth_headers, _USER_CONFIG_NAME)
+        except _SgpAccessForbidden:
+            # Creating succeeded but re-reading is refused: nothing to converge on, so
+            # keep what we made rather than discarding a working config.
+            confirmed = None
         canonical = _canonical_named(confirmed or [], _USER_CONFIG_NAME) or config_id
         if canonical != config_id:
             logger.warning(
@@ -1976,12 +2040,78 @@ class SlackGatewayUseCase:
             logger.warning("[slack] link offer cooldown check failed", exc_info=True)
             return True
 
-    async def _post_ephemeral(self, inbound: InboundSlack, text: str) -> None:
-        """Post a message only the invoking user sees. Best-effort.
+    async def _notify_config_forbidden(self, inbound: InboundSlack) -> None:
+        """Tell this user, at most once a day, that their account cannot be set up.
+
+        Rate-limited for the same reason the link offer is: a busy channel would
+        otherwise repeat it on every mention. Ephemeral because it concerns one
+        person's account and nobody else in the channel can act on it.
+        """
+        key = f"slack:config_forbidden:{inbound.team_id}:{inbound.user}"
+        try:
+            pool = GlobalDependencies().redis_pool
+            if pool is not None:
+                import redis.asyncio as redis
+
+                client = redis.Redis(connection_pool=pool)
+                claimed = await client.set(
+                    key, "1", nx=True, ex=_SGP_FORBIDDEN_NOTICE_COOLDOWN_S
+                )
+                if not claimed:
+                    return
+        except Exception:  # noqa: BLE001 - fail open: saying it twice beats never
+            logger.warning("[slack] forbidden-notice cooldown failed", exc_info=True)
+        logger.warning(
+            "[slack] %s has no SGP config access (403); answering as the bot",
+            inbound.user,
+        )
+        if await self._post_ephemeral(inbound, _SGP_FORBIDDEN_MESSAGE):
+            return
+        # The ephemeral was rejected. Slack refuses them outside a channel context —
+        # an assistant pane, i.e. a DM with this app — and that rejection is permanent
+        # for that conversation, so retrying it forever would deliver nothing. Post
+        # into the thread instead: in a pane the audience is identical, and in a
+        # channel a visible message beats silence for something the person has to act
+        # on. _deliver has no success signal, so this is the last attempt.
+        logger.info("[slack] ephemeral refused; delivering the notice in-thread")
+        try:
+            await self._deliver(inbound, _SGP_FORBIDDEN_MESSAGE)
+            return
+        except Exception:  # noqa: BLE001 - fall through to releasing the cooldown
+            logger.warning("[slack] in-thread notice failed too", exc_info=True)
+        # Nothing was delivered, so drop the cooldown and let the next turn retry
+        # rather than staying quiet for the whole window having told them nothing.
+        await self._release_notice_cooldown(key)
+
+    async def _release_notice_cooldown(self, key: str) -> None:
+        """Drop a claimed cooldown so the next turn may try again.
+
+        Claiming before delivering is deliberate — it stops two concurrent turns both
+        posting — but it means a failed delivery has to give the claim back, or the
+        window passes with the user never told.
+        """
+        try:
+            pool = GlobalDependencies().redis_pool
+            if pool is None:
+                return
+            import redis.asyncio as redis
+
+            await redis.Redis(connection_pool=pool).delete(key)
+        except Exception:  # noqa: BLE001 - best-effort; worst case is one quiet window
+            logger.warning("[slack] releasing notice cooldown failed", exc_info=True)
+
+    async def _post_ephemeral(self, inbound: InboundSlack, text: str) -> bool:
+        """Post a message only the invoking user sees. Best-effort; True if it landed.
 
         Ephemeral so a channel isn't cluttered with onboarding nudges aimed at one
         person — and Slack rejects it outside a channel context (e.g. an assistant
         pane), which we swallow.
+
+        The return value exists for callers that pair this with a rate limit. Slack
+        rejecting an ephemeral is not rare — the assistant-pane case is a *permanent*
+        rejection for that conversation — so a caller that records "already told them"
+        before knowing whether they were told will suppress the message for the whole
+        window and deliver nothing.
         """
         body = await self._slack_api(
             "chat.postEphemeral",
@@ -1994,6 +2124,8 @@ class SlackGatewayUseCase:
         )
         if not body.get("ok"):
             logger.info("[slack] postEphemeral -> %s", body.get("error"))
+            return False
+        return True
 
     async def _set_status(self, inbound: InboundSlack, status: str) -> None:
         """AI-app 'thinking…' indicator (assistant.threads.setStatus). Shows in the

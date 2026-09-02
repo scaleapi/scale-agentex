@@ -2456,16 +2456,62 @@ async def test_two_users_do_not_share_a_cached_config_id(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_user_config_returns_none_when_creation_fails(monkeypatch):
-    """Caller must be able to tell, so it can drop to the bot rather than point a
-    linked user at a config they cannot read (which would be a silent drop)."""
+async def test_forbidden_creation_raises_rather_than_degrading_quietly(monkeypatch):
+    """403 is permanent — the account lacks the role — so it must be distinguishable
+    from a transient failure. Silently degrading forever would leave someone who just
+    completed the link flow wondering why their integrations never work."""
     monkeypatch.setattr(sg, "_SGP_BASE_URL", "https://sgp.example")
     monkeypatch.setattr(sg, "_CONFIG_ID_CACHE", {})
     fake = _FakeSGP(existing=[], create_status=403)
     monkeypatch.setattr(sg.httpx, "AsyncClient", fake.client())
 
+    with pytest.raises(sg._SgpAccessForbidden):
+        await SlackGatewayUseCase()._own_config_id(_user_headers("carol"), "u-carol")
+
+
+@pytest.mark.asyncio
+async def test_transient_creation_failure_stays_quiet(monkeypatch):
+    """The other half: a 5xx might succeed next turn, so it degrades without telling
+    anyone. Only the permanent case is worth a message."""
+    monkeypatch.setattr(sg, "_SGP_BASE_URL", "https://sgp.example")
+    monkeypatch.setattr(sg, "_CONFIG_ID_CACHE", {})
+    fake = _FakeSGP(existing=[], create_status=503)
+    monkeypatch.setattr(sg.httpx, "AsyncClient", fake.client())
+
     cid = await SlackGatewayUseCase()._own_config_id(_user_headers("carol"), "u-carol")
     assert cid is None
+
+
+@pytest.mark.asyncio
+async def test_forbidden_notice_is_rate_limited(monkeypatch):
+    """A busy channel would otherwise repeat it on every mention."""
+    uc = SlackGatewayUseCase()
+    posted = []
+    monkeypatch.setattr(
+        uc, "_post_ephemeral", AsyncMock(side_effect=lambda i, t: posted.append(t))
+    )
+
+    claims = iter([True, False])  # SET NX wins once, then loses
+
+    class _Redis:
+        async def set(self, *a, **k):
+            return next(claims)
+
+    import redis.asyncio as redis_asyncio
+
+    monkeypatch.setattr(
+        sg, "GlobalDependencies", lambda: SimpleNamespace(redis_pool=object())
+    )
+    monkeypatch.setattr(redis_asyncio, "Redis", lambda **k: _Redis())
+    inbound = sg.InboundSlack(
+        team_id="T", channel="C1", user="U1", text="hi", thread_ts="1.0", selector=None
+    )
+
+    await uc._notify_config_forbidden(inbound)
+    await uc._notify_config_forbidden(inbound)
+
+    assert len(posted) == 1, "second call must be suppressed by the cooldown"
+    assert "editor" in posted[0], "should name what to ask for"
 
 
 @pytest.mark.asyncio
@@ -2856,3 +2902,165 @@ async def test_cache_expires_so_a_divergence_can_heal(monkeypatch):
     )
     assert sg._cache_get(key) is None, "expired entries must not be served"
     assert key not in sg._CONFIG_ID_CACHE, "and should be evicted"
+
+
+# --- no SGP access at all --------------------------------------------------
+
+
+class _ForbiddenSGP(_FakeSGP):
+    """SGP refuses this account on the READ path, not just on create."""
+
+    def __init__(self, status=403):
+        super().__init__()
+        self.status = status
+
+    def client(self):
+        outer = self
+
+        class _Client:
+            def __init__(self, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def get(self, url, headers=None, params=None):
+                class _R:
+                    status_code = outer.status
+
+                    def json(self):
+                        return {}
+
+                return _R()
+
+            async def post(self, url, headers=None, json=None):
+                outer.posts.append({"url": url})
+
+                class _R:
+                    status_code = 200
+
+                    def json(self):
+                        return {"id": "nope"}
+
+                return _R()
+
+        return _Client
+
+
+@pytest.mark.asyncio
+async def test_forbidden_listing_is_also_permanent(monkeypatch):
+    """An account can be unable to LIST configs, not just unable to create one. The
+    consequence is identical — no config of their own — so it must be reported the
+    same way rather than looking like a transient blip forever."""
+    monkeypatch.setattr(sg, "_SGP_BASE_URL", "https://sgp.example")
+    monkeypatch.setattr(sg, "_CONFIG_ID_CACHE", {})
+    fake = _ForbiddenSGP(403)
+    monkeypatch.setattr(sg.httpx, "AsyncClient", fake.client())
+
+    with pytest.raises(sg._SgpAccessForbidden):
+        await SlackGatewayUseCase()._own_config_id(_user_headers("hank"), "u-hank")
+    assert fake.posts == [], "must not try to create when reading is refused"
+
+
+@pytest.mark.asyncio
+async def test_unauthorized_listing_stays_quiet(monkeypatch):
+    """401 means the credential was rejected, which a re-link fixes — a different
+    remedy from a role grant, and the re-link prompt is driven elsewhere. Degrade
+    without a second message."""
+    monkeypatch.setattr(sg, "_SGP_BASE_URL", "https://sgp.example")
+    monkeypatch.setattr(sg, "_CONFIG_ID_CACHE", {})
+    monkeypatch.setattr(sg.httpx, "AsyncClient", _ForbiddenSGP(401).client())
+
+    cid = await SlackGatewayUseCase()._own_config_id(_user_headers("iris"), "u-iris")
+    assert cid is None
+
+
+@pytest.mark.asyncio
+async def test_selector_resolution_survives_a_forbidden_directory(monkeypatch):
+    """The selector path is best-effort and its caller falls back to the default
+    config. Raising there would error a turn that can still be answered."""
+    monkeypatch.setattr(sg, "_SGP_BASE_URL", "https://sgp.example")
+    monkeypatch.setattr(sg, "_CONFIG_ID_CACHE", {})
+    monkeypatch.setattr(sg.httpx, "AsyncClient", _ForbiddenSGP(403).client())
+
+    got = await SlackGatewayUseCase()._resolve_config_id(
+        "some-config", _user_headers("jane"), sgp_user_id="u-jane"
+    )
+    assert got is None  # falls back, does not raise
+
+
+# --- the notice must actually be delivered before it counts ----------------
+
+
+def _redis_stub(monkeypatch, claims, deleted):
+    """Redis whose SET NX returns each value in `claims`, recording DELETEs."""
+
+    class _Redis:
+        async def set(self, *a, **k):
+            return next(claims)
+
+        async def delete(self, key):
+            deleted.append(key)
+            return 1
+
+    import redis.asyncio as redis_asyncio
+
+    monkeypatch.setattr(
+        sg, "GlobalDependencies", lambda: SimpleNamespace(redis_pool=object())
+    )
+    monkeypatch.setattr(redis_asyncio, "Redis", lambda **k: _Redis())
+
+
+@pytest.mark.asyncio
+async def test_refused_ephemeral_falls_back_to_the_thread(monkeypatch):
+    """Slack refuses ephemerals outside a channel context (an assistant pane), and
+    that refusal is permanent for the conversation. Retrying would deliver nothing, so
+    post in-thread — in a pane the audience is identical anyway."""
+    uc = SlackGatewayUseCase()
+    deleted: list[str] = []
+    _redis_stub(monkeypatch, iter([True]), deleted)
+    monkeypatch.setattr(uc, "_post_ephemeral", AsyncMock(return_value=False))
+    delivered: list[str] = []
+    monkeypatch.setattr(
+        uc, "_deliver", AsyncMock(side_effect=lambda i, t: delivered.append(t))
+    )
+
+    await uc._notify_config_forbidden(_inbound(team_id="T", user="U1"))
+
+    assert len(delivered) == 1, "must not stay silent when the ephemeral is refused"
+    assert deleted == [], "delivery succeeded, so the cooldown stands"
+
+
+@pytest.mark.asyncio
+async def test_cooldown_is_released_when_nothing_could_be_delivered(monkeypatch):
+    """The bug this guards: the cooldown was committed before delivery was attempted,
+    so a rejected ephemeral suppressed the notice for the whole window and the user
+    was never told why they were on the shared bot."""
+    uc = SlackGatewayUseCase()
+    deleted: list[str] = []
+    _redis_stub(monkeypatch, iter([True]), deleted)
+    monkeypatch.setattr(uc, "_post_ephemeral", AsyncMock(return_value=False))
+    monkeypatch.setattr(uc, "_deliver", AsyncMock(side_effect=RuntimeError("nope")))
+
+    await uc._notify_config_forbidden(_inbound(team_id="T", user="U1"))
+
+    assert deleted == [
+        "slack:config_forbidden:T:U1"
+    ], "nothing was delivered, so the next turn must be allowed to retry"
+
+
+@pytest.mark.asyncio
+async def test_successful_ephemeral_keeps_the_cooldown(monkeypatch):
+    uc = SlackGatewayUseCase()
+    deleted: list[str] = []
+    _redis_stub(monkeypatch, iter([True]), deleted)
+    monkeypatch.setattr(uc, "_post_ephemeral", AsyncMock(return_value=True))
+    monkeypatch.setattr(uc, "_deliver", AsyncMock())
+
+    await uc._notify_config_forbidden(_inbound(team_id="T", user="U1"))
+
+    uc._deliver.assert_not_awaited()  # no need for the fallback
+    assert deleted == []
