@@ -142,6 +142,25 @@ _PUBLIC_BASE_URL = os.getenv("SLACK_GATEWAY_PUBLIC_BASE_URL", "").rstrip("/")
 # persistent mentioner re-arms that budget every 10 minutes. Worst case becomes ~2
 # DMs an hour instead of ~12.
 _LINK_OFFER_COOLDOWN_S = 3600
+# golden-agent self-posts its reply, so the gateway doesn't relay it — but it still
+# WATCHES the turn so a dead turn doesn't leave the "thinking…" indicator stuck and the
+# channel silent. This bounds that watch, and thus how long silence can look like work.
+#
+# 60s is deliberately short. The watch ends the moment the agent emits ANY text, not
+# when it finishes, so a slow-but-alive turn exits early and this ceiling only ever
+# applies to turns that produced nothing whatsoever. A turn that has said nothing in a
+# minute is not being slow, it is dead — the config read failed, or the event was
+# dropped — and the useful thing is to say so while the person is still looking.
+_GOLDEN_REPLY_TIMEOUT_S = 60.0
+_GOLDEN_REPLY_POLL_S = 3.0
+
+# What we post when a turn produces nothing. Names the likely cause, because the
+# overwhelmingly common one is fixable by the person reading it.
+_GOLDEN_SILENT_TURN_MESSAGE = (
+    "I couldn't complete that — the agent didn't respond. This usually means its "
+    "config couldn't be loaded for your account. Try again, and if it keeps happening "
+    "check that you have a *slack-agentex-bot* config in SGP."
+)
 
 # Slack's HTTP Events API is at-least-once — it retries a delivery (up to ~3x, with an
 # X-Slack-Retry-Num header) if we don't 200 within ~3s. Dedup on the envelope's
@@ -161,15 +180,150 @@ _CREATE_RACE_BACKOFF_S = float(os.getenv("SLACK_CREATE_RACE_BACKOFF_S", "0.25"))
 # registered agentex agent name (-> route to that runtime); if neither matches (or there's
 # no selector) the turn falls back to this default agent_config id. golden-agent resolves
 # whatever config_id it gets -> full turn config (prompt / model / harness / tools).
-_DEFAULT_CONFIG_ID = os.getenv(
-    "SLACK_GATEWAY_DEFAULT_CONFIG_ID", "416f61d9-9587-46be-a1d8-0b0aba17eb6e"
-)
-# SGP API base for name -> config_id resolution (GET {base}/v5/agent_configs?name=).
-# Empty (or no acting identity to authenticate the call) -> name resolution is skipped.
-_SGP_BASE_URL = os.getenv("SLACK_GATEWAY_SGP_BASE_URL", "").rstrip("/")
-# name -> config_id, keyed by (account_id, name). Module-level because the use case is
-# instantiated per-request; config ids are stable, so a process-lifetime cache is fine.
-_CONFIG_ID_CACHE: dict[tuple[str, str], str] = {}
+# Baked-in defaults are opt-in by EXACT environment match, and every other
+# deployment fails closed rather than falling back to them.
+#
+# That matters because `auth_headers` carry a live credential — a linked user's
+# _identityJwt session cookie, or the shared bot's api key — and the SGP calls below
+# forward them verbatim. A default pointing at another environment does not merely
+# query the wrong directory: it SENDS those credentials there. An unset variable must
+# therefore mean "no host", not "somebody else's host".
+#
+# ENVIRONMENT is unusable for this. The sgp-dev deployment reports
+# ENVIRONMENT=staging, so a development check would miss the very deployment these
+# defaults exist for, and a not-production check would match other environments and
+# leak into them. DD_ENV is the only value that identifies this deployment.
+_SGP_DEV_ENV = "sgp-dev"
+_DEV_SGP_BASE_URL = "https://api.dev-sgp.scale.com"
+_DEV_SGP_CONFIG_ID = "008fae95-00c0-4cfc-8e9d-00428c97fe29"
+
+
+def _in_sgp_dev() -> bool:
+    return os.getenv("DD_ENV", "") == _SGP_DEV_ENV
+
+
+def _resolve_sgp_base_url() -> str:
+    """SGP API base for config lookup/creation, or "" to disable it entirely.
+
+    Empty is a safe answer: both call sites check it before issuing a request, so an
+    unconfigured non-dev deployment makes no call and forwards no credential.
+    """
+    configured = os.getenv("SLACK_GATEWAY_SGP_BASE_URL", "").rstrip("/")
+    if configured:
+        return configured
+    return _DEV_SGP_BASE_URL if _in_sgp_dev() else ""
+
+
+def _resolve_default_config_id() -> str:
+    """Config for turns that run as the SHARED BOT (the caller isn't linked). Must
+    name a config the bot's credential can read.
+
+    Linked users never use this — they get their own config resolved by name. The bot
+    cannot, for two verified reasons: it may not create configs at all
+    (POST /v5/agent_configs -> 403, "action=create,
+    legacy_roles=['admin','manager','editor']"), and a by-name lookup is ambiguous for
+    it because its credential reads EVERY config in the account (37 visible, against
+    12 for an ordinary member) while names are not unique.
+
+    Unset outside sgp-dev, where the dev id does not exist: bot turns then fail loudly
+    with `config_id required` rather than resolving a stranger's config.
+    """
+    configured = os.getenv("SLACK_GATEWAY_DEFAULT_CONFIG_ID", "")
+    if configured:
+        return configured
+    return _DEV_SGP_CONFIG_ID if _in_sgp_dev() else ""
+
+
+_DEFAULT_CONFIG_ID = _resolve_default_config_id()
+_SGP_BASE_URL = _resolve_sgp_base_url()
+# name -> config_id, keyed by (account_id, sgp_user_id, name). Module-level because the
+# use case is instantiated per-request; config ids are stable, so a process-lifetime
+# cache is fine.
+#
+# The user id is part of the key and must stay there. An SGP agent_config is per-user
+# and config NAMES ARE NOT UNIQUE — every linked person has their own config called
+# ``slack-agentex-bot``. Keyed on account alone (as this was) the first person to
+# resolve would populate the entry for everyone in that account, handing them all one
+# person's config id, which then fails to read for all but its owner: the exact hang
+# this per-user config was added to fix, reintroduced by a cache.
+_CONFIG_ID_CACHE: dict[tuple[str, str, str], tuple[str, float]] = {}
+# Entries expire so a divergence can heal. Config ids are effectively immutable, so a
+# TTL is not about staleness — it is about two workers that concurrently created a
+# duplicate and each cached its own. Without expiry they serve different configs for
+# the same user until someone restarts a pod; with it, both re-list and converge on the
+# canonical pick, which is ordered on immutable fields precisely so they agree.
+_CONFIG_ID_CACHE_TTL_S = 600.0
+
+
+def _cache_get(key: tuple[str, str, str]) -> str | None:
+    entry = _CONFIG_ID_CACHE.get(key)
+    if entry is None:
+        return None
+    config_id, expires_at = entry
+    if time.monotonic() >= expires_at:
+        _CONFIG_ID_CACHE.pop(key, None)
+        return None
+    return config_id
+
+
+def _cache_put(key: tuple[str, str, str], config_id: str) -> None:
+    _CONFIG_ID_CACHE[key] = (config_id, time.monotonic() + _CONFIG_ID_CACHE_TTL_S)
+
+
+# The per-user Slack config. Every linked user gets their own agent_config with this
+# name, created on demand and owned by them, so:
+#   - resolving it as them SUCCEEDS (a shared config belongs to whoever made it, and
+#     nobody else can read it — resolving that as the asker is what hung their turns);
+#   - they can open it in SGP, which is the only place the OAuth "connect" flow is
+#     offered, so telling them to connect Notion there is finally true advice;
+#   - enabling an MCP is their own decision and affects nobody else.
+_USER_CONFIG_NAME = "slack-agentex-bot"
+
+
+# Seed for a freshly created user config. Hardcoded rather than copied from a canonical
+# config on purpose: copying would need a service-account read of a config the new user
+# cannot see, which is the capability this design avoids needing.
+#
+# The tradeoff is real and worth stating: these values are frozen into each config at
+# creation, so editing them here only affects users who link AFTERWARDS. There is no
+# central prompt fix for existing users. Behaviour that must stay correctable belongs in
+# golden-agent's own prompts (git, deployed) rather than here.
+_USER_CONFIG_TEMPLATE: dict[str, Any] = {
+    "name": _USER_CONFIG_NAME,
+    "description": (
+        "Your personal config for the Slack bot. Enable the integrations you want "
+        "here, then connect your own accounts to them on this page — both are "
+        "per-person and affect only your own Slack turns."
+    ),
+    "harness": "claude-code",
+    "model": "claude-opus-5",
+    # Read-only plus the user-scoped MCPs. Deliberately no Bash or Write: this config
+    # answers @-mentions from a shared workspace, and shell access is not warranted for
+    # that. An MCP listed here is only PERMITTED, not usable — it still needs the owner
+    # to connect their own account to it.
+    "allowed_tools": [
+        "Read",
+        "Grep",
+        "Glob",
+        "WebSearch",
+        "WebFetch",
+        "Slack",
+        "Linear",
+        "Notion",
+        "Confluence",
+    ],
+    "system_prompt": (
+        "You are a helpful assistant reached by @-mentioning this app in Slack.\n\n"
+        "Answer in the thread you were asked in, and keep it short — Slack is a "
+        "conversation, not a document. When you need context you weren't given, read "
+        "the surrounding thread or channel with your Slack tools rather than asking "
+        "for it.\n\n"
+        "Integrations are enabled and connected on your own 'slack-agentex-bot' config "
+        "in SGP. If something isn't connected, say so and send the person there. Never "
+        "construct an authorization or OAuth link yourself — any link you can build "
+        "redirects to your own sandbox and can never complete for someone in Slack."
+    ),
+}
 
 # v1/dev: MCP tools to enable per task (golden-agent switches MCPs on from the config's
 # `mcps` list; the credential existing isn't enough — the tool must be enabled for the
@@ -240,6 +394,27 @@ class Target:
         # User-facing attribution — the agent name only; the config_id (a UUID) is kept
         # out of Slack messages and recorded in task_metadata instead.
         return self.agent_name
+
+
+def _canonical_named(items: list[dict], name: str) -> str | None:
+    """The id of the config with this name that EVERY worker will agree on, or None.
+
+    Ordered by ``created_at`` then ``id``, both immutable, both ascending. That is the
+    whole point: the choice must not depend on which worker asks or on what has
+    happened since.
+
+    Ordering by ``updated_at`` (as this first did) is wrong twice over. Editing a
+    config changes it, so the canonical choice MOVES when someone edits a duplicate;
+    and with duplicates created milliseconds apart, two workers can order them
+    differently and cache different ids — each then serves a different prompt and
+    toolset for the same user, turn to turn. Immutable keys make the answer a property
+    of the data rather than of the caller or the clock.
+    """
+    matches = [c for c in items if c.get("name") == name and c.get("id")]
+    if not matches:
+        return None
+    matches.sort(key=lambda c: (str(c.get("created_at") or ""), str(c["id"])))
+    return matches[0]["id"]
 
 
 def _strip_selector(text: str, selector: str) -> str:
@@ -718,7 +893,36 @@ class SlackGatewayUseCase:
                 await self._deliver(inbound, _UNLINKED_MESSAGE)
                 return
 
-            target, prompt = await self._resolve_target(inbound, auth_headers)
+            # Every turn runs on a config named `slack-agentex-bot` belonging to
+            # whoever the turn ACTS AS: a linked user gets theirs, an unlinked turn
+            # acts as the bot and gets the bot's. golden-agent reads the config with
+            # the turn's identity, and a config is invisible to everyone but its owner
+            # — so any other arrangement means reading a config the caller cannot see,
+            # which fails turn-1 resolution, drops the event, and shows up in Slack as
+            # a hang with nothing logged in the channel.
+            if sgp_user_id:
+                config_id = await self._own_config_id(auth_headers, sgp_user_id)
+                if not config_id:
+                    # Couldn't find or create theirs. Staying as them and pointing at
+                    # any other config fails identically, so drop to the bot: they lose
+                    # their personal integrations for this turn and get a real answer
+                    # instead of silence.
+                    logger.warning(
+                        "[slack] no config for %s; running this turn as the bot",
+                        sgp_user_id,
+                    )
+                    principal, auth_headers = await self._acting_identity()
+                    sgp_user_id = None
+                    config_id = _DEFAULT_CONFIG_ID or None
+            else:
+                config_id = _DEFAULT_CONFIG_ID or None
+
+            target, prompt = await self._resolve_target(
+                inbound,
+                auth_headers,
+                sgp_user_id=sgp_user_id,
+                user_config_id=config_id,
+            )
 
             if not await self._authorize(target):
                 await self._deliver(
@@ -1027,7 +1231,7 @@ class SlackGatewayUseCase:
         return f"slack:{inbound.thread_ts}"
 
     async def _resolve_config_id(
-        self, name: str, auth_headers: dict[str, str]
+        self, name: str, auth_headers: dict[str, str], *, sgp_user_id: str | None = None
     ) -> str | None:
         """Resolve an agent_config NAME -> id via SGP's directory
         (GET {SGP}/v5/agent_configs?name=), authenticated with whatever credential the
@@ -1055,27 +1259,147 @@ class SlackGatewayUseCase:
         )
         if not (_SGP_BASE_URL and name and has_credential):
             return None
-        cache_key = (auth_headers.get("x-selected-account-id", ""), name)
-        if cache_key in _CONFIG_ID_CACHE:
-            return _CONFIG_ID_CACHE[cache_key]
+        cache_key = (
+            auth_headers.get("x-selected-account-id", ""),
+            sgp_user_id or "",
+            name,
+        )
+        cached = _cache_get(cache_key)
+        if cached:
+            return cached
+        items = await self._list_configs(auth_headers, name)
+        if items is None:
+            return None
+        match = _canonical_named(items, name)
+        if match:
+            _cache_put(cache_key, match)
+            return match
+        logger.warning("[slack] no agent_config named %r in SGP", name)
+        return None
+
+    async def _list_configs(
+        self, auth_headers: dict[str, str], name: str
+    ) -> list[dict] | None:
+        """The acting identity's visible agent configs, or None if the LOOKUP FAILED.
+
+        ``None`` and ``[]`` are deliberately different answers. ``[]`` means "there is
+        definitively no such config"; ``None`` means "we do not know". Callers that
+        create on absence must only do so on ``[]`` — creating on ``None`` turns a
+        transient error into a second config with the same name, and from then on the
+        by-name lookup returns whichever the list happens to yield first.
+        """
         try:
             async with httpx.AsyncClient(timeout=10) as client:
+                # NB the server IGNORES ?name= — verified against dev, where
+                # name=<real> and name=<nonsense> both return the full list. The
+                # caller-side match is what actually filters; the param is kept as a
+                # hint in case filtering is implemented later.
                 resp = await client.get(
                     f"{_SGP_BASE_URL}/v5/agent_configs",
                     headers=auth_headers,
                     params={"name": name},
                 )
-            items = (resp.json() or {}).get("items") or []
-            for cfg in items:
-                if cfg.get("name") == name and cfg.get("id"):
-                    _CONFIG_ID_CACHE[cache_key] = cfg["id"]
-                    return cfg["id"]
-            logger.warning("[slack] no agent_config named %r in SGP", name)
-        except Exception:  # noqa: BLE001 - best-effort; fall back to the default id
+            if resp.status_code >= 400:
+                logger.warning(
+                    "[slack] agent_config lookup failed: status=%s", resp.status_code
+                )
+                return None
+            return list((resp.json() or {}).get("items") or [])
+        except Exception:  # noqa: BLE001 - unknown, not empty; caller must not create
+            logger.warning("[slack] agent_config lookup errored", exc_info=True)
+            return None
+
+    async def _own_config_id(
+        self, auth_headers: dict[str, str], identity_key: str
+    ) -> str | None:
+        """The acting identity's own ``slack-agentex-bot`` config id, creating it if absent.
+
+        Used for EVERY turn, not just linked ones. A config is read as whoever the turn
+        acts as, so each identity needs its own copy of the name: a linked user gets
+        theirs, an unlinked turn acts as the bot and gets the bot's. One mechanism, and
+        no config id to configure.
+
+        Runs on the TURN path rather than at link time on purpose. Creating it once,
+        when someone links, means a single failed request leaves them holding a
+        credential and no config — and every later turn resolves a config they don't
+        have, fails, and is dropped, which is silence in Slack rather than an error.
+        Check-or-create per turn self-heals instead: the miss is one cached lookup, and
+        a creation that failed last time is simply retried.
+
+        Returns None on any failure. The caller must NOT fall back to the shared
+        default config on None — that config belongs to whoever made it, so resolving
+        it as this user fails exactly the way the missing config would. Falling back to
+        running as the bot degrades (no personal integrations) but still answers.
+        """
+        cache_key = (
+            auth_headers.get("x-selected-account-id", ""),
+            identity_key,
+            _USER_CONFIG_NAME,
+        )
+        cached = _cache_get(cache_key)
+        if cached:
+            return cached
+        has_credential = any(
+            auth_headers.get(h) for h in ("x-api-key", "cookie", "authorization")
+        )
+        if not (_SGP_BASE_URL and has_credential):
+            return None
+
+        items = await self._list_configs(auth_headers, _USER_CONFIG_NAME)
+        if items is None:
+            # The lookup failed, so we do NOT know whether one exists. Creating here
+            # would turn a blip into a duplicate name, after which resolution is
+            # non-deterministic. Degrade this turn instead; the next one retries.
             logger.warning(
-                "[slack] config-id resolution failed for %r", name, exc_info=True
+                "[slack] config lookup failed for %s; not creating", identity_key
             )
-        return None
+            return None
+        existing = _canonical_named(items, _USER_CONFIG_NAME)
+        if existing:
+            _cache_put(cache_key, existing)
+            return existing
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(
+                    f"{_SGP_BASE_URL}/v5/agent_configs",
+                    headers={**auth_headers, "content-type": "application/json"},
+                    json=_USER_CONFIG_TEMPLATE,
+                )
+            if resp.status_code >= 400:
+                logger.warning(
+                    "[slack] creating %r failed: status=%s",
+                    _USER_CONFIG_NAME,
+                    resp.status_code,
+                )
+                return None
+            config_id = (resp.json() or {}).get("id")
+        except Exception:  # noqa: BLE001 - degrade to a bot-run turn, never a silent drop
+            logger.warning(
+                "[slack] creating %r errored", _USER_CONFIG_NAME, exc_info=True
+            )
+            return None
+        if not config_id:
+            return None
+        # Adopt the canonical pick rather than trusting our own POST. Two workers can
+        # both see [] and both create: the deployment runs multiple replicas, the cache
+        # is process-local, and a list issued right after a create may not show the
+        # other worker's yet. Re-resolving makes both converge on the same id instead
+        # of each caching its own creation and serving a different config per turn.
+        confirmed = await self._list_configs(auth_headers, _USER_CONFIG_NAME)
+        canonical = _canonical_named(confirmed or [], _USER_CONFIG_NAME) or config_id
+        if canonical != config_id:
+            logger.warning(
+                "[slack] concurrent create for %s; adopting canonical %s over %s",
+                identity_key,
+                canonical,
+                config_id,
+            )
+        config_id = canonical
+        _cache_put(cache_key, config_id)
+        logger.info(
+            "[slack] created %r for identity %s", _USER_CONFIG_NAME, identity_key
+        )
+        return config_id
 
     async def _message_send_with_race_retry(self, acp, params, agent_id):
         """Send a SYNC agent's ``message/send`` (which get-or-creates the thread task and
@@ -1172,7 +1496,25 @@ class SlackGatewayUseCase:
         create_params: dict[str, Any] = {}
         if target.config_id:
             create_params["config_id"] = target.config_id
-        if _DEFAULT_MCPS:
+        if sgp_user_id is None:
+            # This turn runs as the shared bot — either the asker isn't linked, or
+            # theirs couldn't be resolved and we degraded. Either way there is no
+            # personal identity behind it, so withhold every user-scoped MCP.
+            #
+            # Leaving them on is worse than useless. The config's MCP list is resolved
+            # against whoever the turn acts as, so the bot would either reach ITS OWN
+            # connected accounts while answering somebody else's question, or (the
+            # common case today) resolve nothing and still start a server per MCP with
+            # an empty Authorization header — four of them, each burning MCP_TIMEOUT
+            # before failing, while the agent advertises tools it cannot use.
+            #
+            # An empty list is honored verbatim by resolve_envelope, and SlackBot is
+            # unaffected: it's auto-enabled by Slack origin rather than requested here,
+            # and it carries the bot's own token, so posting and reading the thread
+            # still work. A bot-run turn ends up with exactly the Slack tools and
+            # nothing personal.
+            create_params["mcps"] = []
+        elif _DEFAULT_MCPS:
             create_params["mcps"] = _DEFAULT_MCPS
 
         # SYNC agents have no event stream: one message/send get-or-creates the task and
@@ -1223,21 +1565,24 @@ class SlackGatewayUseCase:
                 # lagging) replica, which may not have the just-created task yet.
                 task = await self._resolve_task_after_race(acp.task_service, task_name)
 
-        # Snapshot existing messages so we can isolate THIS turn's reply (only needed
-        # when we're going to collect + relay it).
-        seen = (
-            await self._seen_message_ids(acp.task_message_service, task.id)
-            if collect
-            else set()
-        )
+        # Snapshot existing messages so we can isolate THIS turn's output. Needed on
+        # BOTH paths: the collect path relays it, and the self-posting path watches for
+        # it to decide whether the turn produced anything at all.
+        seen = await self._seen_message_ids(acp.task_message_service, task.id)
         await acp.handle_rpc_request(
             method=AgentRPCMethod.EVENT_SEND,
             params=SendEventRequestEntity(task_name=task_name, content=content),
             agent_id=agent.id,
         )
-        # Self-posting agents (golden-agent) own their Slack output: send the event and
-        # return without polling — the gateway never relays their reply.
+        # Self-posting agents (golden-agent) own their Slack output, so we never relay
+        # it — but we do watch the turn. If it produces nothing at all the thread is
+        # left with a "thinking…" indicator that never clears and no message, which is
+        # exactly what a dropped event looks like from Slack. Watching turns that into
+        # something the user can act on.
         if not collect:
+            await self._watch_self_posting_turn(
+                acp.task_message_service, task.id, seen, inbound
+            )
             return None
         # Poll the task's messages for this turn's settled agent reply.
         return await self._collect_reply(acp.task_message_service, task.id, seen)
@@ -1265,6 +1610,47 @@ class SlackGatewayUseCase:
     async def _seen_message_ids(self, msg_service, task_id: str) -> set[str]:
         msgs = await self._recent_messages(msg_service, task_id)
         return {m.id for m in msgs if getattr(m, "id", None)}
+
+    async def _watch_self_posting_turn(
+        self, msg_service, task_id: str, seen: set[str], inbound: InboundSlack
+    ) -> None:
+        """Wait for a self-posting turn to produce SOMETHING, or say so.
+
+        golden-agent writes its own Slack reply, so the gateway does not relay it and
+        has no other signal that the turn worked. When a turn dies early — the most
+        common cause being a config it cannot read, which the workflow's signal guard
+        drops without surfacing — nothing is posted and the "thinking…" indicator stays
+        up indefinitely. Silence is the worst possible failure here: it is
+        indistinguishable from the agent still working, so nobody reports it.
+
+        Returns as soon as the turn emits agent-authored text. That is a signal the
+        turn is alive, NOT that it is finished — the agent posts to Slack itself, and
+        posting clears the indicator, so once it is talking there is nothing left for
+        us to do. Only total silence needs handling.
+
+        Polls agentex messages rather than reading the Slack thread: it is an internal
+        call with no rate limit, and a working turn writes plenty (14-30 agent messages
+        on a normal turn, measured).
+        """
+        waited = 0.0
+        while waited < _GOLDEN_REPLY_TIMEOUT_S:
+            await asyncio.sleep(_GOLDEN_REPLY_POLL_S)
+            waited += _GOLDEN_REPLY_POLL_S
+            msgs = await self._recent_messages(msg_service, task_id)
+            new = [m for m in msgs if getattr(m, "id", None) not in seen]
+            # Agent-authored specifically: the event we just sent creates a *user*
+            # message immediately, so "any new message" would always be true.
+            if _agent_text(new):
+                return
+        logger.warning(
+            "[slack] no agent output after %.0fs on task %s; posting a fallback",
+            _GOLDEN_REPLY_TIMEOUT_S,
+            task_id,
+        )
+        # Clear the indicator first: leaving it up next to an error reads as though
+        # the agent is still working on it.
+        await self._set_status(inbound, "")
+        await self._deliver(inbound, _GOLDEN_SILENT_TURN_MESSAGE)
 
     async def _collect_reply(
         self,
@@ -1344,18 +1730,29 @@ class SlackGatewayUseCase:
         return ""
 
     async def _resolve_target(
-        self, inbound: InboundSlack, auth_headers: dict[str, str]
+        self,
+        inbound: InboundSlack,
+        auth_headers: dict[str, str],
+        sgp_user_id: str | None = None,
+        user_config_id: str | None = None,
     ) -> tuple[Target, str]:
         """Resolution cascade for the ``@agent <selector>`` token:
         1. an SGP agent_config with that name -> golden-agent + that config_id;
         2. a registered agentex agent with that name -> route to that runtime;
-        3. neither (or no selector) -> golden-agent + the default config_id.
+        3. neither (or no selector) -> golden-agent + ``user_config_id`` if the caller
+           supplied one, else the shared default config_id.
         The selector is stripped from the prompt only when it matched (1 or 2); an
         unmatched first word is just part of the message.
+
+        ``user_config_id`` is resolved by the caller, not here, because obtaining it
+        can fail in a way that has to change the turn's IDENTITY (fall back to the
+        bot), and identity is ``_run_turn``'s to decide — this method only routes.
         """
         selector = inbound.selector
         if selector:
-            config_id = await self._resolve_config_id(selector, auth_headers)
+            config_id = await self._resolve_config_id(
+                selector, auth_headers, sgp_user_id=sgp_user_id
+            )
             if config_id:
                 return (
                     Target(_DEFAULT_AGENT_NAME, config_id=config_id),
@@ -1367,7 +1764,10 @@ class SlackGatewayUseCase:
                     _strip_selector(inbound.text, selector),
                 )
         return (
-            Target(_DEFAULT_AGENT_NAME, config_id=_DEFAULT_CONFIG_ID or None),
+            Target(
+                _DEFAULT_AGENT_NAME,
+                config_id=user_config_id or _DEFAULT_CONFIG_ID or None,
+            ),
             inbound.text,
         )
 
