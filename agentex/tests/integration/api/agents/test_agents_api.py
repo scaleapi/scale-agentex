@@ -867,3 +867,117 @@ class TestAgentsAPIIntegration:
         names = {a["name"] for a in response.json()}
         assert "card-metadata-empty-with" in names
         assert "card-metadata-empty-without" not in names
+
+    @pytest.mark.asyncio
+    async def test_reregistration_replaces_agent_card_and_filter_results(
+        self, isolated_client
+    ):
+        """Re-registering the same agent identity replaces the stored top-level
+        `agent_card`, and the metadata filter reflects the new card immediately.
+        This locks the rolling-update contract a polling discovery client relies
+        on: after a release re-registers with card B, filter A stops matching
+        and filter B starts matching."""
+        response = await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-rollout",
+                "description": "release 1",
+                "acp_url": "http://rollout-agent:8000",
+                "acp_type": "sync",
+                "registration_metadata": {
+                    "agent_card": {"metadata": {"permits_capable": True, "rev": "a"}}
+                },
+            },
+        )
+        assert response.status_code == 200
+
+        response = await isolated_client.get('/agents?agent_card_metadata={"rev":"a"}')
+        assert response.status_code == 200
+        assert {a["name"] for a in response.json()} == {"card-metadata-rollout"}
+
+        response = await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-rollout",
+                "description": "release 2",
+                "acp_url": "http://rollout-agent:8000",
+                "acp_type": "sync",
+                "registration_metadata": {
+                    "agent_card": {"metadata": {"permits_capable": True, "rev": "b"}}
+                },
+            },
+        )
+        assert response.status_code == 200
+
+        response = await isolated_client.get('/agents?agent_card_metadata={"rev":"a"}')
+        assert response.status_code == 200
+        assert response.json() == []
+
+        response = await isolated_client.get('/agents?agent_card_metadata={"rev":"b"}')
+        assert response.status_code == 200
+        assert {a["name"] for a in response.json()} == {"card-metadata-rollout"}
+
+    @pytest.mark.asyncio
+    async def test_reregistration_with_null_agent_card_withdraws_from_discovery(
+        self, isolated_client
+    ):
+        """An explicit `{"agent_card": null}` registration clears a previously
+        published card, so rolling back to a release that publishes no card can
+        withdraw the stale descriptor without deleting the agent. Omitting
+        `registration_metadata` entirely preserves the existing card."""
+        response = await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-withdraw",
+                "description": "publishes a card",
+                "acp_url": "http://withdraw-agent:8000",
+                "acp_type": "sync",
+                "registration_metadata": {
+                    "agent_card": {"metadata": {"permits_capable": True}}
+                },
+            },
+        )
+        assert response.status_code == 200
+
+        response = await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-withdraw",
+                "description": "re-registers without touching metadata",
+                "acp_url": "http://withdraw-agent:8000",
+                "acp_type": "sync",
+            },
+        )
+        assert response.status_code == 200
+
+        response = await isolated_client.get(
+            '/agents?agent_card_metadata={"permits_capable":true}'
+        )
+        assert response.status_code == 200
+        assert {a["name"] for a in response.json()} == {"card-metadata-withdraw"}
+
+        response = await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-withdraw",
+                "description": "rolled back, withdraws the card",
+                "acp_url": "http://withdraw-agent:8000",
+                "acp_type": "sync",
+                "registration_metadata": {"agent_card": None},
+            },
+        )
+        assert response.status_code == 200
+
+        response = await isolated_client.get(
+            '/agents?agent_card_metadata={"permits_capable":true}'
+        )
+        assert response.status_code == 200
+        assert response.json() == []
+
+        response = await isolated_client.get("/agents?agent_card_metadata={}")
+        assert response.status_code == 200
+        assert "card-metadata-withdraw" not in {a["name"] for a in response.json()}
+
+        response = await isolated_client.get("/agents")
+        assert response.status_code == 200
+        assert "card-metadata-withdraw" in {a["name"] for a in response.json()}
