@@ -652,3 +652,332 @@ class TestAgentsAPIIntegration:
         agents_with_name = [a for a in agents if a["name"] == "duplicate-name-test"]
         assert len(agents_with_name) == 1
         assert agents_with_name[0]["description"] == "Second agent"
+
+    @pytest.mark.asyncio
+    async def test_list_agents_filters_by_agent_card_metadata(self, isolated_client):
+        """`agent_card_metadata` returns only agents whose card metadata contains
+        the requested key/value pairs; agents without card metadata are excluded."""
+        # Given - three agents: one Permits-capable, one with different metadata,
+        # and one with no agent_card at all.
+        await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-permits",
+                "description": "opts into Permits",
+                "acp_url": "http://permits-agent:8000",
+                "acp_type": "sync",
+                "registration_metadata": {
+                    "agent_card": {
+                        "metadata": {"permits_capable": True, "region": "us"}
+                    }
+                },
+            },
+        )
+        await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-other",
+                "description": "different capability",
+                "acp_url": "http://other-agent:8000",
+                "acp_type": "sync",
+                "registration_metadata": {
+                    "agent_card": {"metadata": {"other_feature": True}}
+                },
+            },
+        )
+        await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-none",
+                "description": "no card metadata",
+                "acp_url": "http://plain-agent:8000",
+                "acp_type": "sync",
+            },
+        )
+
+        # When - filter by exact key/value present on only one agent
+        response = await isolated_client.get(
+            '/agents?agent_card_metadata={"permits_capable":true}'
+        )
+        assert response.status_code == 200
+        agents = response.json()
+        names = {a["name"] for a in agents}
+        assert names == {"card-metadata-permits"}
+
+        # And - non-matching value returns no agents (agent exists but with a
+        # different value for the same key does not match)
+        response = await isolated_client.get(
+            '/agents?agent_card_metadata={"permits_capable":false}'
+        )
+        assert response.status_code == 200
+        assert response.json() == []
+
+        # And - omitting the filter returns all non-deleted agents, including
+        # those without any agent_card metadata
+        response = await isolated_client.get("/agents")
+        assert response.status_code == 200
+        names_unfiltered = {a["name"] for a in response.json()}
+        assert {
+            "card-metadata-permits",
+            "card-metadata-other",
+            "card-metadata-none",
+        } <= names_unfiltered
+
+    @pytest.mark.asyncio
+    async def test_list_agents_agent_card_metadata_multi_key_containment(
+        self, isolated_client
+    ):
+        """Multi-key filter requires every key/value to be present (JSONB `@>`)."""
+        await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-multi",
+                "description": "multi",
+                "acp_url": "http://multi-agent:8000",
+                "acp_type": "sync",
+                "registration_metadata": {
+                    "agent_card": {
+                        "metadata": {
+                            "permits_capable": True,
+                            "region": "us",
+                            "extra": "value",
+                        }
+                    }
+                },
+            },
+        )
+
+        # All requested keys match -> included
+        response = await isolated_client.get(
+            '/agents?agent_card_metadata={"permits_capable":true,"region":"us"}'
+        )
+        assert response.status_code == 200
+        assert {a["name"] for a in response.json()} == {"card-metadata-multi"}
+
+        # One requested key doesn't match -> excluded
+        response = await isolated_client.get(
+            '/agents?agent_card_metadata={"permits_capable":true,"region":"eu"}'
+        )
+        assert response.status_code == 200
+        assert response.json() == []
+
+    @pytest.mark.asyncio
+    async def test_list_agents_agent_card_metadata_combined_with_pagination(
+        self, isolated_client
+    ):
+        """The filter composes with existing pagination and ordering behavior."""
+        for i in range(3):
+            await isolated_client.post(
+                "/agents/register",
+                json={
+                    "name": f"card-metadata-page-{i}",
+                    "description": f"agent {i}",
+                    "acp_url": f"http://page-agent-{i}:8000",
+                    "acp_type": "sync",
+                    "registration_metadata": {
+                        "agent_card": {"metadata": {"permits_capable": True}}
+                    },
+                },
+            )
+        # Unrelated agent that must not leak into filtered results
+        await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-page-noise",
+                "description": "noise",
+                "acp_url": "http://noise:8000",
+                "acp_type": "sync",
+            },
+        )
+
+        response = await isolated_client.get(
+            '/agents?agent_card_metadata={"permits_capable":true}&limit=2&page_number=1'
+        )
+        assert response.status_code == 200
+        page_one = response.json()
+        assert len(page_one) == 2
+        assert all(a["name"].startswith("card-metadata-page-") for a in page_one)
+        assert not any(a["name"] == "card-metadata-page-noise" for a in page_one)
+
+    @pytest.mark.asyncio
+    async def test_list_agents_agent_card_metadata_invalid_json_returns_400(
+        self, isolated_client
+    ):
+        """Malformed JSON in `agent_card_metadata` is rejected up front."""
+        response = await isolated_client.get("/agents?agent_card_metadata=not-json")
+        assert response.status_code == 400
+
+        response = await isolated_client.get("/agents?agent_card_metadata=[1,2,3]")
+        assert response.status_code == 400
+
+    @pytest.mark.parametrize(
+        "raw_filter",
+        [
+            '{"x": NaN}',
+            '{"x": Infinity}',
+            '{"x": -Infinity}',
+            '{"x": 1e1000000}',
+            '{"x": [1, NaN]}',
+            '{"x": {"nested": Infinity}}',
+            '{"x": ' + "9" * 5000 + "}",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_list_agents_agent_card_metadata_non_finite_numbers_return_400(
+        self, isolated_client, raw_filter
+    ):
+        """Values Python's json accepts but JSON doesn't are rejected as 400, not
+        passed through to the JSONB bind parameter where they'd surface as a 500."""
+        response = await isolated_client.get(
+            "/agents", params={"agent_card_metadata": raw_filter}
+        )
+        assert response.status_code == 400
+        assert "agent_card_metadata" in response.json()["message"]
+
+    @pytest.mark.asyncio
+    async def test_list_agents_agent_card_metadata_empty_object_requires_metadata(
+        self, isolated_client
+    ):
+        """An explicit `{}` filter still applies the containment predicate: agents
+        must have a card metadata object, but any contents match."""
+        await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-empty-with",
+                "description": "has card metadata",
+                "acp_url": "http://with-agent:8000",
+                "acp_type": "sync",
+                "registration_metadata": {
+                    "agent_card": {"metadata": {"anything": "at-all"}}
+                },
+            },
+        )
+        await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-empty-without",
+                "description": "no card metadata",
+                "acp_url": "http://without-agent:8000",
+                "acp_type": "sync",
+            },
+        )
+
+        response = await isolated_client.get("/agents?agent_card_metadata={}")
+        assert response.status_code == 200
+        names = {a["name"] for a in response.json()}
+        assert "card-metadata-empty-with" in names
+        assert "card-metadata-empty-without" not in names
+
+    @pytest.mark.asyncio
+    async def test_reregistration_replaces_agent_card_and_filter_results(
+        self, isolated_client
+    ):
+        """Re-registering the same agent identity replaces the stored top-level
+        `agent_card`, and the metadata filter reflects the new card immediately.
+        This locks the rolling-update contract a polling discovery client relies
+        on: after a release re-registers with card B, filter A stops matching
+        and filter B starts matching."""
+        response = await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-rollout",
+                "description": "release 1",
+                "acp_url": "http://rollout-agent:8000",
+                "acp_type": "sync",
+                "registration_metadata": {
+                    "agent_card": {"metadata": {"permits_capable": True, "rev": "a"}}
+                },
+            },
+        )
+        assert response.status_code == 200
+
+        response = await isolated_client.get('/agents?agent_card_metadata={"rev":"a"}')
+        assert response.status_code == 200
+        assert {a["name"] for a in response.json()} == {"card-metadata-rollout"}
+
+        response = await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-rollout",
+                "description": "release 2",
+                "acp_url": "http://rollout-agent:8000",
+                "acp_type": "sync",
+                "registration_metadata": {
+                    "agent_card": {"metadata": {"permits_capable": True, "rev": "b"}}
+                },
+            },
+        )
+        assert response.status_code == 200
+
+        response = await isolated_client.get('/agents?agent_card_metadata={"rev":"a"}')
+        assert response.status_code == 200
+        assert response.json() == []
+
+        response = await isolated_client.get('/agents?agent_card_metadata={"rev":"b"}')
+        assert response.status_code == 200
+        assert {a["name"] for a in response.json()} == {"card-metadata-rollout"}
+
+    @pytest.mark.asyncio
+    async def test_reregistration_with_null_agent_card_withdraws_from_discovery(
+        self, isolated_client
+    ):
+        """An explicit `{"agent_card": null}` registration clears a previously
+        published card, so rolling back to a release that publishes no card can
+        withdraw the stale descriptor without deleting the agent. Omitting
+        `registration_metadata` entirely preserves the existing card."""
+        response = await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-withdraw",
+                "description": "publishes a card",
+                "acp_url": "http://withdraw-agent:8000",
+                "acp_type": "sync",
+                "registration_metadata": {
+                    "agent_card": {"metadata": {"permits_capable": True}}
+                },
+            },
+        )
+        assert response.status_code == 200
+
+        response = await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-withdraw",
+                "description": "re-registers without touching metadata",
+                "acp_url": "http://withdraw-agent:8000",
+                "acp_type": "sync",
+            },
+        )
+        assert response.status_code == 200
+
+        response = await isolated_client.get(
+            '/agents?agent_card_metadata={"permits_capable":true}'
+        )
+        assert response.status_code == 200
+        assert {a["name"] for a in response.json()} == {"card-metadata-withdraw"}
+
+        response = await isolated_client.post(
+            "/agents/register",
+            json={
+                "name": "card-metadata-withdraw",
+                "description": "rolled back, withdraws the card",
+                "acp_url": "http://withdraw-agent:8000",
+                "acp_type": "sync",
+                "registration_metadata": {"agent_card": None},
+            },
+        )
+        assert response.status_code == 200
+
+        response = await isolated_client.get(
+            '/agents?agent_card_metadata={"permits_capable":true}'
+        )
+        assert response.status_code == 200
+        assert response.json() == []
+
+        response = await isolated_client.get("/agents?agent_card_metadata={}")
+        assert response.status_code == 200
+        assert "card-metadata-withdraw" not in {a["name"] for a in response.json()}
+
+        response = await isolated_client.get("/agents")
+        assert response.status_code == 200
+        assert "card-metadata-withdraw" in {a["name"] for a in response.json()}

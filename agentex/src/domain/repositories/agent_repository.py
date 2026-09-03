@@ -46,14 +46,36 @@ class AgentRepository(PostgresCRUDRepository[AgentORM, AgentEntity]):
         Args:
             filters: Dictionary of filters to apply. Currently supports:
                     - task_id: Filter agents by task ID using the join table
+                    - agent_card_metadata: Dict applied as an exact JSONB
+                      containment filter (``@>``) against
+                      ``registration_metadata['agent_card']['metadata']``.
             order_by: Field to order by
             order_direction: Direction to order by (asc or desc)
         """
         query = select(AgentORM)
-        if filters and "task_id" in filters:
+        # Pop out non-column filters that the base repository can't map to a
+        # single equality column, so its create_where_clauses_from_filters call
+        # doesn't see them.
+        filters = dict(filters) if filters else {}
+        task_id = filters.pop("task_id", None)
+        agent_card_metadata = filters.pop("agent_card_metadata", None)
+
+        if task_id is not None:
             query = query.join(
                 TaskAgentORM, AgentORM.id == TaskAgentORM.agent_id
-            ).where(TaskAgentORM.task_id == filters["task_id"])
+            ).where(TaskAgentORM.task_id == task_id)
+        if agent_card_metadata is not None:
+            # Top-level JSONB `@>` with the caller's dict wrapped under the same
+            # nested shape it will occupy in the stored registration_metadata.
+            # `@>` matches when every key/value in the right operand exists at
+            # the same path in the left, so agents whose registration_metadata
+            # is NULL, missing `agent_card`, or missing `agent_card.metadata`
+            # are naturally excluded.
+            query = query.where(
+                AgentORM.registration_metadata.contains(
+                    {"agent_card": {"metadata": agent_card_metadata}}
+                )
+            )
         query = query.where(AgentORM.status != AgentStatus.DELETED)
         return await super().list(
             filters=filters,

@@ -1,5 +1,8 @@
+import json
+import math
 import secrets
 from collections.abc import AsyncIterator
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -107,6 +110,57 @@ async def get_agent_by_name(
     return Agent.model_validate(agent_entity)
 
 
+_AGENT_CARD_METADATA_DESCRIPTION = (
+    "JSON-encoded object used to filter agents on "
+    "`registration_metadata.agent_card.metadata` via JSONB containment. "
+    'Example: {"permits_capable": true}.'
+)
+
+
+def _reject_json_constant(name: str) -> float:
+    """Reject the non-standard ``NaN``/``Infinity`` literals ``json`` accepts."""
+    raise ValueError(f"{name} is not a valid JSON number")
+
+
+def _parse_finite_float(raw: str) -> float:
+    """Reject float literals whose magnitude overflows to infinity (e.g. ``1e1000000``)."""
+    value = float(raw)
+    if not math.isfinite(value):
+        raise ValueError(f"{raw} is out of range for a JSON number")
+    return value
+
+
+def _parse_agent_card_metadata(raw: str) -> dict:
+    """Decode the JSON-encoded ``agent_card_metadata`` query value into a dict.
+
+    Python's ``json`` module accepts values that aren't interoperable JSON --
+    the bare ``NaN``/``Infinity`` constants, float literals that overflow to
+    infinity, and integers too large to render. Those all satisfy an
+    ``isinstance(..., dict)`` check but blow up further down at the JSONB bind
+    parameter, turning caller error into an uncontrolled 500. Reject them here
+    so every malformed input surfaces as a 400.
+    """
+    try:
+        parsed = json.loads(
+            raw,
+            parse_constant=_reject_json_constant,
+            parse_float=_parse_finite_float,
+        )
+    except ValueError as exc:
+        # json.JSONDecodeError subclasses ValueError, as do the hook rejections
+        # above and CPython's integer-string conversion limit.
+        raise HTTPException(
+            status_code=400,
+            detail=f"agent_card_metadata is not valid JSON: {exc}",
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="agent_card_metadata must be a JSON object",
+        )
+    return parsed
+
+
 @router.get(
     "",
     response_model=list[Agent],
@@ -121,14 +175,23 @@ async def list_agents(
     page_number: int = Query(1, description="Page number", ge=1),
     order_by: str | None = Query(None, description="Field to order by"),
     order_direction: str = Query("desc", description="Order direction (asc or desc)"),
+    agent_card_metadata: Annotated[
+        str | None,
+        Query(description=_AGENT_CARD_METADATA_DESCRIPTION),
+    ] = None,
 ):
     """List all registered agents."""
+    agent_card_metadata_filter: dict | None = None
+    if agent_card_metadata is not None:
+        agent_card_metadata_filter = _parse_agent_card_metadata(agent_card_metadata)
+
     agent_entities = await agents_use_case.list(
         task_id=task_id,
         limit=limit,
         page_number=page_number,
         order_by=order_by,
         order_direction=order_direction,
+        agent_card_metadata=agent_card_metadata_filter,
         **{"id": _authorized_ids} if _authorized_ids is not None else {},
     )
     return [Agent.model_validate(agent_entity) for agent_entity in agent_entities]

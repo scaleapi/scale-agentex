@@ -249,3 +249,115 @@ async def test_deployment_aware_register_uses_deployment_acp_url_for_healthcheck
     assert temporal_adapter.start_workflow.await_args.kwargs["args"] == [
         {"agent_id": build_only_agent.id, "acp_url": deployment_acp_url}
     ]
+
+
+async def _seed_agent_with_card_metadata(
+    agent_repository: AgentRepository,
+    name: str,
+    card_metadata: dict | None,
+) -> AgentEntity:
+    registration_metadata: dict = {}
+    if card_metadata is not None:
+        registration_metadata["agent_card"] = {"metadata": card_metadata}
+    return await agent_repository.create(
+        AgentEntity(
+            id=str(uuid4()),
+            name=name,
+            description="seed",
+            status=AgentStatus.READY,
+            acp_type=ACPType.ASYNC,
+            acp_url="http://seed.example.com",
+            registration_metadata=registration_metadata or None,
+        )
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_list_filters_by_agent_card_metadata_exact_containment(
+    agents_use_case, agent_repository
+):
+    """Filter matches only agents whose card metadata contains every requested pair.
+
+    Uses a per-test-unique tag so assertions are robust to data seeded by other
+    tests sharing the same session-scoped Postgres container.
+    """
+    suffix = uuid4().hex[:6]
+    tag = f"test-{suffix}"
+    permits = await _seed_agent_with_card_metadata(
+        agent_repository,
+        f"card-metadata-permits-{suffix}",
+        {"permits_capable": True, "region": "us", "test_tag": tag},
+    )
+    other = await _seed_agent_with_card_metadata(
+        agent_repository,
+        f"card-metadata-other-{suffix}",
+        {"other_feature": True, "test_tag": tag},
+    )
+    plain = await _seed_agent_with_card_metadata(
+        agent_repository,
+        f"card-metadata-none-{suffix}",
+        None,
+    )
+    scoped_ids = {permits.id, other.id, plain.id}
+
+    # Single-key exact filter, scoped to this test's tag → only permits agent.
+    matches = await agents_use_case.list(
+        limit=50,
+        page_number=1,
+        agent_card_metadata={"permits_capable": True, "test_tag": tag},
+    )
+    assert {a.id for a in matches if a.id in scoped_ids} == {permits.id}
+
+    # Non-matching value under our tag returns no agents seeded by this test.
+    no_matches = await agents_use_case.list(
+        limit=50,
+        page_number=1,
+        agent_card_metadata={"permits_capable": False, "test_tag": tag},
+    )
+    assert {a.id for a in no_matches if a.id in scoped_ids} == set()
+
+    # Multi-key containment requires every key/value to be present.
+    multi = await agents_use_case.list(
+        limit=50,
+        page_number=1,
+        agent_card_metadata={
+            "permits_capable": True,
+            "region": "us",
+            "test_tag": tag,
+        },
+    )
+    assert {a.id for a in multi if a.id in scoped_ids} == {permits.id}
+    missing_key = await agents_use_case.list(
+        limit=50,
+        page_number=1,
+        agent_card_metadata={
+            "permits_capable": True,
+            "region": "eu",
+            "test_tag": tag,
+        },
+    )
+    assert {a.id for a in missing_key if a.id in scoped_ids} == set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_list_without_agent_card_metadata_returns_all_non_deleted(
+    agents_use_case, agent_repository
+):
+    """Omitting the filter preserves existing behavior (agents without card metadata still listed)."""
+    suffix = uuid4().hex[:6]
+    with_card = await _seed_agent_with_card_metadata(
+        agent_repository,
+        f"card-metadata-with-{suffix}",
+        {"permits_capable": True},
+    )
+    without_card = await _seed_agent_with_card_metadata(
+        agent_repository,
+        f"card-metadata-without-{suffix}",
+        None,
+    )
+
+    all_agents = await agents_use_case.list(limit=50, page_number=1)
+    all_ids = {a.id for a in all_agents}
+    assert {with_card.id, without_card.id} <= all_ids
