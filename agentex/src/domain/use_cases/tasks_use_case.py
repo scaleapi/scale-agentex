@@ -100,8 +100,10 @@ class TasksUseCase:
         name: str | None = None,
         task_metadata: dict[str, Any] | None = None,
         merge_params: dict[str, Any] | None = None,
+        current_state: str | None = None,
     ) -> TaskEntity:
-        """Update mutable fields on a task entity. This is used by our API since not all fields should be mutable."""
+        """Update mutable fields on a task; ``None`` for any field means "not supplied".
+        ``current_state=""`` clears the label."""
 
         if not id and not name:
             raise ClientError("Either id or name must be provided")
@@ -114,16 +116,9 @@ class TasksUseCase:
             else:
                 raise ItemDoesNotExist(f"Task {name} not found")
 
-        # No-op if neither field was supplied.
-        if task_metadata is None and merge_params is None:
+        if task_metadata is None and merge_params is None and current_state is None:
             return task_entity
 
-        # `merge_params` is a separate atomic JSONB shallow-merge so concurrent
-        # callers don't overwrite each other's fields (vs reading→mutating→writing
-        # the whole params dict on task_entity). Run it first so the refreshed
-        # entity it returns becomes the base we apply `task_metadata` on top of;
-        # otherwise the `task_entity = merged` reassignment would discard an
-        # in-memory metadata change made before the merge.
         if merge_params:
             merged = await self.task_service.merge_task_params(
                 task_entity.id, merge_params
@@ -131,9 +126,20 @@ class TasksUseCase:
             if merged is not None:
                 task_entity = merged
 
+        fields: dict[str, Any] = {}
         if task_metadata is not None:
-            task_entity.task_metadata = task_metadata
-            task_entity = await self.task_service.update_task(task=task_entity)
+            fields["task_metadata"] = task_metadata
+        if current_state is not None:
+            # "" is the explicit clear: an empty label carries no meaning, and without
+            # it a task whose agent died mid-state would stay pinned forever.
+            fields["current_state"] = current_state or None
+        if fields:
+            updated = await self.task_service.update_mutable_fields(
+                task_entity.id, fields
+            )
+            if updated is None:
+                raise ItemDoesNotExist(f"Task {id or name} not found")
+            task_entity = updated
 
         return task_entity
 

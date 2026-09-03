@@ -58,6 +58,18 @@ class TestTasksAPIIntegration:
         return tasks
 
     @pytest_asyncio.fixture
+    async def test_running_task(self, isolated_repositories, test_agent):
+        """Create a minimal running task for tests that don't care about its name"""
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name=f"running-task-{orm_id()[:8]}",
+            status=TaskStatus.RUNNING,
+            status_reason="Running task for testing",
+        )
+        return await task_repo.create(agent_id=test_agent.id, task=task)
+
+    @pytest_asyncio.fixture
     async def test_task_with_params(self, isolated_repositories, test_agent):
         """Create a test task with params directly via repository"""
         task_repo = isolated_repositories["task_repository"]
@@ -506,8 +518,7 @@ class TestTasksAPIIntegration:
     async def test_list_tasks_omits_params_in_response(
         self, isolated_client, test_task_with_params
     ):
-        """The list summary must omit `params` even when the task has them
-        (they can carry secrets/PII); fetch a single task for the full record."""
+        """List summary omits params but carries current_state."""
         # When - Request all tasks
         response = await isolated_client.get("/tasks")
 
@@ -521,6 +532,8 @@ class TestTasksAPIIntegration:
         )
         assert params_task is not None, "Task should be in the list"
         assert "params" not in params_task
+        # current_state is a non-sensitive opaque label, so it IS in the lean summary.
+        assert "current_state" in params_task
 
     #
     async def test_get_task_by_id_includes_params_in_response(
@@ -674,6 +687,111 @@ class TestTasksAPIIntegration:
         assert response_data["task_metadata"]["workflow"]["stage"] == "updated"
         assert response_data["task_metadata"]["configuration"]["version"] == "2.0.0"
         assert response_data["task_metadata"]["metrics"]["complexity_score"] == 75
+
+    async def test_update_task_current_state(
+        self, isolated_client, test_running_task
+    ):
+        """PUT current_state: set it, omitted leaves it untouched, point-read reconciles."""
+        created_task = test_running_task
+
+        # Fresh task: current_state present in response and null by default.
+        response = await isolated_client.get(f"/tasks/{created_task.id}")
+        assert response.status_code == 200
+        assert response.json()["current_state"] is None
+
+        # Setting current_state persists and echoes back.
+        response = await isolated_client.put(
+            f"/tasks/{created_task.id}", json={"current_state": "awaiting_input"}
+        )
+        assert response.status_code == 200
+        assert response.json()["current_state"] == "awaiting_input"
+
+        # Point-read reflects the committed value (source of truth).
+        response = await isolated_client.get(f"/tasks/{created_task.id}")
+        assert response.status_code == 200
+        assert response.json()["current_state"] == "awaiting_input"
+
+        # Updating only task_metadata (current_state omitted) does not clobber it.
+        response = await isolated_client.put(
+            f"/tasks/{created_task.id}", json={"task_metadata": {"k": "v"}}
+        )
+        assert response.status_code == 200
+        assert response.json()["current_state"] == "awaiting_input"
+
+    async def test_update_task_current_state_and_metadata_together(
+        self, isolated_client, test_running_task
+    ):
+        """current_state + task_metadata in one PUT both persist without clobbering status."""
+        created_task = test_running_task
+
+        response = await isolated_client.put(
+            f"/tasks/{created_task.id}",
+            json={"current_state": "step_2", "task_metadata": {"stage": "two"}},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["current_state"] == "step_2"
+        assert body["task_metadata"] == {"stage": "two"}
+        assert body["status"] == "RUNNING"
+
+    async def test_update_task_current_state_by_name(
+        self, isolated_client, isolated_repositories, test_agent
+    ):
+        """PUT /tasks/name/{name} forwards current_state too."""
+        task_repo = isolated_repositories["task_repository"]
+        task = TaskEntity(
+            id=orm_id(),
+            name="task-for-current-state-by-name",
+            status=TaskStatus.RUNNING,
+            status_reason="Test task for by-name current_state",
+        )
+        await task_repo.create(agent_id=test_agent.id, task=task)
+
+        response = await isolated_client.put(
+            "/tasks/name/task-for-current-state-by-name",
+            json={"current_state": "working"},
+        )
+        assert response.status_code == 200
+        assert response.json()["current_state"] == "working"
+
+    async def test_update_task_current_state_empty_string_clears(
+        self, isolated_client, test_running_task
+    ):
+        """Empty string clears the label, so a task stuck mid-state is recoverable."""
+        response = await isolated_client.put(
+            f"/tasks/{test_running_task.id}", json={"current_state": "WORKING"}
+        )
+        assert response.json()["current_state"] == "WORKING"
+
+        response = await isolated_client.put(
+            f"/tasks/{test_running_task.id}", json={"current_state": ""}
+        )
+        assert response.status_code == 200
+        assert response.json()["current_state"] is None
+
+        # The clear is persisted, not just echoed.
+        response = await isolated_client.get(f"/tasks/{test_running_task.id}")
+        assert response.json()["current_state"] is None
+
+    async def test_update_task_current_state_too_long_rejected(
+        self, isolated_client, test_running_task
+    ):
+        """current_state exceeding the max length is rejected with 422."""
+        response = await isolated_client.put(
+            f"/tasks/{test_running_task.id}", json={"current_state": "x" * 256}
+        )
+        assert response.status_code == 422
+
+    async def test_update_task_request_ignores_unknown_fields(
+        self, isolated_client, test_running_task
+    ):
+        """Unknown fields are ignored (200, not 422) — guards the extra="ignore" SDK-compat assumption."""
+        response = await isolated_client.put(
+            f"/tasks/{test_running_task.id}",
+            json={"current_state": "working", "field_from_a_newer_sdk": "ignored"},
+        )
+        assert response.status_code == 200
+        assert response.json()["current_state"] == "working"
 
     async def test_update_task_endpoint_validation(
         self, isolated_client, isolated_repositories
