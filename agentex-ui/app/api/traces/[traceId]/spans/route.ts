@@ -35,11 +35,22 @@ export async function GET(
     sort_by: 'start_timestamp',
     sort_order: 'asc',
   });
-  const upstream = await fetch(`${SGP_BASE_URL}/v5/spans/search?${query}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ trace_ids: [traceId] }),
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${SGP_BASE_URL}/v5/spans/search?${query}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ trace_ids: [traceId] }),
+      signal: request.signal,
+    });
+  } catch (error) {
+    // A browser that navigated away aborts the request, and the abort reason is what the
+    // fetch rejects with, so the same identity check the Agentex proxy uses applies here.
+    if (error === request.signal.reason) {
+      return new Response(null, { status: 499 });
+    }
+    throw error;
+  }
   return new Response(upstream.body, {
     status: upstream.status,
     headers: { 'content-type': 'application/json' },

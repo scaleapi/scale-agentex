@@ -6,8 +6,11 @@ import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 
 export const spansKeys = {
   all: ['spans'] as const,
-  byTaskId: (taskId: string | null) =>
-    taskId ? ([...spansKeys.all, 'task', taskId] as const) : spansKeys.all,
+  // The account scopes the platform read, so it scopes the cache entry too.
+  byTaskId: (taskId: string | null, accountId: string | null) =>
+    taskId
+      ? ([...spansKeys.all, 'task', taskId, accountId ?? ''] as const)
+      : spansKeys.all,
 };
 
 /** A platform span as the traces BFF route returns it. */
@@ -54,7 +57,7 @@ export function useSpans(taskId: string | null): UseSpansState {
   const { sgpAccountID } = useSafeSearchParams();
 
   const { data, isLoading, error } = useQuery<SpansResult, Error>({
-    queryKey: spansKeys.byTaskId(taskId),
+    queryKey: spansKeys.byTaskId(taskId, sgpAccountID),
     queryFn: async ({ signal }): Promise<SpansResult> => {
       if (!taskId) {
         return { items: [], hasMore: false };

@@ -16,8 +16,8 @@ vi.mock('@/app/api/_lib/bff', () => ({
   applyBffCredentials: bff.applyBffCredentials,
 }));
 
-function call(traceId: string) {
-  return GET(new Request(`http://ui.local/api/traces/${traceId}/spans`), {
+function call(traceId: string, init?: RequestInit) {
+  return GET(new Request(`http://ui.local/api/traces/${traceId}/spans`, init), {
     params: Promise.resolve({ traceId }),
   });
 }
@@ -52,6 +52,27 @@ describe('GET /api/traces/[traceId]/spans', () => {
     expect(new Headers(init.headers).get('authorization')).toBe(
       'Bearer server-side'
     );
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('answers 499 when the browser aborts before the platform replies', async () => {
+    const controller = new AbortController();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init: RequestInit) => {
+        const signal = init.signal as AbortSignal;
+        return new Promise<Response>((_resolve, reject) => {
+          if (signal.aborted) reject(signal.reason);
+          signal.addEventListener('abort', () => reject(signal.reason));
+        });
+      })
+    );
+
+    const pending = call('t1', { signal: controller.signal });
+    controller.abort();
+    const res = await pending;
+
+    expect(res.status).toBe(499);
   });
 
   it('passes the upstream status through', async () => {

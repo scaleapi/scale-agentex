@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { useSpans } from './use-spans';
+import { spansKeys, useSpans } from './use-spans';
 
 vi.mock('@/hooks/use-safe-search-params', () => ({
   useSafeSearchParams: () => ({ sgpAccountID: 'acct-1' }),
@@ -36,6 +36,14 @@ const span = {
   start_timestamp: '2026-01-01T00:00:00Z',
   end_timestamp: null,
 };
+
+describe('spansKeys', () => {
+  it('scopes a task query to the selected account', () => {
+    expect(spansKeys.byTaskId('task-1', 'acct-1')).not.toEqual(
+      spansKeys.byTaskId('task-1', 'acct-2')
+    );
+  });
+});
 
 describe('useSpans', () => {
   afterEach(() => {
