@@ -20,7 +20,7 @@ import {
 // Hitting /api/auth/session runs the jwt-callback refresh and rotates the cookie. Deduped
 // so a burst of 401s (e.g. a refocused tab) shares one refresh.
 let sessionRefresh: Promise<unknown> | null = null;
-function refreshSession(): Promise<unknown> {
+export function refreshSession(): Promise<unknown> {
   sessionRefresh ??= fetch('/api/auth/session', { credentials: 'include' })
     .catch(() => {})
     .finally(() => {

@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 
+import { refreshSession, useAgentexClient } from '@/components/providers';
 import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 
 export const spansKeys = {
@@ -70,6 +71,7 @@ export function useSpans(
   createdAt: string | null | undefined
 ): UseSpansState {
   const { sgpAccountID } = useSafeSearchParams();
+  const { authEnabled } = useAgentexClient();
 
   const { data, isLoading, error } = useQuery<SpansResult, Error>({
     queryKey: spansKeys.byTaskId(taskId, sgpAccountID, createdAt),
@@ -81,17 +83,19 @@ export function useSpans(
       const search = createdAt
         ? `?${new URLSearchParams({ from: createdAt })}`
         : '';
-      const response = await fetch(
-        `/api/traces/${encodeURIComponent(taskId)}/spans${search}`,
-        {
-          credentials: 'include',
-          // Selected account, same source as the SDK, forwarded by the BFF.
-          headers: sgpAccountID
-            ? { 'x-selected-account-id': sgpAccountID }
-            : {},
-          signal,
-        }
-      );
+      const url = `/api/traces/${encodeURIComponent(taskId)}/spans${search}`;
+      const init: RequestInit = {
+        credentials: 'include',
+        // Selected account, same source as the SDK, forwarded by the BFF.
+        headers: sgpAccountID ? { 'x-selected-account-id': sgpAccountID } : {},
+        signal,
+      };
+      let response = await fetch(url, init);
+      if (response.status === 401 && authEnabled) {
+        // The access token expired between refreshes, so refresh once and retry like the SDK client.
+        await refreshSession();
+        response = await fetch(url, init);
+      }
 
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));

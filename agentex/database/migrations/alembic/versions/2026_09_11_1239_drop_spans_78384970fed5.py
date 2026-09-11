@@ -6,15 +6,16 @@ Create Date: 2026-09-11 12:39:10.000000
 
 Drops the legacy Postgres-backed spans table. Agent spans are written to the
 platform's tracing service by the SDK's SGP tracing processor, and the
-/spans API that fed this table is removed in the same change, so nothing
-reads or writes it any more.
+/spans API that fed this table is removed in the same change, so the
+server neither reads nor writes it any more. Clients on SDK versions that
+still default to that API get 404s from here on.
 
 Safety:
-- DROP TABLE is metadata-only in PostgreSQL (the files are unlinked), so it
-  completes well inside the statement timeout regardless of table size. It
-  needs an AccessExclusiveLock; a writer still holding the table (an old pod
-  mid-rollout) makes the lock wait hit lock_timeout, and the pod retries the
-  migration on its next start.
+- DROP TABLE unlinks the table's files rather than scanning rows, so its
+  cost does not grow with the row count. It needs an AccessExclusiveLock,
+  so a writer holding a conflicting lock for longer than lock_timeout (an
+  old pod mid-rollout) aborts the migration, and the pod retries it on its
+  next start.
 - IF EXISTS keeps re-runs idempotent. The indexes and the foreign key to
   tasks go with the table.
 - Downgrade recreates the empty table with the shape the ORM last declared.

@@ -10,6 +10,16 @@ vi.mock('@/hooks/use-safe-search-params', () => ({
   useSafeSearchParams: () => ({ sgpAccountID: 'acct-1' }),
 }));
 
+const providers = vi.hoisted(() => ({
+  authEnabled: false,
+  refreshSession: vi.fn(async () => undefined),
+}));
+
+vi.mock('@/components/providers', () => ({
+  useAgentexClient: () => ({ authEnabled: providers.authEnabled }),
+  refreshSession: providers.refreshSession,
+}));
+
 function createWrapper() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -48,6 +58,41 @@ describe('spansKeys', () => {
 describe('useSpans', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    providers.authEnabled = false;
+    providers.refreshSession.mockClear();
+  });
+
+  it('refreshes the session once and retries a 401 when login is enabled', async () => {
+    providers.authEnabled = true;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ detail: 'expired' }, 401))
+      .mockResolvedValueOnce(jsonResponse({ items: [span], has_more: false }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useSpans('task-1', null), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.spans).toEqual([span]);
+    expect(providers.refreshSession).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not refresh on a 401 when login is disabled', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse({ detail: 'expired' }, 401))
+    );
+
+    const { result } = renderHook(() => useSpans('task-1', null), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.error).toBe('expired'));
+    expect(providers.refreshSession).not.toHaveBeenCalled();
   });
 
   it('reads the task trace through the BFF with the selected account', async () => {
