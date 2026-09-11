@@ -20,7 +20,7 @@ type TracesSidebarProps = {
 
 export function TracesSidebar({ isOpen }: TracesSidebarProps) {
   const { taskID } = useSafeSearchParams();
-  const { spans, isLoading, error } = useSpans(taskID);
+  const { spans, hasMore, isLoading, error } = useSpans(taskID);
 
   return (
     <AnimatePresence>
@@ -76,8 +76,15 @@ export function TracesSidebar({ isOpen }: TracesSidebarProps) {
                     </div>
                   )}
 
+                  {hasMore && (
+                    <div className="text-muted-foreground text-sm">
+                      Showing the first {spans.length} spans. Use Investigate
+                      traces for the full trace.
+                    </div>
+                  )}
+
                   {spans.map(span => {
-                    const startTime = new Date(span.start_time);
+                    const startTime = new Date(span.start_timestamp);
 
                     return (
                       <div key={span.id}>

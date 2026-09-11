@@ -41,7 +41,6 @@ from src.api.routes import (
     linear,
     messages,
     slack,
-    spans,
     states,
     task_retention,
     tasks,
@@ -200,7 +199,6 @@ async def handle_unexpected(request, exc):
 fastapi_app.include_router(agents.router)
 fastapi_app.include_router(tasks.router)
 fastapi_app.include_router(messages.router)
-fastapi_app.include_router(spans.router)
 fastapi_app.include_router(states.router)
 fastapi_app.include_router(events.router)
 fastapi_app.include_router(slack.router)

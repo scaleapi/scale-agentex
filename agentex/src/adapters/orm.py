@@ -152,32 +152,6 @@ class AgentTaskTrackerORM(BaseORM):
     )
 
 
-class SpanORM(BaseORM):
-    __tablename__ = "spans"
-    id = Column(String, primary_key=True, default=orm_id)  # Using UUIDs for IDs
-    trace_id = Column(String, nullable=False)
-    task_id = Column(String, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
-    parent_id = Column(String, nullable=True)
-    name = Column(String, nullable=False)
-    start_time = Column(DateTime(timezone=True), nullable=False)
-    end_time = Column(DateTime(timezone=True), nullable=True)
-    input = Column(JSON, nullable=True)
-    output = Column(JSON, nullable=True)
-    data = Column(JSON, nullable=True)
-
-    # Indexes for efficient querying
-    __table_args__ = (
-        # Index for filtering spans by trace_id
-        Index("ix_spans_trace_id", "trace_id"),
-        # Composite index for filtering by trace_id and ordering by start_time
-        Index("ix_spans_trace_id_start_time", "trace_id", "start_time"),
-        # Index for traversing span hierarchy
-        Index("ix_spans_parent_id", "parent_id"),
-        # Index for filtering spans by task_id
-        Index("ix_spans_task_id", "task_id"),
-    )
-
-
 class AgentAPIKeyORM(BaseORM):
     __tablename__ = "agent_api_keys"
     id = Column(String, primary_key=True, default=orm_id)

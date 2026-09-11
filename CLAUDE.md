@@ -208,7 +208,7 @@ The backend (`agentex/src/`) follows a clean architecture with strict layer sepa
 ```
 src/
 ├── api/                    # FastAPI routes, middleware, request/response schemas
-│   ├── routes/             # API endpoints (agents, tasks, messages, spans, etc.)
+│   ├── routes/             # API endpoints (agents, tasks, messages, states, etc.)
 │   ├── schemas/            # Pydantic request/response models
 │   ├── authentication_middleware.py
 │   └── app.py              # FastAPI application setup
@@ -285,7 +285,6 @@ Tests are organized by type and use different strategies:
 - **Agents**: Autonomous entities that execute tasks, managed via ACP protocol
 - **Tasks**: Work units with lifecycle states (pending → running → completed/failed). Identified by a UUID `id`; the human-readable `name` is **optional** (nullable) and, when set, globally unique. `task/create` is get-or-create keyed on `name`, so reusing an existing name returns that task with its prior history instead of creating a new one — omit `name` (or make it unique) whenever each call should produce a fresh task.
 - **Messages**: Communication between system and agents (stored in MongoDB)
-- **Spans**: Execution traces for observability (OpenTelemetry-style)
 - **Events**: Domain events for async communication
 - **States**: Key-value state storage for agents
 - **Deployment History**: Track agent deployment versions and changes
@@ -347,7 +346,7 @@ For any migration that adds a backfilled column with an FK and an index on a lar
 | Step | What | Why |
 |---|---|---|
 | **M1 (Alembic)** | `ADD COLUMN` (nullable) + `ADD CONSTRAINT ... NOT VALID` + `CREATE INDEX CONCURRENTLY` (in `autocommit_block()`) | Schema-only, all metadata-cheap or non-blocking. Each operation is idempotent (`IF NOT EXISTS` / `pg_constraint` guard) so the migration is safe to re-run on environments that already ran a previous (broken) version. |
-| **Out-of-band runbook** | Chunked backfill script with `lock_timeout`, small batches, `COMMIT` between batches, `pg_sleep` between batches | Operator-driven; runs during a low-traffic window, can be cancelled cleanly, doesn't block pod startup. Pattern: `agentex/docs/runbooks/spans-task-id-backfill.md`. |
+| **Out-of-band runbook** | Chunked backfill script with `lock_timeout`, small batches, `COMMIT` between batches, `pg_sleep` between batches | Operator-driven; runs during a low-traffic window, can be cancelled cleanly, doesn't block pod startup. |
 | **M2 (Alembic)** | `ALTER TABLE ... VALIDATE CONSTRAINT` (only if a fully validated FK state is actually needed) | Runs after the backfill so the scan finds no violations. `ShareUpdateExclusiveLock` is non-blocking against reads/writes but still scans the table — usually optional. |
 
 The application should also tolerate the partially-backfilled state at read time (e.g. ORing the new column against the legacy column where they overlap) so deployment of M1 is decoupled from the backfill's completion.

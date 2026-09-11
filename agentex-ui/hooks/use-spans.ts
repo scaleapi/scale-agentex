@@ -2,9 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 
-import { useAgentexClient } from '@/components/providers';
-
-import type { Span } from 'agentex/resources';
+import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 
 export const spansKeys = {
   all: ['spans'] as const,
@@ -12,50 +10,88 @@ export const spansKeys = {
     taskId ? ([...spansKeys.all, 'task', taskId] as const) : spansKeys.all,
 };
 
+/** A platform span as the traces BFF route returns it. */
+export type TraceSpan = {
+  id: string;
+  trace_id: string;
+  parent_id: string | null;
+  name: string;
+  start_timestamp: string;
+  end_timestamp: string | null;
+  status?: string | null;
+  type?: string | null;
+  input?: Record<string, unknown> | null;
+  output?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
+};
+
+type SpansPage = {
+  items: TraceSpan[];
+  has_more?: boolean;
+};
+
+type SpansResult = {
+  items: TraceSpan[];
+  hasMore: boolean;
+};
+
 type UseSpansState = {
-  spans: Span[];
+  spans: TraceSpan[];
+  // True when the trace has more spans than the one page the sidebar shows.
+  hasMore: boolean;
   isLoading: boolean;
   error: string | null;
 };
 
 /**
- * Fetches execution spans for observability and debugging of task execution.
+ * Fetches a task's execution spans from Scale GenAI Platform, where agents trace under the
+ * task id, through the same-origin BFF route that attaches credentials server-side.
  *
- * Queries by task_id first. Falls back to trace_id=taskId for backward
- * compatibility with spans created before the task_id column was added.
- *
- * @param taskId - string | null - The task ID to fetch spans for, or null to disable the query
- * @returns UseSpansState - Object containing the spans array, loading state, and any error message
+ * @param taskId - The task ID to fetch spans for, or null to disable the query
+ * @returns The first page of spans in start order, whether more exist, the loading state, and any error message
  */
 export function useSpans(taskId: string | null): UseSpansState {
-  const { agentexClient } = useAgentexClient();
+  const { sgpAccountID } = useSafeSearchParams();
 
-  const { data, isLoading, error } = useQuery<Span[], Error>({
+  const { data, isLoading, error } = useQuery<SpansResult, Error>({
     queryKey: spansKeys.byTaskId(taskId),
-    queryFn: async ({ signal }) => {
+    queryFn: async ({ signal }): Promise<SpansResult> => {
       if (!taskId) {
-        return [];
+        return { items: [], hasMore: false };
       }
 
-      // task_id is not yet in the SDK types (SDK update pending), but the
-      // server already accepts it — cast until the SDK is regenerated.
-      const spansByTaskId = await agentexClient.spans.list(
-        { task_id: taskId } as Parameters<typeof agentexClient.spans.list>[0],
-        { signal }
+      const response = await fetch(
+        `/api/traces/${encodeURIComponent(taskId)}/spans`,
+        {
+          credentials: 'include',
+          // Selected account, same source as the SDK, forwarded by the BFF.
+          headers: sgpAccountID
+            ? { 'x-selected-account-id': sgpAccountID }
+            : {},
+          signal,
+        }
       );
 
-      if (spansByTaskId.length > 0) {
-        return spansByTaskId;
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        const message =
+          typeof body.error === 'string'
+            ? body.error
+            : typeof body.detail === 'string'
+              ? body.detail
+              : `Request failed with status ${response.status}`;
+        throw new Error(message);
       }
 
-      // Fallback: query by trace_id=taskId for backward compat with old spans
-      return await agentexClient.spans.list({ trace_id: taskId }, { signal });
+      const page: SpansPage = await response.json();
+      return { items: page.items ?? [], hasMore: page.has_more ?? false };
     },
     enabled: taskId !== null,
   });
 
   return {
-    spans: data ?? [],
+    spans: data?.items ?? [],
+    hasMore: data?.hasMore ?? false,
     isLoading,
     error: error?.message ?? null,
   };

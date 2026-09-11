@@ -60,22 +60,6 @@ def create_event_repository(postgres_session):
     )
 
 
-def create_span_repository(postgres_session):
-    """Factory function to create SpanRepository with given PostgreSQL session"""
-    from contextlib import asynccontextmanager
-
-    from src.domain.repositories.span_repository import SpanRepository
-
-    @asynccontextmanager
-    async def session_maker():
-        yield postgres_session
-
-    return SpanRepository(
-        async_read_write_session_maker=session_maker,
-        async_read_only_session_maker=session_maker,
-    )
-
-
 def create_task_state_repository(mongodb_database):
     """Factory function to create TaskStateRepository with given MongoDB database"""
     from src.domain.repositories.task_state_repository import TaskStateRepository
@@ -171,12 +155,6 @@ def task_repository(unit_db_session):
 def event_repository(unit_db_session):
     """Event repository for unit tests"""
     return create_event_repository(unit_db_session)
-
-
-@pytest.fixture
-def span_repository(unit_db_session):
-    """Span repository for unit tests"""
-    return create_span_repository(unit_db_session)
 
 
 @pytest.fixture

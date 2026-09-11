@@ -267,7 +267,6 @@ async def isolated_repositories(isolated_test_schema):
     )
     from src.domain.repositories.deployment_repository import DeploymentRepository
     from src.domain.repositories.event_repository import EventRepository
-    from src.domain.repositories.span_repository import SpanRepository
     from src.domain.repositories.task_message_repository import TaskMessageRepository
     from src.domain.repositories.task_repository import TaskRepository
     from src.domain.repositories.task_state_repository import TaskStateRepository
@@ -303,9 +302,6 @@ async def isolated_repositories(isolated_test_schema):
             async_rw_session_factory, async_ro_session_factory
         ),
         "event_repository": EventRepository(
-            async_rw_session_factory, async_ro_session_factory
-        ),
-        "span_repository": SpanRepository(
             async_rw_session_factory, async_ro_session_factory
         ),
         "agent_task_tracker_repository": AgentTaskTrackerRepository(
@@ -383,7 +379,6 @@ async def isolated_integration_app(
     )
     from src.domain.use_cases.events_use_case import EventUseCase
     from src.domain.use_cases.messages_use_case import MessagesUseCase
-    from src.domain.use_cases.spans_use_case import SpanUseCase
     from src.domain.use_cases.states_use_case import StatesUseCase
     from src.domain.use_cases.task_retention_use_case import TaskRetentionUseCase
     from src.domain.use_cases.tasks_use_case import TasksUseCase
@@ -423,9 +418,6 @@ async def isolated_integration_app(
 
     def create_events_use_case():
         return EventUseCase(event_repository=isolated_repositories["event_repository"])
-
-    def create_spans_use_case():
-        return SpanUseCase(span_repository=isolated_repositories["span_repository"])
 
     def create_states_use_case():
         return StatesUseCase(
@@ -519,7 +511,6 @@ async def isolated_integration_app(
     )
     from src.domain.repositories.deployment_repository import DeploymentRepository
     from src.domain.repositories.event_repository import EventRepository
-    from src.domain.repositories.span_repository import SpanRepository
     from src.domain.repositories.task_message_repository import TaskMessageRepository
     from src.domain.repositories.task_repository import TaskRepository
     from src.domain.repositories.task_state_repository import TaskStateRepository
@@ -540,7 +531,6 @@ async def isolated_integration_app(
             CheckpointsUseCase: create_checkpoints_use_case,
             AgentsUseCase: create_agents_use_case,
             EventUseCase: create_events_use_case,
-            SpanUseCase: create_spans_use_case,
             StatesUseCase: create_states_use_case,
             AgentTaskTrackerUseCase: create_agent_task_tracker_use_case,
             TasksUseCase: create_tasks_use_case,
@@ -562,7 +552,6 @@ async def isolated_integration_app(
             ],
             TaskRepository: lambda: isolated_repositories["task_repository"],
             EventRepository: lambda: isolated_repositories["event_repository"],
-            SpanRepository: lambda: isolated_repositories["span_repository"],
             AgentTaskTrackerRepository: lambda: isolated_repositories[
                 "agent_task_tracker_repository"
             ],

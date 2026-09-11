@@ -33,7 +33,7 @@ A modern web interface for building, testing, and monitoring intelligent agents.
 
 ### Observability
 
-- **Execution Traces** - View OpenTelemetry-style spans for task execution
+- **Execution Traces** - View a task's spans from Scale GenAI Platform (needs `SGP_API_URL`)
 - **Span Visualization** - Hierarchical view of execution flow
 - **Performance Metrics** - Timing and duration information for each execution step
 - **Error Tracking** - Detailed error information when tasks fail
@@ -178,7 +178,7 @@ For Docker-related commands, see the Docker section in `build.ps1 help`.
 - `hooks/use-tasks.ts` - Task list with infinite scroll pagination
 - `hooks/use-task-messages.ts` - Message fetching and sending with message streaming for sync agents
 - `hooks/use-task-subscription.ts` - Real-time task updates via WebSocket for async agents
-- `hooks/use-spans.ts` - Execution trace data
+- `hooks/use-spans.ts` - Execution trace data (via `/api/traces`)
 
 **Components:**
 
