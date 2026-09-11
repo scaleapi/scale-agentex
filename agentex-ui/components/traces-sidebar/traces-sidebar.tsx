@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 
+import { useAgentexClient } from '@/components/providers';
 import { JsonViewer } from '@/components/ui/json-viewer';
 import { ResizableSidebar } from '@/components/ui/resizable-sidebar';
 import {
@@ -10,6 +11,7 @@ import {
 } from '@/components/ui/tooltip';
 import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 import { useSpans } from '@/hooks/use-spans';
+import { useTask } from '@/hooks/use-tasks';
 
 const MIN_SIDEBAR_WIDTH = 350;
 const DEFAULT_SIDEBAR_WIDTH = 350;
@@ -20,7 +22,15 @@ type TracesSidebarProps = {
 
 export function TracesSidebar({ isOpen }: TracesSidebarProps) {
   const { taskID } = useSafeSearchParams();
-  const { spans, hasMore, isLoading, error } = useSpans(taskID);
+  const { agentexClient, sgpAppURL } = useAgentexClient();
+  const { data: task, isError: taskUnavailable } = useTask({
+    agentexClient,
+    taskId: taskID ?? '',
+  });
+  // The task's creation time anchors the search window. Without it the query waits, unless
+  // the task itself cannot be read, in which case the platform's default window is used.
+  const createdAt = task?.created_at ?? (taskUnavailable ? null : undefined);
+  const { spans, hasMore, isLoading, error } = useSpans(taskID, createdAt);
 
   return (
     <AnimatePresence>
@@ -78,8 +88,9 @@ export function TracesSidebar({ isOpen }: TracesSidebarProps) {
 
                   {hasMore && (
                     <div className="text-muted-foreground text-sm">
-                      Showing the first {spans.length} spans. Use Investigate
-                      traces for the full trace.
+                      Showing the first {spans.length} spans.
+                      {sgpAppURL &&
+                        ' Use Investigate traces for the full trace.'}
                     </div>
                   )}
 

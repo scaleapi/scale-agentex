@@ -40,3 +40,7 @@ jobs:
     - name: Run lint
       run: npm run lint
       working-directory: ./agentex-ui
+
+    - name: Run unit tests
+      run: npm run test:run
+      working-directory: ./agentex-ui

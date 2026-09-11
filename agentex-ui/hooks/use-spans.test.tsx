@@ -39,8 +39,8 @@ const span = {
 
 describe('spansKeys', () => {
   it('scopes a task query to the selected account', () => {
-    expect(spansKeys.byTaskId('task-1', 'acct-1')).not.toEqual(
-      spansKeys.byTaskId('task-1', 'acct-2')
+    expect(spansKeys.byTaskId('task-1', 'acct-1', null)).not.toEqual(
+      spansKeys.byTaskId('task-1', 'acct-2', null)
     );
   });
 });
@@ -56,9 +56,10 @@ describe('useSpans', () => {
       .mockResolvedValue(jsonResponse({ items: [span], has_more: false }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const { result } = renderHook(() => useSpans('task-1'), {
-      wrapper: createWrapper(),
-    });
+    const { result } = renderHook(
+      () => useSpans('task-1', '2026-01-01T00:00:00.000Z'),
+      { wrapper: createWrapper() }
+    );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -67,7 +68,9 @@ describe('useSpans', () => {
     expect(result.current.error).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe('/api/traces/task-1/spans');
+    expect(url).toBe(
+      '/api/traces/task-1/spans?from=2026-01-01T00%3A00%3A00.000Z'
+    );
     expect(init.credentials).toBe('include');
     expect(init.headers).toEqual({ 'x-selected-account-id': 'acct-1' });
   });
@@ -78,7 +81,7 @@ describe('useSpans', () => {
       vi.fn().mockResolvedValue(jsonResponse({ items: [span], has_more: true }))
     );
 
-    const { result } = renderHook(() => useSpans('task-1'), {
+    const { result } = renderHook(() => useSpans('task-1', null), {
       wrapper: createWrapper(),
     });
 
@@ -98,7 +101,7 @@ describe('useSpans', () => {
         )
     );
 
-    const { result } = renderHook(() => useSpans('task-1'), {
+    const { result } = renderHook(() => useSpans('task-1', null), {
       wrapper: createWrapper(),
     });
 
@@ -112,11 +115,37 @@ describe('useSpans', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    const { result } = renderHook(() => useSpans(null), {
+    const { result } = renderHook(() => useSpans(null, null), {
       wrapper: createWrapper(),
     });
 
     expect(result.current.spans).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('waits until the task creation time is known', () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderHook(() => useSpans('task-1', undefined), {
+      wrapper: createWrapper(),
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reads without a window when the task cannot be loaded', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ items: [], has_more: false }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useSpans('task-1', null), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/traces/task-1/spans');
   });
 });

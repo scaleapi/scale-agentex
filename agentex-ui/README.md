@@ -33,7 +33,7 @@ A modern web interface for building, testing, and monitoring intelligent agents.
 
 ### Observability
 
-- **Execution Traces** - View a task's spans from Scale GenAI Platform (needs `SGP_API_URL`)
+- **Execution Traces** - View a task's spans from Scale GenAI Platform (needs `SGP_API_URL` or `NEXT_PUBLIC_SGP_APP_URL`)
 - **Span Visualization** - Hierarchical view of execution flow
 - **Performance Metrics** - Timing and duration information for each execution step
 - **Error Tracking** - Detailed error information when tasks fail

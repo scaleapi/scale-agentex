@@ -9,8 +9,24 @@ import { applyBffCredentials, SGP_BASE_URL } from '@/app/api/_lib/bff';
  */
 export const dynamic = 'force-dynamic';
 
-// The platform caps a search page at this size, and the sidebar shows the first page.
+// The sidebar shows one page and reports the rest through has_more.
 const PAGE_SIZE = 100;
+// The platform refuses a window wider than 90 days, and it defaults an omitted window to the
+// last 90 days, which hides older tasks. Anchor the window on the task's creation instead.
+const WINDOW_MS = 90 * 24 * 60 * 60 * 1000 - 60 * 1000;
+const SKEW_MS = 5 * 60 * 1000;
+
+function searchWindow(from: string | null): Record<string, string> | null {
+  if (from === null) return {};
+  const start = Date.parse(from);
+  if (Number.isNaN(start)) return null;
+  const fromTs = start - SKEW_MS;
+  const toTs = Math.min(Date.now(), fromTs + WINDOW_MS);
+  return {
+    from_ts: new Date(fromTs).toISOString(),
+    to_ts: new Date(toTs).toISOString(),
+  };
+}
 
 export async function GET(
   request: Request,
@@ -24,6 +40,13 @@ export async function GET(
   }
 
   const { traceId } = await ctx.params;
+  const window = searchWindow(new URL(request.url).searchParams.get('from'));
+  if (window === null) {
+    return NextResponse.json(
+      { error: 'from must be an ISO timestamp' },
+      { status: 400 }
+    );
+  }
   const headers = new Headers({
     'Content-Type': 'application/json',
     accept: 'application/json',
@@ -34,6 +57,9 @@ export async function GET(
     limit: String(PAGE_SIZE),
     sort_by: 'start_timestamp',
     sort_order: 'asc',
+    // Over the byte budget the platform shortens the page instead of refusing it.
+    allow_short_pages: 'true',
+    ...window,
   });
   let upstream: Response;
   try {

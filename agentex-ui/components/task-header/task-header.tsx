@@ -13,7 +13,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
-import { useSpans } from '@/hooks/use-spans';
 
 import type { Agent } from 'agentex/resources';
 
@@ -37,8 +36,8 @@ export function TaskHeader({
 }: TaskHeaderProps) {
   const displayTaskId = taskId ? taskId.split('-')[0] : '';
   const { agentName: selectedAgentName } = useSafeSearchParams();
-  const { spans } = useSpans(taskId);
-  const traceId = spans[0]?.trace_id ?? taskId;
+  // Agents trace under the task id, so the task is the trace.
+  const traceId = taskId;
 
   const copyTaskId = async () => {
     if (taskId) {

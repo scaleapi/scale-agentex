@@ -6,10 +6,20 @@ import { useSafeSearchParams } from '@/hooks/use-safe-search-params';
 
 export const spansKeys = {
   all: ['spans'] as const,
-  // The account scopes the platform read, so it scopes the cache entry too.
-  byTaskId: (taskId: string | null, accountId: string | null) =>
+  // The account and the window anchor scope the platform read, so they scope the cache too.
+  byTaskId: (
+    taskId: string | null,
+    accountId: string | null,
+    createdAt: string | null | undefined
+  ) =>
     taskId
-      ? ([...spansKeys.all, 'task', taskId, accountId ?? ''] as const)
+      ? ([
+          ...spansKeys.all,
+          'task',
+          taskId,
+          accountId ?? '',
+          createdAt ?? '',
+        ] as const)
       : spansKeys.all,
 };
 
@@ -51,20 +61,28 @@ type UseSpansState = {
  * task id, through the same-origin BFF route that attaches credentials server-side.
  *
  * @param taskId - The task ID to fetch spans for, or null to disable the query
+ * @param createdAt - The task's creation time, which anchors the platform's search window.
+ *   Undefined means not known yet (the query waits), null means unknown (no window is sent).
  * @returns The first page of spans in start order, whether more exist, the loading state, and any error message
  */
-export function useSpans(taskId: string | null): UseSpansState {
+export function useSpans(
+  taskId: string | null,
+  createdAt: string | null | undefined
+): UseSpansState {
   const { sgpAccountID } = useSafeSearchParams();
 
   const { data, isLoading, error } = useQuery<SpansResult, Error>({
-    queryKey: spansKeys.byTaskId(taskId, sgpAccountID),
+    queryKey: spansKeys.byTaskId(taskId, sgpAccountID, createdAt),
     queryFn: async ({ signal }): Promise<SpansResult> => {
       if (!taskId) {
         return { items: [], hasMore: false };
       }
 
+      const search = createdAt
+        ? `?${new URLSearchParams({ from: createdAt })}`
+        : '';
       const response = await fetch(
-        `/api/traces/${encodeURIComponent(taskId)}/spans`,
+        `/api/traces/${encodeURIComponent(taskId)}/spans${search}`,
         {
           credentials: 'include',
           // Selected account, same source as the SDK, forwarded by the BFF.
@@ -89,7 +107,7 @@ export function useSpans(taskId: string | null): UseSpansState {
       const page: SpansPage = await response.json();
       return { items: page.items ?? [], hasMore: page.has_more ?? false };
     },
-    enabled: taskId !== null,
+    enabled: taskId !== null && createdAt !== undefined,
   });
 
   return {
