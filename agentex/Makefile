@@ -105,6 +105,14 @@ docker-build-with-docs: ## Build production Docker image with docs included
 # Test Commands
 #
 
+lint: ## Check lint and formatting with ruff (same checks as CI)
+	uv run ruff check src/
+	uv run ruff format --check src/
+
+lint-fix: ## Auto-fix lint errors and format with ruff
+	uv run ruff check src/ --fix
+	uv run ruff format src/
+
 test: ## Run tests (examples: make test FILE=path/to/test.py, make test NAME=pattern, make test ARGS="-v")
 	@uv run python scripts/run_tests.py \
 		$(if $(FILE),$(FILE)) \

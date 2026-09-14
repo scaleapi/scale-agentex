@@ -75,7 +75,9 @@ logger = make_logger(__name__)
 
 # Module state
 _auto_instrumentation_bootstrapped = False
-_meter_provider: MeterProvider | None = None  # Set only when this module creates the provider
+_meter_provider: MeterProvider | None = (
+    None  # Set only when this module creates the provider
+)
 _initialized: bool = False
 
 DEFAULT_SERVICE_NAME = "agentex"
