@@ -113,7 +113,10 @@ async def get_agent_by_name(
 _AGENT_CARD_METADATA_DESCRIPTION = (
     "JSON-encoded object used to filter agents on "
     "`registration_metadata.agent_card.metadata` via JSONB containment. "
-    'Example: {"permits_capable": true}.'
+    'Example: {"permits_capable": true}. Only matches cards published '
+    "through the direct registration path: registrations that carry a "
+    "`deployment_id` write the card to the deployment record instead of "
+    "`registration_metadata`, so those agents never match this filter."
 )
 
 
