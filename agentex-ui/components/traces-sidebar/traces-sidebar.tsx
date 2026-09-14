@@ -30,7 +30,11 @@ export function TracesSidebar({ isOpen }: TracesSidebarProps) {
   // The task's creation time anchors the search window. Without it the query waits, unless
   // the task itself cannot be read, in which case the platform's default window is used.
   const createdAt = task?.created_at ?? (taskUnavailable ? null : undefined);
-  const { spans, hasMore, isLoading, error } = useSpans(taskID, createdAt);
+  const { spans, hasMore, truncatedBefore, isLoading, error } = useSpans(
+    taskID,
+    createdAt,
+    { enabled: isOpen }
+  );
 
   return (
     <AnimatePresence>
@@ -83,6 +87,15 @@ export function TracesSidebar({ isOpen }: TracesSidebarProps) {
                   {spans.length === 0 && !isLoading && !error && taskID && (
                     <div className="text-muted-foreground text-sm">
                       No spans found for this task
+                    </div>
+                  )}
+
+                  {truncatedBefore && (
+                    <div className="text-muted-foreground text-sm">
+                      Spans before {new Date(truncatedBefore).toLocaleString()}{' '}
+                      are not shown.
+                      {sgpAppURL &&
+                        ' Use Investigate traces for the full trace.'}
                     </div>
                   )}
 

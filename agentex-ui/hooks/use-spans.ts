@@ -42,17 +42,27 @@ export type TraceSpan = {
 type SpansPage = {
   items: TraceSpan[];
   has_more?: boolean;
+  window_truncated?: boolean;
+  effective_from_ts?: string | null;
 };
 
 type SpansResult = {
   items: TraceSpan[];
   hasMore: boolean;
+  truncatedBefore: string | null;
+};
+
+type UseSpansOptions = {
+  // False while the sidebar is collapsed, so a hidden panel does not search the platform.
+  enabled?: boolean;
 };
 
 type UseSpansState = {
   spans: TraceSpan[];
   // True when the trace has more spans than the one page the sidebar shows.
   hasMore: boolean;
+  // Set when the platform clamped the window, to the earliest instant it did search.
+  truncatedBefore: string | null;
   isLoading: boolean;
   error: string | null;
 };
@@ -62,22 +72,25 @@ type UseSpansState = {
  * task id, through the same-origin BFF route that attaches credentials server-side.
  *
  * @param taskId - The task ID to fetch spans for, or null to disable the query
- * @param createdAt - The task's creation time, which anchors the platform's search window.
+ * @param createdAt - The task's creation time, which starts the platform's search window.
  *   Undefined means not known yet (the query waits), null means unknown (no window is sent).
- * @returns The first page of spans in start order, whether more exist, the loading state, and any error message
+ * @param options - `enabled: false` holds the query while the sidebar is collapsed.
+ * @returns The first page of spans in start order, whether more exist, where the platform
+ *   truncated the window, the loading state, and any error message
  */
 export function useSpans(
   taskId: string | null,
-  createdAt: string | null | undefined
+  createdAt: string | null | undefined,
+  { enabled = true }: UseSpansOptions = {}
 ): UseSpansState {
   const { sgpAccountID } = useSafeSearchParams();
   const { authEnabled } = useAgentexClient();
 
-  const { data, isLoading, error } = useQuery<SpansResult, Error>({
+  const { data, isPending, error } = useQuery<SpansResult, Error>({
     queryKey: spansKeys.byTaskId(taskId, sgpAccountID, createdAt),
     queryFn: async ({ signal }): Promise<SpansResult> => {
       if (!taskId) {
-        return { items: [], hasMore: false };
+        return { items: [], hasMore: false, truncatedBefore: null };
       }
 
       const search = createdAt
@@ -109,15 +122,24 @@ export function useSpans(
       }
 
       const page: SpansPage = await response.json();
-      return { items: page.items ?? [], hasMore: page.has_more ?? false };
+      return {
+        items: page.items ?? [],
+        hasMore: page.has_more ?? false,
+        truncatedBefore:
+          page.window_truncated && page.effective_from_ts
+            ? page.effective_from_ts
+            : null,
+      };
     },
-    enabled: taskId !== null && createdAt !== undefined,
+    enabled: enabled && taskId !== null && createdAt !== undefined,
   });
 
   return {
     spans: data?.items ?? [],
     hasMore: data?.hasMore ?? false,
-    isLoading,
+    truncatedBefore: data?.truncatedBefore ?? null,
+    // No data yet, whether the query is waiting on the task or in flight, reads as loading.
+    isLoading: isPending,
     error: error?.message ?? null,
   };
 }

@@ -168,15 +168,81 @@ describe('useSpans', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('waits until the task creation time is known', () => {
+  it('waits for the task creation time and reports loading meanwhile', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    renderHook(() => useSpans('task-1', undefined), {
+    const { result } = renderHook(() => useSpans('task-1', undefined), {
       wrapper: createWrapper(),
     });
 
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.spans).toEqual([]);
+  });
+
+  it('does not search while disabled and reads once enabled', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ items: [span], has_more: false }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) =>
+        useSpans('task-1', null, { enabled }),
+      { wrapper: createWrapper(), initialProps: { enabled: false } }
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.current.isLoading).toBe(true);
+
+    rerender({ enabled: true });
+
+    await waitFor(() => expect(result.current.spans).toEqual([span]));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports where the platform truncated the window', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          items: [span],
+          has_more: false,
+          window_truncated: true,
+          effective_from_ts: '2026-06-01T00:00:00Z',
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useSpans('task-1', null), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.truncatedBefore).toBe('2026-06-01T00:00:00Z');
+  });
+
+  it('reports no truncation when the platform searched the whole window', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          items: [span],
+          has_more: false,
+          window_truncated: false,
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useSpans('task-1', null), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.truncatedBefore).toBeNull();
   });
 
   it('reads without a window when the task cannot be loaded', async () => {

@@ -11,21 +11,15 @@ export const dynamic = 'force-dynamic';
 
 // The sidebar shows one page and reports the rest through has_more.
 const PAGE_SIZE = 100;
-// The platform refuses a window wider than 90 days, and it defaults an omitted window to the
-// last 90 days, which hides older tasks. Anchor the window on the task's creation instead.
-const WINDOW_MS = 90 * 24 * 60 * 60 * 1000 - 60 * 1000;
+// Start at the task's creation and leave the end open: the platform clamps a window wider than
+// 90 days to its newest 90 and reports that through window_truncated.
 const SKEW_MS = 5 * 60 * 1000;
 
 function searchWindow(from: string | null): Record<string, string> | null {
   if (from === null) return {};
   const start = Date.parse(from);
   if (Number.isNaN(start)) return null;
-  const fromTs = start - SKEW_MS;
-  const toTs = Math.min(Date.now(), fromTs + WINDOW_MS);
-  return {
-    from_ts: new Date(fromTs).toISOString(),
-    to_ts: new Date(toTs).toISOString(),
-  };
+  return { from_ts: new Date(start - SKEW_MS).toISOString() };
 }
 
 export async function GET(

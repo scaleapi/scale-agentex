@@ -80,7 +80,7 @@ describe('GET /api/traces/[traceId]/spans', () => {
     expect(res.status).toBe(499);
   });
 
-  it('anchors the search window on the task creation time', async () => {
+  it('starts the search window at the task creation time and leaves it open-ended', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(new Response('{"items":[]}', { status: 200 }));
@@ -90,23 +90,40 @@ describe('GET /api/traces/[traceId]/spans', () => {
     await call('t1', undefined, `?from=${encodeURIComponent(from)}`);
 
     const params = upstreamURL(fetchMock).searchParams;
-    const fromTs = Date.parse(params.get('from_ts')!);
-    const toTs = Date.parse(params.get('to_ts')!);
-    expect(fromTs).toBe(Date.parse(from) - 5 * 60 * 1000);
-    expect(toTs - fromTs).toBe(90 * 24 * 60 * 60 * 1000 - 60 * 1000);
+    expect(Date.parse(params.get('from_ts')!)).toBe(
+      Date.parse(from) - 5 * 60 * 1000
+    );
+    expect(params.has('to_ts')).toBe(false);
   });
 
-  it('caps the window at now for a recent task', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(new Response('{"items":[]}', { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
-    const from = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  it('passes the platform truncation of a window wider than 90 days through', async () => {
+    const from = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
+    const effectiveFrom = new Date(
+      Date.now() - 90 * 24 * 60 * 60 * 1000
+    ).toISOString();
+    const page = {
+      items: [{ id: 's1', trace_id: 't1' }],
+      has_more: false,
+      window_truncated: true,
+      effective_from_ts: effectiveFrom,
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(page), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      )
+    );
 
-    await call('t1', undefined, `?from=${encodeURIComponent(from)}`);
+    const res = await call(
+      't1',
+      undefined,
+      `?from=${encodeURIComponent(from)}`
+    );
 
-    const toTs = Date.parse(upstreamURL(fetchMock).searchParams.get('to_ts')!);
-    expect(Date.now() - toTs).toBeLessThan(5000);
+    expect(await res.json()).toEqual(page);
   });
 
   it('sends no window without a creation time', async () => {
