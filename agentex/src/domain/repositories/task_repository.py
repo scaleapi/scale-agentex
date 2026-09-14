@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends
 from sqlalchemy import cast, distinct, func, select, update
@@ -20,6 +20,9 @@ from src.domain.entities.tasks import TaskEntity, TaskRelationships, TaskStatus
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
+
+# Columns update_mutable_fields is allowed to set (status/params have their own atomic paths).
+_MUTABLE_TASK_COLUMNS = frozenset({"task_metadata", "current_state"})
 
 
 class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationships]):
@@ -231,20 +234,36 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
         general-purpose updater.
         """
 
+        # ``COALESCE(params, '{}'::jsonb)`` so a NULL existing value doesn't poison the
+        # concat; explicit JSONB casts so Postgres picks the jsonb ``||`` (not text concat).
+        existing = func.coalesce(TaskORM.params, cast({}, JSONB))
+        merged = existing.op("||", return_type=JSONB)(cast(patch, JSONB))
+        return await self._update_returning(task_id, {"params": merged})
+
+    async def update_mutable_fields(
+        self, task_id: str, fields: dict[str, Any]
+    ) -> TaskEntity | None:
+        """Column-scoped atomic update; can't clobber status/params. Returns updated entity or None."""
+        unknown = fields.keys() - _MUTABLE_TASK_COLUMNS
+        if unknown:
+            raise ValueError(
+                f"update_mutable_fields may only set {sorted(_MUTABLE_TASK_COLUMNS)}; "
+                f"got disallowed columns {sorted(unknown)}"
+            )
+        return await self._update_returning(task_id, fields)
+
+    async def _update_returning(
+        self, task_id: str, values: dict[str, Any]
+    ) -> TaskEntity | None:
+        """UPDATE … SET … WHERE id → updated entity or None. Shared by merge_params and update_mutable_fields."""
         async with (
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
         ):
-            # ``COALESCE(params, '{}'::jsonb)`` so a NULL existing value
-            # doesn't poison the concat to NULL. Both operands cast to
-            # JSONB explicitly so Postgres picks the JSONB ``||`` operator
-            # (not the text concat overload).
-            existing = func.coalesce(TaskORM.params, cast({}, JSONB))
-            merged = existing.op("||", return_type=JSONB)(cast(patch, JSONB))
             stmt = (
                 update(TaskORM)
                 .where(TaskORM.id == task_id)
-                .values(params=merged)
+                .values(**values)
                 .returning(TaskORM)
             )
             result = await session.execute(stmt)
