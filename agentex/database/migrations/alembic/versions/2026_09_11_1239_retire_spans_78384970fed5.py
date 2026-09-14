@@ -1,7 +1,7 @@
 """retire spans
 
 Revision ID: 78384970fed5
-Revises: c4e8b2a7f91d
+Revises: b7d3e1f4a2c6
 Create Date: 2026-09-11 12:39:10.000000
 
 Renames the legacy Postgres-backed spans table to spans_legacy. Agent spans
@@ -33,7 +33,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "78384970fed5"
-down_revision: str | None = "c4e8b2a7f91d"
+down_revision: str | None = "b7d3e1f4a2c6"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
