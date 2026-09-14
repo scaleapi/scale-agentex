@@ -450,10 +450,16 @@ class AgentsUseCase:
         task_id: str | None = None,
         order_by: str | None = None,
         order_direction: str = "desc",
+        agent_card_metadata: dict[str, Any] | None = None,
         **filters,
     ) -> list[AgentEntity]:
         if task_id is not None:
             filters["task_id"] = task_id
+        if agent_card_metadata is not None:
+            # Reserved key consumed by the repository to apply a JSONB containment
+            # filter on `registration_metadata.agent_card.metadata`. Kept out of the
+            # generic column-equality path in `create_where_clauses_from_filters`.
+            filters["agent_card_metadata"] = agent_card_metadata
 
         return await self.agent_repo.list(
             filters=filters,
