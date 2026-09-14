@@ -22,8 +22,8 @@ Safety:
   a conflicting lock on spans for longer than lock_timeout (an old pod
   mid-rollout) aborts the migration, and the pod retries it on its next
   start.
-- IF EXISTS keeps re-runs idempotent. Indexes and the foreign key keep
-  their names.
+- The rename runs only when the source exists and the target does not, so
+  a re-run is a no-op. Indexes and the foreign key keep their names.
 - Downgrade renames the table back, so the old routes find it again.
 """
 
@@ -38,9 +38,24 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+def _rename_if_only_source_exists(source: str, target: str) -> None:
+    """Rename only when the source exists and the target does not, so re-runs are no-ops."""
+    op.execute(
+        f"""
+        DO $$
+        BEGIN
+            IF to_regclass('public.{source}') IS NOT NULL
+               AND to_regclass('public.{target}') IS NULL THEN
+                ALTER TABLE {source} RENAME TO {target};
+            END IF;
+        END$$;
+        """
+    )
+
+
 def upgrade() -> None:
-    op.execute("ALTER TABLE IF EXISTS spans RENAME TO spans_legacy")
+    _rename_if_only_source_exists("spans", "spans_legacy")
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE IF EXISTS spans_legacy RENAME TO spans")
+    _rename_if_only_source_exists("spans_legacy", "spans")

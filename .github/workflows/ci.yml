@@ -29,8 +29,10 @@ jobs:
           filters: |
             agentex:
               - 'agentex/**'
+              - '.github/workflows/ci.yml'
             agentex-ui:
               - 'agentex-ui/**'
+              - '.github/workflows/ci.yml'
 
   test:
     name: "Run Unit and Integration Tests"
