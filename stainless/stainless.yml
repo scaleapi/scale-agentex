@@ -32,7 +32,7 @@ targets:
 # `environments` are a map of the name of the environment (e.g. "sandbox",
 # "production") to the corresponding url to use.
 environments:
-  production: http://localhost:5003
+  production: https://agentex.sgp.scale.com
   development: http://localhost:5003
 
 # `resources` define the structure and organization for your API, such as how
