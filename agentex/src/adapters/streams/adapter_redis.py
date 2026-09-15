@@ -177,7 +177,6 @@ class RedisStreamRepository(StreamRepository):
     async def read_messages(
         self, topic: str, last_id: str, timeout_ms: int = 2000, count: int = 10
     ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
-        logger.info(f"Reading messages from Redis stream {topic}, last_id: {last_id}")
         """
         Read messages from a Redis stream and yield them one by one.
 
@@ -194,7 +193,6 @@ class RedisStreamRepository(StreamRepository):
             Tuples of (message_id, data) for each message
         """
 
-        # logger.info(f"Reading messages from Redis stream {topic}, last_id: {last_id}")
         try:
             # Read messages with the specified block time
             streams = {topic: last_id}
