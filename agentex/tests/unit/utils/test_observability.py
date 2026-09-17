@@ -194,3 +194,31 @@ def test_failed_logging_skips_app_configuration_but_still_cleans_up(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "must not configure" not in result.stderr
     assert "partial-cleanup" in result.stdout
+
+
+def test_adapter_receives_native_metrics_provider_before_app_configuration(tmp_path):
+    (tmp_path / "metrics_adapter.py").write_text(
+        "def initialize_logging(): return False\n"
+        "def configure_app(app):\n"
+        "    from opentelemetry import metrics\n"
+        "    from opentelemetry.sdk.metrics import MeterProvider\n"
+        "    assert isinstance(metrics.get_meter_provider(), MeterProvider)\n"
+        "def shutdown(): pass\n"
+    )
+    result = run_python(
+        """
+        import os
+        os.environ['OTEL_EXPORTER_OTLP_METRICS_ENDPOINT'] = 'http://127.0.0.1:1/v1/metrics'
+        os.environ['OTEL_EXPORTER_OTLP_METRICS_PROTOCOL'] = 'http/protobuf'
+        from src.utils import observability
+        observability.initialize_logging()
+        class App: pass
+        observability.configure_app(App())
+        from src.utils.otel_metrics import shutdown_otel_metrics
+        shutdown_otel_metrics()
+        """,
+        tmp_path,
+        adapter="metrics_adapter",
+        ci=True,
+    )
+    assert result.returncode == 0, result.stderr

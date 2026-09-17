@@ -1,8 +1,8 @@
 # API observability adapter
 
-The API can use an optional Python module for deployment-specific logging and
-tracing. Set `AGENTEX_OBSERVABILITY_MODULE` to its import path before starting
-Uvicorn. When the variable is unset, the API uses its built-in logging and
+The API can use an optional Python module for deployment-specific logs, traces,
+and metrics. Set `AGENTEX_OBSERVABILITY_MODULE` to its import path before
+starting Uvicorn. When the variable is unset, the API uses its built-in logging and
 OpenTelemetry setup and imports no adapter.
 
 The adapter is installed separately. The public backend does not require its
@@ -19,7 +19,7 @@ def initialize_logging() -> bool:
 
 
 def configure_app(app) -> None:
-    # Configure tracing on the completed FastAPI app here.
+    # Configure tracing and metrics on the completed FastAPI app here.
     pass
 
 
@@ -37,9 +37,10 @@ def shutdown() -> None:
 2. `configure_app(app)` runs once for each app, after all application routes,
    mounts and middleware are registered. It runs before the outer health-check
    wrapper and before Uvicorn builds the middleware stack. The existing
-   OpenTelemetry bootstrap has already run. Reuse installed providers and
-   instrumentation; do not add another exporter or instrument an HTTP or
-   database client twice.
+   OpenTelemetry bootstrap and native metric provider initialization have already
+   run. Reuse installed providers and exporters. HTTP instrumentation should
+   have one owner. An adapter may add metric collectors alongside native
+   collectors during adoption; overlapping measurements must be expected.
 3. `shutdown()` runs once in a thread during API lifespan cleanup. It also runs
    when lifespan startup or another cleanup step fails. It must tolerate partial
    initialization. Close resources the adapter created, and leave adopted
@@ -71,11 +72,9 @@ responses. An explicit outbound header takes precedence. Context lasts through
 streaming and resets when the request finishes or fails. Health probes handled
 by the outer interceptor keep bypassing application middleware.
 
-Request and response logs use static messages and route templates. They include
-`method`, `path`, `request_id`, `request_bytes` or `status_code`; they do not log
-request bodies, query values or raw headers. Redis publish logs keep a bounded
-`stream_topic` and `payload_bytes`. ACP and HTTP stream diagnostics use
-`error_type` instead of serializing payloads or validation inputs.
+Existing application log messages are unchanged. A structured-field allowlist
+cannot remove values already embedded in message text. Log-call cleanup is
+separate from the adapter interface.
 
 To bind another logging context, an adapter may install middleware outside the
 request middleware. Accept or generate the ID there, write the chosen header
@@ -85,7 +84,7 @@ public middleware will reuse that value. Always reset context after completion.
 Run the focused checks from `agentex/`:
 
 ```sh
-uv run python -m pytest tests/unit/utils/test_observability.py tests/unit/api/test_observability_lifespan.py tests/unit/api/test_request_logging_middleware.py tests/unit/utils/test_http_request_id.py tests/unit/utils/test_payload_logging.py
+uv run python -m pytest tests/unit/utils/test_observability.py tests/unit/api/test_observability_lifespan.py tests/unit/api/test_request_logging_middleware.py tests/unit/utils/test_http_request_id.py
 uv run python -m pytest tests/integration/test_observability_adapter.py
 ```
 

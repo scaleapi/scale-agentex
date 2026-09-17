@@ -59,6 +59,9 @@ def configure_app(app: FastAPI) -> None:
         return
     _configured_apps.add(app)
     try:
+        from src.utils.otel_metrics import init_otel_metrics
+
+        init_otel_metrics()
         _adapter.configure_app(app)
     except Exception:
         _report_failure("app configuration")
