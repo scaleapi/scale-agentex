@@ -49,9 +49,11 @@ class HttpxGateway(HttpPort):
                 event_hooks={"request": [forward_async_request_id]},
             )
             logger.info(
-                f"Created shared regular httpx client (id: {id(cls._regular_client)}, "
-                f"max_connections={env.HTTPX_MAX_CONNECTIONS}, "
-                f"max_keepalive={env.HTTPX_MAX_KEEPALIVE_CONNECTIONS})"
+                "Created shared regular httpx client",
+                extra={
+                    "max_connections": env.HTTPX_MAX_CONNECTIONS,
+                    "max_keepalive": env.HTTPX_MAX_KEEPALIVE_CONNECTIONS,
+                },
             )
         return cls._regular_client
 
@@ -80,9 +82,11 @@ class HttpxGateway(HttpPort):
                 event_hooks={"request": [forward_async_request_id]},
             )
             logger.info(
-                f"Created shared streaming httpx client (id: {id(cls._streaming_client)}, "
-                f"max_connections={env.HTTPX_MAX_CONNECTIONS}, "
-                f"max_keepalive={env.HTTPX_MAX_KEEPALIVE_CONNECTIONS})"
+                "Created shared streaming httpx client",
+                extra={
+                    "max_connections": env.HTTPX_MAX_CONNECTIONS,
+                    "max_keepalive": env.HTTPX_MAX_KEEPALIVE_CONNECTIONS,
+                },
             )
         return cls._streaming_client
 
@@ -112,7 +116,7 @@ class HttpxGateway(HttpPort):
         client = self._get_regular_client()
 
         try:
-            logger.debug(f"Making {method} request to {url}")
+            logger.debug("Making HTTP request", extra={"method": method})
 
             # Build request kwargs
             request_kwargs = {
@@ -131,28 +135,37 @@ class HttpxGateway(HttpPort):
 
             # Log successful response
             logger.debug(
-                f"Successful {method} request to {url}, status: {response.status_code}"
+                "HTTP request succeeded",
+                extra={"method": method, "status_code": response.status_code},
             )
             return response.json()
 
         except HTTPStatusError as e:
             logger.error(
-                f"HTTP error {e.response.status_code} for {method} {url}: {e}",
-                exc_info=True,
+                "HTTP request failed",
+                extra={
+                    "method": method,
+                    "status_code": e.response.status_code,
+                    "error_type": type(e).__name__,
+                },
             )
             raise
         except ConnectError as e:
             logger.error(
-                f"Connection error for {method} {url}: {e}. This might be a connection pool issue.",
-                exc_info=True,
+                "HTTP connection failed",
+                extra={"method": method, "error_type": type(e).__name__},
             )
             raise
         except TimeoutException as e:
-            logger.error(f"Timeout error for {method} {url}: {e}", exc_info=True)
+            logger.error(
+                "HTTP request timed out",
+                extra={"method": method, "error_type": type(e).__name__},
+            )
             raise
         except Exception as e:
             logger.error(
-                f"Unexpected error during {method} request to {url}: {e}", exc_info=True
+                "Unexpected HTTP request error",
+                extra={"method": method, "error_type": type(e).__name__},
             )
             raise
 
@@ -179,7 +192,7 @@ class HttpxGateway(HttpPort):
         )
 
         try:
-            logger.debug(f"Starting streaming {method} request to {url}")
+            logger.debug("Starting HTTP stream", extra={"method": method})
 
             # Build stream kwargs
             stream_kwargs = {
@@ -196,7 +209,8 @@ class HttpxGateway(HttpPort):
             async with client.stream(**stream_kwargs) as response:
                 response.raise_for_status()
                 logger.debug(
-                    f"Streaming connection established to {url}, status: {response.status_code}"
+                    "HTTP stream connected",
+                    extra={"method": method, "status_code": response.status_code},
                 )
 
                 async for line in response.aiter_lines():
@@ -207,31 +221,37 @@ class HttpxGateway(HttpPort):
                     except json.JSONDecodeError as e:
                         # Log but don't fail on individual line parse errors
                         logger.warning(
-                            f"Failed to parse SSE line (skipping): {line}, error: {e}"
+                            "Failed to parse SSE line (skipping)",
+                            extra={"error_type": type(e).__name__},
                         )
                         continue
 
         except HTTPStatusError as e:
             logger.error(
-                f"HTTP error {e.response.status_code} for streaming {method} {url}: {e}",
-                exc_info=True,
+                "HTTP stream failed",
+                extra={
+                    "method": method,
+                    "status_code": e.response.status_code,
+                    "error_type": type(e).__name__,
+                },
             )
             raise
         except ConnectError as e:
             logger.error(
-                f"Connection error for streaming {method} {url}: {e}. This might be a connection pool issue.",
-                exc_info=True,
+                "HTTP stream connection failed",
+                extra={"method": method, "error_type": type(e).__name__},
             )
             raise
         except TimeoutException as e:
             logger.error(
-                f"Timeout error for streaming {method} {url}: {e}", exc_info=True
+                "HTTP stream timed out",
+                extra={"method": method, "error_type": type(e).__name__},
             )
             raise
         except Exception as e:
             logger.error(
-                f"Unexpected error during streaming {method} request to {url}: {e}",
-                exc_info=True,
+                "Unexpected HTTP stream error",
+                extra={"method": method, "error_type": type(e).__name__},
             )
             raise
 
@@ -274,7 +294,7 @@ class HttpxGateway(HttpPort):
                 follow_redirects=True,
                 event_hooks={"request": [forward_request_id]},
             ) as client:
-                logger.debug(f"Making sync {method} request to {url}")
+                logger.debug("Making sync HTTP request", extra={"method": method})
 
                 response = client.request(
                     method,
@@ -286,29 +306,37 @@ class HttpxGateway(HttpPort):
 
                 # Log successful response
                 logger.debug(
-                    f"Successful sync {method} request to {url}, status: {response.status_code}"
+                    "Sync HTTP request succeeded",
+                    extra={"method": method, "status_code": response.status_code},
                 )
                 return response.json()
 
         except HTTPStatusError as e:
             logger.error(
-                f"HTTP error {e.response.status_code} for sync {method} {url}: {e}",
-                exc_info=True,
+                "Sync HTTP request failed",
+                extra={
+                    "method": method,
+                    "status_code": e.response.status_code,
+                    "error_type": type(e).__name__,
+                },
             )
             raise
         except ConnectError as e:
             logger.error(
-                f"Connection error for sync {method} {url}: {e}. This might be a connection pool issue.",
-                exc_info=True,
+                "Sync HTTP connection failed",
+                extra={"method": method, "error_type": type(e).__name__},
             )
             raise
         except TimeoutException as e:
-            logger.error(f"Timeout error for sync {method} {url}: {e}", exc_info=True)
+            logger.error(
+                "Sync HTTP request timed out",
+                extra={"method": method, "error_type": type(e).__name__},
+            )
             raise
         except Exception as e:
             logger.error(
-                f"Unexpected error during sync {method} request to {url}: {e}",
-                exc_info=True,
+                "Unexpected sync HTTP request error",
+                extra={"method": method, "error_type": type(e).__name__},
             )
             raise
 

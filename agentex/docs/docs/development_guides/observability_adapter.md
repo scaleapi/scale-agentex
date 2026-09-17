@@ -72,9 +72,10 @@ responses. An explicit outbound header takes precedence. Context lasts through
 streaming and resets when the request finishes or fails. Health probes handled
 by the outer interceptor keep bypassing application middleware.
 
-Existing application log messages are unchanged. A structured-field allowlist
-cannot remove values already embedded in message text. Log-call cleanup is
-separate from the adapter interface.
+The request/response logger and selected ACP, Redis, and HTTP client log calls
+use fixed messages with metadata instead of bodies, raw URLs, or exception
+values. Other log calls can still embed payloads; a structured-field allowlist
+cannot remove values already embedded in message text.
 
 To bind another logging context, an adapter may install middleware outside the
 request middleware. Accept or generate the ID there, write the chosen header

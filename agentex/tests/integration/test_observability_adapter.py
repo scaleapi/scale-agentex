@@ -165,5 +165,6 @@ def test_spawned_workers_configure_and_clean_up_independently(tmp_path):
             f"service.instance.id=api.pod.{configured['pid']}" in configured["resource"]
         )
     logs = log_path.read_text()
-    assert logs.count("Request [POST /api/observability-probe]") == 1
-    assert logs.count("Response[200] [POST /api/observability-probe]") == 1
+    assert "private-payload-marker" not in logs
+    assert logs.count("Request received") == 1
+    assert logs.count("Response sent") == 1
