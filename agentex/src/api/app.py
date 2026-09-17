@@ -1,6 +1,9 @@
 # ruff: noqa: E402
-# E402 suppressed: bootstrap_auto_instrumentation() must run before imports of
-# auto-instrumented libraries (FastAPI, httpx, SQLAlchemy, etc.).
+# Logging and auto-instrumentation must start before application imports.
+
+from src.utils import observability
+
+observability.initialize_logging()
 
 from src.utils.otel_metrics import (
     bootstrap_auto_instrumentation,
@@ -10,8 +13,9 @@ from src.utils.otel_metrics import (
 
 bootstrap_auto_instrumentation()
 
+import asyncio
 import os
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
 from datadog import initialize, statsd
@@ -88,26 +92,23 @@ class HTTPExceptionWithMessage(HTTPException):
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # Initialize OpenTelemetry metrics first (before dependencies register instruments)
-    init_otel_metrics()
+    async with AsyncExitStack() as cleanup:
+        cleanup.push_async_callback(asyncio.to_thread, observability.shutdown)
+        cleanup.callback(shutdown_otel_metrics)
+        init_otel_metrics()
 
-    await dependencies.startup_global_dependencies()
-    configure_statsd()
+        # Cleanup also covers partially initialized dependencies and failures.
+        cleanup.callback(dependencies.shutdown)
+        cleanup.push_async_callback(dependencies.async_shutdown)
+        cleanup.push_async_callback(HttpxGateway.close_clients)
+        await dependencies.startup_global_dependencies()
+        configure_statsd()
 
-    # Start PostgreSQL metrics collection
-    global_deps = GlobalDependencies()
-    if global_deps.postgres_metrics_collector:
-        await global_deps.postgres_metrics_collector.start_collection()
+        global_deps = GlobalDependencies()
+        if global_deps.postgres_metrics_collector:
+            await global_deps.postgres_metrics_collector.start_collection()
 
-    yield
-
-    # Clean up HTTP clients before other shutdown tasks
-    await HttpxGateway.close_clients()
-    await dependencies.async_shutdown()
-    dependencies.shutdown()
-
-    # Shutdown OTel metrics (flushes remaining data)
-    shutdown_otel_metrics()
+        yield
 
 
 fastapi_app = FastAPI(
@@ -190,10 +191,18 @@ async def handle_http_exc(request, exc):
 
 @fastapi_app.exception_handler(Exception)
 async def handle_unexpected(request, exc):
-    logger.exception("Unhandled exception caught by exception handler", exc_info=exc)
-    return format_error_response(
+    request_id = getattr(request.state, "request_id", None)
+    logger.exception(
+        "Unhandled exception caught by exception handler",
+        exc_info=exc,
+        extra={"request_id": request_id},
+    )
+    response = format_error_response(
         f"Internal Server Error. Class: {exc.__class__}. Exception: {exc}", 500
     )
+    if request_id:
+        response.headers["x-request-id"] = request_id
+    return response
 
 
 # Include all routers
@@ -220,6 +229,8 @@ if resolve_environment_variable_dependency(EnvVarKeys.ENABLE_AGENT_RUN_SCHEDULES
     fastapi_app.include_router(agent_run_schedules.router)
 fastapi_app.include_router(checkpoints.router)
 fastapi_app.include_router(task_retention.router)
+
+observability.configure_app(fastapi_app)
 
 # Wrap FastAPI app with health check interceptor for sub-millisecond K8s probe responses.
 # This must be the outermost layer to bypass all middleware.

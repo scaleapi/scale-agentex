@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import os
+import sys
 from contextlib import AbstractContextManager
 from types import ModuleType
 from typing import Any
@@ -55,7 +56,9 @@ def _fake_auto_instrumentation_import(
             return mod
         return real_import(name, globals, locals, fromlist, level)
 
-    return mock_initialize, patch.object(builtins, "__import__", side_effect=fake_import)
+    return mock_initialize, patch.object(
+        builtins, "__import__", side_effect=fake_import
+    )
 
 
 def _block_auto_instrumentation_import() -> AbstractContextManager[Any]:
@@ -97,6 +100,15 @@ def test_bootstrap_skips_when_auto_instrumentation_not_installed(monkeypatch):
 
 
 @pytest.mark.unit
+def test_bootstrap_qualifies_instance_id_without_contrib(monkeypatch):
+    monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "service.instance.id=api.pod")
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 1234)
+    with _block_auto_instrumentation_import():
+        assert otel_metrics.bootstrap_auto_instrumentation() is False
+    assert "service.instance.id=api.pod.1234" in os.environ["OTEL_RESOURCE_ATTRIBUTES"]
+
+
+@pytest.mark.unit
 def test_bootstrap_runs_without_otlp_env(monkeypatch):
     for key in list(os.environ):
         if key.startswith("OTEL_EXPORTER_OTLP") and key.endswith("_ENDPOINT"):
@@ -135,6 +147,59 @@ def test_bootstrap_initialize_failure_returns_false(monkeypatch):
         assert otel_metrics._auto_instrumentation_bootstrapped is False
         assert otel_metrics.bootstrap_auto_instrumentation() is False
         assert mock_initialize.call_count == 2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("original", [None, "redis,logging"])
+@pytest.mark.parametrize("fails", [False, True])
+def test_bootstrap_preserves_datadog_http_ownership(monkeypatch, original, fails):
+    key = "OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"
+    if original is None:
+        monkeypatch.delenv(key, raising=False)
+    else:
+        monkeypatch.setenv(key, original)
+    for name in ("fastapi", "starlette", "httpx"):
+        module = ModuleType(name)
+        module._datadog_patch = True
+        monkeypatch.setitem(sys.modules, name, module)
+    observed = []
+
+    def initialize():
+        observed.append(set(os.environ[key].split(",")))
+        if fails:
+            raise RuntimeError("failed initialization")
+
+    _, import_patch = _fake_auto_instrumentation_import(
+        MagicMock(side_effect=initialize)
+    )
+    with import_patch:
+        assert otel_metrics.bootstrap_auto_instrumentation() is (not fails)
+    assert observed == [
+        {"fastapi", "starlette", "httpx"}
+        | ({"redis", "logging"} if original else set())
+    ]
+    assert os.environ.get(key) == original
+
+
+@pytest.mark.unit
+def test_bootstrap_handles_datadog_patches_scheduled_before_import(monkeypatch):
+    import ddtrace._monkey
+
+    monkeypatch.delitem(sys.modules, "httpx", raising=False)
+    monkeypatch.setattr(ddtrace._monkey, "_PATCHED_MODULES", {"httpx"})
+    monkeypatch.delenv("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", raising=False)
+    observed = []
+    initialize = MagicMock(
+        side_effect=lambda: observed.append(
+            os.environ.get("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS")
+        )
+    )
+    _, import_patch = _fake_auto_instrumentation_import(initialize)
+    with import_patch:
+        assert otel_metrics.bootstrap_auto_instrumentation() is True
+    assert observed == ["httpx"]
+    assert "httpx" not in sys.modules
+    assert "OTEL_PYTHON_DISABLED_INSTRUMENTATIONS" not in os.environ
 
 
 @pytest.mark.unit

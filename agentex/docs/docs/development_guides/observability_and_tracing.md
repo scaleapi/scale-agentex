@@ -1,5 +1,8 @@
 # Observability & Tracing
 
+For backend API logging and deployment-specific telemetry, see the
+[API observability adapter](observability_adapter.md).
+
 Agentex derives tracing spans **automatically** from the canonical message stream. When you deliver a turn through the [unified harness](streaming_patterns.md#unified-harness-surface-framework-agents), the `UnifiedEmitter` watches the same `StreamTaskMessage*` events it sends to the client and opens/closes tool and reasoning spans as a side effect. There is no per-framework tracing handler to wire up (the old `create_<framework>_tracing_handler` helpers have been removed).
 
 ## How spans are derived
