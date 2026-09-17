@@ -18,7 +18,10 @@ def log_request(
 ):
     raw_path = request.scope["root_path"] + request.scope["route"].path
     logger.info(
-        "Request received",
+        "Request [%s %s] (%s)",
+        request.method,
+        raw_path[:256],
+        request_id,
         extra={
             "method": request.method,
             "path": raw_path[:256],
@@ -30,7 +33,11 @@ def log_request(
 
 def log_response(request_id: str, request: Request, response: Response):
     logger.info(
-        "Response sent",
+        "Response[%s] [%s %s] (%s)",
+        response.status_code,
+        request.method,
+        (request.scope["root_path"] + request.scope["route"].path)[:256],
+        request_id,
         extra={
             "status_code": response.status_code,
             "method": request.method,

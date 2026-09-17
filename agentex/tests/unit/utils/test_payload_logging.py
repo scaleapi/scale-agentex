@@ -14,6 +14,7 @@ from src.adapters.streams.adapter_redis import RedisStreamRepository
 from src.api.logged_api_route import log_request, log_response
 from src.domain.entities.agents_rpc import AgentRPCMethod
 from src.domain.services.agent_acp_service import AgentACPService
+from src.utils.logging import LOG_FORMAT
 
 pytestmark = pytest.mark.unit
 PAYLOAD = "private-user-payload-marker"
@@ -40,6 +41,12 @@ def test_request_and_response_logs_omit_payload_headers_and_query(caplog):
         assert record.request_id == "request-1"
         assert record.path == "/tasks/{task_id}"
         assert not {"body", "headers", "query_params"}.intersection(record.__dict__)
+    rendered = [
+        logging.Formatter(LOG_FORMAT).format(record) for record in caplog.records
+    ]
+    assert "POST /tasks/{task_id}" in rendered[0]
+    assert "200" in rendered[1]
+    assert all("request-1" in line for line in rendered)
 
 
 async def test_redis_publish_logs_no_payload(caplog):
