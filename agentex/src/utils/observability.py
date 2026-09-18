@@ -1,10 +1,11 @@
-"""Optional observability callbacks, loaded before application dependencies."""
+"""Select an optional telemetry adapter once per process."""
 
 from __future__ import annotations
 
 import importlib
 import logging
 import os
+from functools import cache
 from types import ModuleType
 from typing import TYPE_CHECKING
 from weakref import WeakSet
@@ -12,68 +13,49 @@ from weakref import WeakSet
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
-_adapter: ModuleType | None = None
-_logging_initialized = False
-_logging_prepared = False
-_logging_managed = False
-_shutdown_called = False
 _configured_apps: WeakSet[FastAPI] = WeakSet()
+_shutdown_called = False
 
 
-def _report_failure(stage: str) -> None:
-    logging.getLogger(__name__).warning(
-        "Optional observability adapter failed during %s", stage, exc_info=True
-    )
-    if os.environ.get("CI", "").lower() in {"true", "1", "yes"}:
-        raise RuntimeError(f"Observability adapter failed during {stage}")
-
-
-def initialize_logging() -> None:
-    """Prepare logging once, before modules create their application loggers."""
-    global _adapter, _logging_initialized, _logging_managed, _logging_prepared
-    if _logging_initialized:
-        return
-    _logging_initialized = True
+@cache
+def _adapter() -> ModuleType | None:
     module_name = os.environ.get("AGENTEX_OBSERVABILITY_MODULE", "").strip()
     if not module_name:
+        return None
+    try:
+        return importlib.import_module(module_name)
+    except ModuleNotFoundError as exc:
+        if exc.name == module_name or module_name.startswith(f"{exc.name}."):
+            return None
+        raise
+
+
+def is_managed() -> bool:
+    """Whether an installed adapter replaces built-in instrumentation."""
+    return _adapter() is not None
+
+
+def initialize(app: FastAPI) -> None:
+    """Initialize after routes and middleware, before serving requests."""
+    adapter = _adapter()
+    if adapter is None or app in _configured_apps:
         return
     try:
-        _adapter = importlib.import_module(module_name)
-        managed = _adapter.initialize_logging()
-        if not isinstance(managed, bool):
-            raise TypeError("initialize_logging() must return a bool")
-        _logging_managed = managed
-        _logging_prepared = True
+        adapter.initialize(app)
     except Exception:
-        _report_failure("logging initialization")
-
-
-def is_logging_managed() -> bool:
-    """Whether the adapter owns application logging handlers and formatting."""
-    return _logging_managed
-
-
-def configure_app(app: FastAPI) -> None:
-    """Configure an app once, after its routes and middleware are registered."""
-    if _adapter is None or not _logging_prepared or app in _configured_apps:
-        return
+        try:
+            shutdown()
+        except Exception:
+            logging.getLogger(__name__).exception("Observability cleanup failed")
+        raise
     _configured_apps.add(app)
-    try:
-        from src.utils.otel_metrics import init_otel_metrics
-
-        init_otel_metrics()
-        _adapter.configure_app(app)
-    except Exception:
-        _report_failure("app configuration")
 
 
 def shutdown() -> None:
-    """Release adapter-owned resources once; the caller runs this off-loop."""
+    """Flush the adapter once; call off the event loop."""
     global _shutdown_called
-    if _adapter is None or _shutdown_called:
+    adapter = _adapter()
+    if adapter is None or _shutdown_called:
         return
     _shutdown_called = True
-    try:
-        _adapter.shutdown()
-    except Exception:
-        _report_failure("shutdown")
+    adapter.shutdown()

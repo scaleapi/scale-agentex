@@ -1,4 +1,4 @@
-"""Public adapter bootstrap runs before application imports."""
+"""Select one telemetry owner before application imports."""
 
 import json
 import os
@@ -13,13 +13,13 @@ pytestmark = pytest.mark.unit
 BACKEND = Path(__file__).resolve().parents[3]
 
 
-def run_python(source, tmp_path, *, adapter=None, ci=False):
+def run_python(source, tmp_path, *, adapter=None):
     env = {
         key: value
         for key, value in os.environ.items()
-        if not key.startswith(("AGENTEX_OBSERVABILITY_", "OTEL_"))
+        if not key.startswith(("AGENTEX_OBSERVABILITY_", "OTEL_", "DD_"))
     }
-    env.update(PYTHONPATH=f"{tmp_path}{os.pathsep}{BACKEND}", CI=str(ci).lower())
+    env.update(PYTHONPATH=f"{tmp_path}{os.pathsep}{BACKEND}", DD_TRACE_ENABLED="false")
     if adapter:
         env["AGENTEX_OBSERVABILITY_MODULE"] = adapter
     return subprocess.run(
@@ -32,57 +32,53 @@ def run_python(source, tmp_path, *, adapter=None, ci=False):
     )
 
 
-def test_disabled_bootstrap_does_not_import_application_dependencies(tmp_path):
+@pytest.mark.parametrize("adapter", [None, "missing_test_adapter.api"])
+def test_absent_adapter_preserves_default_logging(tmp_path, adapter):
     result = run_python(
         """
         import sys
         from src.utils import observability
-        observability.initialize_logging()
-        assert not observability.is_logging_managed()
+        assert not observability.is_managed()
         assert "fastapi" not in sys.modules
-        assert "src.utils.logging" not in sys.modules
         assert "opentelemetry" not in sys.modules
+        from src.utils.logging import make_logger
+        logger = make_logger("test.default")
+        logger.info("one-output-only")
+        assert len(logger.handlers) == 1
         """,
         tmp_path,
+        adapter=adapter,
     )
     assert result.returncode == 0, result.stderr
+    assert (result.stdout + result.stderr).count("one-output-only") == 1
 
 
-def test_adapter_runs_before_loggers_and_after_routes(tmp_path):
+def test_adapter_initializes_once_after_routes_without_import_time_handlers(tmp_path):
     (tmp_path / "example_adapter.py").write_text(
-        textwrap.dedent(
-            """
-            import logging
-            import sys
-            calls = []
-            def initialize_logging():
-                assert "src.utils.logging" not in sys.modules
-                assert "src.utils.otel_metrics" not in sys.modules
-                assert "fastapi" not in sys.modules
-                calls.append("logging")
-                logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-                return True
-            def configure_app(app):
-                assert any(route.path == "/agents" for route in app.routes)
-                assert any(route.path.startswith("/tasks") for route in app.routes)
-                assert len(app.user_middleware) >= 3
-                calls.append("app")
-            def shutdown():
-                calls.append("shutdown")
-            """
-        )
+        textwrap.dedent("""
+        import logging
+        import sys
+        calls = []
+        def initialize(app):
+            assert any(route.path == "/agents" for route in app.routes)
+            assert any(route.path.startswith("/tasks") for route in app.routes)
+            assert len(app.user_middleware) >= 3
+            assert not logging.getLogger("src.api.app").handlers
+            calls.append("initialize")
+            logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+        def shutdown():
+            calls.append("shutdown")
+    """)
     )
     result = run_python(
         """
-        import json
-        import sys
-        from src.api.app import fastapi_app
+        import json, sys
         from src.utils import observability
+        from src.api.app import fastapi_app
+        old_hook = sys.excepthook
         from src.utils.logging import make_logger
         import example_adapter
-        observability.initialize_logging()
-        observability.configure_app(fastapi_app)
-        old_hook = sys.excepthook
+        observability.initialize(fastapi_app)
         logger = make_logger("test.managed")
         logger.info("token=%s", "sensitive-value")
         assert not logger.handlers
@@ -98,127 +94,78 @@ def test_adapter_runs_before_loggers_and_after_routes(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "sensitive-value" not in result.stdout + result.stderr
     assert result.stdout.count("[REDACTED]") == 1
-    assert json.loads(result.stdout.splitlines()[-1]) == ["logging", "app", "shutdown"]
+    assert json.loads(result.stdout.splitlines()[-1]) == ["initialize", "shutdown"]
 
 
-@pytest.mark.parametrize("ci", [False, True])
-def test_missing_adapter_warns_or_fails_in_ci(tmp_path, ci):
+def test_broken_adapter_dependency_is_not_treated_as_absent(tmp_path):
+    (tmp_path / "broken_adapter.py").write_text("import missing_adapter_dependency\n")
     result = run_python(
-        """
-        from src.utils import observability
-        observability.initialize_logging()
-        assert not observability.is_logging_managed()
-        """,
+        "from src.utils.observability import is_managed; is_managed()",
         tmp_path,
-        adapter="missing_test_adapter",
-        ci=ci,
+        adapter="broken_adapter",
     )
-    assert (result.returncode != 0) is ci
-    assert "observability" in result.stderr.lower()
+    assert result.returncode != 0
+    assert "missing_adapter_dependency" in result.stderr
 
 
-def test_repeated_make_logger_adds_one_handler(tmp_path):
-    result = run_python(
-        """
-        from src.utils.logging import make_logger
-        logger = make_logger("test.default")
-        make_logger("test.default")
-        logger.info("one-output-only")
-        """,
-        tmp_path,
-    )
-    assert result.returncode == 0, result.stderr
-    assert (result.stdout + result.stderr).count("one-output-only") == 1
-
-
-@pytest.mark.parametrize("stage", ["logging", "app", "shutdown"])
-@pytest.mark.parametrize("ci", [False, True])
-def test_callback_failures_keep_default_startup_or_raise_in_ci(tmp_path, stage, ci):
+def test_initialization_failure_cleans_up_without_starting_native_telemetry(tmp_path):
     (tmp_path / "failing_adapter.py").write_text(
-        textwrap.dedent(
-            f"""
-            def fail(stage):
-                if stage == {stage!r}:
-                    raise ValueError("adapter unavailable")
-            def initialize_logging():
-                fail("logging")
-                return False
-            def configure_app(app):
-                fail("app")
-            def shutdown():
-                fail("shutdown")
-            """
-        )
+        textwrap.dedent("""
+        def initialize(app):
+            raise RuntimeError("partial adapter setup")
+        def shutdown():
+            print("partial-cleanup")
+    """)
     )
     result = run_python(
-        """
-        from src.utils import observability
-        observability.initialize_logging()
-        from fastapi import FastAPI
-        observability.configure_app(FastAPI())
-        observability.shutdown()
-        assert not observability.is_logging_managed()
-        """,
+        "from src.api.app import app",
         tmp_path,
         adapter="failing_adapter",
-        ci=ci,
     )
-    assert (result.returncode != 0) is ci
-    assert "adapter unavailable" in result.stderr
+    assert result.returncode != 0
+    assert "partial adapter setup" in result.stderr
+    assert result.stdout.count("partial-cleanup") == 1
 
 
-def test_failed_logging_skips_app_configuration_but_still_cleans_up(tmp_path):
-    (tmp_path / "partial_adapter.py").write_text(
-        textwrap.dedent(
-            """
-            def initialize_logging():
-                raise RuntimeError("partial setup")
-            def configure_app(app):
-                raise AssertionError("must not configure after failed logging")
-            def shutdown():
-                print("partial-cleanup")
-            """
-        )
-    )
-    result = run_python(
-        """
-        from src.utils import observability
-        observability.initialize_logging()
-        from fastapi import FastAPI
-        observability.configure_app(FastAPI())
-        observability.shutdown()
-        """,
-        tmp_path,
-        adapter="partial_adapter",
-    )
-    assert result.returncode == 0, result.stderr
-    assert "must not configure" not in result.stderr
-    assert "partial-cleanup" in result.stdout
-
-
-def test_adapter_receives_native_metrics_provider_before_app_configuration(tmp_path):
+def test_managed_mode_disables_lazy_native_metrics_and_statsd(tmp_path):
     (tmp_path / "metrics_adapter.py").write_text(
-        "def initialize_logging(): return False\n"
-        "def configure_app(app):\n"
-        "    from opentelemetry import metrics\n"
-        "    from opentelemetry.sdk.metrics import MeterProvider\n"
-        "    assert isinstance(metrics.get_meter_provider(), MeterProvider)\n"
-        "def shutdown(): pass\n"
+        "def initialize(app): pass\ndef shutdown(): pass\n"
     )
     result = run_python(
         """
-        import os
-        os.environ['OTEL_EXPORTER_OTLP_METRICS_ENDPOINT'] = 'http://127.0.0.1:1/v1/metrics'
-        os.environ['OTEL_EXPORTER_OTLP_METRICS_PROTOCOL'] = 'http/protobuf'
-        from src.utils import observability
-        observability.initialize_logging()
-        class App: pass
-        observability.configure_app(App())
-        from src.utils.otel_metrics import shutdown_otel_metrics
-        shutdown_otel_metrics()
+        import asyncio, os, socket
+        os.environ['OTEL_EXPORTER_OTLP_ENDPOINT'] = 'http://127.0.0.1:1'
+        os.environ['DD_AGENT_HOST'] = '127.0.0.1'
+        from datadog import initialize
+        from opentelemetry import metrics
+        from src.utils.otel_metrics import bootstrap_auto_instrumentation, init_otel_metrics, get_meter
+        before = metrics.get_meter_provider()
+        bootstrap_auto_instrumentation()
+        assert init_otel_metrics() is None
+        assert get_meter('native-probe') is None
+        assert metrics.get_meter_provider() is before
+        from src.utils.cache_metrics import record_cache_access
+        from src.utils.schedule_metrics import record_schedule_temporal_op
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
+            receiver.bind(('127.0.0.1', 0))
+            receiver.settimeout(0.1)
+            initialize(statsd_host='127.0.0.1', statsd_port=receiver.getsockname()[1])
+            record_cache_access('probe', 'hit')
+            record_schedule_temporal_op('create', 'success')
+            try:
+                data = receiver.recv(1024)
+            except TimeoutError:
+                data = b''
+            assert not data, data
+        from src.adapters.streams.adapter_redis import RedisStreamRepository
+        class Redis:
+            async def info(self):
+                raise AssertionError('native Redis collection must be skipped')
+        from types import SimpleNamespace
+        probe = SimpleNamespace(redis=Redis(), _last_metrics_time=0)
+        asyncio.run(RedisStreamRepository.send_redis_connection_metrics(probe))
         """,
         tmp_path,
         adapter="metrics_adapter",
-        ci=True,
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr

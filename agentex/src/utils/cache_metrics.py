@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Literal
 from datadog import statsd
 
 from src.utils.logging import make_logger
+from src.utils.observability import is_managed
 from src.utils.otel_metrics import get_meter
 
 if TYPE_CHECKING:
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
 logger = make_logger(__name__)
 
 # StatsD is only emitted if the Datadog Agent host is configured.
-_STATSD_ENABLED = bool(os.environ.get("DD_AGENT_HOST"))
+_STATSD_ENABLED = not is_managed() and bool(os.environ.get("DD_AGENT_HOST"))
 
 # Outcome of a single cache read. "hit" = present and fresh; "miss_expired" =
 # present but past its TTL (TTL too short / churn); "miss_absent" = never cached

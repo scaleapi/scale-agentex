@@ -2,93 +2,81 @@
 
 The API can use an optional Python module for deployment-specific logs, traces,
 and metrics. Set `AGENTEX_OBSERVABILITY_MODULE` to its import path before
-starting Uvicorn. When the variable is unset, the API uses its built-in logging and
-OpenTelemetry setup and imports no adapter.
+starting Uvicorn. If the variable is unset or the selected module is not
+installed, the API keeps its built-in telemetry.
 
-The adapter is installed separately. The public backend does not require its
-package or any particular logging backend.
+An installed, selected adapter replaces built-in instrumentation. The API skips
+its automatic instrumentation, native metric provider, custom metrics, StatsD,
+and PostgreSQL/Redis collectors. Application loggers keep their sensitive-text
+filter and propagate to the adapter's handlers. Database operations and product
+span storage continue normally.
+
+The adapter is installed separately. The public backend does not depend on its
+package or a particular telemetry backend.
 
 ## Callback contract
 
-Implement these synchronous functions:
+Implement two synchronous functions. Importing the adapter must not install
+handlers, providers, or instrumentation.
 
 ```python
-def initialize_logging() -> bool:
-    # Install application logging handlers and formatting here.
-    return True
-
-
-def configure_app(app) -> None:
-    # Configure tracing and metrics on the completed FastAPI app here.
+def initialize(app) -> None:
+    # Configure logging, traces, and metrics for the completed FastAPI app.
     pass
 
 
 def shutdown() -> None:
-    # Flush and close only resources created by this adapter.
+    # Flush and close resources created by the adapter.
     pass
 ```
 
-1. `initialize_logging()` runs once per process, before application modules
-   create loggers and before the normal OpenTelemetry bootstrap. Return `True`
-   only after installing logging handlers. Agentex loggers then propagate to
-   those handlers, keep their sensitive-text filter, and add no output handler
-   or exception hook. Return `False` to retain built-in logging. Avoid importing
-   application modules from this callback.
-2. `configure_app(app)` runs once for each app, after all application routes,
-   mounts and middleware are registered. It runs before the outer health-check
-   wrapper and before Uvicorn builds the middleware stack. The existing
-   OpenTelemetry bootstrap and native metric provider initialization have already
-   run. Reuse installed providers and exporters. HTTP instrumentation should
-   have one owner. An adapter may add metric collectors alongside native
-   collectors during adoption; overlapping measurements must be expected.
-3. `shutdown()` runs once in a thread during API lifespan cleanup. It also runs
-   when lifespan startup or another cleanup step fails. It must tolerate partial
-   initialization. Close resources the adapter created, and leave adopted
-   providers running. Callbacks should undo incomplete changes before raising.
+`initialize(app)` runs once per app after routes, mounts, and middleware are
+registered, before Uvicorn builds the middleware stack or loads application
+dependencies. Configure logging here. Adapter mode adds no application output
+handlers or exception hook before initialization.
 
-Callback failures produce a diagnostic and let the API continue. A failed
-logging callback keeps built-in logging and skips app configuration; shutdown
-still runs for the imported adapter. With `CI=true`, failures raise instead, so
-tests cannot silently pass with a disabled adapter.
+`shutdown()` runs once per process in a thread after application cleanup. It
+also runs when initialization or dependency startup fails. It must tolerate
+partial initialization and close only resources the adapter owns. The
+`AsyncExitStack` still runs remaining cleanup if another cleanup step raises.
 
-Each Uvicorn worker loads the module separately. The normal bootstrap adds the
-worker PID to `service.instance.id`, including when automatic instrumentation
-packages are absent. Keep provider and initialization state local to the process.
-The API does not configure other entry points, such as background workers.
+An installed adapter with a missing dependency, or an initialization error,
+fails startup. Only absence of the selected module falls back to built-in
+telemetry. Selection is cached for the life of the process; restart after
+changing it. Every Uvicorn worker initializes independently.
 
-The native application metrics, database collectors and product spans keep
-their existing setup and shutdown. An adapter should preserve those paths.
-The normal bootstrap skips OpenTelemetry HTTP instrumentors when Datadog owns
-the matching HTTP libraries. It preserves the configured instrumentor exclusions
-and still initializes the SDK, other instrumentors and custom metrics.
+The API hook does not initialize background workers. Adapters that own all
+instrumentation should require a plain server launch and document how to turn
+off competing automatic instrumentation.
 
-## Request IDs and log fields
+## Request IDs and logs
 
 The request middleware accepts an inbound `x-request-id` with 1–128 printable
-ASCII characters and no spaces. It generates a UUID when that header is missing
-or invalid. It stores the value in `request.state.request_id` and the existing
-`ctx_var_request_id`, forwards it through cached HTTP clients, and echoes it on
-responses. An explicit outbound header takes precedence. Context lasts through
-streaming and resets when the request finishes or fails. Health probes handled
-by the outer interceptor keep bypassing application middleware.
+ASCII characters and no spaces. It generates a UUID for missing or invalid
+headers, stores the ID in `request.state.request_id` and `ctx_var_request_id`,
+forwards it through cached HTTP clients, and echoes it on responses. Explicit
+outbound headers take precedence. Context lasts through streams and resets when
+the request finishes or fails. The outer health interceptor still bypasses
+application middleware for probes.
+
+An adapter can bind its own logging context in outer middleware. Accept or
+generate the ID there, put it in the request headers, and keep the context active
+through the response. The public middleware reuses that ID.
 
 The request/response logger and selected ACP, Redis, and HTTP client log calls
 use fixed templates with safe context and metadata instead of bodies, raw URLs,
 or exception values. Other log calls can still embed payloads; a structured-field
 allowlist cannot remove values already embedded in message text.
 
-To bind another logging context, an adapter may install middleware outside the
-request middleware. Accept or generate the ID there, write the chosen header
-into the request scope, and keep its context active through the response. The
-public middleware will reuse that value. Always reset context after completion.
+## Verification
 
-Run the focused checks from `agentex/`:
+Run from `agentex/`:
 
 ```sh
-uv run python -m pytest tests/unit/utils/test_observability.py tests/unit/api/test_observability_lifespan.py tests/unit/api/test_request_logging_middleware.py tests/unit/utils/test_http_request_id.py
+uv run python -m pytest tests/unit/utils/test_observability.py tests/unit/api/test_observability_lifespan.py tests/unit/config/test_observability_dependencies.py tests/unit/api/test_request_logging_middleware.py tests/unit/utils/test_http_request_id.py
 uv run python -m pytest tests/integration/test_observability_adapter.py
 ```
 
-The integration test starts two local Uvicorn workers and uses real HTTP. It
-replaces database startup with test callbacks; it does not verify database
-connectivity, deployment configuration or telemetry delivery to a backend.
+The integration test uses two real Uvicorn workers and HTTP requests. It replaces
+remote dependency startup with test callbacks; it does not verify a deployment
+or delivery to a telemetry backend.

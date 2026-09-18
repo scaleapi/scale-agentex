@@ -10,8 +10,11 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.parametrize("managed", [False, True])
 @pytest.mark.parametrize("failure", [None, "startup", "http", "async", "sync"])
-async def test_cleanup_runs_after_startup_or_dependency_failure(monkeypatch, failure):
+async def test_cleanup_runs_after_startup_or_dependency_failure(
+    monkeypatch, failure, managed
+):
     app_module = importlib.import_module("src.api.app")
     calls = []
     loop_thread = threading.get_ident()
@@ -51,6 +54,7 @@ async def test_cleanup_runs_after_startup_or_dependency_failure(monkeypatch, fai
     from src.utils import observability
 
     monkeypatch.setattr(observability, "shutdown", close_adapter)
+    monkeypatch.setattr(observability, "is_managed", lambda: managed)
 
     async def run():
         async with app_module.lifespan(app_module.fastapi_app):
@@ -62,5 +66,7 @@ async def test_cleanup_runs_after_startup_or_dependency_failure(monkeypatch, fai
             await run()
     else:
         await run()
-    assert calls[-5:] == ["http", "async", "sync", "metrics-close", "adapter"]
+    expected = ["http", "async", "sync", "adapter" if managed else "metrics-close"]
+    assert calls[-4:] == expected
+    assert ("metrics-init" in calls) is not managed
     assert ("serve" in calls) is (failure != "startup")
