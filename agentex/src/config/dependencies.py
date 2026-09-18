@@ -70,6 +70,8 @@ class GlobalDependencies(metaclass=Singleton):
             )
 
     async def load(self):
+        # Import after adapter initialization so SQLAlchemy instrumentation can
+        # wrap create_async_engine before this module binds it.
         from sqlalchemy.ext.asyncio import create_async_engine
 
         if self._loaded:
