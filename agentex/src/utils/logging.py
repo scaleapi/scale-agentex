@@ -11,7 +11,7 @@ import ddtrace
 import json_log_formatter
 from ddtrace.trace import tracer
 
-from src.utils.observability import is_logging_managed
+from src.utils.observability import is_managed
 from src.utils.request_utils import REQUEST_KEY_REGEXP_BLACKLIST
 
 # Check if Datadog is configured
@@ -184,20 +184,16 @@ def make_logger(name: str) -> logging.Logger:
     if _sensitive_data_filter not in logger.filters:
         logger.addFilter(_sensitive_data_filter)
 
-    if is_logging_managed():
+    if is_managed():
         logger.propagate = True
         return logger
 
-    if not any(
-        getattr(handler, "_agentex_owned", False) for handler in logger.handlers
-    ):
-        stream_handler = logging.StreamHandler()
-        stream_handler._agentex_owned = True
-        if _use_json_logs:
-            stream_handler.setFormatter(CustomJSONFormatter())
-        else:
-            stream_handler.setFormatter(logging.Formatter(LOG_FORMAT))
-        logger.addHandler(stream_handler)
+    stream_handler = logging.StreamHandler()
+    if _use_json_logs:
+        stream_handler.setFormatter(CustomJSONFormatter())
+    else:
+        stream_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    logger.addHandler(stream_handler)
 
     def handle_exception(exc_type, exc_value, exc_traceback):
         if issubclass(exc_type, KeyboardInterrupt):

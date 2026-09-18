@@ -13,10 +13,13 @@ Two responsibilities:
    ``MeterProvider`` from bootstrap/operator when present; otherwise creates a
    standalone OTLP pipeline when an endpoint is configured.
 
-**Datadog ``ddtrace-run`` coexistence:** Bootstrap skips OTel HTTP instrumentation
-already owned by Datadog, including patches scheduled before framework imports.
-Other instrumentors and the existing SDK/provider setup still run. To let OTel
-own HTTP instead, disable the corresponding Datadog integrations at startup.
+**Datadog ``ddtrace-run`` coexistence:** Neither OTel nor ddtrace detects the other's
+FastAPI patches. If both run in one process, ddtrace wraps the middleware stack
+first; OTel skips ``OpenTelemetryMiddleware`` with "unexpected middleware stack"
+and HTTP OTel metrics/traces are not emitted. Helm avoids this by using
+``ddtrace-run`` only when ``datadog.env`` is set (OTel-only otherwise). If both
+are required, set ``DD_TRACE_FASTAPI_ENABLED=false`` and
+``DD_TRACE_STARLETTE_ENABLED=false`` so OTel owns HTTP instrumentation.
 
 **Per-worker ``service.instance.id``:** Uvicorn spawn workers share pod-level
 ``OTEL_RESOURCE_ATTRIBUTES``, so auto-instrumentation would otherwise emit all
@@ -43,7 +46,6 @@ Environment variables (custom metrics / standalone mode):
 from __future__ import annotations
 
 import os
-import sys
 from typing import TYPE_CHECKING
 
 from opentelemetry import metrics
@@ -64,6 +66,7 @@ from opentelemetry.sdk.resources import (
 )
 
 from src.utils.logging import make_logger
+from src.utils.observability import is_managed
 
 if TYPE_CHECKING:
     from opentelemetry.metrics import Meter
@@ -119,21 +122,6 @@ def _sync_instance_id_to_env(instance_id: str) -> None:
 # --- Auto-instrumentation bootstrap ---
 
 
-def _datadog_http_instrumentations() -> set[str]:
-    """Find HTTP patches already applied or scheduled by ddtrace-run."""
-    scheduled = getattr(sys.modules.get("ddtrace._monkey"), "_PATCHED_MODULES", set())
-    owned = {
-        name
-        for name in ("fastapi", "starlette", "httpx")
-        if getattr(sys.modules.get(name), "_datadog_patch", False)
-        or (name not in sys.modules and name in scheduled)
-    }
-    # Either framework integration can wrap the same ASGI request.
-    if owned & {"fastapi", "starlette"}:
-        owned.update({"fastapi", "starlette"})
-    return owned
-
-
 def bootstrap_auto_instrumentation() -> bool:
     """Call ``initialize()`` once per process when auto-instrumentation is available.
 
@@ -155,29 +143,16 @@ def bootstrap_auto_instrumentation() -> bool:
     """
     global _auto_instrumentation_bootstrapped
 
-    if _auto_instrumentation_bootstrapped:
+    if is_managed() or _auto_instrumentation_bootstrapped:
+        return False
+
+    try:
+        from opentelemetry.instrumentation.auto_instrumentation import initialize
+    except ImportError:
         return False
 
     try:
         _sync_instance_id_to_env(_unique_instance_id(_detected_resource()))
-        from opentelemetry.instrumentation.auto_instrumentation import initialize
-    except ImportError:
-        return False
-    except Exception:
-        logger.warning("OpenTelemetry resource setup failed", exc_info=True)
-        return False
-
-    disabled_key = "OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"
-    original_disabled = os.environ.get(disabled_key)
-    datadog_owned = _datadog_http_instrumentations()
-    try:
-        if datadog_owned:
-            disabled = {
-                name.strip()
-                for name in (original_disabled or "").split(",")
-                if name.strip()
-            }
-            os.environ[disabled_key] = ",".join(sorted(disabled | datadog_owned))
         initialize()
     except Exception:
         logger.warning(
@@ -185,12 +160,6 @@ def bootstrap_auto_instrumentation() -> bool:
             exc_info=True,
         )
         return False
-    finally:
-        if datadog_owned:
-            if original_disabled is None:
-                os.environ.pop(disabled_key, None)
-            else:
-                os.environ[disabled_key] = original_disabled
 
     _auto_instrumentation_bootstrapped = True
     logger.debug(
@@ -269,6 +238,8 @@ def init_otel_metrics(
     """
     global _meter_provider, _initialized
 
+    if is_managed():
+        return None
     if _initialized:
         return _meter_provider or _global_meter_provider()
 
@@ -343,6 +314,8 @@ def get_meter(name: str, version: str = "0.1.0") -> Meter | None:
     Returns:
         An OpenTelemetry Meter instance, or None if OTel is not configured
     """
+    if is_managed():
+        return None
     if not _initialized:
         init_otel_metrics()
     if _meter_provider is None and _global_meter_provider() is None:

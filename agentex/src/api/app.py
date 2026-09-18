@@ -1,10 +1,7 @@
 # ruff: noqa: E402
-# Logging and auto-instrumentation must start before application imports.
+# Built-in auto-instrumentation must start before application imports.
 
 from src.utils import observability
-
-observability.initialize_logging()
-
 from src.utils.otel_metrics import (
     bootstrap_auto_instrumentation,
     init_otel_metrics,
@@ -93,16 +90,19 @@ class HTTPExceptionWithMessage(HTTPException):
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     async with AsyncExitStack() as cleanup:
-        cleanup.push_async_callback(asyncio.to_thread, observability.shutdown)
-        cleanup.callback(shutdown_otel_metrics)
-        init_otel_metrics()
+        if observability.is_managed():
+            cleanup.push_async_callback(asyncio.to_thread, observability.shutdown)
+        else:
+            cleanup.callback(shutdown_otel_metrics)
+            init_otel_metrics()
 
         # Cleanup also covers partially initialized dependencies and failures.
         cleanup.callback(dependencies.shutdown)
         cleanup.push_async_callback(dependencies.async_shutdown)
         cleanup.push_async_callback(HttpxGateway.close_clients)
         await dependencies.startup_global_dependencies()
-        configure_statsd()
+        if not observability.is_managed():
+            configure_statsd()
 
         global_deps = GlobalDependencies()
         if global_deps.postgres_metrics_collector:
@@ -230,7 +230,7 @@ if resolve_environment_variable_dependency(EnvVarKeys.ENABLE_AGENT_RUN_SCHEDULES
 fastapi_app.include_router(checkpoints.router)
 fastapi_app.include_router(task_retention.router)
 
-observability.configure_app(fastapi_app)
+observability.initialize(fastapi_app)
 
 # Wrap FastAPI app with health check interceptor for sub-millisecond K8s probe responses.
 # This must be the outermost layer to bypass all middleware.

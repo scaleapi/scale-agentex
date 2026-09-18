@@ -31,13 +31,8 @@ def test_spawned_workers_configure_and_clean_up_independently(tmp_path):
                 output.write(json.dumps({"stage": stage, "pid": os.getpid(),
                     "resource": os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "")}) + "\\n")
 
-        def initialize_logging():
-            assert "src.utils.logging" not in sys.modules
+        def initialize(app):
             logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-            record("logging")
-            return True
-
-        def configure_app(app):
             from fastapi import Request
             from src.api.logged_api_route import LoggedAPIRoute
             from src.utils.logging import ctx_var_request_id
@@ -156,14 +151,9 @@ def test_spawned_workers_configure_and_clean_up_independently(tmp_path):
     for path in event_files:
         records = [json.loads(line) for line in path.read_text().splitlines()]
         assert [record["stage"] for record in records] == [
-            "logging",
             "configured",
             "shutdown",
         ]
-        configured = records[1]
-        assert (
-            f"service.instance.id=api.pod.{configured['pid']}" in configured["resource"]
-        )
     logs = log_path.read_text()
     assert logs.count("Request [POST /api/observability-probe]") == 1
     assert logs.count("Response[200] [POST /api/observability-probe]") == 1
