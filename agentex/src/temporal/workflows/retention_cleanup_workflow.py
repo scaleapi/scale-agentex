@@ -21,10 +21,11 @@ from src.temporal.activities.retention_cleanup_activities import (
     LOAD_CLEANUP_CONFIG_ACTIVITY,
 )
 from src.utils.logging import make_logger
+from src.utils.observability import uses_observability_adapter
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 
-logger = make_logger(__name__)
+logger = workflow.logger if uses_observability_adapter() else make_logger(__name__)
 
 
 def _chunked(items: list[str], size: int) -> list[list[str]]:
