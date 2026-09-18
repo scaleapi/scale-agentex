@@ -24,7 +24,7 @@ from src.utils.db_metrics import (
     PostgresMetricsCollector,
 )
 from src.utils.logging import make_logger
-from src.utils.observability import is_managed
+from src.utils.observability import uses_observability_adapter
 
 logger = make_logger(__name__)
 
@@ -97,7 +97,9 @@ class GlobalDependencies(metaclass=Singleton):
         )  # Support middleware operations
 
         pool_class = (
-            AsyncAdaptedQueuePool if is_managed() else InstrumentedAsyncAdaptedQueuePool
+            AsyncAdaptedQueuePool
+            if uses_observability_adapter()
+            else InstrumentedAsyncAdaptedQueuePool
         )
 
         # https://docs.sqlalchemy.org/en/20/core/engines.html#sqlalchemy.create_engine
@@ -207,7 +209,7 @@ class GlobalDependencies(metaclass=Singleton):
                 pool_recycle=3600,
             )
 
-        if not is_managed():
+        if not uses_observability_adapter():
             # Initialize PostgreSQL metrics collector
             self.postgres_metrics_collector = PostgresMetricsCollector()
             environment = self.environment_variables.ENVIRONMENT

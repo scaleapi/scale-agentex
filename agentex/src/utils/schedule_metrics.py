@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Literal
 from datadog import statsd
 
 from src.utils.logging import make_logger
-from src.utils.observability import is_managed
+from src.utils.observability import uses_observability_adapter
 from src.utils.otel_metrics import get_meter
 
 if TYPE_CHECKING:
@@ -32,7 +32,9 @@ if TYPE_CHECKING:
 logger = make_logger(__name__)
 
 # StatsD is only emitted if the Datadog Agent host is configured.
-_STATSD_ENABLED = not is_managed() and bool(os.environ.get("DD_AGENT_HOST"))
+_STATSD_ENABLED = not uses_observability_adapter() and bool(
+    os.environ.get("DD_AGENT_HOST")
+)
 
 # The Temporal schedule lifecycle operation being recorded.
 ScheduleOperation = Literal["create", "update", "delete"]

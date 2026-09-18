@@ -10,7 +10,7 @@ from fastapi import Depends
 from src.adapters.streams.port import StreamRepository
 from src.config.dependencies import DEnvironmentVariables, DRedisPool
 from src.utils.logging import make_logger
-from src.utils.observability import is_managed
+from src.utils.observability import uses_observability_adapter
 
 logger = make_logger(__name__)
 
@@ -118,7 +118,7 @@ class RedisStreamRepository(StreamRepository):
         Only collects metrics if at least _METRICS_DEBOUNCE_INTERVAL seconds
         have passed since the last collection to avoid overhead on hot paths.
         """
-        if is_managed():
+        if uses_observability_adapter():
             return
         now = time.monotonic()
         if now - self._last_metrics_time < _METRICS_DEBOUNCE_INTERVAL:

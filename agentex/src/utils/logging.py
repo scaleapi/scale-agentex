@@ -11,7 +11,7 @@ import ddtrace
 import json_log_formatter
 from ddtrace.trace import tracer
 
-from src.utils.observability import is_managed
+from src.utils.observability import uses_observability_adapter
 from src.utils.request_utils import REQUEST_KEY_REGEXP_BLACKLIST
 
 # Check if Datadog is configured
@@ -184,7 +184,7 @@ def make_logger(name: str) -> logging.Logger:
     if _sensitive_data_filter not in logger.filters:
         logger.addFilter(_sensitive_data_filter)
 
-    if is_managed():
+    if uses_observability_adapter():
         logger.propagate = True
         return logger
 

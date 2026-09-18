@@ -30,7 +30,7 @@ def _adapter() -> ModuleType | None:
         raise
 
 
-def is_managed() -> bool:
+def uses_observability_adapter() -> bool:
     """Whether an installed adapter replaces built-in instrumentation."""
     return _adapter() is not None
 
