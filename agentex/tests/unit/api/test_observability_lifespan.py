@@ -54,7 +54,7 @@ async def test_cleanup_runs_after_startup_or_dependency_failure(
     from src.utils import observability
 
     monkeypatch.setattr(observability, "shutdown", close_adapter)
-    monkeypatch.setattr(observability, "is_managed", lambda: managed)
+    monkeypatch.setattr(observability, "uses_observability_adapter", lambda: managed)
 
     async def run():
         async with app_module.lifespan(app_module.fastapi_app):

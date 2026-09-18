@@ -90,7 +90,7 @@ class HTTPExceptionWithMessage(HTTPException):
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     async with AsyncExitStack() as cleanup:
-        if observability.is_managed():
+        if observability.uses_observability_adapter():
             cleanup.push_async_callback(asyncio.to_thread, observability.shutdown)
         else:
             cleanup.callback(shutdown_otel_metrics)
@@ -101,7 +101,7 @@ async def lifespan(_: FastAPI):
         cleanup.push_async_callback(dependencies.async_shutdown)
         cleanup.push_async_callback(HttpxGateway.close_clients)
         await dependencies.startup_global_dependencies()
-        if not observability.is_managed():
+        if not observability.uses_observability_adapter():
             configure_statsd()
 
         global_deps = GlobalDependencies()

@@ -66,7 +66,7 @@ from opentelemetry.sdk.resources import (
 )
 
 from src.utils.logging import make_logger
-from src.utils.observability import is_managed
+from src.utils.observability import uses_observability_adapter
 
 if TYPE_CHECKING:
     from opentelemetry.metrics import Meter
@@ -143,7 +143,7 @@ def bootstrap_auto_instrumentation() -> bool:
     """
     global _auto_instrumentation_bootstrapped
 
-    if is_managed() or _auto_instrumentation_bootstrapped:
+    if uses_observability_adapter() or _auto_instrumentation_bootstrapped:
         return False
 
     try:
@@ -238,7 +238,7 @@ def init_otel_metrics(
     """
     global _meter_provider, _initialized
 
-    if is_managed():
+    if uses_observability_adapter():
         return None
     if _initialized:
         return _meter_provider or _global_meter_provider()
@@ -314,7 +314,7 @@ def get_meter(name: str, version: str = "0.1.0") -> Meter | None:
     Returns:
         An OpenTelemetry Meter instance, or None if OTel is not configured
     """
-    if is_managed():
+    if uses_observability_adapter():
         return None
     if not _initialized:
         init_otel_metrics()

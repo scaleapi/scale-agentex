@@ -38,7 +38,7 @@ def test_absent_adapter_preserves_default_logging(tmp_path, adapter):
         """
         import sys
         from src.utils import observability
-        assert not observability.is_managed()
+        assert not observability.uses_observability_adapter()
         assert "fastapi" not in sys.modules
         assert "opentelemetry" not in sys.modules
         from src.utils.logging import make_logger
@@ -100,7 +100,7 @@ def test_adapter_initializes_once_after_routes_without_import_time_handlers(tmp_
 def test_broken_adapter_dependency_is_not_treated_as_absent(tmp_path):
     (tmp_path / "broken_adapter.py").write_text("import missing_adapter_dependency\n")
     result = run_python(
-        "from src.utils.observability import is_managed; is_managed()",
+        "from src.utils.observability import uses_observability_adapter; uses_observability_adapter()",
         tmp_path,
         adapter="broken_adapter",
     )

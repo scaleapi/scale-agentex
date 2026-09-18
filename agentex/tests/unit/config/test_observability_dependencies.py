@@ -15,7 +15,7 @@ async def test_database_setup_uses_selected_instrumentation(monkeypatch, managed
     monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/test")
     monkeypatch.delenv("READ_ONLY_DATABASE_URL", raising=False)
     monkeypatch.delenv("REDIS_URL", raising=False)
-    monkeypatch.setattr(dependencies, "is_managed", lambda: managed)
+    monkeypatch.setattr(dependencies, "uses_observability_adapter", lambda: managed)
 
     async def no_temporal(_self):
         return None
