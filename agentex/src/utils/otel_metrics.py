@@ -46,6 +46,7 @@ Environment variables (custom metrics / standalone mode):
 from __future__ import annotations
 
 import os
+from importlib import metadata
 from typing import TYPE_CHECKING
 
 from opentelemetry import metrics
@@ -130,7 +131,8 @@ def bootstrap_auto_instrumentation() -> bool:
     worker imports ``app.py`` fresh, so one call per worker is enough.
 
     Runs when: contrib packages are installed (no ``ImportError``).
-    Skips when: bootstrap already succeeded in this process.
+    Skips when: bootstrap already succeeded in this process, or
+    AGENTEX_OTEL_REQUIRE_SDK_SETUP=true and no distro/configurator is installed.
     On ``ImportError`` or ``initialize()`` failure, returns False and leaves
     the flag unset so a later call can retry.
 
@@ -145,6 +147,13 @@ def bootstrap_auto_instrumentation() -> bool:
 
     if uses_observability_adapter() or _auto_instrumentation_bootstrapped:
         return False
+
+    if os.getenv("AGENTEX_OTEL_REQUIRE_SDK_SETUP", "false").strip().lower() == "true":
+        if not any(
+            metadata.entry_points(group=group)
+            for group in ("opentelemetry_distro", "opentelemetry_configurator")
+        ):
+            return False
 
     try:
         from opentelemetry.instrumentation.auto_instrumentation import initialize

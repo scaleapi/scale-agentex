@@ -5,6 +5,7 @@ from __future__ import annotations
 import builtins
 import os
 from contextlib import AbstractContextManager
+from importlib import metadata
 from types import ModuleType
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -55,7 +56,9 @@ def _fake_auto_instrumentation_import(
             return mod
         return real_import(name, globals, locals, fromlist, level)
 
-    return mock_initialize, patch.object(builtins, "__import__", side_effect=fake_import)
+    return mock_initialize, patch.object(
+        builtins, "__import__", side_effect=fake_import
+    )
 
 
 def _block_auto_instrumentation_import() -> AbstractContextManager[Any]:
@@ -71,8 +74,9 @@ def _block_auto_instrumentation_import() -> AbstractContextManager[Any]:
 
 
 @pytest.fixture(autouse=True)
-def reset_otel_metrics_state():
+def reset_otel_metrics_state(monkeypatch):
     """Reset module and global OTel state between tests."""
+    monkeypatch.delenv("AGENTEX_OTEL_REQUIRE_SDK_SETUP", raising=False)
     saved_provider = metrics.get_meter_provider()
     saved_bootstrap = otel_metrics._auto_instrumentation_bootstrapped
     otel_metrics.shutdown_otel_metrics()
@@ -97,6 +101,21 @@ def test_bootstrap_skips_when_auto_instrumentation_not_installed(monkeypatch):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("value", ["true", "TRUE", " true "])
+def test_bootstrap_skips_bundled_instrumentation_without_sdk_setup(monkeypatch, value):
+    monkeypatch.setenv("AGENTEX_OTEL_REQUIRE_SDK_SETUP", value)
+    monkeypatch.setattr(metadata, "entry_points", lambda **kwargs: ())
+    original_attributes = os.environ.get("OTEL_RESOURCE_ATTRIBUTES")
+    mock_initialize, import_patch = _fake_auto_instrumentation_import()
+
+    with import_patch:
+        assert otel_metrics.bootstrap_auto_instrumentation() is False
+
+    mock_initialize.assert_not_called()
+    assert os.environ.get("OTEL_RESOURCE_ATTRIBUTES") == original_attributes
+
+
+@pytest.mark.unit
 def test_bootstrap_runs_without_otlp_env(monkeypatch):
     for key in list(os.environ):
         if key.startswith("OTEL_EXPORTER_OTLP") and key.endswith("_ENDPOINT"):
@@ -110,7 +129,19 @@ def test_bootstrap_runs_without_otlp_env(monkeypatch):
 
 
 @pytest.mark.unit
-def test_bootstrap_calls_initialize_when_packages_available(monkeypatch):
+@pytest.mark.parametrize(
+    "sdk_setup_group", [None, "opentelemetry_configurator", "opentelemetry_distro"]
+)
+def test_bootstrap_calls_initialize_when_packages_available(
+    monkeypatch, sdk_setup_group
+):
+    if sdk_setup_group:
+        monkeypatch.setenv("AGENTEX_OTEL_REQUIRE_SDK_SETUP", "true")
+        monkeypatch.setattr(
+            metadata,
+            "entry_points",
+            lambda *, group: (object(),) if group == sdk_setup_group else (),
+        )
     monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
 
     mock_initialize, import_patch = _fake_auto_instrumentation_import()
@@ -339,8 +370,12 @@ def test_metrics_endpoint_takes_precedence_over_general_endpoint(monkeypatch):
 
 
 @pytest.mark.unit
-def test_custom_metrics_preserve_instrument_attributes_in_shared_mode():
+@pytest.mark.parametrize("require_sdk_setup", ["true", "false"])
+def test_custom_metrics_preserve_instrument_attributes_in_shared_mode(
+    monkeypatch, require_sdk_setup
+):
     """Instrument names and point attributes must not change when attaching to operator provider."""
+    monkeypatch.setenv("AGENTEX_OTEL_REQUIRE_SDK_SETUP", require_sdk_setup)
     cache_metrics._instruments_initialized = False
     cache_metrics._access_counter = None
     cache_metrics._eviction_counter = None

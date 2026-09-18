@@ -14,6 +14,12 @@ span storage continue normally.
 The adapter is installed separately. The public backend does not depend on its
 package or a particular telemetry backend.
 
+Images that bundle instrumentation for an adapter can set
+`AGENTEX_OTEL_REQUIRE_SDK_SETUP=true`. Native startup then requires an installed
+OpenTelemetry distribution or configurator before auto-instrumenting libraries.
+Injected SDK setup still runs in each worker; built-in custom metrics are
+unaffected. The default is `false`, preserving public backend behavior.
+
 ## Callback contract
 
 Implement two synchronous functions. Importing the adapter must not install
