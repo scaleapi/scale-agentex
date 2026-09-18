@@ -33,24 +33,47 @@ def run_python(source, tmp_path, *, adapter=None):
 
 
 @pytest.mark.parametrize("adapter", [None, "missing_test_adapter.api"])
-def test_absent_adapter_preserves_default_logging(tmp_path, adapter):
+@pytest.mark.parametrize("environment", ["development", "production"])
+def test_absent_adapter_preserves_default_logging(
+    tmp_path, monkeypatch, adapter, environment
+):
+    monkeypatch.setenv("ENVIRONMENT", environment)
     result = run_python(
         """
-        import sys
+        import importlib, io, logging, sys
         from src.utils import observability
         assert not observability.uses_observability_adapter()
         assert "fastapi" not in sys.modules
         assert "opentelemetry" not in sys.modules
-        from src.utils.logging import make_logger
-        logger = make_logger("test.default")
-        logger.info("one-output-only")
-        assert len(logger.handlers) == 1
+        from src.utils import logging as agentex_logging
+        external_output = io.StringIO()
+        external_handler = logging.StreamHandler(external_output)
+        external_formatter = logging.Formatter("external: %(message)s")
+        external_handler.setFormatter(external_formatter)
+        logger = logging.getLogger("test.default")
+        logger.addHandler(external_handler)
+        logging.getLogger().addHandler(logging.NullHandler())
+        assert agentex_logging.make_logger("test.default") is logger
+        original_handlers = list(logger.handlers)
+        assert agentex_logging.make_logger("test.default") is logger
+        importlib.reload(agentex_logging)
+        assert agentex_logging.make_logger("test.default") is logger
+        logger.info("one-output-only token=%s", "sensitive-value")
+        assert len(logger.handlers) == 2
+        assert logger.handlers == original_handlers
+        assert external_handler.formatter is external_formatter
+        assert external_output.getvalue() == "external: one-output-only token=[REDACTED]\\n"
         """,
         tmp_path,
         adapter=adapter,
     )
     assert result.returncode == 0, result.stderr
     assert (result.stdout + result.stderr).count("one-output-only") == 1
+    assert "sensitive-value" not in result.stdout + result.stderr
+    if environment == "production":
+        assert json.loads(result.stderr)["message"] == (
+            "one-output-only token=[REDACTED]"
+        )
 
 
 def test_adapter_initializes_once_after_routes_without_import_time_handlers(tmp_path):

@@ -188,12 +188,14 @@ def make_logger(name: str) -> logging.Logger:
         logger.propagate = True
         return logger
 
-    stream_handler = logging.StreamHandler()
-    if _use_json_logs:
-        stream_handler.setFormatter(CustomJSONFormatter())
-    else:
-        stream_handler.setFormatter(logging.Formatter(LOG_FORMAT))
-    logger.addHandler(stream_handler)
+    if not any(handler.name == "agentex.console" for handler in logger.handlers):
+        stream_handler = logging.StreamHandler()
+        stream_handler.set_name("agentex.console")
+        if _use_json_logs:
+            stream_handler.setFormatter(CustomJSONFormatter())
+        else:
+            stream_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+        logger.addHandler(stream_handler)
 
     def handle_exception(exc_type, exc_value, exc_traceback):
         if issubclass(exc_type, KeyboardInterrupt):
