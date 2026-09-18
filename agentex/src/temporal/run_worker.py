@@ -4,15 +4,27 @@ Temporal worker entry point for health check workflows.
 Each worker process handles one task queue for clean separation and scaling.
 """
 
+# ruff: noqa: E402
+# Instrument libraries before dependency modules bind their constructors.
+from src.utils import observability
+
+if __name__ == "__main__":
+    observability.initialize_worker()
+
 import asyncio
 import os
+import signal
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import AsyncExitStack
+from datetime import timedelta
 
 import httpx
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
+from src.adapters.http.adapter_httpx import HttpxGateway
 from src.adapters.temporal.client_factory import TemporalClientFactory
+from src.config import dependencies
 from src.config.dependencies import (
     GlobalDependencies,
     database_async_read_only_session_maker,
@@ -43,12 +55,14 @@ from src.temporal.workflows.scheduled_agent_run_workflow import (
     ScheduledAgentRunWorkflow,
 )
 from src.utils.logging import make_logger
+from src.utils.otel_metrics import shutdown_otel_metrics
 
 logger = make_logger(__name__)
 
 # Task queue name for agentex server operations
 AGENTEX_SERVER_TASK_QUEUE = "agentex-server"
 OTLP_METRICS_DEFAULT_PORT = 4317
+WORKER_SHUTDOWN_GRACE = timedelta(seconds=10)
 
 
 def build_metrics_url(host_url: str | None) -> str | None:
@@ -73,6 +87,7 @@ def build_metrics_url(host_url: str | None) -> str | None:
     if ":" in host:
         host = f"[{host}]"
     return f"http://{host}:{port}"
+
 
 # Global worker instance
 health_check_worker: Worker | None = None
@@ -101,6 +116,8 @@ async def run_worker(
         TemporalError: If worker creation or execution fails
     """
     global health_check_worker
+    health_check_worker = None
+    worker_task = None
 
     try:
         # Initialize global dependencies
@@ -137,6 +154,7 @@ async def run_worker(
             activities=activities or [],
             workflow_runner=UnsandboxedWorkflowRunner(),
             max_concurrent_activities=max_concurrent_activities,
+            graceful_shutdown_timeout=WORKER_SHUTDOWN_GRACE,
             build_id=str(uuid.uuid4()),
         )
 
@@ -152,16 +170,19 @@ async def run_worker(
             logger.info(f"Activities: {[a.__name__ for a in activities]}")
 
         # Run the worker (this will block until the worker is stopped)
-        await health_check_worker.run()
+        worker_task = asyncio.create_task(health_check_worker.run())
+        await asyncio.shield(worker_task)
 
     except Exception as e:
         logger.error(f"Worker failed: {e}")
         raise
     finally:
         # Cleanup
-        if health_check_worker:
+        if health_check_worker and worker_task:
             logger.info("Shutting down worker...")
-            await health_check_worker.shutdown()
+            if not health_check_worker.is_shutdown:
+                await health_check_worker.shutdown()
+            await worker_task
 
 
 def create_agentex_server_worker(
@@ -227,29 +248,53 @@ def create_agentex_server_worker(
 async def main() -> None:
     """Main entry point for the agentex-server Temporal worker."""
     try:
-        await startup_global_dependencies()
-        global_dependencies = GlobalDependencies()
+        async with AsyncExitStack() as cleanup:
+            if observability.uses_observability_adapter():
+                cleanup.push_async_callback(asyncio.to_thread, observability.shutdown)
+            else:
+                cleanup.callback(shutdown_otel_metrics)
+            cleanup.callback(dependencies.shutdown)
+            cleanup.push_async_callback(dependencies.async_shutdown)
+            cleanup.push_async_callback(HttpxGateway.close_clients)
+            await startup_global_dependencies()
+            global_dependencies = GlobalDependencies()
 
-        engine = database_async_read_write_engine()
-        session_maker = database_async_read_write_session_maker(engine)
-        read_only_session_maker = database_async_read_only_session_maker(engine)
-        agent_repo = AgentRepository(session_maker, read_only_session_maker)
+            engine = database_async_read_write_engine()
+            session_maker = database_async_read_write_session_maker(engine)
+            read_only_session_maker = database_async_read_only_session_maker(engine)
+            agent_repo = AgentRepository(session_maker, read_only_session_maker)
 
-        worker_task = create_agentex_server_worker(
-            agent_repo=agent_repo,
-            http_client=httpx_client(),
-            global_dependencies=global_dependencies,
-        )
-        await worker_task
+            worker_task = create_agentex_server_worker(
+                agent_repo=agent_repo,
+                http_client=httpx_client(),
+                global_dependencies=global_dependencies,
+            )
+            await worker_task
 
     except KeyboardInterrupt:
         logger.info("Received interrupt signal, shutting down worker...")
-        if health_check_worker:
-            await health_check_worker.shutdown()
     except Exception as e:
         logger.error(f"Worker startup failed: {e}")
         raise
 
 
+async def _run_cli() -> None:
+    """Run cleanup on SIGTERM as well as keyboard interruption."""
+    loop = asyncio.get_running_loop()
+    main_task = asyncio.create_task(main())
+
+    def request_shutdown() -> None:
+        if not main_task.cancelling():
+            main_task.cancel()
+
+    loop.add_signal_handler(signal.SIGTERM, request_shutdown)
+    try:
+        await main_task
+    except asyncio.CancelledError:
+        logger.info("Received shutdown signal, worker stopped")
+    finally:
+        loop.remove_signal_handler(signal.SIGTERM)
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(_run_cli())

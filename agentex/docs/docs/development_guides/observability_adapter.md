@@ -1,4 +1,4 @@
-# API observability adapter
+# API and platform worker observability adapters
 
 The API can use an optional Python module for deployment-specific logs, traces,
 and metrics. Set `AGENTEX_OBSERVABILITY_MODULE` to its import path before
@@ -6,10 +6,14 @@ starting Uvicorn. If the variable is unset or the selected module is not
 installed, the API keeps its built-in telemetry.
 
 An installed, selected adapter replaces built-in instrumentation. The API skips
-its automatic instrumentation, native metric provider, custom metrics, StatsD,
+its automatic instrumentation, native metric provider, StatsD,
 and PostgreSQL/Redis collectors. Application loggers keep their sensitive-text
 filter and propagate to the adapter's handlers. Database operations and product
 span storage continue normally.
+
+Custom application metrics use an adapter's optional `get_meter` callback. If
+the callback is absent, custom metrics stay disabled in adapter mode. Native
+PostgreSQL and Redis collectors remain disabled either way.
 
 The adapter is installed separately. The public backend does not depend on its
 package or a particular telemetry backend.
@@ -52,8 +56,57 @@ telemetry. Selection is cached for the life of the process; restart after
 changing it. Every Uvicorn worker initializes independently.
 
 The API hook does not initialize background workers. Adapters that own all
-instrumentation should require a plain server launch and document how to turn
+instrumentation should require a plain process launch and document how to turn
 off competing automatic instrumentation.
+
+## Platform Temporal worker
+
+The `src.temporal.run_worker` entry point supports the same module selector for
+the platform `agentex-server` task queue. This does not configure customer agent
+or SDK workers. Use a worker adapter module that implements `initialize_worker()`
+and `shutdown()`, and set the selector before importing the entry point:
+
+```sh
+AGENTEX_OBSERVABILITY_MODULE=example_telemetry.worker \
+  python -m src.temporal.run_worker
+```
+
+`initialize_worker()` runs once before dependency and client imports, so the
+adapter can instrument library constructors before they are used. Select the
+API and worker modules separately for each process. Missing selected modules
+keep native telemetry; installed modules with broken callbacks fail startup.
+Unset the selector and restart the worker to return to native telemetry.
+
+Two optional synchronous callbacks extend the adapter contract:
+
+```python
+def temporal_client_interceptors():
+    return []
+
+
+def get_meter(name: str, version: str):
+    return None
+```
+
+The client factory applies `temporal_client_interceptors()` once to each client,
+including the dependency client and the polling client. Temporal automatically
+uses client interceptors that also implement its worker interceptor interface.
+Do not register those interceptors again on `Worker`. `get_meter` must return a
+meter from the adapter's provider, or `None`; it must not create a provider for
+each call.
+
+Temporal Core metrics keep their existing, separate exporter. `DD_AGENT_HOST`
+still selects the OTLP gRPC endpoint on port 4317 (or the explicit port), with
+Temporal's default export interval. Keep this endpoint reachable when enabling
+the adapter. Python metric providers do not replace Core's Rust metrics; do not
+add another Core exporter or runtime through the adapter.
+
+On SIGTERM, the worker stops polling, gives activities a ten-second grace
+period, then closes HTTP clients and dependencies before flushing the adapter
+in a thread. Adapters should configure bounded exporter timeouts. The process
+manager's termination grace period remains the limit for unresponsive cleanup.
+Workflow logs use Temporal's replay-aware logger in adapter mode. Healthcheck
+failure logs omit response content and exception values in that mode.
 
 ## Request IDs and logs
 
@@ -69,8 +122,8 @@ An adapter can bind its own logging context in outer middleware. Accept or
 generate the ID there, put it in the request headers, and keep the context active
 through the response. The public middleware reuses that ID.
 
-Application log messages are unchanged. A structured-field allowlist cannot
-remove values embedded in message text. Log-call cleanup is separate.
+A structured-field allowlist cannot remove values embedded in message text.
+General log-call cleanup is separate from adapter setup.
 
 ## Verification
 
@@ -79,6 +132,7 @@ Run from `agentex/`:
 ```sh
 uv run python -m pytest tests/unit/utils/test_observability.py tests/unit/api/test_observability_lifespan.py tests/unit/config/test_observability_dependencies.py tests/unit/api/test_request_logging_middleware.py tests/unit/utils/test_http_request_id.py
 uv run python -m pytest tests/integration/test_observability_adapter.py
+uv run python -m pytest tests/unit/temporal/test_worker_observability.py tests/unit/temporal/test_run_worker_metrics_url.py tests/unit/temporal/test_healthcheck_activities.py
 ```
 
 The integration test uses two real Uvicorn workers and HTTP requests. It replaces

@@ -67,6 +67,7 @@ from opentelemetry.sdk.resources import (
 )
 
 from src.utils.logging import make_logger
+from src.utils.observability import get_meter as get_adapter_meter
 from src.utils.observability import uses_observability_adapter
 
 if TYPE_CHECKING:
@@ -324,7 +325,7 @@ def get_meter(name: str, version: str = "0.1.0") -> Meter | None:
         An OpenTelemetry Meter instance, or None if OTel is not configured
     """
     if uses_observability_adapter():
-        return None
+        return get_adapter_meter(name, version)
     if not _initialized:
         init_otel_metrics()
     if _meter_provider is None and _global_meter_provider() is None:

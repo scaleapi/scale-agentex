@@ -110,6 +110,7 @@ class GlobalDependencies(metaclass=Singleton):
             ),
             echo=echo_db_engine,
             poolclass=pool_class,
+            pool_logging_name="main",
             pool_size=async_db_pool_size,
             max_overflow=20,  # Allow 20 additional connections beyond pool_size when needed
             pool_pre_ping=True,
@@ -123,6 +124,7 @@ class GlobalDependencies(metaclass=Singleton):
             ),
             echo=echo_db_engine,
             poolclass=pool_class,
+            pool_logging_name="middleware",
             pool_size=middleware_db_pool_size,
             max_overflow=10,  # Allow 10 additional connections for middleware
             pool_pre_ping=True,
@@ -203,6 +205,7 @@ class GlobalDependencies(metaclass=Singleton):
                 async_creator=async_db_engine_creator(read_only_db_url),
                 echo=echo_db_engine,
                 poolclass=pool_class,
+                pool_logging_name="readonly",
                 pool_size=async_db_pool_size,
                 max_overflow=20,
                 pool_pre_ping=True,

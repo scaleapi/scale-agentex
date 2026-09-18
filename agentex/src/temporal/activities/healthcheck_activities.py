@@ -13,6 +13,7 @@ from src.domain.entities.agents import AgentStatus
 from src.domain.repositories.agent_repository import AgentRepository
 from src.utils.acp_url import resolve_acp_url
 from src.utils.logging import make_logger
+from src.utils.observability import uses_observability_adapter
 from temporalio import activity
 
 logger = make_logger(__name__)
@@ -69,24 +70,28 @@ class HealthCheckActivities:
                 parsed_response = response.json()
                 status = parsed_response.get("status")
                 if status != "healthy":
+                    detail = "" if uses_observability_adapter() else f": {status}"
                     logger.error(
-                        f"Agent {agent_id} returned non-healthy status: {status}"
+                        f"Agent {agent_id} returned non-healthy status{detail}"
                     )
                     return False
                 response_agent_id = parsed_response.get("agent_id")
                 if response_agent_id and response_agent_id != agent_id:
+                    detail = (
+                        "" if uses_observability_adapter() else f": {response_agent_id}"
+                    )
                     logger.error(
-                        f"Agent {agent_id} returned unexpected agent ID: {response_agent_id}"
+                        f"Agent {agent_id} returned unexpected agent ID{detail}"
                     )
                     return False
             except json.JSONDecodeError:
-                logger.error(
-                    f"Agent {agent_id} returned non-JSON response: {response.text}"
-                )
+                detail = "" if uses_observability_adapter() else f": {response.text}"
+                logger.error(f"Agent {agent_id} returned non-JSON response{detail}")
                 return False
             return True
         except Exception as e:
-            logger.error(f"Failed to check status of agent {agent_id}: {e}")
+            detail = type(e).__name__ if uses_observability_adapter() else str(e)
+            logger.error(f"Failed to check status of agent {agent_id}: {detail}")
         return False
 
     @activity.defn(name=UPDATE_AGENT_STATUS_ACTIVITY)
@@ -112,5 +117,6 @@ class HealthCheckActivities:
             await self.agent_repo.update(item=agent)
             logger.info(f"Updated agent {agent_id} status to {status}")
         except Exception as e:
-            logger.error(f"Failed to update agent {agent_id} status: {e}")
+            detail = type(e).__name__ if uses_observability_adapter() else str(e)
+            logger.error(f"Failed to update agent {agent_id} status: {detail}")
             raise
