@@ -62,9 +62,22 @@ Use `adk.tracing.span` for spans the stream cannot infer (the top-level turn, su
 
 Both delivery calls expose normalized usage. `auto_send_turn` returns a `TurnResult` with `final_text` and a `usage` object; for `yield_turn`, read `turn.usage()` after the stream is exhausted. `TurnUsage` carries `model`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `reasoning_tokens`, `total_tokens`, `cost_usd`, `duration_ms`, `num_llm_calls`, `num_tool_calls`, and `num_reasoning_blocks`.
 
+## Seeing spans in the developer UI
+
+Span derivation produces spans; **tracing processors** decide where they go, and none is registered until you add one. To see spans in the developer UI's traces tab (served by the local Agentex backend), register the Agentex processor once at module load time:
+
+```python
+from agentex.lib.core.tracing.tracing_processor_manager import add_tracing_processor_config
+from agentex.lib.types.tracing import AgentexTracingProcessorConfig
+
+add_tracing_processor_config(AgentexTracingProcessorConfig())
+```
+
+It writes every derived span to the backend's `/spans` API using the agent's own credentials (`AGENTEX_BASE_URL` and the agent API key that `agentex agents run` injects). The `agentex init` framework templates do this for you. Without it, spans only reach the optional SGP processor below, which disables itself when `SGP_API_KEY` or `SGP_ACCOUNT_ID` is empty, so a locally scaffolded agent shows "No spans found for this task".
+
 ## Sending spans to Scale GenAI Platform
 
-Span derivation produces spans; **tracing processors** decide where they go. Register a processor once at module load time (before any request is handled) and every derived span fans out to it:
+To also ship spans to Scale GenAI Platform, register the SGP processor (before any request is handled); every derived span fans out to each registered processor:
 
 ```python
 import os
@@ -87,4 +100,4 @@ With a processor registered and `trace_id` set on the emitter, tool and reasonin
 - Tool and reasoning spans are derived from the canonical stream automatically; no per-framework tracing handler.
 - `tracer=None` traces when `trace_id` is set, `tracer=False` disables, a `SpanTracer` instance customizes.
 - Pass `parent_span_id` from an `adk.tracing.span` to nest derived spans under a turn span.
-- Register an `SGPTracingProcessorConfig` once at module load to ship spans to Scale GenAI Platform.
+- Register an `AgentexTracingProcessorConfig` once at module load to see spans in the developer UI; add an `SGPTracingProcessorConfig` to also ship them to Scale GenAI Platform.
