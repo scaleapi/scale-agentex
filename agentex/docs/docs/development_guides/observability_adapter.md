@@ -79,8 +79,10 @@ An adapter can bind its own logging context in outer middleware. Accept or
 generate the ID there, put it in the request headers, and keep the context active
 through the response. The public middleware reuses that ID.
 
-Application log messages are unchanged. A structured-field allowlist cannot
-remove values embedded in message text. Log-call cleanup is separate.
+The request/response logger and selected ACP, Redis, and HTTP client log calls
+use fixed templates with safe context and metadata instead of bodies, raw URLs,
+or exception values. Other log calls can still embed payloads; a structured-field
+allowlist cannot remove values already embedded in message text.
 
 ## Verification
 

@@ -176,10 +176,9 @@ class AgentACPService(TaskMessageMixin):
                 raise ValueError(f"Unknown message type: {message_type}")
         except Exception as e:
             logger.error(
-                f"Failed to validate ACP response as TaskMessage. Result: {result} - Error: {e}"
+                "Failed to validate ACP response as TaskMessage",
+                extra={"error_type": type(e).__name__},
             )
-            if hasattr(e, "errors"):
-                logger.error(f"Validation error details: {e.errors()}")
             raise ValueError(
                 f"ACP server returned invalid TaskMessage format: {str(e)}"
             ) from e
@@ -247,7 +246,9 @@ class AgentACPService(TaskMessageMixin):
             return rpc_response.result or {}
 
         except Exception as e:
-            logger.error(f"Error calling ACP server at {url}: {e}")
+            logger.error(
+                "Error calling ACP server", extra={"error_type": type(e).__name__}
+            )
             raise e
 
     async def _call_jsonrpc_stream(
@@ -264,11 +265,8 @@ class AgentACPService(TaskMessageMixin):
         )
 
         try:
-            logger.info(
-                "Calling model dump on payload:", request.model_dump(mode="json")
-            )
             payload = request.model_dump(mode="json")
-            logger.info(f"Streaming payload: {payload}")
+            logger.info("Starting ACP stream", extra={"method": method.value})
             async for chunk in self._http_gateway.stream_call(
                 method="POST",
                 url=f"{url}/api",
@@ -288,7 +286,9 @@ class AgentACPService(TaskMessageMixin):
 
                 yield rpc_response.result or {}
         except Exception as e:
-            logger.error(f"Error calling ACP server at {url}: {e}")
+            logger.error(
+                "Error calling ACP server", extra={"error_type": type(e).__name__}
+            )
             raise e
 
     def get_delegation_headers(self, agent: AgentEntity) -> dict[str, str]:
@@ -314,7 +314,11 @@ class AgentACPService(TaskMessageMixin):
         # message, streaming and cancel (which call get_headers(agent) with no
         # request_headers) would drop traceparent and the downstream agent would
         # start a detached trace. The inbound headers are on self._request.
-        inbound_headers = dict(self._request.headers) if getattr(self, "_request", None) is not None else {}
+        inbound_headers = (
+            dict(self._request.headers)
+            if getattr(self, "_request", None) is not None
+            else {}
+        )
         trace_context_headers = extract_trace_context_headers(inbound_headers)
         delegation_headers = self.get_delegation_headers(agent)
         auth_headers = await self.get_agent_auth_headers(agent)

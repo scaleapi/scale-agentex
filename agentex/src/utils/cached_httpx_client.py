@@ -46,14 +46,13 @@ def get_async_client(base_url: str) -> httpx.AsyncClient:
             event_hooks={"request": [forward_async_request_id]},
         )
 
-        logger.debug(
-            f"Created async client for base_url: {base_url} with limits: {limits}"
-        )
+        logger.debug("Created cached async HTTP client")
         return client
 
     except Exception as e:
         logger.error(
-            f"Failed to create async client for {base_url}: {e}", exc_info=True
+            "Failed to create async HTTP client; using fallback",
+            extra={"error_type": type(e).__name__},
         )
         # Return a basic client as fallback
         return httpx.AsyncClient(
