@@ -74,6 +74,7 @@ def build_metrics_url(host_url: str | None) -> str | None:
         host = f"[{host}]"
     return f"http://{host}:{port}"
 
+
 # Global worker instance
 health_check_worker: Worker | None = None
 

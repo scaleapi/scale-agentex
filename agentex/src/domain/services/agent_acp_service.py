@@ -314,7 +314,11 @@ class AgentACPService(TaskMessageMixin):
         # message, streaming and cancel (which call get_headers(agent) with no
         # request_headers) would drop traceparent and the downstream agent would
         # start a detached trace. The inbound headers are on self._request.
-        inbound_headers = dict(self._request.headers) if getattr(self, "_request", None) is not None else {}
+        inbound_headers = (
+            dict(self._request.headers)
+            if getattr(self, "_request", None) is not None
+            else {}
+        )
         trace_context_headers = extract_trace_context_headers(inbound_headers)
         delegation_headers = self.get_delegation_headers(agent)
         auth_headers = await self.get_agent_auth_headers(agent)
