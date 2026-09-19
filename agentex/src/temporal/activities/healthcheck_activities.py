@@ -58,7 +58,6 @@ class HealthCheckActivities:
         # In docker-free local mode, rewrite host.docker.internal -> the host-reachable
         # override so the healthcheck matches how the request path dials the agent.
         acp_url = resolve_acp_url(acp_url)
-        logger.info(f"Checking status of agent {agent_id} via {acp_url}")
         try:
             response = await self.http_client.get(f"{acp_url}/healthz", timeout=5)
             if response.status_code != 200:
