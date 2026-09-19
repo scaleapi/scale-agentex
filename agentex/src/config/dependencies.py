@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
-    create_async_engine,
 )
+from sqlalchemy.pool import AsyncAdaptedQueuePool
 from temporalio.client import Client as TemporalClient
 
 from src.config.environment_variables import Environment, EnvironmentVariables
@@ -24,6 +24,7 @@ from src.utils.db_metrics import (
     PostgresMetricsCollector,
 )
 from src.utils.logging import make_logger
+from src.utils.observability import uses_observability_adapter
 
 logger = make_logger(__name__)
 
@@ -69,6 +70,10 @@ class GlobalDependencies(metaclass=Singleton):
             )
 
     async def load(self):
+        # Import after adapter initialization so SQLAlchemy instrumentation can
+        # wrap create_async_engine before this module binds it.
+        from sqlalchemy.ext.asyncio import create_async_engine
+
         if self._loaded:
             return
 
@@ -93,6 +98,12 @@ class GlobalDependencies(metaclass=Singleton):
             os.environ.get("POSTGRES_MIDDLEWARE_POOL_SIZE", "5")
         )  # Support middleware operations
 
+        pool_class = (
+            AsyncAdaptedQueuePool
+            if uses_observability_adapter()
+            else InstrumentedAsyncAdaptedQueuePool
+        )
+
         # https://docs.sqlalchemy.org/en/20/core/engines.html#sqlalchemy.create_engine
         self.database_async_read_write_engine = create_async_engine(
             "postgresql+asyncpg://",
@@ -100,7 +111,7 @@ class GlobalDependencies(metaclass=Singleton):
                 self.environment_variables.DATABASE_URL,
             ),
             echo=echo_db_engine,
-            poolclass=InstrumentedAsyncAdaptedQueuePool,  # emits pool wait_time/pending_requests/timeouts
+            poolclass=pool_class,
             pool_size=async_db_pool_size,
             max_overflow=20,  # Allow 20 additional connections beyond pool_size when needed
             pool_pre_ping=True,
@@ -113,7 +124,7 @@ class GlobalDependencies(metaclass=Singleton):
                 self.environment_variables.DATABASE_URL,
             ),
             echo=echo_db_engine,
-            poolclass=InstrumentedAsyncAdaptedQueuePool,  # emits pool wait_time/pending_requests/timeouts
+            poolclass=pool_class,
             pool_size=middleware_db_pool_size,
             max_overflow=10,  # Allow 10 additional connections for middleware
             pool_pre_ping=True,
@@ -193,44 +204,45 @@ class GlobalDependencies(metaclass=Singleton):
                 "postgresql+asyncpg://",
                 async_creator=async_db_engine_creator(read_only_db_url),
                 echo=echo_db_engine,
-                poolclass=InstrumentedAsyncAdaptedQueuePool,  # emits pool wait_time/pending_requests/timeouts
+                poolclass=pool_class,
                 pool_size=async_db_pool_size,
                 max_overflow=20,
                 pool_pre_ping=True,
                 pool_recycle=3600,
             )
 
-        # Initialize PostgreSQL metrics collector
-        self.postgres_metrics_collector = PostgresMetricsCollector()
-        environment = self.environment_variables.ENVIRONMENT
-        service_name = os.environ.get("OTEL_SERVICE_NAME", "agentex")
+        if not uses_observability_adapter():
+            # Initialize PostgreSQL metrics collector
+            self.postgres_metrics_collector = PostgresMetricsCollector()
+            environment = self.environment_variables.ENVIRONMENT
+            service_name = os.environ.get("OTEL_SERVICE_NAME", "agentex")
 
-        if self.database_async_read_write_engine:
-            self.postgres_metrics_collector.register_engine(
-                engine=self.database_async_read_write_engine,
-                pool_name="main",
-                db_url=self.environment_variables.DATABASE_URL,
-                environment=environment,
-                service_name=service_name,
-            )
+            if self.database_async_read_write_engine:
+                self.postgres_metrics_collector.register_engine(
+                    engine=self.database_async_read_write_engine,
+                    pool_name="main",
+                    db_url=self.environment_variables.DATABASE_URL,
+                    environment=environment,
+                    service_name=service_name,
+                )
 
-        if self.database_async_middleware_read_write_engine:
-            self.postgres_metrics_collector.register_engine(
-                engine=self.database_async_middleware_read_write_engine,
-                pool_name="middleware",
-                db_url=self.environment_variables.DATABASE_URL,
-                environment=environment,
-                service_name=service_name,
-            )
+            if self.database_async_middleware_read_write_engine:
+                self.postgres_metrics_collector.register_engine(
+                    engine=self.database_async_middleware_read_write_engine,
+                    pool_name="middleware",
+                    db_url=self.environment_variables.DATABASE_URL,
+                    environment=environment,
+                    service_name=service_name,
+                )
 
-        if self.database_async_read_only_engine:
-            self.postgres_metrics_collector.register_engine(
-                engine=self.database_async_read_only_engine,
-                pool_name="readonly",
-                db_url=read_only_db_url,
-                environment=environment,
-                service_name=service_name,
-            )
+            if self.database_async_read_only_engine:
+                self.postgres_metrics_collector.register_engine(
+                    engine=self.database_async_read_only_engine,
+                    pool_name="readonly",
+                    db_url=read_only_db_url,
+                    environment=environment,
+                    service_name=service_name,
+                )
 
         self._loaded = True
 

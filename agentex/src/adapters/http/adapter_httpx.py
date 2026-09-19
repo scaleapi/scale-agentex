@@ -9,6 +9,7 @@ from httpx import ConnectError, HTTPStatusError, Limits, Timeout, TimeoutExcepti
 from src.adapters.http.port import HttpPort
 from src.config.dependencies import DEnvironmentVariables
 from src.utils.logging import make_logger
+from src.utils.request_id import forward_async_request_id, forward_request_id
 
 logger = make_logger(__name__)
 
@@ -45,6 +46,7 @@ class HttpxGateway(HttpPort):
                 timeout=timeout,
                 http2=True,  # Enable HTTP/2 for better connection reuse
                 follow_redirects=True,
+                event_hooks={"request": [forward_async_request_id]},
             )
             logger.info(
                 f"Created shared regular httpx client (id: {id(cls._regular_client)}, "
@@ -75,6 +77,7 @@ class HttpxGateway(HttpPort):
                 timeout=streaming_timeout,
                 http2=True,  # Enable HTTP/2 for better streaming
                 follow_redirects=True,
+                event_hooks={"request": [forward_async_request_id]},
             )
             logger.info(
                 f"Created shared streaming httpx client (id: {id(cls._streaming_client)}, "
@@ -269,6 +272,7 @@ class HttpxGateway(HttpPort):
                 timeout=httpx_timeout,
                 http2=True,  # Enable HTTP/2
                 follow_redirects=True,
+                event_hooks={"request": [forward_request_id]},
             ) as client:
                 logger.debug(f"Making sync {method} request to {url}")
 
