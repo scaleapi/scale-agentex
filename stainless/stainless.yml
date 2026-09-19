@@ -1,0 +1,314 @@
+# yaml-language-server: $schema=https://app.stainless.com/config-internal.schema.json
+
+organization:
+  # Name of your organization or company, used to determine the name of the client
+  # and headings.
+  name: agentex
+  # Link to your API documentation.
+  docs: https://docs.gp.scale.com
+  # Contact email for bug reports, questions, and support requests.
+  contact: roxanne.farhad@scale.com
+
+# `targets` define the output targets and their customization options, such as
+# whether to emit the Node SDK and what it's package name should be.
+targets:
+  typescript:
+    package_name: agentex
+    production_repo: scaleapi/scale-agentex-typescript
+    publish:
+      npm: true
+    staging_repo: scaleapi/agentex-sdk-typescript
+  python:
+    keep_files:
+      - "adk/**"
+    edition: python.2025-11-20
+    package_name: agentex
+    production_repo: scaleapi/scale-agentex-python
+    publish:
+      pypi: true
+    project_name: agentex-client
+    staging_repo: scaleapi/agentex-sdk-python
+
+# `environments` are a map of the name of the environment (e.g. "sandbox",
+# "production") to the corresponding url to use.
+environments:
+  production: http://localhost:5003
+  development: http://localhost:5003
+
+# `resources` define the structure and organization for your API, such as how
+# methods and models are grouped together and accessed. See the [configuration
+# guide] for more information.
+#
+# [configuration guide]: https://www.stainless.com/docs/guides/configure#resources
+resources:
+
+  $shared:
+    models:
+      delete_response: DeleteResponse
+
+  agents:
+    # Configure the models--named types--defined in the resource. Each key in the
+    # object is the name of the model and the value is either the name of a schema in
+    # `#/components/schemas` or an object with more detail.
+    #
+    # [reference]: https://www.stainless.com/docs/reference/config#model
+    models:
+      acp_type: '#/components/schemas/ACPType'
+      agent: '#/components/schemas/Agent'
+      agent_rpc_request: '#/components/schemas/AgentRPCRequest'
+      # agent_rpc_params: '#/components/schemas/AgentRPCParams'
+      task_message_content: '#/components/schemas/TaskMessageContent'
+      agent_rpc_response: '#/components/schemas/AgentRPCResponse'
+      agent_rpc_result: 'AgentRPCResult'
+      task_message_update:
+        openapi_uri: 'TaskMessageUpdate'
+        force_generation: true
+      text_delta: 'TextDelta'
+      data_delta: 'DataDelta'
+      reasoning_summary_delta: 'ReasoningSummaryDelta'
+      reasoning_content_delta: 'ReasoningContentDelta'
+      tool_request_delta: 'ToolRequestDelta'
+      tool_response_delta: 'ToolResponseDelta'
+      task_message_delta: 'TaskMessageDelta'
+    methods:
+      retrieve: get /agents/{agent_id}
+      delete: delete /agents/{agent_id}
+      list: get /agents
+      # register: post /agents/register
+      rpc: post /agents/{agent_id}/rpc
+
+      retrieve_by_name: get /agents/name/{agent_name}
+      delete_by_name: delete /agents/name/{agent_name}
+      rpc_by_name: post /agents/name/{agent_name}/rpc
+      register_build: post /agents/register-build
+      # handle_rpc:
+      #   endpoint: post /agents/{agent_id}/rpc
+      #   type: http
+      #   streaming:
+      #     type: jsonl
+      #     param_discriminator: TODO_UNSUPPORTED
+      # Subresources define resources that are nested within another for more powerful
+      # logical groupings, e.g. `cards.payments`.
+      # subresources:
+      #   name:
+      #     methods:
+      #       retrieve: get /agents/name/{agent_name}
+      #       delete: delete /agents/name/{agent_name}
+      #       rpc: post /agents/name/{agent_name}/rpc
+      #       handle_rpc:
+      #         endpoint: post /agents/name/{agent_name}/rpc
+      #         type: http
+      # streaming:
+      #   type: jsonl
+      #   param_discriminator: TODO_UNSUPPORTED
+
+    subresources:
+      deployments:
+        methods:
+          create: post /agents/{agent_id}/deployments
+          list: get /agents/{agent_id}/deployments
+          retrieve: get /agents/{agent_id}/deployments/{deployment_id}
+          delete: delete /agents/{agent_id}/deployments/{deployment_id}
+          promote: post /agents/{agent_id}/deployments/{deployment_id}/promote
+          preview_rpc: post /agents/{agent_id}/deployments/{deployment_id}/rpc
+      schedules:
+        methods:
+          create: post /agents/{agent_id}/schedules
+          list: get /agents/{agent_id}/schedules
+
+          retrieve: get /agents/{agent_id}/schedules/{schedule_id}
+          update: patch /agents/{agent_id}/schedules/{schedule_id}
+          delete: delete /agents/{agent_id}/schedules/{schedule_id}
+          pause: post /agents/{agent_id}/schedules/{schedule_id}/pause
+          resume: post /agents/{agent_id}/schedules/{schedule_id}/resume
+          trigger: post /agents/{agent_id}/schedules/{schedule_id}/trigger
+          skip: post /agents/{agent_id}/schedules/{schedule_id}/skip
+          unskip: post /agents/{agent_id}/schedules/{schedule_id}/unskip
+
+          retrieve_by_name: get /agents/{agent_id}/schedules/name/{name}
+          update_by_name: patch /agents/{agent_id}/schedules/name/{name}
+          delete_by_name: delete /agents/{agent_id}/schedules/name/{name}
+          pause_by_name: post /agents/{agent_id}/schedules/name/{name}/pause
+          resume_by_name: post /agents/{agent_id}/schedules/name/{name}/resume
+          trigger_by_name: post /agents/{agent_id}/schedules/name/{name}/trigger
+  tasks:
+    models:
+      task: '#/components/schemas/Task'
+    methods:
+      retrieve: get /tasks/{task_id}
+      delete: delete /tasks/{task_id}
+      list: get /tasks
+      stream_events:
+        endpoint: get /tasks/{task_id}/stream
+        type: http
+        streaming:
+          type: sse
+          param_discriminator: null
+      retrieve_by_name: get /tasks/name/{task_name}
+      delete_by_name: delete /tasks/name/{task_name}
+      stream_events_by_name:
+        endpoint: get /tasks/name/{task_name}/stream
+        type: http
+        streaming:
+          type: sse
+          param_discriminator: null
+      update_by_id: put /tasks/{task_id}
+      update_by_name: put /tasks/name/{task_name}
+      complete: post /tasks/{task_id}/complete
+      fail: post /tasks/{task_id}/fail
+      cancel: post /tasks/{task_id}/cancel
+      terminate: post /tasks/{task_id}/terminate
+      timeout: post /tasks/{task_id}/timeout
+      query_workflow: get /tasks/{task_id}/query/{query_name}
+      interrupt: post /tasks/{task_id}/interrupt
+    # subresources:
+    #   name:
+    #     methods:
+    #       retrieve: get /tasks/name/{task_name}
+    #       delete: delete /tasks/name/{task_name}
+    #       stream_events:
+    #         endpoint: get /tasks/name/{task_name}/stream
+    #         type: http
+    #         streaming:
+    #           type: sse
+    #           param_discriminator: null
+
+  messages:
+    models:
+      data_content: '#/components/schemas/DataContent'
+      message_author: '#/components/schemas/MessageAuthor'
+      message_style: '#/components/schemas/MessageStyle'
+      # streaming_status: '#/components/schemas/StreamingStatus'
+      task_message: '#/components/schemas/TaskMessage'
+      text_content: '#/components/schemas/TextContent'
+      text_format: '#/components/schemas/TextFormat'
+      reasoning_content: '#/components/schemas/ReasoningContent'
+      tool_request_content: '#/components/schemas/ToolRequestContent'
+      tool_response_content: '#/components/schemas/ToolResponseContent'
+    methods:
+      create: post /messages
+      list: get /messages
+      update: put /messages/{message_id}
+      retrieve: get /messages/{message_id}
+      list_paginated: get /messages/paginated
+    subresources:
+      batch:
+        methods:
+          update: put /messages/batch
+          create: post /messages/batch
+
+  spans:
+    models:
+      span: '#/components/schemas/Span'
+    methods:
+      create: post /spans
+      list: get /spans
+      update: patch /spans/{span_id}
+      retrieve: get /spans/{span_id}
+
+  states:
+    models:
+      state: '#/components/schemas/State'
+    methods:
+      create: post /states
+      list: get /states
+      retrieve: get /states/{state_id}
+      update: put /states/{state_id}
+      delete: delete /states/{state_id}
+
+  events:
+    models:
+      event: '#/components/schemas/Event'
+    methods:
+      retrieve: get /events/{event_id}
+      list: get /events
+
+  tracker:
+    models:
+      agent_task_tracker: '#/components/schemas/AgentTaskTracker'
+    methods:
+      retrieve: get /tracker/{tracker_id}
+      update: put /tracker/{tracker_id}
+      list: get /tracker
+  deployment_history:
+    methods:
+      retrieve: get /deployment-history/{deployment_id}
+      list: get /deployment-history
+    models:
+      deployment_history: '#/components/schemas/DeploymentHistory'
+  checkpoints:
+    methods:
+      get_tuple: post /checkpoints/get-tuple
+      put: post /checkpoints/put
+      put_writes: post /checkpoints/put-writes
+      list: post /checkpoints/list
+      delete_thread: post /checkpoints/delete-thread
+  webhooks:
+    methods:
+      create_webhook_trigger: post /agent_api_keys/webhook-trigger
+
+settings:
+  # All generated integration tests that hit the prism mock http server are marked
+  # as skipped. Removing this setting or setting it to false enables tests, but
+  # doing so may result in test failures due to bugs in the test server.
+  #
+  # [prism mock http server]: https://stoplight.io/open-source/prism
+  disable_mock_tests: true
+  license: Apache-2.0
+
+# `client_settings` define settings for the API client, such as extra constructor
+# arguments (used for authentication), retry behavior, idempotency, etc.
+client_settings:
+  opts:
+    api_key:
+      type: string
+      read_env: AGENTEX_SDK_API_KEY
+      nullable: true
+      auth:
+        security_scheme: bearerAuth
+
+security_schemes:
+  bearerAuth:
+    type: http
+    scheme: bearer
+
+security:
+  - bearerAuth: []
+  - {}
+
+# `readme` is used to configure the code snippets that will be rendered in the
+# README.md of various SDKs. In particular, you can change the `headline`
+# snippet's endpoint and the arguments to call it with.
+readme:
+  example_requests:
+    default:
+      type: request
+      endpoint: get /tasks
+      params: {}
+    headline:
+      type: request
+      endpoint: get /tasks
+      params: {}
+
+openapi:
+  transforms:
+    - reason: For better names
+      command: extractToRefs
+      args:
+        ref:
+          target: $.components.schemas.SendMessageRequest.properties.content
+          name: '#/components/schemas/AnishsCoolSchema'
+unspecified_endpoints:
+  - post /agents/register
+  - get /agents/forward/name/{agent_name}/{path}
+  - post /agents/forward/name/{agent_name}/{path}
+  - get /agent_api_keys
+  - post /agent_api_keys
+  - get /agent_api_keys/name/{name}
+  - get /agent_api_keys/{id}
+  - delete /agent_api_keys/{id}
+  - delete /agent_api_keys/name/{api_key_name}
+  - get /tasks/{task_id}/export
+  - post /tasks/{task_id}/export
+  - post /tasks/{task_id}/clean
+  - post /tasks/{task_id}/rehydrate
