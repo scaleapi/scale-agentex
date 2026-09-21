@@ -85,8 +85,10 @@ class HealthCheckActivities:
                     )
                     return False
             except json.JSONDecodeError:
-                detail = "" if uses_observability_adapter() else f": {response.text}"
-                logger.error(f"Agent {agent_id} returned non-JSON response{detail}")
+                logger.error(
+                    f"Agent {agent_id} returned non-JSON response "
+                    f"(status={response.status_code}, bytes={len(response.content)})"
+                )
                 return False
             return True
         except Exception as e:

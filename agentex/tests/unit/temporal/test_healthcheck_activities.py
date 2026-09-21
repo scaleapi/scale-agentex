@@ -60,7 +60,7 @@ async def test_managed_healthcheck_logs_omit_untrusted_values(
     elif failure == "agent_id":
         response = httpx.Response(200, json={"status": "healthy", "agent_id": canary})
     elif failure == "body":
-        response = httpx.Response(200, text=canary)
+        response = httpx.Response(200, text=canary * 500)
     else:
         response = None
         http_client.get.side_effect = httpx.ConnectError(
@@ -77,5 +77,8 @@ async def test_managed_healthcheck_logs_omit_untrusted_values(
     assert await activity.check_status_activity("agent-1", "http://agent") is False
 
     log_calls = repr(logger.error.call_args_list)
-    assert (canary in log_calls) is not managed
+    assert (canary in log_calls) is (not managed and failure != "body")
     assert "agent-1" in log_calls
+    if failure == "body":
+        assert "status=200" in log_calls
+        assert f"bytes={len(response.content)}" in log_calls
