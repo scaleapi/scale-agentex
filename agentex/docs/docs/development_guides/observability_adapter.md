@@ -12,8 +12,12 @@ filter and propagate to the adapter's handlers. Database operations and product
 span storage continue normally.
 
 Custom application metrics use an adapter's optional `get_meter` callback. If
-the callback is absent, custom metrics stay disabled in adapter mode. Native
-PostgreSQL and Redis collectors remain disabled either way.
+the callback is absent, adapter mode stops `auth_cache.access`,
+`auth_cache.eviction`, and `agent_run_schedule.temporal_op`; generic HTTP,
+database, and Redis metrics do not replace them. Before enabling an adapter
+without this callback, identify dashboards and alerts using these series and
+preserve or replace any required signals. Native PostgreSQL and Redis collectors
+remain disabled either way.
 
 The adapter is installed separately. The public backend does not depend on its
 package or a particular telemetry backend.
@@ -117,6 +121,11 @@ forwards it through cached HTTP clients, and echoes it on responses. Explicit
 outbound headers take precedence. Context lasts through streams and resets when
 the request finishes or fails. The outer health interceptor still bypasses
 application middleware for probes.
+
+Inbound IDs are accepted for correlation; validation prevents unsafe log text,
+not spoofing. Deployments that need service-controlled IDs must have a trusted
+ingress overwrite caller-supplied `x-request-id`; directly exposed deployments
+otherwise retain caller-controlled IDs.
 
 An adapter can bind its own logging context in outer middleware. Accept or
 generate the ID there, put it in the request headers, and keep the context active

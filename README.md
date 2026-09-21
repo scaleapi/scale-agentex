@@ -68,6 +68,10 @@ brew install docker docker-compose node
 brew services stop redis
 ```
 
+> **Intel Macs:** `cryptography` 50 no longer publishes x86_64 macOS wheels. Install
+> Rust (`brew install rust`) before using `uv sync`, or run the backend entirely in
+> Linux containers with `cd agentex && docker compose up --build`.
+
 #### Windows
 
 ```powershell
@@ -479,4 +483,3 @@ python -c "import agentex; print(f'agentex-sdk version: {agentex.__version__}')"
 ## Contributing
 
 Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to contribute to this project.
-
