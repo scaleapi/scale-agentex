@@ -73,11 +73,7 @@ env:
   # plugins, so adding a target must be a deliberate two-file change here and in setup-stlc,
   # rather than a confusing mid-build plugin-resolution failure.
   #
-  # TEMPORARILY typescript-only. python is fully reconciled and its build integrates cleanly,
-  # but pushing to scale-agentex-python-staging's protected main is rejected (GH006) because we
-  # hold only MAINTAIN there -- so including it would just produce red runs. Restore
-  # `python,typescript` once that repo grants ADMIN; nothing else needs to change.
-  DEFAULT_TARGETS: typescript
+  DEFAULT_TARGETS: python,typescript
 
 jobs:
   # skip changes that touch only stainless/custom-code/** so seal-back can't re-trigger generate —
