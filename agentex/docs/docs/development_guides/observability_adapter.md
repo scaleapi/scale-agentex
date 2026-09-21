@@ -109,8 +109,19 @@ On SIGTERM, the worker stops polling, gives activities a ten-second grace
 period, then closes HTTP clients and dependencies before flushing the adapter
 in a thread. Adapters should configure bounded exporter timeouts. The process
 manager's termination grace period remains the limit for unresponsive cleanup.
-Workflow logs use Temporal's replay-aware logger in adapter mode. Healthcheck
-failure logs omit response content and exception values in that mode.
+
+Before enabling the adapter, set an explicit pod termination grace period and
+configure any service mesh to keep outbound connections available through the
+ten-second activity drain, dependency cleanup, and final telemetry flush. Allow
+additional time before the pod deadline. Verify these settings in the rendered
+deployment and test SIGTERM during active work and autoscaling scale-in with the
+actual proxy and a slow collector. An idle local shutdown test does not verify
+those deployment conditions.
+
+Workflow logs use Temporal's replay-aware logger in adapter mode. Credential
+redaction runs on the Temporal workflow and activity loggers, so it survives
+adapter handler replacement. Non-JSON health responses log only status and size
+in both modes. Other healthcheck failures omit untrusted values in adapter mode.
 
 ## Request IDs and logs
 
