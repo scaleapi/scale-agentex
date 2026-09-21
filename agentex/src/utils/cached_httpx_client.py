@@ -4,6 +4,8 @@ from functools import lru_cache
 import httpx
 from httpx import Limits
 
+from src.utils.request_id import forward_async_request_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,6 +43,7 @@ def get_async_client(base_url: str) -> httpx.AsyncClient:
             http2=True,
             # Follow redirects
             follow_redirects=True,
+            event_hooks={"request": [forward_async_request_id]},
         )
 
         logger.debug(
@@ -56,4 +59,5 @@ def get_async_client(base_url: str) -> httpx.AsyncClient:
         return httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=30,
+            event_hooks={"request": [forward_async_request_id]},
         )

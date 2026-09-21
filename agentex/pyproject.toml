@@ -36,7 +36,12 @@ dependencies = [
     # see src/utils/credential_encryption.py. Already present transitively, but
     # declared directly because correctness of a stored credential shouldn't
     # depend on another package continuing to pull it in.
-    "cryptography>=44.0.0",
+    # >=50.0.0 clears CVE-2026-69247 (PKCS#7 Bleichenbacher oracle), CVE-2026-69248 /
+    # CVE-2026-69249 (name-constraint wildcard escape, exponential path building),
+    # CVE-2026-39892 (non-contiguous buffer overflow) and GHSA-537c-gmf6-5ccf
+    # (vulnerable OpenSSL bundled in the wheels). Floor kept at the patched minimum
+    # so a re-resolve can't regress below it.
+    "cryptography>=50.0.0",
 ]
 
 [dependency-groups]

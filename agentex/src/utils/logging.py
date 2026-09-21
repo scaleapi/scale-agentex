@@ -11,6 +11,7 @@ import ddtrace
 import json_log_formatter
 from ddtrace.trace import tracer
 
+from src.utils.observability import uses_observability_adapter
 from src.utils.request_utils import REQUEST_KEY_REGEXP_BLACKLIST
 
 # Check if Datadog is configured
@@ -175,13 +176,6 @@ def make_logger(name: str) -> logging.Logger:
         raise ValueError("Name must be a non-empty string.")
 
     logger = logging.getLogger(name)
-    stream_handler = logging.StreamHandler()
-    if _use_json_logs:
-        stream_handler.setFormatter(CustomJSONFormatter())
-    else:
-        stream_handler.setFormatter(logging.Formatter(LOG_FORMAT))
-
-    logger.addHandler(stream_handler)
     logger.setLevel(log_level)
 
     # Mask secret values before any handler emits the record. Attaching to the
@@ -189,6 +183,19 @@ def make_logger(name: str) -> logging.Logger:
     # applies to every downstream handler the record propagates to.
     if _sensitive_data_filter not in logger.filters:
         logger.addFilter(_sensitive_data_filter)
+
+    if uses_observability_adapter():
+        logger.propagate = True
+        return logger
+
+    if not any(handler.name == "agentex.console" for handler in logger.handlers):
+        stream_handler = logging.StreamHandler()
+        stream_handler.set_name("agentex.console")
+        if _use_json_logs:
+            stream_handler.setFormatter(CustomJSONFormatter())
+        else:
+            stream_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+        logger.addHandler(stream_handler)
 
     def handle_exception(exc_type, exc_value, exc_traceback):
         if issubclass(exc_type, KeyboardInterrupt):

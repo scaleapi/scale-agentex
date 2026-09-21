@@ -23,6 +23,7 @@ from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlalchemy.pool import AsyncAdaptedQueuePool
 
 from src.utils.logging import make_logger
+from src.utils.observability import uses_observability_adapter
 from src.utils.otel_metrics import get_meter
 
 if TYPE_CHECKING:
@@ -39,7 +40,9 @@ _METRICS_DEBOUNCE_INTERVAL = 30
 _SLOW_QUERY_THRESHOLD = float(os.environ.get("POSTGRES_SLOW_QUERY_THRESHOLD", "0.5"))
 
 # StatsD is only enabled if DD_AGENT_HOST is configured
-_STATSD_ENABLED = bool(os.environ.get("DD_AGENT_HOST"))
+_STATSD_ENABLED = not uses_observability_adapter() and bool(
+    os.environ.get("DD_AGENT_HOST")
+)
 
 # Bucket boundaries (seconds) for the connection-acquisition wait histogram.
 # The SDK's default boundaries are millisecond-magnitude integers [0, 5, 10, ...]
