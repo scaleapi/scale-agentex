@@ -198,8 +198,10 @@ def test_managed_mode_disables_lazy_native_metrics_and_statsd(tmp_path):
 def test_worker_callbacks_preserve_absent_adapter_behavior(tmp_path, adapter):
     result = run_python(
         """
+        import sys
         from src.utils import observability
         observability.initialize_worker()
+        assert 'src.utils.logging' not in sys.modules
         assert not observability.uses_observability_adapter()
         assert observability.temporal_client_interceptors() == ()
         assert observability.get_meter('test', '1.0') is None
@@ -243,6 +245,31 @@ def test_worker_initializes_once_before_dependency_imports(tmp_path):
         observability.shutdown()
         observability.shutdown()
         assert worker_adapter.calls == ['initialize-worker', 'shutdown']
+        """,
+        tmp_path,
+        adapter="worker_adapter",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_worker_redaction_survives_handler_replacement(tmp_path):
+    (tmp_path / "worker_adapter.py").write_text(
+        "def initialize_worker(): pass\ndef shutdown(): pass\n"
+    )
+    result = run_python(
+        """
+        import io, logging
+        from src.utils import observability
+        observability.initialize_worker()
+        observability.initialize_worker()
+        for phase in ('initial', 'replacement'):
+            output = io.StringIO()
+            logging.basicConfig(stream=output, level=logging.INFO, force=True)
+            for name in ('temporalio.workflow', 'temporalio.activity'):
+                logging.getLogger(name).warning('%s token=%s', phase, 'private-canary')
+            assert output.getvalue().count('token=[REDACTED]') == 2
+            assert 'private-canary' not in output.getvalue()
+        observability.shutdown()
         """,
         tmp_path,
         adapter="worker_adapter",

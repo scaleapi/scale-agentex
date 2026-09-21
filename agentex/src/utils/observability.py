@@ -63,6 +63,15 @@ def initialize_worker() -> None:
         return
     try:
         adapter.initialize_worker()
+        from src.utils.logging import SensitiveDataFilter
+
+        # Logger filters survive replacement of the adapter's output handlers.
+        for name in ("temporalio.workflow", "temporalio.activity"):
+            logger = logging.getLogger(name)
+            if not any(
+                isinstance(item, SensitiveDataFilter) for item in logger.filters
+            ):
+                logger.addFilter(SensitiveDataFilter())
     except Exception:
         try:
             shutdown()
