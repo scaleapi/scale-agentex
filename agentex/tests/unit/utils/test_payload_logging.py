@@ -2,6 +2,7 @@
 
 import json
 import logging
+import traceback
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -65,10 +66,14 @@ async def test_redis_publish_logs_no_payload(caplog):
 
 def test_acp_validation_logs_no_response_input(caplog):
     service = AgentACPService.__new__(AgentACPService)
-    with caplog.at_level(logging.ERROR), pytest.raises(ValueError):
+    with caplog.at_level(logging.ERROR), pytest.raises(ValueError) as error:
         service._parse_task_message({"type": "text", "content": {"prompt": PAYLOAD}})
     assert caplog.records
     assert PAYLOAD not in str([record.__dict__ for record in caplog.records])
+    assert PAYLOAD not in str(error.value)
+    rendered = "".join(traceback.format_exception(error.value))
+    assert PAYLOAD not in rendered
+    assert "_parse_task_message" in rendered
 
 
 async def test_acp_stream_logs_no_payload(caplog):

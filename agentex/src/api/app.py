@@ -197,9 +197,7 @@ async def handle_unexpected(request, exc):
         exc_info=exc,
         extra={"request_id": request_id},
     )
-    response = format_error_response(
-        f"Internal Server Error. Class: {exc.__class__}. Exception: {exc}", 500
-    )
+    response = format_error_response("Internal Server Error", 500)
     if request_id:
         response.headers["x-request-id"] = request_id
     return response

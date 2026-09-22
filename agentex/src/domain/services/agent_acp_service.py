@@ -178,9 +178,8 @@ class AgentACPService(TaskMessageMixin):
             logger.error(
                 f"Failed to validate ACP response as TaskMessage: {type(e).__name__}"
             )
-            raise ValueError(
-                f"ACP server returned invalid TaskMessage format: {str(e)}"
-            ) from e
+        # Raise outside except so middleware cannot restore the validation context.
+        raise ValueError("ACP server returned invalid TaskMessage format") from None
 
     def _parse_task_message_update(
         self, result: dict[str, Any]

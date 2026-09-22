@@ -128,7 +128,14 @@ async def test_unhandled_error_echoes_request_id_and_logs_it(caplog):
     ) as client:
         response = await client.get("/failure", headers={"x-request-id": "error-123"})
     assert response.status_code == 500
+    assert response.json() == {
+        "message": "Internal Server Error",
+        "code": 500,
+        "data": None,
+    }
     assert response.headers["x-request-id"] == "error-123"
+    assert "Traceback (most recent call last)" in caplog.text
+    assert "RuntimeError: test failure" in caplog.text
     assert any(
         getattr(record, "request_id", None) == "error-123" for record in caplog.records
     )
