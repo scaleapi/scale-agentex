@@ -46,6 +46,7 @@ Environment variables (custom metrics / standalone mode):
 from __future__ import annotations
 
 import os
+from importlib import metadata
 from typing import TYPE_CHECKING
 
 from opentelemetry import metrics
@@ -66,6 +67,7 @@ from opentelemetry.sdk.resources import (
 )
 
 from src.utils.logging import make_logger
+from src.utils.observability import get_meter as get_adapter_meter
 from src.utils.observability import uses_observability_adapter
 
 if TYPE_CHECKING:
@@ -130,7 +132,8 @@ def bootstrap_auto_instrumentation() -> bool:
     worker imports ``app.py`` fresh, so one call per worker is enough.
 
     Runs when: contrib packages are installed (no ``ImportError``).
-    Skips when: bootstrap already succeeded in this process.
+    Skips when: bootstrap already succeeded in this process, or
+    AGENTEX_OTEL_REQUIRE_SDK_SETUP=true and no distro/configurator is installed.
     On ``ImportError`` or ``initialize()`` failure, returns False and leaves
     the flag unset so a later call can retry.
 
@@ -145,6 +148,13 @@ def bootstrap_auto_instrumentation() -> bool:
 
     if uses_observability_adapter() or _auto_instrumentation_bootstrapped:
         return False
+
+    if os.getenv("AGENTEX_OTEL_REQUIRE_SDK_SETUP", "false").strip().lower() == "true":
+        if not any(
+            metadata.entry_points(group=group)
+            for group in ("opentelemetry_distro", "opentelemetry_configurator")
+        ):
+            return False
 
     try:
         from opentelemetry.instrumentation.auto_instrumentation import initialize
@@ -315,7 +325,7 @@ def get_meter(name: str, version: str = "0.1.0") -> Meter | None:
         An OpenTelemetry Meter instance, or None if OTel is not configured
     """
     if uses_observability_adapter():
-        return None
+        return get_adapter_meter(name, version)
     if not _initialized:
         init_otel_metrics()
     if _meter_provider is None and _global_meter_provider() is None:

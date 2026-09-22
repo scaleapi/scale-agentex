@@ -18,30 +18,23 @@ def log_request(
 ):
     raw_path = request.scope["root_path"] + request.scope["route"].path
     logger.info(
-        "Request [%s %s] (%s)",
-        request.method,
-        raw_path[:256],
-        request_id,
+        f"Request [{request.method} {raw_path}] ({request_id})",
         extra={
             "method": request.method,
-            "path": raw_path[:256],
-            "request_bytes": len(request_body),
+            "path": raw_path,
             "request_id": request_id,
         },
     )
 
 
 def log_response(request_id: str, request: Request, response: Response):
+    raw_path = request.scope["root_path"] + request.scope["route"].path
     logger.info(
-        "Response[%s] [%s %s] (%s)",
-        response.status_code,
-        request.method,
-        (request.scope["root_path"] + request.scope["route"].path)[:256],
-        request_id,
+        f"Response[{response.status_code}] [{request.method} {raw_path}] ({request_id})",
         extra={
             "status_code": response.status_code,
             "method": request.method,
-            "path": (request.scope["root_path"] + request.scope["route"].path)[:256],
+            "path": raw_path,
             "request_id": request_id,
         },
     )
@@ -86,10 +79,7 @@ class LoggedStreamingResponse(StreamingResponse):
             await send({"type": "http.response.body", "body": b"", "more_body": False})
 
         except Exception as exc:
-            logger.error(
-                "Error in stream response",
-                extra={"error_type": type(exc).__name__, "request_id": self.request_id},
-            )
+            logger.error(f"Error in stream response: {type(exc).__name__}")
             # Wrap error and propagate up for middlewares to handle
             raise StreamResponseError(exc) from exc
 
@@ -121,8 +111,7 @@ class LoggedAPIRoute(APIRoute):
                     return form_data_to_body(form_data)
                 except Exception as e:
                     logger.warning(
-                        "Failed to parse request form data",
-                        extra={"error_type": type(e).__name__},
+                        f"Failed to parse request form data: {type(e).__name__}"
                     )
             return await request.body()
 

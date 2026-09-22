@@ -21,6 +21,7 @@ from temporalio.runtime import OpenTelemetryConfig, Runtime, TelemetryConfig
 from src.adapters.temporal.exceptions import TemporalConnectionError
 from src.config.environment_variables import EnvironmentVariables
 from src.utils.logging import make_logger
+from src.utils.observability import temporal_client_interceptors
 
 logger = make_logger(__name__)
 
@@ -121,6 +122,9 @@ class TemporalClientFactory:
 
             if temporal_namespace:
                 connect_options["namespace"] = temporal_namespace
+
+            if interceptors := temporal_client_interceptors():
+                connect_options["interceptors"] = interceptors
 
             # Add telemetry if metrics URL is provided
             if metrics_url:

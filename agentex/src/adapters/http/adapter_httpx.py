@@ -49,11 +49,9 @@ class HttpxGateway(HttpPort):
                 event_hooks={"request": [forward_async_request_id]},
             )
             logger.info(
-                "Created shared regular httpx client",
-                extra={
-                    "max_connections": env.HTTPX_MAX_CONNECTIONS,
-                    "max_keepalive": env.HTTPX_MAX_KEEPALIVE_CONNECTIONS,
-                },
+                f"Created shared regular httpx client (id: {id(cls._regular_client)}, "
+                f"max_connections={env.HTTPX_MAX_CONNECTIONS}, "
+                f"max_keepalive={env.HTTPX_MAX_KEEPALIVE_CONNECTIONS})"
             )
         return cls._regular_client
 
@@ -82,11 +80,9 @@ class HttpxGateway(HttpPort):
                 event_hooks={"request": [forward_async_request_id]},
             )
             logger.info(
-                "Created shared streaming httpx client",
-                extra={
-                    "max_connections": env.HTTPX_MAX_CONNECTIONS,
-                    "max_keepalive": env.HTTPX_MAX_KEEPALIVE_CONNECTIONS,
-                },
+                f"Created shared streaming httpx client (id: {id(cls._streaming_client)}, "
+                f"max_connections={env.HTTPX_MAX_CONNECTIONS}, "
+                f"max_keepalive={env.HTTPX_MAX_KEEPALIVE_CONNECTIONS})"
             )
         return cls._streaming_client
 
@@ -116,7 +112,7 @@ class HttpxGateway(HttpPort):
         client = self._get_regular_client()
 
         try:
-            logger.debug("Making HTTP request", extra={"method": method})
+            logger.debug(f"Making {method} request")
 
             # Build request kwargs
             request_kwargs = {
@@ -134,38 +130,25 @@ class HttpxGateway(HttpPort):
             response.raise_for_status()
 
             # Log successful response
-            logger.debug(
-                "HTTP request succeeded",
-                extra={"method": method, "status_code": response.status_code},
-            )
+            logger.debug(f"Successful {method} request, status: {response.status_code}")
             return response.json()
 
         except HTTPStatusError as e:
             logger.error(
-                "HTTP request failed",
-                extra={
-                    "method": method,
-                    "status_code": e.response.status_code,
-                    "error_type": type(e).__name__,
-                },
+                f"HTTP error {e.response.status_code} for {method}: {type(e).__name__}"
             )
             raise
         except ConnectError as e:
             logger.error(
-                "HTTP connection failed",
-                extra={"method": method, "error_type": type(e).__name__},
+                f"Connection error for {method}: {type(e).__name__}. This might be a connection pool issue."
             )
             raise
         except TimeoutException as e:
-            logger.error(
-                "HTTP request timed out",
-                extra={"method": method, "error_type": type(e).__name__},
-            )
+            logger.error(f"Timeout error for {method}: {type(e).__name__}")
             raise
         except Exception as e:
             logger.error(
-                "Unexpected HTTP request error",
-                extra={"method": method, "error_type": type(e).__name__},
+                f"Unexpected error during {method} request: {type(e).__name__}"
             )
             raise
 
@@ -192,7 +175,7 @@ class HttpxGateway(HttpPort):
         )
 
         try:
-            logger.debug("Starting HTTP stream", extra={"method": method})
+            logger.debug(f"Starting streaming {method} request")
 
             # Build stream kwargs
             stream_kwargs = {
@@ -209,8 +192,7 @@ class HttpxGateway(HttpPort):
             async with client.stream(**stream_kwargs) as response:
                 response.raise_for_status()
                 logger.debug(
-                    "HTTP stream connected",
-                    extra={"method": method, "status_code": response.status_code},
+                    f"Streaming connection established, status: {response.status_code}"
                 )
 
                 async for line in response.aiter_lines():
@@ -221,37 +203,26 @@ class HttpxGateway(HttpPort):
                     except json.JSONDecodeError as e:
                         # Log but don't fail on individual line parse errors
                         logger.warning(
-                            "Failed to parse SSE line (skipping)",
-                            extra={"error_type": type(e).__name__},
+                            f"Failed to parse SSE line (skipping): {type(e).__name__}"
                         )
                         continue
 
         except HTTPStatusError as e:
             logger.error(
-                "HTTP stream failed",
-                extra={
-                    "method": method,
-                    "status_code": e.response.status_code,
-                    "error_type": type(e).__name__,
-                },
+                f"HTTP error {e.response.status_code} for streaming {method}: {type(e).__name__}"
             )
             raise
         except ConnectError as e:
             logger.error(
-                "HTTP stream connection failed",
-                extra={"method": method, "error_type": type(e).__name__},
+                f"Connection error for streaming {method}: {type(e).__name__}. This might be a connection pool issue."
             )
             raise
         except TimeoutException as e:
-            logger.error(
-                "HTTP stream timed out",
-                extra={"method": method, "error_type": type(e).__name__},
-            )
+            logger.error(f"Timeout error for streaming {method}: {type(e).__name__}")
             raise
         except Exception as e:
             logger.error(
-                "Unexpected HTTP stream error",
-                extra={"method": method, "error_type": type(e).__name__},
+                f"Unexpected error during streaming {method} request: {type(e).__name__}"
             )
             raise
 
@@ -294,7 +265,7 @@ class HttpxGateway(HttpPort):
                 follow_redirects=True,
                 event_hooks={"request": [forward_request_id]},
             ) as client:
-                logger.debug("Making sync HTTP request", extra={"method": method})
+                logger.debug(f"Making sync {method} request")
 
                 response = client.request(
                     method,
@@ -306,37 +277,26 @@ class HttpxGateway(HttpPort):
 
                 # Log successful response
                 logger.debug(
-                    "Sync HTTP request succeeded",
-                    extra={"method": method, "status_code": response.status_code},
+                    f"Successful sync {method} request, status: {response.status_code}"
                 )
                 return response.json()
 
         except HTTPStatusError as e:
             logger.error(
-                "Sync HTTP request failed",
-                extra={
-                    "method": method,
-                    "status_code": e.response.status_code,
-                    "error_type": type(e).__name__,
-                },
+                f"HTTP error {e.response.status_code} for sync {method}: {type(e).__name__}"
             )
             raise
         except ConnectError as e:
             logger.error(
-                "Sync HTTP connection failed",
-                extra={"method": method, "error_type": type(e).__name__},
+                f"Connection error for sync {method}: {type(e).__name__}. This might be a connection pool issue."
             )
             raise
         except TimeoutException as e:
-            logger.error(
-                "Sync HTTP request timed out",
-                extra={"method": method, "error_type": type(e).__name__},
-            )
+            logger.error(f"Timeout error for sync {method}: {type(e).__name__}")
             raise
         except Exception as e:
             logger.error(
-                "Unexpected sync HTTP request error",
-                extra={"method": method, "error_type": type(e).__name__},
+                f"Unexpected error during sync {method} request: {type(e).__name__}"
             )
             raise
 

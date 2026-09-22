@@ -192,3 +192,164 @@ def test_managed_mode_disables_lazy_native_metrics_and_statsd(tmp_path):
         adapter="metrics_adapter",
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("adapter", [None, "missing_test_adapter.worker"])
+def test_worker_callbacks_preserve_absent_adapter_behavior(tmp_path, adapter):
+    result = run_python(
+        """
+        import sys
+        from src.utils import observability
+        observability.initialize_worker()
+        assert 'src.utils.logging' not in sys.modules
+        assert not observability.uses_observability_adapter()
+        assert observability.temporal_client_interceptors() == ()
+        assert observability.get_meter('test', '1.0') is None
+        observability.shutdown()
+        """,
+        tmp_path,
+        adapter=adapter,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_worker_initializes_once_before_dependency_imports(tmp_path):
+    (tmp_path / "worker_adapter.py").write_text(
+        textwrap.dedent("""
+        import sys
+        calls = []
+        def initialize_worker():
+            assert 'src.config.dependencies' not in sys.modules
+            assert 'src.adapters.temporal.client_factory' not in sys.modules
+            assert 'src.utils.database' not in sys.modules
+            calls.append('initialize-worker')
+        def shutdown():
+            calls.append('shutdown')
+    """)
+    )
+    result = run_python(
+        """
+        import asyncio, runpy
+        from unittest.mock import patch
+        with patch.object(asyncio, 'run', lambda coroutine: coroutine.close()):
+            runpy.run_module('src.temporal.run_worker', run_name='__main__')
+        from src.utils import observability
+        import worker_adapter
+        observability.initialize_worker()
+        assert observability.temporal_client_interceptors() == ()
+        assert observability.get_meter('test', '1.0') is None
+        from temporalio import workflow
+        from src.temporal.workflows import healthcheck_workflow, retention_cleanup_workflow
+        assert healthcheck_workflow.logger is workflow.logger
+        assert retention_cleanup_workflow.logger is workflow.logger
+        observability.shutdown()
+        observability.shutdown()
+        assert worker_adapter.calls == ['initialize-worker', 'shutdown']
+        """,
+        tmp_path,
+        adapter="worker_adapter",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_worker_redaction_survives_handler_replacement(tmp_path):
+    (tmp_path / "worker_adapter.py").write_text(
+        "def initialize_worker(): pass\ndef shutdown(): pass\n"
+    )
+    result = run_python(
+        """
+        import io, logging
+        from src.utils import observability
+        observability.initialize_worker()
+        observability.initialize_worker()
+        for phase in ('initial', 'replacement'):
+            output = io.StringIO()
+            logging.basicConfig(stream=output, level=logging.INFO, force=True)
+            for name in ('temporalio.workflow', 'temporalio.activity'):
+                logging.getLogger(name).warning('%s token=%s', phase, 'private-canary')
+            assert output.getvalue().count('token=[REDACTED]') == 2
+            assert 'private-canary' not in output.getvalue()
+        observability.shutdown()
+        """,
+        tmp_path,
+        adapter="worker_adapter",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_failed_worker_initialization_cleans_up(tmp_path):
+    (tmp_path / "failing_worker_adapter.py").write_text(
+        textwrap.dedent("""
+        def initialize_worker():
+            raise RuntimeError('partial worker setup')
+        def shutdown():
+            print('worker-cleanup')
+    """)
+    )
+    result = run_python(
+        "import runpy; runpy.run_module('src.temporal.run_worker', run_name='__main__')",
+        tmp_path,
+        adapter="failing_worker_adapter",
+    )
+    assert result.returncode != 0
+    assert "partial worker setup" in result.stderr
+    assert result.stdout.count("worker-cleanup") == 1
+
+
+def test_api_schedule_queue_lookup_does_not_bootstrap_worker(tmp_path):
+    (tmp_path / "api_only_adapter.py").write_text(
+        "def initialize(app): pass\n"
+        "def shutdown(): raise AssertionError('API adapter was shut down')\n"
+    )
+    result = run_python(
+        """
+        from src.domain.services.agent_run_schedule_service import AgentRunScheduleService
+        from src.utils import observability
+        assert AgentRunScheduleService._task_queue(None) == 'agentex-server'
+        assert not observability._worker_initialized
+        assert not observability._shutdown_called
+        """,
+        tmp_path,
+        adapter="api_only_adapter",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_adapter_meter_keeps_application_metrics_on_shared_provider(tmp_path):
+    (tmp_path / "shared_meter_adapter.py").write_text(
+        textwrap.dedent("""
+        from opentelemetry.sdk.metrics import MeterProvider
+        from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+        reader = InMemoryMetricReader()
+        provider = MeterProvider(metric_readers=[reader])
+        def get_meter(name, version):
+            return provider.get_meter(name, version)
+        def shutdown():
+            provider.shutdown()
+    """)
+    )
+    result = run_python(
+        """
+        from opentelemetry import metrics
+        from src.utils.cache_metrics import record_cache_access
+        from src.utils import otel_metrics, observability
+        import shared_meter_adapter
+        before = metrics.get_meter_provider()
+        record_cache_access('worker', 'hit')
+        assert otel_metrics.init_otel_metrics() is None
+        assert metrics.get_meter_provider() is before
+        data = shared_meter_adapter.reader.get_metrics_data()
+        points = [
+            (metric.name, scope.scope.name, dict(point.attributes))
+            for resource in data.resource_metrics
+            for scope in resource.scope_metrics
+            for metric in scope.metrics
+            for point in metric.data.data_points
+        ]
+        assert ('auth_cache.access', 'agentex.auth_cache', {'cache': 'worker', 'result': 'hit'}) in points
+        observability.shutdown()
+        """,
+        tmp_path,
+        adapter="shared_meter_adapter",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

@@ -109,3 +109,40 @@ async def test_httpx_invalid_stream_line_is_not_logged(monkeypatch, caplog):
             ]
     assert result == [{"ok": True}]
     assert PAYLOAD not in str([record.__dict__ for record in caplog.records])
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize(
+    "error_type",
+    [httpx.HTTPStatusError, httpx.ConnectError, httpx.ReadTimeout, ValueError],
+)
+async def test_http_errors_keep_diagnostics_without_payload(
+    monkeypatch, caplog, streaming, error_type
+):
+    def handler(request):
+        if error_type is httpx.HTTPStatusError:
+            return httpx.Response(500, text=PAYLOAD)
+        raise error_type(PAYLOAD)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        monkeypatch.setattr(HttpxGateway, "_regular_client", client)
+        monkeypatch.setattr(HttpxGateway, "_streaming_client", client)
+        gateway = HttpxGateway.__new__(HttpxGateway)
+        with caplog.at_level(logging.ERROR), pytest.raises(error_type) as exc:
+            if streaming:
+                _ = [
+                    chunk
+                    async for chunk in gateway.stream_call(
+                        "POST", f"http://agent/{PAYLOAD}"
+                    )
+                ]
+            else:
+                await gateway.async_call("POST", f"http://agent/{PAYLOAD}")
+    assert PAYLOAD in str(exc.value)
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert PAYLOAD not in str(record.__dict__)
+    assert "POST" in record.getMessage()
+    assert error_type.__name__ in record.getMessage()
+    if error_type is httpx.HTTPStatusError:
+        assert "500" in record.getMessage()

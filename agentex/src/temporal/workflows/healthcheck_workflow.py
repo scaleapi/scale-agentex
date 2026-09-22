@@ -9,10 +9,11 @@ from src.temporal.activities.healthcheck_activities import (
     UPDATE_AGENT_STATUS_ACTIVITY,
 )
 from src.utils.logging import make_logger
+from src.utils.observability import uses_observability_adapter
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 
-logger = make_logger(__name__)
+logger = workflow.logger if uses_observability_adapter() else make_logger(__name__)
 
 
 @workflow.defn
@@ -69,7 +70,8 @@ class HealthCheckWorkflow:
                     ),
                 )
             except Exception as e:
-                logger.error(f"Failed to check status of agent {agent_id}: {e}")
+                detail = type(e).__name__ if uses_observability_adapter() else str(e)
+                logger.error(f"Failed to check status of agent {agent_id}: {detail}")
 
             if not success:
                 # Activity failed or agent unreachable
