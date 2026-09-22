@@ -132,6 +132,10 @@ jobs:
         uses: actions/checkout@v6
         with:
           persist-credentials: false
+          # Same reason as BRANCH below: a workflow_dispatch on a feature branch would otherwise
+          # build and seal from that ref. github.ref is the PR merge ref on pull_request, which
+          # is the default checkout, so PR behavior is unchanged.
+          ref: ${{ github.event_name == 'pull_request' && github.ref || 'main' }}
 
       - name: Setup stlc
         uses: ./.github/actions/setup-stlc
@@ -189,6 +193,16 @@ jobs:
 
           held=""
           while IFS=$'\t' read -r target staging prod; do
+            # Only hold on targets this run actually builds. The loop below reads every target
+            # in stainless.yml, but the build uses --targets "$DEFAULT_TARGETS", which may be a
+            # narrower set. Without this, a production repo that is ahead for a target we are
+            # NOT building would still exit 1 and block the targets we are.
+            case ",${DEFAULT_TARGETS}," in
+              ,all,) ;;                   # `all` builds every configured target -- no filter
+              *",${target},"*) ;;         # explicitly selected
+              *) continue ;;              # not in this run's target set
+            esac
+
             # Skip one-repo targets (staging == production) and targets with no production repo.
             { [ -z "$prod" ] || [ "$prod" = "null" ] || [ "$staging" = "$prod" ]; } && continue
 
@@ -230,8 +244,14 @@ jobs:
 
       - name: Generate SDKs and push
         env:
-          # PR head ref on pull_request (preview branch); "main" otherwise.
-          BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          # PR head ref on pull_request (an ephemeral preview branch); the trunk otherwise.
+          #
+          # Pinned to 'main' rather than github.ref_name: workflow_dispatch lets the operator
+          # pick any ref, and ref_name would then send a feature branch through the non-PR path
+          # -- pushing an SDK preview branch instead of syncing the trunk, and letting the
+          # seal-back step open a tracking-file PR derived from that preview. Keep this in step
+          # with --trunk-branch below.
+          BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || 'main' }}
           COMMIT_MSG: ${{ steps.msg.outputs.commit_msg }}
           GH_TOKEN: ${{ secrets.SDK_WRITE_TOKEN }}
         working-directory: ${{ env.STAINLESS_WORKSPACE }}
@@ -292,7 +312,17 @@ jobs:
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner, repo, issue_number, per_page: 100,
             });
-            const mine = comments.find((c) => c.body && c.body.includes(marker));
+            // Only ever replace a comment this workflow authored. The marker is public, so
+            // `includes` on any author would let a human comment quoting the manifest be
+            // silently overwritten. Bot `type` cannot be spoofed by a user account, and the
+            // renderer always emits the marker first.
+            const mine = comments.find(
+              (c) =>
+                c.user &&
+                c.user.type === 'Bot' &&
+                typeof c.body === 'string' &&
+                c.body.trimStart().startsWith(marker),
+            );
             if (mine) {
               await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
             } else {
