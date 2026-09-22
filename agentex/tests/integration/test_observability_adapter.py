@@ -35,6 +35,7 @@ def test_spawned_workers_configure_and_clean_up_independently(tmp_path):
             logging.basicConfig(stream=sys.stdout, level=logging.INFO)
             from fastapi import Request
             from src.api.logged_api_route import LoggedAPIRoute
+            from src.domain.services.agent_acp_service import AgentACPService
             from src.utils.logging import ctx_var_request_id
             assert any(route.path == "/agents" for route in app.routes)
             record("configured")
@@ -43,6 +44,12 @@ def test_spawned_workers_configure_and_clean_up_independently(tmp_path):
                         "body": await request.json()}
             app.router.add_api_route("/api/observability-probe", probe, methods=["POST"],
                                      route_class_override=LoggedAPIRoute)
+            async def invalid_acp_response(request: Request):
+                service = AgentACPService.__new__(AgentACPService)
+                service._parse_task_message({"type": "text", "author": "agent",
+                                             "content": await request.json()})
+            app.router.add_api_route("/api/invalid-acp-response", invalid_acp_response,
+                                     methods=["POST"], route_class_override=LoggedAPIRoute)
 
         def shutdown():
             record("shutdown")
@@ -138,6 +145,18 @@ def test_spawned_workers_configure_and_clean_up_independently(tmp_path):
                 assert response.headers["x-request-id"] == "ingress-123"
                 assert response.json()["request_id"] == "ingress-123"
                 assert response.json()["body"] == body
+                error = client.post(
+                    "/api/invalid-acp-response",
+                    json=body,
+                    headers={"x-request-id": "error-123"},
+                )
+                assert error.status_code == 500
+                assert error.json() == {
+                    "message": "Internal Server Error",
+                    "code": 500,
+                    "data": None,
+                }
+                assert error.headers["x-request-id"] == "error-123"
         finally:
             process.terminate()
             try:
@@ -155,5 +174,10 @@ def test_spawned_workers_configure_and_clean_up_independently(tmp_path):
             "shutdown",
         ]
     logs = log_path.read_text()
+    assert "private-payload-marker" not in logs
+    assert "Unhandled exception caught by exception handler" in logs
+    assert "Exception in ASGI application" in logs
+    assert "_parse_task_message" in logs
+    assert "Traceback (most recent call last)" in logs
     assert logs.count("Request [POST /api/observability-probe]") == 1
     assert logs.count("Response[200] [POST /api/observability-probe]") == 1

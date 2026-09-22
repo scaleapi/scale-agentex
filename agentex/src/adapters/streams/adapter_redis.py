@@ -53,7 +53,7 @@ class RedisStreamRepository(StreamRepository):
             # Simple JSON serialization
             data_json = json.dumps(data)
 
-            logger.info(f"Publishing data to stream {topic}, data: {data_json}")
+            logger.info(f"Publishing data to stream {topic}")
 
             # Add to Redis stream with maxlen to prevent unbounded growth.
             # Pipeline XADD + EXPIRE in one round-trip so the stream key gets
@@ -85,7 +85,7 @@ class RedisStreamRepository(StreamRepository):
                         raise message_id
                     if isinstance(results[1], Exception):
                         logger.warning(
-                            f"Failed to refresh TTL on stream {topic}: {results[1]}"
+                            f"Failed to refresh TTL on stream {topic}: {type(results[1]).__name__}"
                         )
             else:
                 message_id = await self.redis.xadd(
@@ -96,7 +96,9 @@ class RedisStreamRepository(StreamRepository):
                 )
             return message_id
         except Exception as e:
-            logger.error(f"Error publishing data to Redis stream {topic}: {e}")
+            logger.error(
+                f"Error publishing data to Redis stream {topic}: {type(e).__name__}"
+            )
             raise
 
     async def send_redis_connection_metrics(self):
@@ -152,7 +154,7 @@ class RedisStreamRepository(StreamRepository):
 
             await asyncio.to_thread(_send_redis_connection_metrics, self)
         except Exception as e:
-            logger.error(f"Failed to send metrics: {e}", exc_info=e)
+            logger.error(f"Failed to send metrics: {type(e).__name__}")
 
     async def get_stream_tail_id(self, topic: str) -> str:
         """
@@ -170,7 +172,9 @@ class RedisStreamRepository(StreamRepository):
         try:
             entries = await self.redis.xrevrange(name=topic, count=1)
         except Exception as e:
-            logger.error(f"Error snapshotting tail of Redis stream {topic}: {e}")
+            logger.error(
+                f"Error snapshotting tail of Redis stream {topic}: {type(e).__name__}"
+            )
             raise
         if not entries:
             return "0-0"
@@ -223,11 +227,11 @@ class RedisStreamRepository(StreamRepository):
                                 yield message_id, data
                             except Exception as e:
                                 logger.warning(
-                                    f"Failed to parse data from Redis stream: {e}"
+                                    f"Failed to parse data from Redis stream: {type(e).__name__}"
                                 )
 
         except Exception as e:
-            logger.error(f"Error reading from Redis stream {topic}: {e}")
+            logger.error(f"Error reading from Redis stream {topic}: {type(e).__name__}")
             raise
 
     async def cleanup_stream(self, topic: str) -> None:
@@ -242,7 +246,7 @@ class RedisStreamRepository(StreamRepository):
             await self.send_redis_connection_metrics()
             logger.info(f"Cleaned up Redis stream: {topic}")
         except Exception as e:
-            logger.error(f"Error cleaning up Redis stream {topic}: {e}")
+            logger.error(f"Error cleaning up Redis stream {topic}: {type(e).__name__}")
             raise
 
 

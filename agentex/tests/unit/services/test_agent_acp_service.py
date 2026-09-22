@@ -893,8 +893,9 @@ class TestAgentACPService:
 
         assert "Connection timeout" in str(exc_info.value)
 
-    async def test_parse_task_message_invalid_type(self, agent_acp_service):
+    async def test_parse_task_message_invalid_type(self):
         """Test parsing invalid task message type"""
+        agent_acp_service = AgentACPService.__new__(AgentACPService)
         # Given
         invalid_result = {
             "type": "invalid_type",
@@ -906,7 +907,8 @@ class TestAgentACPService:
         with pytest.raises(ValueError) as exc_info:
             agent_acp_service._parse_task_message(invalid_result)
 
-        assert "Unknown message type" in str(exc_info.value)
+        assert "invalid TaskMessage format" in str(exc_info.value)
+        assert "invalid_type" not in str(exc_info.value)
 
     async def test_parse_task_message_update_invalid_type(self, agent_acp_service):
         """Test parsing invalid task message update type"""

@@ -6,11 +6,7 @@ from fastapi.routing import APIRoute
 from starlette.background import BackgroundTask
 
 from src.utils.logging import ctx_var_request_id, make_logger
-from src.utils.request_utils import (
-    decode_request_body,
-    form_data_to_body,
-    strip_sensitive_items,
-)
+from src.utils.request_utils import form_data_to_body
 
 logger = make_logger(__name__)
 
@@ -21,28 +17,24 @@ def log_request(
     request_body: bytes,
 ):
     raw_path = request.scope["root_path"] + request.scope["route"].path
-    request_dict = decode_request_body(request_body)
     logger.info(
-        f"Request [{request.method} {raw_path}] ({request_id}): {request_dict}",
+        f"Request [{request.method} {raw_path}] ({request_id})",
         extra={
             "method": request.method,
             "path": raw_path,
-            "query_params": strip_sensitive_items(request.query_params),
-            "headers": strip_sensitive_items(request.headers),
-            "body": request_dict,
             "request_id": request_id,
         },
     )
 
 
 def log_response(request_id: str, request: Request, response: Response):
+    raw_path = request.scope["root_path"] + request.scope["route"].path
     logger.info(
-        f"Response[{response.status_code}] [{request.method} {request.url.path}] ({request_id})",
+        f"Response[{response.status_code}] [{request.method} {raw_path}] ({request_id})",
         extra={
             "status_code": response.status_code,
             "method": request.method,
-            "path": request.url.path,
-            "headers": strip_sensitive_items(response.headers),
+            "path": raw_path,
             "request_id": request_id,
         },
     )
@@ -87,7 +79,7 @@ class LoggedStreamingResponse(StreamingResponse):
             await send({"type": "http.response.body", "body": b"", "more_body": False})
 
         except Exception as exc:
-            logger.error(f"Error in stream response: {exc}", exc_info=True)
+            logger.error(f"Error in stream response: {type(exc).__name__}")
             # Wrap error and propagate up for middlewares to handle
             raise StreamResponseError(exc) from exc
 
@@ -119,7 +111,7 @@ class LoggedAPIRoute(APIRoute):
                     return form_data_to_body(form_data)
                 except Exception as e:
                     logger.warning(
-                        f"Failed to parse form data for request {request.url.path}: {e}"
+                        f"Failed to parse request form data: {type(e).__name__}"
                     )
             return await request.body()
 

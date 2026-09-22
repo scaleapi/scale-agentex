@@ -112,7 +112,7 @@ class HttpxGateway(HttpPort):
         client = self._get_regular_client()
 
         try:
-            logger.debug(f"Making {method} request to {url}")
+            logger.debug(f"Making {method} request")
 
             # Build request kwargs
             request_kwargs = {
@@ -130,29 +130,25 @@ class HttpxGateway(HttpPort):
             response.raise_for_status()
 
             # Log successful response
-            logger.debug(
-                f"Successful {method} request to {url}, status: {response.status_code}"
-            )
+            logger.debug(f"Successful {method} request, status: {response.status_code}")
             return response.json()
 
         except HTTPStatusError as e:
             logger.error(
-                f"HTTP error {e.response.status_code} for {method} {url}: {e}",
-                exc_info=True,
+                f"HTTP error {e.response.status_code} for {method}: {type(e).__name__}"
             )
             raise
         except ConnectError as e:
             logger.error(
-                f"Connection error for {method} {url}: {e}. This might be a connection pool issue.",
-                exc_info=True,
+                f"Connection error for {method}: {type(e).__name__}. This might be a connection pool issue."
             )
             raise
         except TimeoutException as e:
-            logger.error(f"Timeout error for {method} {url}: {e}", exc_info=True)
+            logger.error(f"Timeout error for {method}: {type(e).__name__}")
             raise
         except Exception as e:
             logger.error(
-                f"Unexpected error during {method} request to {url}: {e}", exc_info=True
+                f"Unexpected error during {method} request: {type(e).__name__}"
             )
             raise
 
@@ -179,7 +175,7 @@ class HttpxGateway(HttpPort):
         )
 
         try:
-            logger.debug(f"Starting streaming {method} request to {url}")
+            logger.debug(f"Starting streaming {method} request")
 
             # Build stream kwargs
             stream_kwargs = {
@@ -196,7 +192,7 @@ class HttpxGateway(HttpPort):
             async with client.stream(**stream_kwargs) as response:
                 response.raise_for_status()
                 logger.debug(
-                    f"Streaming connection established to {url}, status: {response.status_code}"
+                    f"Streaming connection established, status: {response.status_code}"
                 )
 
                 async for line in response.aiter_lines():
@@ -207,31 +203,26 @@ class HttpxGateway(HttpPort):
                     except json.JSONDecodeError as e:
                         # Log but don't fail on individual line parse errors
                         logger.warning(
-                            f"Failed to parse SSE line (skipping): {line}, error: {e}"
+                            f"Failed to parse SSE line (skipping): {type(e).__name__}"
                         )
                         continue
 
         except HTTPStatusError as e:
             logger.error(
-                f"HTTP error {e.response.status_code} for streaming {method} {url}: {e}",
-                exc_info=True,
+                f"HTTP error {e.response.status_code} for streaming {method}: {type(e).__name__}"
             )
             raise
         except ConnectError as e:
             logger.error(
-                f"Connection error for streaming {method} {url}: {e}. This might be a connection pool issue.",
-                exc_info=True,
+                f"Connection error for streaming {method}: {type(e).__name__}. This might be a connection pool issue."
             )
             raise
         except TimeoutException as e:
-            logger.error(
-                f"Timeout error for streaming {method} {url}: {e}", exc_info=True
-            )
+            logger.error(f"Timeout error for streaming {method}: {type(e).__name__}")
             raise
         except Exception as e:
             logger.error(
-                f"Unexpected error during streaming {method} request to {url}: {e}",
-                exc_info=True,
+                f"Unexpected error during streaming {method} request: {type(e).__name__}"
             )
             raise
 
@@ -274,7 +265,7 @@ class HttpxGateway(HttpPort):
                 follow_redirects=True,
                 event_hooks={"request": [forward_request_id]},
             ) as client:
-                logger.debug(f"Making sync {method} request to {url}")
+                logger.debug(f"Making sync {method} request")
 
                 response = client.request(
                     method,
@@ -286,29 +277,26 @@ class HttpxGateway(HttpPort):
 
                 # Log successful response
                 logger.debug(
-                    f"Successful sync {method} request to {url}, status: {response.status_code}"
+                    f"Successful sync {method} request, status: {response.status_code}"
                 )
                 return response.json()
 
         except HTTPStatusError as e:
             logger.error(
-                f"HTTP error {e.response.status_code} for sync {method} {url}: {e}",
-                exc_info=True,
+                f"HTTP error {e.response.status_code} for sync {method}: {type(e).__name__}"
             )
             raise
         except ConnectError as e:
             logger.error(
-                f"Connection error for sync {method} {url}: {e}. This might be a connection pool issue.",
-                exc_info=True,
+                f"Connection error for sync {method}: {type(e).__name__}. This might be a connection pool issue."
             )
             raise
         except TimeoutException as e:
-            logger.error(f"Timeout error for sync {method} {url}: {e}", exc_info=True)
+            logger.error(f"Timeout error for sync {method}: {type(e).__name__}")
             raise
         except Exception as e:
             logger.error(
-                f"Unexpected error during sync {method} request to {url}: {e}",
-                exc_info=True,
+                f"Unexpected error during sync {method} request: {type(e).__name__}"
             )
             raise
 

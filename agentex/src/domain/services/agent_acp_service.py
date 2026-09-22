@@ -176,13 +176,10 @@ class AgentACPService(TaskMessageMixin):
                 raise ValueError(f"Unknown message type: {message_type}")
         except Exception as e:
             logger.error(
-                f"Failed to validate ACP response as TaskMessage. Result: {result} - Error: {e}"
+                f"Failed to validate ACP response as TaskMessage: {type(e).__name__}"
             )
-            if hasattr(e, "errors"):
-                logger.error(f"Validation error details: {e.errors()}")
-            raise ValueError(
-                f"ACP server returned invalid TaskMessage format: {str(e)}"
-            ) from e
+        # Raise outside except so middleware cannot restore the validation context.
+        raise ValueError("ACP server returned invalid TaskMessage format") from None
 
     def _parse_task_message_update(
         self, result: dict[str, Any]
@@ -247,7 +244,7 @@ class AgentACPService(TaskMessageMixin):
             return rpc_response.result or {}
 
         except Exception as e:
-            logger.error(f"Error calling ACP server at {url}: {e}")
+            logger.error(f"Error calling ACP server: {type(e).__name__}")
             raise e
 
     async def _call_jsonrpc_stream(
@@ -264,11 +261,8 @@ class AgentACPService(TaskMessageMixin):
         )
 
         try:
-            logger.info(
-                "Calling model dump on payload:", request.model_dump(mode="json")
-            )
             payload = request.model_dump(mode="json")
-            logger.info(f"Streaming payload: {payload}")
+            logger.info(f"Starting ACP stream: {method.value}")
             async for chunk in self._http_gateway.stream_call(
                 method="POST",
                 url=f"{url}/api",
@@ -288,7 +282,7 @@ class AgentACPService(TaskMessageMixin):
 
                 yield rpc_response.result or {}
         except Exception as e:
-            logger.error(f"Error calling ACP server at {url}: {e}")
+            logger.error(f"Error calling ACP server: {type(e).__name__}")
             raise e
 
     def get_delegation_headers(self, agent: AgentEntity) -> dict[str, str]:
