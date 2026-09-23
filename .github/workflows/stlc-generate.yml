@@ -142,12 +142,33 @@ jobs:
         with:
           stlc-read-token: ${{ secrets.STLC_READ_TOKEN }}
 
+      - name: Mint SDK sync token
+        # GitHub App instead of a PAT: no expiry treadmill, no SSO re-auth, and -- critically --
+        # commits attribute to a real account. The config repo's ruleset requires an extra
+        # approval for unattributed changes, which is what blocked the seal-back PR from ever
+        # self-merging under the old `stlc-bot` identity.
+        #
+        # The token lives ONE HOUR. It is minted once here and used through the seal-back step.
+        # If a build ever runs long enough to outlive it, the seal-back is what fails, and the
+        # symptom is the SDK repos sitting ahead of the tracking files.
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AGENTEX_SDK_SYNC_APP_ID }}
+          private-key: ${{ secrets.AGENTEX_SDK_SYNC_PRIVATE_KEY }}
+          owner: scaleapi
+          repositories: scale-agentex,scale-agentex-python-staging,scale-agentex-typescript-staging
+
       - name: Configure auth for stlc to push to SDK repos
         env:
-          GH_TOKEN: ${{ secrets.SDK_WRITE_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          git config --global user.name "stlc-bot"
-          git config --global user.email "stlc-bot@users.noreply.github.com"
+          # The numeric prefix is the BOT USER id (gh api users/'agentex-sdk-sync[bot]'), not the
+          # installation id. GitHub matches <id>+<login>@users.noreply.github.com against the
+          # user id; get this wrong and commits land unattributed, which is the whole thing the
+          # App was adopted to fix.
+          git config --global user.name  "agentex-sdk-sync[bot]"
+          git config --global user.email "333044712+agentex-sdk-sync[bot]@users.noreply.github.com"
           gh auth setup-git
 
       - name: Resolve commit message
@@ -181,7 +202,13 @@ jobs:
         if: github.event_name != 'pull_request'
         working-directory: ${{ env.STAINLESS_WORKSPACE }}
         env:
-          GH_TOKEN: ${{ secrets.SDK_WRITE_TOKEN }}
+          # Deliberately NOT the app token. The App is scoped to the config repo plus the two
+          # staging repos, and this step reads the PRODUCTION repos -- scale-agentex-typescript
+          # is private, so an app token cannot see it and the step would degrade to
+          # `::warning::Codegen hold skipped for typescript`, silently dropping the guard.
+          # STLC_READ_TOKEN is a classic `repo`-scoped PAT and reads all four. Do not "tidy"
+          # this back to the app token without first widening the App's repository access.
+          GH_TOKEN: ${{ secrets.STLC_READ_TOKEN }}
           # Fail fast instead of prompting when a repo needs credentials.
           GIT_TERMINAL_PROMPT: '0'
         run: |
@@ -253,7 +280,7 @@ jobs:
           # with --trunk-branch below.
           BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || 'main' }}
           COMMIT_MSG: ${{ steps.msg.outputs.commit_msg }}
-          GH_TOKEN: ${{ secrets.SDK_WRITE_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         working-directory: ${{ env.STAINLESS_WORKSPACE }}
         run: |
           echo "Building targets: $DEFAULT_TARGETS to branch: $BRANCH"
@@ -333,7 +360,7 @@ jobs:
         # `stlc build` may rewrite the tracking files under stainless/custom-code/.
         # main is protected, so land them via a PR on a shared branch (one seal-back PR
         # at a time); merging won't loop (guard skips tracking-only pushes).
-        # Prefers SDK_WRITE_TOKEN: where an org turns off "Allow GitHub Actions to create
+        # Prefers the App token: where an org turns off "Allow GitHub Actions to create
         # and approve pull requests", GITHUB_TOKEN fails this step with "GitHub Actions is
         # not permitted to create or approve pull requests" -- after the branch has been
         # pushed, leaving the tracking files stranded on an unmerged branch.
@@ -345,7 +372,7 @@ jobs:
         # is what makes running on any outcome safe.
         if: ${{ always() && github.event_name != 'pull_request' }}
         env:
-          GH_TOKEN: ${{ secrets.SDK_WRITE_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           if [ -z "$(git status --porcelain -- "$STAINLESS_WORKSPACE/custom-code")" ]; then
