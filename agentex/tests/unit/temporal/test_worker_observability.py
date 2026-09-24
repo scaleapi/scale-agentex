@@ -18,7 +18,7 @@ pytestmark = pytest.mark.unit
 @pytest.mark.parametrize("metrics_url", [None, "http://collector:4317"])
 @pytest.mark.parametrize("explicit_config", [False, True])
 async def test_client_factory_adds_interceptors_without_changing_core_metrics(
-    monkeypatch, managed, metrics_url, explicit_config
+    monkeypatch, caplog, managed, metrics_url, explicit_config
 ):
     interceptor = object()
     adapter = SimpleNamespace(temporal_client_interceptors=lambda: [interceptor])
@@ -28,7 +28,10 @@ async def test_client_factory_adds_interceptors_without_changing_core_metrics(
     runtime = Mock()
     monkeypatch.setattr(client_factory, "Runtime", runtime)
     config = (
-        OpenTelemetryConfig(url="http://collector:4318/v1/metrics", http=True)
+        OpenTelemetryConfig(
+            url="https://metrics-user:otel-test-secret@collector:4318/v1/metrics",
+            http=True,
+        )
         if explicit_config
         else None
     )
@@ -54,6 +57,8 @@ async def test_client_factory_adds_interceptors_without_changing_core_metrics(
         assert core.url == (config.url if config is not None else metrics_url)
         assert core.metric_periodicity is None
         assert core.http is explicit_config
+        assert core.url not in caplog.text
+        assert "otel-test-secret" not in caplog.text
     else:
         runtime.assert_not_called()
         assert "runtime" not in options
@@ -128,10 +133,14 @@ async def test_main_cleanup_follows_worker_and_dependencies(
 
 async def test_worker_inherits_client_interceptors_without_registering_twice(
     monkeypatch,
+    caplog,
 ):
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", raising=False)
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_METRICS_PROTOCOL", raising=False)
-    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318")
+    monkeypatch.setenv(
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "https://metrics-user:otel-test-secret@collector:4318",
+    )
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
     monkeypatch.delenv("DD_AGENT_HOST", raising=False)
     client = object()
@@ -157,8 +166,10 @@ async def test_worker_inherits_client_interceptors_without_registering_twice(
     await run_worker.run_worker()
 
     core = create_client.call_args.kwargs["metrics_config"]
-    assert core.url == "http://collector:4318/v1/metrics"
+    assert core.url == "https://metrics-user:otel-test-secret@collector:4318/v1/metrics"
     assert core.http is True
+    assert core.url not in caplog.text
+    assert "otel-test-secret" not in caplog.text
     assert worker_constructor.call_args.args == (client,)
     assert "interceptors" not in worker_constructor.call_args.kwargs
     worker.run.assert_awaited_once()

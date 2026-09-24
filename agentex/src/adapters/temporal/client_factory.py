@@ -132,9 +132,7 @@ class TemporalClientFactory:
             if metrics_config is None and metrics_url:
                 metrics_config = OpenTelemetryConfig(url=metrics_url)
             if metrics_config is not None:
-                logger.info(
-                    f"Configuring Temporal client with metrics URL: {metrics_config.url}"
-                )
+                logger.info("Configuring Temporal client with Core metrics")
                 runtime = Runtime(telemetry=TelemetryConfig(metrics=metrics_config))
                 connect_options["runtime"] = runtime
 

@@ -160,7 +160,7 @@ async def run_worker(
         # Check for metrics configuration
         metrics_config = build_metrics_config()
         if metrics_config:
-            logger.info(f"Configuring worker with metrics URL: {metrics_config.url}")
+            logger.info("Configuring worker with Temporal Core metrics")
 
         # Create Temporal client
         client = await TemporalClientFactory.create_client_from_env(
