@@ -127,19 +127,42 @@ def test_no_metrics_exporter_without_any_endpoint():
 
 
 @pytest.mark.unit
-def test_local_runner_selects_grpc_for_its_collector(monkeypatch):
+@pytest.mark.parametrize("otel_endpoint", ["http://localhost:4317", None])
+@pytest.mark.parametrize("inherited", [False, True])
+def test_local_runner_owns_metrics_settings(monkeypatch, otel_endpoint, inherited):
+    if inherited:
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://other:4318")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+        monkeypatch.setenv(
+            "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://other:4318/v1/metrics"
+        )
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_METRICS_PROTOCOL", "http/protobuf")
     env = build_env(
         database_url="postgresql://localhost/agentex",
         redis_url="redis://localhost:6379",
         mongo_uri=None,
         temporal_address="localhost:7233",
-        otel_endpoint="http://localhost:4317",
+        otel_endpoint=otel_endpoint,
     )
+    remaining_overrides = set(env) & {
+        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
+    }
+    assert not remaining_overrides
+    for name in (
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
+    ):
+        monkeypatch.delenv(name, raising=False)
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     config = run_worker.build_metrics_config()
-    assert config.url == "http://localhost:4317"
-    assert config.http is False
+    if otel_endpoint:
+        assert config.url == otel_endpoint
+        assert config.http is False
+    else:
+        assert config is None
 
 
 @pytest.mark.unit
