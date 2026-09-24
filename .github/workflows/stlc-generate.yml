@@ -138,6 +138,41 @@ jobs:
           # is the default checkout, so PR behavior is unchanged.
           ref: ${{ github.event_name == 'pull_request' && github.ref || 'main' }}
 
+      # TEMPORARY DIAGNOSTIC -- remove once the installation is correct.
+      # The scoped mint below fails with a 422 that says only "at least one repository ... is
+      # not accessible", without naming it. This mints owner-wide (still read-only) purely to
+      # enumerate what the installation actually covers, and reports present/missing for the
+      # repos this workflow needs. It prints only names already committed in this file, so it
+      # discloses nothing new in a public log.
+      - name: Diagnose installation coverage
+        id: diag-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AGENTEX_SDK_SYNC_APP_ID }}
+          private-key: ${{ secrets.AGENTEX_SDK_SYNC_PRIVATE_KEY }}
+          owner: scaleapi
+          permission-contents: read
+          permission-metadata: read
+
+      - name: Report installation coverage
+        env:
+          GH_TOKEN: ${{ steps.diag-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          gh api --paginate /installation/repositories --jq '.repositories[].full_name' \
+            | sort > /tmp/installed.txt
+          echo "Installation covers $(wc -l < /tmp/installed.txt) repositories."
+          echo
+          for r in scale-agentex stlc stlc-python stlc-typescript \
+                   scale-agentex-python scale-agentex-typescript \
+                   scale-agentex-python-staging scale-agentex-typescript-staging; do
+            if grep -qx "scaleapi/$r" /tmp/installed.txt; then
+              printf '  present  scaleapi/%s\n' "$r"
+            else
+              printf '  MISSING  scaleapi/%s\n' "$r"
+            fi
+          done
+
       - name: Mint SDK read token
         # Read-only counterpart to the sync token below. Two consumers: setup-stlc installs the
         # CLI family from the scaleapi/stlc* mirrors, and the codegen hold reads the production
