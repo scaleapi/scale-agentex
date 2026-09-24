@@ -182,6 +182,13 @@ jobs:
           private-key: ${{ secrets.AGENTEX_SDK_SYNC_PRIVATE_KEY }}
           owner: scaleapi
           repositories: scale-agentex,scale-agentex-python-staging,scale-agentex-typescript-staging
+          # Without these, the token silently inherits the App's FULL permission set, which
+          # includes `issues: write` -- granted for release-please elsewhere and useless here.
+          # `workflows: write` is not optional: `stlc build --push` carries `.github/workflows/**`
+          # as scaffold, and a push that touches those paths is rejected without it.
+          permission-contents: write
+          permission-workflows: write
+          permission-metadata: read
 
       - name: Configure auth for stlc to push to SDK repos
         env:
@@ -395,9 +402,11 @@ jobs:
         # uncommitted -- the state every later build refuses to work around.
         #
         # The `if:` MUST match the step below. With the default `success()` a red build would
-        # skip this mint, leave the output empty, and silently drop the seal-back onto
-        # GITHUB_TOKEN -- the exact path the next step's comment warns strands the files, and a
-        # far more common failure than the expiry this guards against.
+        # skip this mint and the seal-back would fall to the next term of its chain -- the
+        # hour-old job-start token, i.e. exactly the expiry risk this step exists to remove,
+        # reintroduced on the runs most likely to have burned the hour. (Only if that mint also
+        # failed does it reach GITHUB_TOKEN, which fails outright wherever the org blocks Actions
+        # from creating pull requests.)
         #
         # Scoped to the config repo alone: that is all the seal-back touches.
         id: seal-token
@@ -408,6 +417,11 @@ jobs:
           private-key: ${{ secrets.AGENTEX_SDK_SYNC_PRIVATE_KEY }}
           owner: scaleapi
           repositories: scale-agentex
+          # Narrower than the push token above: the seal-back pushes a branch and opens/merges a
+          # pull request, and touches no workflow files. No `workflows: write`, no `issues: write`.
+          permission-contents: write
+          permission-pull-requests: write
+          permission-metadata: read
 
       - name: Seal tracking files back to the config repo
         # `stlc build` may rewrite the tracking files under stainless/custom-code/.
