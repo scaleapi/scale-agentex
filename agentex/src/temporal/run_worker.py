@@ -20,6 +20,7 @@ from contextlib import AsyncExitStack
 from datetime import timedelta
 
 import httpx
+from temporalio.runtime import OpenTelemetryConfig
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from src.adapters.http.adapter_httpx import HttpxGateway
@@ -89,6 +90,29 @@ def build_metrics_url(host_url: str | None) -> str | None:
     return f"http://{host}:{port}"
 
 
+def build_metrics_config() -> OpenTelemetryConfig | None:
+    """Prefer OTel metrics settings, with the legacy host as a gRPC fallback."""
+    metrics_endpoint = os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "").strip()
+    base_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+    if metrics_endpoint or base_endpoint:
+        protocol = (
+            os.getenv("OTEL_EXPORTER_OTLP_METRICS_PROTOCOL", "").strip()
+            or os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "").strip()
+            or "http/protobuf"
+        ).lower()
+        if protocol not in {"grpc", "http/protobuf", "http"}:
+            raise ValueError(f"Unsupported Temporal metrics protocol: {protocol}")
+        http = protocol != "grpc"
+        endpoint = metrics_endpoint or (
+            base_endpoint.rstrip("/") + "/v1/metrics" if http else base_endpoint
+        )
+        return OpenTelemetryConfig(url=endpoint, http=http)
+
+    if endpoint := build_metrics_url(os.getenv("DD_AGENT_HOST")):
+        return OpenTelemetryConfig(url=endpoint)
+    return None
+
+
 # Global worker instance
 health_check_worker: Worker | None = None
 
@@ -134,15 +158,14 @@ async def run_worker(
             raise ValueError("Temporal is not properly configured")
 
         # Check for metrics configuration
-        host_url = os.environ.get("DD_AGENT_HOST")
-        metrics_url = build_metrics_url(host_url)
-        if metrics_url:
-            logger.info(f"Configuring worker with metrics URL: {metrics_url}")
+        metrics_config = build_metrics_config()
+        if metrics_config:
+            logger.info(f"Configuring worker with metrics URL: {metrics_config.url}")
 
         # Create Temporal client
         client = await TemporalClientFactory.create_client_from_env(
             environment_variables=environment_variables,
-            metrics_url=metrics_url,
+            metrics_config=metrics_config,
         )
 
         # Create the worker directly (no manager needed)

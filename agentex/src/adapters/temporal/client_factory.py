@@ -81,6 +81,8 @@ class TemporalClientFactory:
         temporal_namespace: str | None = None,
         metrics_url: str | None = None,
         data_converter: DataConverter | None = None,
+        *,
+        metrics_config: OpenTelemetryConfig | None = None,
     ) -> Client:
         """
         Create a Temporal client with the specified configuration.
@@ -90,6 +92,7 @@ class TemporalClientFactory:
             temporal_namespace: Optional namespace to connect to
             metrics_url: Optional OpenTelemetry metrics endpoint
             data_converter: Optional custom data converter
+            metrics_config: Metrics configuration; takes precedence over metrics_url
 
         Returns:
             Configured Temporal client
@@ -126,16 +129,13 @@ class TemporalClientFactory:
             if interceptors := temporal_client_interceptors():
                 connect_options["interceptors"] = interceptors
 
-            # Add telemetry if metrics URL is provided
-            if metrics_url:
+            if metrics_config is None and metrics_url:
+                metrics_config = OpenTelemetryConfig(url=metrics_url)
+            if metrics_config is not None:
                 logger.info(
-                    f"Configuring Temporal client with metrics URL: {metrics_url}"
+                    f"Configuring Temporal client with metrics URL: {metrics_config.url}"
                 )
-                runtime = Runtime(
-                    telemetry=TelemetryConfig(
-                        metrics=OpenTelemetryConfig(url=metrics_url)
-                    )
-                )
+                runtime = Runtime(telemetry=TelemetryConfig(metrics=metrics_config))
                 connect_options["runtime"] = runtime
 
             # Create the client
@@ -156,6 +156,8 @@ class TemporalClientFactory:
     async def create_client_from_env(
         environment_variables: EnvironmentVariables | None = None,
         metrics_url: str | None = None,
+        *,
+        metrics_config: OpenTelemetryConfig | None = None,
     ) -> Client:
         """
         Create a Temporal client using environment variables.
@@ -163,6 +165,7 @@ class TemporalClientFactory:
         Args:
             environment_variables: Environment variables instance (will refresh if None)
             metrics_url: Optional OpenTelemetry metrics endpoint
+            metrics_config: Metrics configuration; takes precedence over metrics_url
 
         Returns:
             Configured Temporal client
@@ -177,6 +180,7 @@ class TemporalClientFactory:
             temporal_address=environment_variables.TEMPORAL_ADDRESS,
             temporal_namespace=environment_variables.TEMPORAL_NAMESPACE,
             metrics_url=metrics_url,
+            metrics_config=metrics_config,
         )
 
     @staticmethod

@@ -9,14 +9,16 @@ import pytest
 from src.adapters.temporal import client_factory
 from src.temporal import run_worker
 from src.utils import observability
+from temporalio.runtime import OpenTelemetryConfig
 
 pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize("managed", [False, True])
 @pytest.mark.parametrize("metrics_url", [None, "http://collector:4317"])
+@pytest.mark.parametrize("explicit_config", [False, True])
 async def test_client_factory_adds_interceptors_without_changing_core_metrics(
-    monkeypatch, managed, metrics_url
+    monkeypatch, managed, metrics_url, explicit_config
 ):
     interceptor = object()
     adapter = SimpleNamespace(temporal_client_interceptors=lambda: [interceptor])
@@ -25,9 +27,17 @@ async def test_client_factory_adds_interceptors_without_changing_core_metrics(
     monkeypatch.setattr(client_factory.Client, "connect", connect)
     runtime = Mock()
     monkeypatch.setattr(client_factory, "Runtime", runtime)
+    config = (
+        OpenTelemetryConfig(url="http://collector:4318/v1/metrics", http=True)
+        if explicit_config
+        else None
+    )
 
     await client_factory.TemporalClientFactory.create_client(
-        "localhost:7233", temporal_namespace="worker-tests", metrics_url=metrics_url
+        "localhost:7233",
+        temporal_namespace="worker-tests",
+        metrics_url=metrics_url,
+        metrics_config=config,
     )
 
     options = connect.call_args.kwargs
@@ -38,12 +48,12 @@ async def test_client_factory_adds_interceptors_without_changing_core_metrics(
         assert options["interceptors"] == [interceptor]
     else:
         assert "interceptors" not in options
-    if metrics_url:
+    if config is not None or metrics_url:
         assert options["runtime"] is runtime.return_value
         core = runtime.call_args.kwargs["telemetry"].metrics
-        assert core.url == metrics_url
+        assert core.url == (config.url if config is not None else metrics_url)
         assert core.metric_periodicity is None
-        assert core.http is False
+        assert core.http is explicit_config
     else:
         runtime.assert_not_called()
         assert "runtime" not in options
@@ -119,6 +129,11 @@ async def test_main_cleanup_follows_worker_and_dependencies(
 async def test_worker_inherits_client_interceptors_without_registering_twice(
     monkeypatch,
 ):
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_METRICS_PROTOCOL", raising=False)
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+    monkeypatch.delenv("DD_AGENT_HOST", raising=False)
     client = object()
     worker = SimpleNamespace(run=AsyncMock(), shutdown=AsyncMock(), is_shutdown=False)
     worker_constructor = Mock(return_value=worker)
@@ -132,14 +147,18 @@ async def test_worker_inherits_client_interceptors_without_registering_twice(
     monkeypatch.setattr(
         run_worker.TemporalClientFactory, "is_temporal_configured", lambda _: True
     )
+    create_client = AsyncMock(return_value=client)
     monkeypatch.setattr(
         run_worker.TemporalClientFactory,
         "create_client_from_env",
-        AsyncMock(return_value=client),
+        create_client,
     )
 
     await run_worker.run_worker()
 
+    core = create_client.call_args.kwargs["metrics_config"]
+    assert core.url == "http://collector:4318/v1/metrics"
+    assert core.http is True
     assert worker_constructor.call_args.args == (client,)
     assert "interceptors" not in worker_constructor.call_args.kwargs
     worker.run.assert_awaited_once()

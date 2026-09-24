@@ -213,6 +213,7 @@ def build_env(
 
     if otel_endpoint:
         env["OTEL_EXPORTER_OTLP_ENDPOINT"] = otel_endpoint
+        env["OTEL_EXPORTER_OTLP_PROTOCOL"] = "grpc"
         env["OTEL_SERVICE_NAME"] = "agentex-api"
     else:
         env.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
