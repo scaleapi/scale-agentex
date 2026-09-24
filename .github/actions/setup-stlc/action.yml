@@ -1,9 +1,9 @@
 name: 'Setup stlc'
-description: 'Install the stlc CLI plus the python and typescript target plugins, and configure git auth to fetch the private stainless/stlc* repos. Intended for CI workflows that run stlc commands.'
+description: 'Install the stlc CLI plus the python and typescript target plugins, and configure git auth to fetch the private scaleapi/stlc* repos. Intended for CI workflows that run stlc commands.'
 
 inputs:
   stlc-read-token:
-    description: 'Classic PAT with the `repo` scope, SSO-authorized for the stainless org. Used to fetch the stlc CLI family from private GitHub repos.'
+    description: 'Token with read access to scaleapi/stlc, stlc-python and stlc-typescript. Normally a downscoped agentex-sdk-sync App token (contents: read) minted by the calling workflow.'
     required: true
 
 # Trimmed from the upstream example, which provisions ten language toolchains and all twelve
@@ -44,17 +44,23 @@ runs:
     - name: Install stlc
       shell: bash
       env:
-        STLC_READ_TOKEN: ${{ inputs.stlc-read-token }}
+        STLC_READ_CREDENTIAL: ${{ inputs.stlc-read-token }}
       run: |
-        git_config_key="url.https://x-access-token:${STLC_READ_TOKEN}@github.com/stainless/.insteadOf"
+        # Rewrite prefix is `scaleapi/stlc`, NOT `scaleapi/`. The prefix has to be narrow enough
+        # to miss scale-agentex*: a rewrite on the whole org would point every scaleapi URL in
+        # the job at this read-only token, including the staging repos `stlc build --push` writes
+        # to. `scaleapi/stlc` prefix-matches all four stlc* repos and nothing else. (The trap
+        # below also scopes this to the step, but the narrow prefix is what makes it safe by
+        # construction rather than by timing.)
+        git_config_key="url.https://x-access-token:${STLC_READ_CREDENTIAL}@github.com/scaleapi/stlc.insteadOf"
         cleanup_stlc_auth() { git config --global --unset-all "$git_config_key" || true; }
         trap cleanup_stlc_auth EXIT
-        git config --global --add "$git_config_key" "https://github.com/stainless/"
+        git config --global --add "$git_config_key" "https://github.com/scaleapi/stlc"
 
         npm install -g \
-          "git+https://x-access-token:${STLC_READ_TOKEN}@github.com/stainless/stlc.git" \
-          "git+https://x-access-token:${STLC_READ_TOKEN}@github.com/stainless/stlc-python.git" \
-          "git+https://x-access-token:${STLC_READ_TOKEN}@github.com/stainless/stlc-typescript.git"
+          "git+https://x-access-token:${STLC_READ_CREDENTIAL}@github.com/scaleapi/stlc.git" \
+          "git+https://x-access-token:${STLC_READ_CREDENTIAL}@github.com/scaleapi/stlc-python.git" \
+          "git+https://x-access-token:${STLC_READ_CREDENTIAL}@github.com/scaleapi/stlc-typescript.git"
 
     - name: Check stlc CLI is callable
       shell: bash

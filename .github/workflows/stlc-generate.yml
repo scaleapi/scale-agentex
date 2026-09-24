@@ -117,11 +117,12 @@ jobs:
 
   generate:
     needs: guard
-    # Fork pull requests get no repository secrets, so STLC_READ_TOKEN would be empty and
-    # setup-stlc's install would 404 against the private stainless/stlc* repos -- a red check
-    # an external contributor can neither understand nor fix. This repo is public and does
-    # receive fork PRs, so skip them. Do NOT "fix" this with pull_request_target: that runs
-    # with full secrets against fork-authored code, and this workflow pushes to four repos.
+    # Fork pull requests get no repository secrets, so AGENTEX_SDK_SYNC_PRIVATE_KEY would be
+    # empty, both token mints would fail, and setup-stlc's install would 404 against the private
+    # scaleapi/stlc* repos -- a red check an external contributor can neither understand nor fix.
+    # This repo is public and does receive fork PRs, so skip them. Do NOT "fix" this with
+    # pull_request_target: that runs with full secrets against fork-authored code, and this
+    # workflow pushes to four repos.
     if: >-
       ${{ needs.guard.outputs.skip != 'true'
       && (github.event_name != 'pull_request'
@@ -137,10 +138,28 @@ jobs:
           # is the default checkout, so PR behavior is unchanged.
           ref: ${{ github.event_name == 'pull_request' && github.ref || 'main' }}
 
+      - name: Mint SDK read token
+        # Read-only counterpart to the sync token below. Two consumers: setup-stlc installs the
+        # CLI family from the scaleapi/stlc* mirrors, and the codegen hold reads the production
+        # and staging SDK repos.
+        #
+        # `permission-contents: read` downscopes BELOW the App's app-wide `contents: write`, so
+        # this token cannot write any of the seven repos -- including the two production repos,
+        # which no token in this workflow should ever be able to touch. Keep it that way.
+        id: read-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AGENTEX_SDK_SYNC_APP_ID }}
+          private-key: ${{ secrets.AGENTEX_SDK_SYNC_PRIVATE_KEY }}
+          owner: scaleapi
+          repositories: stlc,stlc-python,stlc-typescript,scale-agentex-python,scale-agentex-typescript,scale-agentex-python-staging,scale-agentex-typescript-staging
+          permission-contents: read
+          permission-metadata: read
+
       - name: Setup stlc
         uses: ./.github/actions/setup-stlc
         with:
-          stlc-read-token: ${{ secrets.STLC_READ_TOKEN }}
+          stlc-read-token: ${{ steps.read-token.outputs.token }}
 
       - name: Mint SDK sync token
         # GitHub App instead of a PAT: no expiry treadmill, no SSO re-auth, and -- critically --
@@ -202,13 +221,18 @@ jobs:
         if: github.event_name != 'pull_request'
         working-directory: ${{ env.STAINLESS_WORKSPACE }}
         env:
-          # Deliberately NOT the app token. The App is scoped to the config repo plus the two
-          # staging repos, and this step reads the PRODUCTION repos -- scale-agentex-typescript
-          # is private, so an app token cannot see it and the step would degrade to
-          # `::warning::Codegen hold skipped for typescript`, silently dropping the guard.
-          # STLC_READ_TOKEN is a classic `repo`-scoped PAT and reads all four. Do not "tidy"
-          # this back to the app token without first widening the App's repository access.
-          GH_TOKEN: ${{ secrets.STLC_READ_TOKEN }}
+          # The READ token, not the sync token. This step reads four repos -- both production
+          # and both staging -- and must not be able to write any of them. The read mint is
+          # downscoped to `contents: read`, which is exactly the property that matters for a
+          # guard whose whole job is to refuse to write when production is ahead.
+          #
+          # scale-agentex-typescript is private, so this genuinely needs credentials: the
+          # unauthenticated first attempt below only succeeds for public scale-agentex-python.
+          # If the read token ever stops covering these four, the step degrades to
+          # `::warning::Codegen hold skipped for <target>` -- it drops the guard silently
+          # rather than failing, so a missing repo here is invisible. Keep the mint's
+          # `repositories:` list and this step's needs in sync.
+          GH_TOKEN: ${{ steps.read-token.outputs.token }}
           # Fail fast instead of prompting when a repo needs credentials.
           GIT_TERMINAL_PROMPT: '0'
         run: |
@@ -356,6 +380,30 @@ jobs:
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
 
+      - name: Re-mint SDK sync token for seal-back
+        # The sync token minted at the top of the job lives ONE HOUR, and everything between it
+        # and the seal-back -- toolchain install, two full SDK builds, lint, tests -- sits inside
+        # that window. Today a run takes ~5 minutes, so expiry is remote; the reason to re-mint
+        # anyway is the blast radius, not the odds. The seal-back runs `if: always()`, so it also
+        # runs after slow or failed builds (GitHub's job ceiling is six hours), and a seal-back
+        # that dies on an expired token leaves the SDK repos pushed but the tracking files
+        # uncommitted -- the state every later build refuses to work around.
+        #
+        # The `if:` MUST match the step below. With the default `success()` a red build would
+        # skip this mint, leave the output empty, and silently drop the seal-back onto
+        # GITHUB_TOKEN -- the exact path the next step's comment warns strands the files, and a
+        # far more common failure than the expiry this guards against.
+        #
+        # Scoped to the config repo alone: that is all the seal-back touches.
+        id: seal-token
+        if: ${{ always() && github.event_name != 'pull_request' }}
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AGENTEX_SDK_SYNC_APP_ID }}
+          private-key: ${{ secrets.AGENTEX_SDK_SYNC_PRIVATE_KEY }}
+          owner: scaleapi
+          repositories: scale-agentex
+
       - name: Seal tracking files back to the config repo
         # `stlc build` may rewrite the tracking files under stainless/custom-code/.
         # main is protected, so land them via a PR on a shared branch (one seal-back PR
@@ -372,7 +420,10 @@ jobs:
         # is what makes running on any outcome safe.
         if: ${{ always() && github.event_name != 'pull_request' }}
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          # Fresh token first; the job-start token as a fallback if the re-mint itself failed
+          # (it can still be valid); GITHUB_TOKEN last, which works only where the org allows
+          # Actions to create pull requests -- see the note above.
+          GH_TOKEN: ${{ steps.seal-token.outputs.token || steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           if [ -z "$(git status --porcelain -- "$STAINLESS_WORKSPACE/custom-code")" ]; then
