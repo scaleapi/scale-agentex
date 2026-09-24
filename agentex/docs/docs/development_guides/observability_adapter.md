@@ -99,11 +99,14 @@ Do not register those interceptors again on `Worker`. `get_meter` must return a
 meter from the adapter's provider, or `None`; it must not create a provider for
 each call.
 
-Temporal Core metrics keep their existing, separate exporter. `DD_AGENT_HOST`
-still selects the OTLP gRPC endpoint on port 4317 (or the explicit port), with
-Temporal's default export interval. Keep this endpoint reachable when enabling
-the adapter. Python metric providers do not replace Core's Rust metrics; do not
-add another Core exporter or runtime through the adapter.
+Temporal Core metrics keep their separate exporter and default interval. The
+worker prefers `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` over
+`OTEL_EXPORTER_OTLP_ENDPOINT`; HTTP appends `/v1/metrics` only to the base endpoint.
+Protocol precedence is `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL`, then
+`OTEL_EXPORTER_OTLP_PROTOCOL`, then `http/protobuf`. Set `grpc` for gRPC receivers.
+Without an OTel endpoint, `DD_AGENT_HOST` remains the gRPC fallback on port 4317
+(or its explicit port). Python metric providers do not replace Core's Rust
+metrics; do not add another Core exporter or runtime through the adapter.
 
 On SIGTERM, the worker stops polling, gives activities a ten-second grace
 period, then closes HTTP clients and dependencies before flushing the adapter

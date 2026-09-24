@@ -1,5 +1,19 @@
 import pytest
+from scripts.dev_nodocker.config import build_env
+from src.temporal import run_worker
 from src.temporal.run_worker import build_metrics_url
+
+
+@pytest.fixture(autouse=True)
+def clear_metrics_environment(monkeypatch):
+    for name in (
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_PROTOCOL",
+        "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
+        "DD_AGENT_HOST",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.mark.unit
@@ -40,3 +54,120 @@ def test_ipv6_literals_are_bracketed(host, expected):
 )
 def test_explicit_port_is_preserved(host, expected):
     assert build_metrics_url(host) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("base", "expected"),
+    [
+        ("http://collector:4318", "http://collector:4318/v1/metrics"),
+        ("https://collector/prefix/", "https://collector/prefix/v1/metrics"),
+        (" http://[::1]:4318/ ", "http://[::1]:4318/v1/metrics"),
+    ],
+)
+def test_otel_base_endpoint_enables_http_without_dd_host(monkeypatch, base, expected):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", base)
+    config = run_worker.build_metrics_config()
+    assert config.url == expected
+    assert config.http is True
+
+
+@pytest.mark.unit
+def test_metrics_endpoint_overrides_base_and_dd_host(monkeypatch):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://unused:4318")
+    monkeypatch.setenv(
+        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://collector/custom-metrics"
+    )
+    monkeypatch.setenv("DD_AGENT_HOST", "old-collector")
+    config = run_worker.build_metrics_config()
+    assert config.url == "http://collector/custom-metrics"
+    assert config.http is True
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("general", "specific", "expected_url", "http"),
+    [
+        ("grpc", "", "http://collector:4317", False),
+        ("grpc", "http/protobuf", "http://collector:4317/v1/metrics", True),
+        ("http/protobuf", " GRPC ", "http://collector:4317", False),
+        ("", "http", "http://collector:4317/v1/metrics", True),
+        (" ", " ", "http://collector:4317/v1/metrics", True),
+    ],
+)
+def test_otel_protocol_precedence(monkeypatch, general, specific, expected_url, http):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4317")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", general)
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_METRICS_PROTOCOL", specific)
+    config = run_worker.build_metrics_config()
+    assert config.url == expected_url
+    assert config.http is http
+
+
+@pytest.mark.unit
+def test_blank_metrics_endpoint_uses_base(monkeypatch):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", " ")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318")
+    assert run_worker.build_metrics_config().url == "http://collector:4318/v1/metrics"
+
+
+@pytest.mark.unit
+def test_dd_host_remains_grpc_fallback(monkeypatch):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", " ")
+    monkeypatch.setenv("DD_AGENT_HOST", "[::1]:5555")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+    config = run_worker.build_metrics_config()
+    assert config.url == "http://[::1]:5555"
+    assert config.http is False
+
+
+@pytest.mark.unit
+def test_no_metrics_exporter_without_any_endpoint():
+    assert run_worker.build_metrics_config() is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("otel_endpoint", ["http://localhost:4317", None])
+@pytest.mark.parametrize("inherited", [False, True])
+def test_local_runner_owns_metrics_settings(monkeypatch, otel_endpoint, inherited):
+    if inherited:
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://other:4318")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+        monkeypatch.setenv(
+            "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://other:4318/v1/metrics"
+        )
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_METRICS_PROTOCOL", "http/protobuf")
+    env = build_env(
+        database_url="postgresql://localhost/agentex",
+        redis_url="redis://localhost:6379",
+        mongo_uri=None,
+        temporal_address="localhost:7233",
+        otel_endpoint=otel_endpoint,
+    )
+    remaining_overrides = set(env) & {
+        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
+    }
+    assert not remaining_overrides
+    for name in (
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    config = run_worker.build_metrics_config()
+    if otel_endpoint:
+        assert config.url == otel_endpoint
+        assert config.http is False
+    else:
+        assert config is None
+
+
+@pytest.mark.unit
+def test_unsupported_otel_protocol_is_rejected(monkeypatch):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_METRICS_PROTOCOL", "http/json")
+    with pytest.raises(ValueError, match="Unsupported Temporal metrics protocol"):
+        run_worker.build_metrics_config()
