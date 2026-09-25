@@ -378,6 +378,12 @@ jobs:
               # Honour that policy rather than subvert it: accept their absence for this
               # commit specifically. Every other gate still applies -- nothing may be
               # failing, nothing may still be running, and a human must still approve.
+              #
+              # This does not give up all signal. Only `lint` and `build` carry the
+              # metadata clause; `test` does not, in either production repo, so it runs
+              # for real on these commits and still has to reach SUCCESS to clear the
+              # `failing`/`pending` gates above. If a target ever adds that clause to
+              # `test` as well, this exemption stops being narrow and should be revisited.
               metadata_tip=0
               [ "$(git -C "$d" log -1 --format=%B "$to_full")" = "codegen metadata" ] && metadata_tip=1
 
