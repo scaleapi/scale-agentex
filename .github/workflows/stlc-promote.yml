@@ -263,92 +263,113 @@ jobs:
             echo "::group::land $target"
             d="$WORK/$target"
 
-            # Decide the landing mode by ATTEMPTING the fast-forward, not by reading
-            # the production repo's protection.
+            # An in-flight promote pull request GOVERNS: its gates are checked BEFORE
+            # main is touched. Ordering is the whole safety property here. Attempting
+            # the push first looks equivalent and is not -- once CI goes green on the
+            # staged SHA the required-checks gate is satisfied and the App's bypass
+            # covers the pull-request requirement, so the push SUCCEEDS with the pull
+            # request still unapproved. That silently removes the human gate this mode
+            # exists to provide.
             #
-            # Reading it would be the obvious approach and is not available: the
-            # branch-protection endpoint needs Administration: read, and this App
-            # holds only contents/issues/metadata/pull_requests/workflows. Requesting
-            # a permission the App lacks makes the mint itself fail, and
-            # `rules/branches/main` does not surface classic protection at all -- it
-            # returns empty for a repo that demonstrably has required checks. A
-            # lookup that silently returned "no checks" would pick the fast-forward
-            # for exactly the trunk that cannot accept one.
-            #
-            # Attempting the push tests the real question rather than a proxy, needs
-            # no extra permission, and self-corrects if protection ever changes. A
-            # rejected push changes nothing.
-            if err=$(git -C "$d" -c credential.helper= push "$prod_url" staging/main:refs/heads/main 2>&1); then
-              pushed="$pushed $target"
-              planned=$(printf '%s' "$planned" | sed "s/ $target\b//")
-              echo "promoted ${from} -> ${to}"
-              echo "::endgroup::"; continue
-            fi
-
-            # Only ONE rejection means "use a pull request". Anything else is a real
-            # failure and must not be silently reinterpreted.
-            if ! printf '%s' "$err" | grep -qi "required status check"; then
-              echo "$err"
-              echo "::error title=Promote failed for ${target}::push to ${prod} main was rejected for a reason other than required status checks. See the log."
-              blocked="$blocked $target"
-              echo "::endgroup::"; continue
-            fi
-
-            echo "direct push refused by required status checks — using a pull request."
-
-            # --- PR mode ---
-            # Deliberately never merges the pull request. This repo allows squash only,
-            # and squash rewrites SHAs, which forks the production trunk from staging
-            # and blocks all codegen until a human reconciles it. Instead the same
-            # commits are staged on a branch so CI runs on those exact SHAs; once the
-            # checks are green the required-checks gate is satisfied FOR THAT SHA and
-            # the fast-forward above succeeds on the next run.
-            staged=$(git -C "$d" -c credential.helper= ls-remote "$prod_url" "refs/heads/$PROMOTE_BRANCH" | cut -f1)
-
-            if [ "$staged" != "$to_full" ]; then
-              git -C "$d" -c credential.helper= push --force "$prod_url" "staging/main:refs/heads/$PROMOTE_BRANCH"
-              if ! gh pr view "$PROMOTE_BRANCH" --repo "$prod" --json number >/dev/null 2>&1; then
-                body=$(printf '%s\n' \
-                  "Automated promote from the staging trunk, opened by stlc-promote.yml." \
-                  "" \
-                  "**Approve this pull request - do not click Merge.** Squash and rebase both rewrite SHAs, which forks the production trunk away from staging and blocks all codegen until someone reconciles them by hand. Merge commits are disabled on this repo." \
-                  "" \
-                  "Once CI is green here and this has one approval, re-run \`stlc-promote.yml\` in the config repo. It fast-forwards \`main\` to these exact commits, GitHub closes this pull request as merged, and the trunks stay byte-identical.")
-                gh pr create --repo "$prod" --base main --head "$PROMOTE_BRANCH" \
-                  --title "promote: staging ${to} to production" \
-                  --body "$body" >/dev/null
-              fi
-              pr=$(gh pr view "$PROMOTE_BRANCH" --repo "$prod" --json number --jq .number)
-              echo "staged ${to} on ${PROMOTE_BRANCH}; pull request #${pr} awaiting checks + approval"
-              waiting="$waiting ${target}(#${pr})"
-              echo "::endgroup::"; continue
-            fi
-
-            # Branch already matches staging, so the push above failed for a reason
-            # other than "no check runs yet" -- report what is still outstanding.
-            pr_json=$(gh pr view "$PROMOTE_BRANCH" --repo "$prod" --json number,reviewDecision,statusCheckRollup 2>/dev/null || echo '')
-            if [ -z "$pr_json" ]; then
-              echo "::error title=Promote blocked for ${target}::${PROMOTE_BRANCH} matches staging but has no open pull request. Delete the branch and re-run to recreate it."
+            # --state open matters: gh resolves a branch to its most recent pull
+            # request regardless of state, so after a previous promote this would find
+            # the CLOSED one, skip creating a new one, and then report progress against
+            # a pull request that can never merge.
+            # Fail CLOSED. `|| echo ''` here would turn a transient API error into
+            # "no pull request governs", and the fast-forward below would then land
+            # unapproved commits the moment the staged SHA's checks happened to be
+            # green -- the same gate-skipping this ordering exists to prevent.
+            if ! pr=$(gh pr list --repo "$prod" --head "$PROMOTE_BRANCH" --state open --json number --jq '.[0].number // empty'); then
+              echo "::error title=Promote blocked for ${target}::could not query pull requests on ${prod}; refusing to touch main without knowing whether one is in flight."
               blocked="$blocked $target"; echo "::endgroup::"; continue
             fi
-            pr=$(printf '%s' "$pr_json" | jq -r .number)
-            review=$(printf '%s' "$pr_json" | jq -r '.reviewDecision // "NONE"')
-            failing=$(printf '%s' "$pr_json" | jq -r '[.statusCheckRollup[]? | select((.conclusion // .state // "") | test("FAILURE|ERROR|CANCELLED"))] | length')
-            pending=$(printf '%s' "$pr_json" | jq -r '[.statusCheckRollup[]? | select(((.conclusion // "") == "") and ((.state // "") != "SUCCESS"))] | length')
+            staged=$(git -C "$d" -c credential.helper= ls-remote "$prod_url" "refs/heads/$PROMOTE_BRANCH" | cut -f1)
 
-            if [ "$failing" != "0" ]; then
-              echo "::error title=Promote blocked for ${target}::pull request #${pr} has ${failing} failing check(s). Fix them on the staging trunk, not here -- this branch is overwritten on every promote."
-              blocked="$blocked $target"
-            elif [ "$pending" != "0" ]; then
-              echo "checks still running on #${pr} (${pending} pending) — re-run once green."
-              waiting="$waiting ${target}(#${pr})"
-            elif [ "$review" != "APPROVED" ]; then
-              echo "#${pr} is green but not approved (reviewDecision=${review}) — approve it, then re-run."
-              waiting="$waiting ${target}(#${pr})"
-            else
-              echo "::error title=Promote blocked for ${target}::#${pr} is green and approved but the fast-forward was still refused. See the push error above."
-              blocked="$blocked $target"
+            if [ -n "$pr" ]; then
+              if [ "$staged" != "$to_full" ]; then
+                # Staging moved while this was in flight. The existing approval was
+                # given for different commits, and it would SURVIVE a force-push --
+                # this repo has dismiss_stale_reviews=false and
+                # require_last_push_approval=false. Reusing the pull request would let
+                # an approval of the old SHA authorise the new one, so close it and
+                # open a fresh one that carries no reviews.
+                gh pr close "$pr" --repo "$prod" --comment "Superseded: the staging trunk advanced to ${to} while this was open. Closing rather than force-pushing, because an approval here would otherwise carry over to commits nobody reviewed." >/dev/null || true
+                git -C "$d" -c credential.helper= push --force "$prod_url" "staging/main:refs/heads/$PROMOTE_BRANCH"
+                pr=""
+              else
+                review=$(gh pr view "$pr" --repo "$prod" --json reviewDecision --jq '.reviewDecision // "NONE"')
+                rollup=$(gh pr view "$pr" --repo "$prod" --json statusCheckRollup --jq '.statusCheckRollup')
+                failing=$(printf '%s' "$rollup" | jq -r '[.[]? | select((.conclusion // .state // "") | test("FAILURE|ERROR|CANCELLED"))] | length')
+                pending=$(printf '%s' "$rollup" | jq -r '[.[]? | select(((.conclusion // "") == "") and ((.state // "") != "SUCCESS"))] | length')
+
+                if [ "$failing" != "0" ]; then
+                  echo "::error title=Promote blocked for ${target}::pull request #${pr} has ${failing} failing check(s). Fix them on the staging trunk, not on this branch -- it is overwritten on every promote."
+                  blocked="$blocked $target"; echo "::endgroup::"; continue
+                fi
+                if [ "$pending" != "0" ]; then
+                  echo "#${pr}: ${pending} check(s) still running — re-run once green."
+                  waiting="$waiting ${target}(#${pr})"; echo "::endgroup::"; continue
+                fi
+                if [ "$review" != "APPROVED" ]; then
+                  echo "#${pr} is green but not approved (reviewDecision=${review}) — approve it, then re-run."
+                  waiting="$waiting ${target}(#${pr})"; echo "::endgroup::"; continue
+                fi
+
+                # Green AND approved. The required checks are satisfied for this exact
+                # SHA, so the fast-forward is accepted.
+                if ! err=$(git -C "$d" -c credential.helper= push "$prod_url" staging/main:refs/heads/main 2>&1); then
+                  echo "$err"
+                  echo "::error title=Promote failed for ${target}::#${pr} is green and approved but the fast-forward was refused."
+                  blocked="$blocked $target"; echo "::endgroup::"; continue
+                fi
+                pushed="$pushed $target"
+                planned=$(printf '%s' "$planned" | sed "s/ $target\b//")
+                echo "promoted ${from} -> ${to} via #${pr}"
+                git -C "$d" -c credential.helper= push "$prod_url" --delete "refs/heads/$PROMOTE_BRANCH" >/dev/null 2>&1 || echo "::warning::could not delete ${PROMOTE_BRANCH} on ${prod}"
+                echo "::endgroup::"; continue
+              fi
             fi
+
+            # No pull request governs this target. Decide the mode by ATTEMPTING the
+            # fast-forward rather than reading the production repo's protection: that
+            # endpoint needs Administration: read, which this App does not hold, and a
+            # silently-failed lookup would pick the fast-forward for exactly the trunk
+            # that cannot accept one. A rejected push changes nothing.
+            if [ -z "$pr" ] && [ "$staged" != "$to_full" ]; then
+              if err=$(git -C "$d" -c credential.helper= push "$prod_url" staging/main:refs/heads/main 2>&1); then
+                pushed="$pushed $target"
+                planned=$(printf '%s' "$planned" | sed "s/ $target\b//")
+                echo "promoted ${from} -> ${to}"
+                [ -n "$staged" ] && git -C "$d" -c credential.helper= push "$prod_url" --delete "refs/heads/$PROMOTE_BRANCH" >/dev/null 2>&1 || true
+                echo "::endgroup::"; continue
+              fi
+
+              # Only this one rejection means "use a pull request". Anything else is a
+              # real failure and must not be silently reinterpreted.
+              if ! printf '%s' "$err" | grep -qi "required status check"; then
+                echo "$err"
+                echo "::error title=Promote failed for ${target}::push to ${prod} main was rejected for a reason other than required status checks."
+                blocked="$blocked $target"; echo "::endgroup::"; continue
+              fi
+              echo "direct push refused by required status checks — staging a pull request."
+              git -C "$d" -c credential.helper= push --force "$prod_url" "staging/main:refs/heads/$PROMOTE_BRANCH"
+            fi
+
+            # Open a pull request for the staged commits. Never merged by this
+            # workflow: this repo allows squash only, and squash rewrites SHAs, which
+            # forks the production trunk from staging and blocks all codegen.
+            body=$(printf '%s\n' \
+              "Automated promote from the staging trunk, opened by stlc-promote.yml." \
+              "" \
+              "**Approve this pull request - do not click Merge.** Squash and rebase both rewrite SHAs, which forks the production trunk away from staging and blocks all codegen until someone reconciles them by hand. Merge commits are disabled on this repo." \
+              "" \
+              "Once CI is green here and this has one approval, re-run \`stlc-promote.yml\` in the config repo. It fast-forwards \`main\` to these exact commits, GitHub closes this pull request as merged, and the trunks stay byte-identical.")
+            gh pr create --repo "$prod" --base main --head "$PROMOTE_BRANCH" \
+              --title "promote: staging ${to} to production" \
+              --body "$body" >/dev/null
+            pr=$(gh pr list --repo "$prod" --head "$PROMOTE_BRANCH" --state open --json number --jq '.[0].number')
+            echo "staged ${to} on ${PROMOTE_BRANCH}; pull request #${pr} awaiting checks + approval"
+            waiting="$waiting ${target}(#${pr})"
             echo "::endgroup::"
           done < "$PLAN"
 
