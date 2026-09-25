@@ -105,7 +105,7 @@ jobs:
 
           WORK=$(mktemp -d)
           PLAN="$WORK/plan.tsv"; : > "$PLAN"
-          pushed=""; planned=""; insync=""; forked=""; waiting=""
+          pushed=""; planned=""; insync=""; forked=""; waiting=""; blocked=""
 
           # The summary must survive an unexpected failure. Under `set -e` a fetch or
           # push error exits the script, and without this trap the operator is pointed
@@ -128,6 +128,7 @@ jobs:
                 [ -n "$waiting" ] && echo "- awaiting checks + approval:$waiting — approve the pull request, then re-run this workflow" || true
                 [ -n "$insync" ] && echo "- already in sync:$insync" || true
                 [ -n "$forked" ] && echo "- **blocked (forked trunk):**$forked" || true
+                [ -n "$blocked" ] && echo "- **blocked:**$blocked" || true
                 # Only worth shouting about when production was partially written --
                 # a validation failure with nothing pushed is already self-evident
                 # from the error annotation.
@@ -225,22 +226,9 @@ jobs:
             to=$(git -C "$d" rev-parse --short staging/main)
             to_full=$(git -C "$d" rev-parse staging/main)
 
-            # Pick the landing mode from the production repo's own protection rather
-            # than from config. A branch with required status checks CANNOT accept a
-            # direct push of fresh commits -- they have no check runs, so the push is
-            # refused with "N of N required status checks are expected". No bypass
-            # covers that; bypass_pull_request_allowances only exempts the
-            # pull-request requirement. Deriving the mode here means the workflow
-            # self-corrects if those checks are ever added or removed.
-            if gh api "repos/${prod}/branches/main/protection" --jq '.required_status_checks.contexts | length' 2>/dev/null | grep -qvx 0; then
-              mode=pr
-            else
-              mode=ff
-            fi
-
-            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$target" "$mode" "$prod_url" "$prod" "$from" "$to" "$to_full" >> "$PLAN"
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$target" "$prod_url" "$prod" "$from" "$to" "$to_full" >> "$PLAN"
             planned="$planned $target"
-            echo "ready (${mode}): ${prod} main ${from} -> ${to}"
+            echo "ready: ${prod} main ${from} -> ${to}"
             echo "::endgroup::"
           done < "$WORK/configured.tsv"
 
@@ -271,25 +259,53 @@ jobs:
           # SHAs, and fast-forward main only once the checks are green and a human
           # has approved. Same commits either way -- the trunks stay byte-identical,
           # which a squash or rebase merge would destroy.
-          while IFS=$'\t' read -r target mode prod_url prod from to to_full; do
-            echo "::group::land $target ($mode)"
+          while IFS=$'\t' read -r target prod_url prod from to to_full; do
+            echo "::group::land $target"
             d="$WORK/$target"
 
-            if [ "$mode" = "ff" ]; then
-              git -C "$d" -c credential.helper= push "$prod_url" staging/main:refs/heads/main
+            # Decide the landing mode by ATTEMPTING the fast-forward, not by reading
+            # the production repo's protection.
+            #
+            # Reading it would be the obvious approach and is not available: the
+            # branch-protection endpoint needs Administration: read, and this App
+            # holds only contents/issues/metadata/pull_requests/workflows. Requesting
+            # a permission the App lacks makes the mint itself fail, and
+            # `rules/branches/main` does not surface classic protection at all -- it
+            # returns empty for a repo that demonstrably has required checks. A
+            # lookup that silently returned "no checks" would pick the fast-forward
+            # for exactly the trunk that cannot accept one.
+            #
+            # Attempting the push tests the real question rather than a proxy, needs
+            # no extra permission, and self-corrects if protection ever changes. A
+            # rejected push changes nothing.
+            if err=$(git -C "$d" -c credential.helper= push "$prod_url" staging/main:refs/heads/main 2>&1); then
               pushed="$pushed $target"
               planned=$(printf '%s' "$planned" | sed "s/ $target\b//")
               echo "promoted ${from} -> ${to}"
               echo "::endgroup::"; continue
             fi
 
+            # Only ONE rejection means "use a pull request". Anything else is a real
+            # failure and must not be silently reinterpreted.
+            if ! printf '%s' "$err" | grep -qi "required status check"; then
+              echo "$err"
+              echo "::error title=Promote failed for ${target}::push to ${prod} main was rejected for a reason other than required status checks. See the log."
+              blocked="$blocked $target"
+              echo "::endgroup::"; continue
+            fi
+
+            echo "direct push refused by required status checks — using a pull request."
+
             # --- PR mode ---
+            # Deliberately never merges the pull request. This repo allows squash only,
+            # and squash rewrites SHAs, which forks the production trunk from staging
+            # and blocks all codegen until a human reconciles it. Instead the same
+            # commits are staged on a branch so CI runs on those exact SHAs; once the
+            # checks are green the required-checks gate is satisfied FOR THAT SHA and
+            # the fast-forward above succeeds on the next run.
             staged=$(git -C "$d" -c credential.helper= ls-remote "$prod_url" "refs/heads/$PROMOTE_BRANCH" | cut -f1)
 
             if [ "$staged" != "$to_full" ]; then
-              # Stage (or restage) the promote branch and make sure a pull request
-              # exists for it. Force-push: the branch is disposable and must track
-              # whatever staging currently is.
               git -C "$d" -c credential.helper= push --force "$prod_url" "staging/main:refs/heads/$PROMOTE_BRANCH"
               if ! gh pr view "$PROMOTE_BRANCH" --repo "$prod" --json number >/dev/null 2>&1; then
                 body=$(printf '%s\n' \
@@ -308,37 +324,31 @@ jobs:
               echo "::endgroup::"; continue
             fi
 
-            # Branch already matches staging. Check the gates.
+            # Branch already matches staging, so the push above failed for a reason
+            # other than "no check runs yet" -- report what is still outstanding.
             pr_json=$(gh pr view "$PROMOTE_BRANCH" --repo "$prod" --json number,reviewDecision,statusCheckRollup 2>/dev/null || echo '')
             if [ -z "$pr_json" ]; then
-              echo "::error title=Promote blocked for ${target}::${PROMOTE_BRANCH} matches staging but has no open pull request. Re-run to recreate it."
+              echo "::error title=Promote blocked for ${target}::${PROMOTE_BRANCH} matches staging but has no open pull request. Delete the branch and re-run to recreate it."
               blocked="$blocked $target"; echo "::endgroup::"; continue
             fi
             pr=$(printf '%s' "$pr_json" | jq -r .number)
             review=$(printf '%s' "$pr_json" | jq -r '.reviewDecision // "NONE"')
             failing=$(printf '%s' "$pr_json" | jq -r '[.statusCheckRollup[]? | select((.conclusion // .state // "") | test("FAILURE|ERROR|CANCELLED"))] | length')
-            pending=$(printf '%s' "$pr_json" | jq -r '[.statusCheckRollup[]? | select((.conclusion // .state // "") == "" or (.state // "") == "PENDING")] | length')
+            pending=$(printf '%s' "$pr_json" | jq -r '[.statusCheckRollup[]? | select(((.conclusion // "") == "") and ((.state // "") != "SUCCESS"))] | length')
 
             if [ "$failing" != "0" ]; then
               echo "::error title=Promote blocked for ${target}::pull request #${pr} has ${failing} failing check(s). Fix them on the staging trunk, not here -- this branch is overwritten on every promote."
-              blocked="$blocked $target"; echo "::endgroup::"; continue
-            fi
-            if [ "$pending" != "0" ]; then
+              blocked="$blocked $target"
+            elif [ "$pending" != "0" ]; then
               echo "checks still running on #${pr} (${pending} pending) — re-run once green."
-              waiting="$waiting ${target}(#${pr})"; echo "::endgroup::"; continue
-            fi
-            if [ "$review" != "APPROVED" ]; then
+              waiting="$waiting ${target}(#${pr})"
+            elif [ "$review" != "APPROVED" ]; then
               echo "#${pr} is green but not approved (reviewDecision=${review}) — approve it, then re-run."
-              waiting="$waiting ${target}(#${pr})"; echo "::endgroup::"; continue
+              waiting="$waiting ${target}(#${pr})"
+            else
+              echo "::error title=Promote blocked for ${target}::#${pr} is green and approved but the fast-forward was still refused. See the push error above."
+              blocked="$blocked $target"
             fi
-
-            # Green and approved. The required checks are satisfied FOR THIS SHA, so
-            # the fast-forward is now accepted.
-            git -C "$d" -c credential.helper= push "$prod_url" "staging/main:refs/heads/main"
-            pushed="$pushed $target"
-            planned=$(printf '%s' "$planned" | sed "s/ $target\b//")
-            echo "promoted ${from} -> ${to} via #${pr}"
-            git -C "$d" -c credential.helper= push "$prod_url" --delete "refs/heads/$PROMOTE_BRANCH" || echo "::warning::could not delete ${PROMOTE_BRANCH} on ${prod}"
             echo "::endgroup::"
           done < "$PLAN"
 
