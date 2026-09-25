@@ -162,10 +162,21 @@ jobs:
             git -C "$d" -c credential.helper= fetch -q "$staging_url" main:refs/remotes/staging/main
             git -C "$d" -c credential.helper= fetch -q "$prod_url" main:refs/remotes/prod/main
 
-            merged=$(git -C "$d" merge-tree --write-tree staging/main prod/main) || merged=conflict
-            staging_tree=$(git -C "$d" rev-parse 'staging/main^{tree}')
-            if [ "$merged" = "$staging_tree" ]; then
-              echo "staging already has production's content."
+            # Test ANCESTRY, not content. This is deliberately the same predicate the
+            # codegen hold uses, because keeping it true is the entire job here.
+            #
+            # An earlier version skipped when the trees matched. That is not the same
+            # question: identical content does NOT imply shared lineage -- a rebase,
+            # a cherry-pick or a hand-applied release produces the same tree from a
+            # different commit. In that state the content check reported "already
+            # current" on every scheduled run while the hold blocked codegen forever,
+            # with nothing failing and nothing alerting. Reproduced before fixing.
+            #
+            # Ancestry is also the stronger test: if production IS an ancestor of
+            # staging then merging it changes nothing, so the content check adds no
+            # information the ancestry check does not already give.
+            if git -C "$d" merge-base --is-ancestor prod/main staging/main; then
+              echo "staging already contains production's history."
               current="$current $target"
               echo "::endgroup::"; continue
             fi
@@ -173,7 +184,13 @@ jobs:
             # Fast-forward only. A forked trunk needs a MERGE in the staging repo, by a
             # human; rebase and cherry-pick rewrite SHAs and leave this failing forever.
             if ! git -C "$d" merge-base --is-ancestor staging/main prod/main; then
-              echo "::error title=Back-sync blocked for ${target}::staging main is not an ancestor of production/main. The trunks have forked; merge production into staging by hand (never rebase) and re-run."
+              # Call out the confusing shape explicitly: when the trees already match,
+              # every surface looks healthy and only the hold disagrees.
+              same_tree=""
+              if [ "$(git -C "$d" rev-parse 'staging/main^{tree}')" = "$(git -C "$d" rev-parse 'prod/main^{tree}')" ]; then
+                same_tree=" NOTE: the two trunks have IDENTICAL content but divergent history, so nothing looks wrong except that codegen stays held. This is what a rebase or cherry-pick of a release commit produces."
+              fi
+              echo "::error title=Back-sync blocked for ${target}::staging main is not an ancestor of production/main. The trunks have forked; merge production into staging by hand (never rebase) and re-run.${same_tree}"
               forked="$forked $target"
               echo "::endgroup::"; continue
             fi

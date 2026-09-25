@@ -184,6 +184,16 @@ jobs:
             prod_tree=$(git -C "$d" rev-parse 'prod/main^{tree}')
             if [ "$merged" = "$prod_tree" ]; then
               echo "production already has staging's content."
+              # Content is the right question for "is there anything to promote?", but
+              # it is not the question the codegen hold asks. The hold needs production
+              # to be an ANCESTOR of staging, and identical trees do not imply that --
+              # a rebase or cherry-picked release gives the same content from different
+              # commits. Promote cannot repair that (a fast-forward is impossible once
+              # the trunks fork); the back-sync owns the repair. But say so, because
+              # otherwise every surface reports healthy while codegen stays held.
+              if ! git -C "$d" merge-base --is-ancestor prod/main staging/main; then
+                echo "::warning title=Forked trunk for ${target}::nothing to promote, but production/main is not an ancestor of staging main, so the codegen hold is blocking builds for this target. Identical content, divergent history. Merge production into staging (never rebase) to clear it."
+              fi
               insync="$insync $target"
               echo "::endgroup::"; continue
             fi
