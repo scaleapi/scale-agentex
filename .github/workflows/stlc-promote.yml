@@ -100,6 +100,17 @@ jobs:
           # Fixed name so the pull request is reusable across runs rather than
           # accumulating one per promote. Force-pushed each time; it is disposable.
           PROMOTE_BRANCH: stlc/promote
+          # Checks that must have reported an actual SUCCESS on the staged commits
+          # before main is fast-forwarded. Naming them is the gate. "Nothing failed and
+          # nothing is pending" is also true of a pull request no check has reported on
+          # yet, and true of one where only third-party scanners passed while the test
+          # suite never ran -- neither is evidence the commits are good.
+          #
+          # These are the ci.yml job names both production repos share. Each must be a
+          # job whose check run reaches SUCCESS; a job that is SKIPPED does not count. A
+          # target whose CI names its jobs differently has to be added here, or its
+          # promote waits forever with "missing a SUCCESS from".
+          PROMOTE_REQUIRED_CHECKS: lint build test
           GIT_TERMINAL_PROMPT: '0'
         run: |
           set -euo pipefail
@@ -251,35 +262,32 @@ jobs:
             exit 0
           fi
 
+          # Fail closed rather than letting "green" degrade to "no requirements".
+          if [ -z "$(printf '%s' "$PROMOTE_REQUIRED_CHECKS" | tr -d '[:space:]')" ]; then
+            echo "::error title=Promote aborted::PROMOTE_REQUIRED_CHECKS is empty; refusing to promote without naming a check that must pass."
+            exit 1
+          fi
+
           # PASS 2 -- land. Every selected target has already passed its checks.
           #
-          # Two modes, because the production repos differ. A trunk with no required
-          # status checks takes the fast-forward directly. A trunk that HAS them
-          # cannot: fresh commits carry no check runs, so the push is refused. For
-          # those, stage the exact same commits on a branch, let CI run on those
-          # SHAs, and fast-forward main only once the checks are green and a human
-          # has approved. Same commits either way -- the trunks stay byte-identical,
-          # which a squash or rebase merge would destroy.
+          # EVERY promote goes through a reviewed pull request opened on the production
+          # repo. That is the default and the only path -- not a fallback discovered by a
+          # failed push. Promotion publishes to repos that ship packages to PyPI and npm,
+          # so it deserves a human look regardless of what branch protection happens to
+          # require. Deriving the mode from protection made the review gate an accident of
+          # configuration: remove a required check and promotes would silently start
+          # landing unreviewed.
+          #
+          # The pull request is never MERGED by this workflow. These repos allow squash
+          # only, and squash rewrites SHAs, which forks the production trunk from staging
+          # and blocks all codegen until a human reconciles it. Instead the same commits
+          # are staged on a branch, CI runs on those exact SHAs, and once green and
+          # approved main is FAST-FORWARDED onto them. GitHub then closes the pull request
+          # as merged and the trunks stay byte-identical.
           while IFS=$'\t' read -r target prod_url prod from to to_full; do
             echo "::group::land $target"
             d="$WORK/$target"
 
-            # EVERY promote goes through a reviewed pull request. This is the default
-            # and the only path -- not a fallback discovered by a failed push.
-            #
-            # Promotion publishes to repos that ship packages to PyPI and npm, so it
-            # is a change that deserves a human look regardless of what branch
-            # protection happens to require. Deriving the mode from protection made
-            # the review gate an accident of configuration: remove a required check
-            # and promotes would silently start landing unreviewed.
-            #
-            # The pull request is never MERGED by this workflow. These repos allow
-            # squash only, and squash rewrites SHAs, which forks the production trunk
-            # from staging and blocks all codegen until a human reconciles it. Instead
-            # the same commits are staged on a branch, CI runs on those exact SHAs, and
-            # once green and approved main is FAST-FORWARDED onto them. GitHub then
-            # closes the pull request as merged and the trunks stay byte-identical.
-            #
             # Fail closed on a lookup error: reading it as "no pull request" would let
             # the fast-forward below land unapproved commits.
             if ! pr=$(gh pr list --repo "$prod" --head "$PROMOTE_BRANCH" --state open --json number --jq '.[0].number // empty'); then
@@ -290,18 +298,113 @@ jobs:
 
             # --- an open pull request whose head matches staging: check the gates ---
             if [ -n "$pr" ] && [ "$staged" = "$to_full" ]; then
-              review=$(gh pr view "$pr" --repo "$prod" --json reviewDecision --jq '.reviewDecision // "NONE"')
-              rollup=$(gh pr view "$pr" --repo "$prod" --json statusCheckRollup --jq '.statusCheckRollup')
-              failing=$(printf '%s' "$rollup" | jq -r '[.[]? | select((.conclusion // .state // "") | test("FAILURE|ERROR|CANCELLED"))] | length')
-              pending=$(printf '%s' "$rollup" | jq -r '[.[]? | select(((.conclusion // "") == "") and ((.state // "") != "SUCCESS"))] | length')
-
-              if [ "$failing" != "0" ]; then
-                echo "::error title=Promote blocked for ${target}::pull request #${pr} has ${failing} failing check(s). Fix them on the staging trunk, not on this branch -- it is overwritten on every promote."
+              if ! review=$(gh pr view "$pr" --repo "$prod" --json reviewDecision --jq '.reviewDecision // "NONE"'); then
+                echo "::error title=Promote blocked for ${target}::could not read the review state of #${pr} on ${prod}."
                 blocked="$blocked $target"; echo "::endgroup::"; continue
               fi
-              if [ "$pending" != "0" ]; then
-                echo "#${pr}: ${pending} check(s) still running — re-run once green."
+
+              # GitHub keeps EVERY check run ever created for a SHA, so the rollup is not
+              # "the current state of CI" -- a check that failed and was later re-run to
+              # green still contributes its original FAILURE, forever. Collapse it to one
+              # entry per check name, and call a name pending if any of its runs is still
+              # going. Without this collapse the `target-main` label applied below could
+              # never clear validate-pr-base's first failing run, and the promote would
+              # stay blocked for the life of the SHA.
+              #
+              # Collapsing by "newest wins" alone is NOT safe here. ci.yml skips lint,
+              # build and test on a non-fork pull_request event, so each name carries a
+              # SKIPPED placeholder alongside the real result from the push to
+              # $PROMOTE_BRANCH -- and those placeholders have incoherent timestamps
+              # (observed live: a SKIPPED `build` whose completedAt precedes its own
+              # startedAt, and whose startedAt is later than the real run's). Sorting on
+              # them can elect the placeholder and discard the only run that executed.
+              # So prefer an entry that actually concluded pass or fail, and fall back to
+              # the skipped ones only when nothing real ran.
+              if ! rollup=$(gh pr view "$pr" --repo "$prod" --json statusCheckRollup); then
+                echo "::error title=Promote blocked for ${target}::could not read the checks of #${pr} on ${prod}."
+                blocked="$blocked $target"; echo "::endgroup::"; continue
+              fi
+              if ! checks=$(printf '%s' "$rollup" | jq -r --arg req "$PROMOTE_REQUIRED_CHECKS" '
+                    def key: (.name // .context // "?");
+                    def stamp: (.completedAt // .startedAt // .createdAt // "");
+                    def running:
+                      if (.status // null) != null then ((.status | ascii_upcase) != "COMPLETED")
+                      else (((.state // "") | ascii_upcase) | . == "PENDING" or . == "EXPECTED") end;
+                    def outcome:
+                      ((.conclusion // .state // "") | ascii_upcase) as $c
+                      | if ($c == "FAILURE" or $c == "ERROR" or $c == "CANCELLED" or $c == "TIMED_OUT"
+                             or $c == "ACTION_REQUIRED" or $c == "STARTUP_FAILURE") then "fail"
+                        elif $c == "SUCCESS" then "pass"
+                        else "skip" end;
+                    ( $req | split(" ") | map(select(length > 0)) ) as $required
+                    | [ .statusCheckRollup[]? | {k: key, r: running, o: outcome, t: stamp} ]
+                    | group_by(.k)
+                    | map( . as $g
+                           | ($g | map(select(.r | not))) as $done
+                           | ($done | map(select(.o != "skip"))) as $real
+                           | { name: $g[0].k,
+                               running: ($g | map(.r) | any),
+                               outcome: ( (if ($real | length) > 0 then $real else $done end)
+                                          | sort_by(.t) | last | .o // "skip") } )
+                    | . as $checks
+                    | [ ([ $checks[] | select(.running | not) | select(.outcome == "fail") | .name ] | join(", ")),
+                        ([ $checks[] | select(.running) | .name ] | join(", ")),
+                        ([ $required[] | select( . as $n
+                             | ([ $checks[] | select(.name == $n and (.running | not) and .outcome == "pass") ] | length) == 0 ) ] | join(", ")),
+                        ($checks | length | tostring) ]
+                    | join("\u001f")'); then
+                echo "::error title=Promote blocked for ${target}::could not classify the checks of #${pr} on ${prod}."
+                blocked="$blocked $target"; echo "::endgroup::"; continue
+              fi
+              # Split on US (0x1f), not tab. Tab is an IFS *whitespace* character, so
+              # `read` collapses runs of it and drops leading empties -- an all-green
+              # "\t\tlint" would land the third field in the first variable and report
+              # passing checks as failing ones. US is not IFS whitespace and cannot occur
+              # in a check name, so empty fields survive in position.
+              case "$checks" in
+                *$'\037'*$'\037'*$'\037'*) ;;
+                *) echo "::error title=Promote blocked for ${target}::unreadable check summary for #${pr} on ${prod}."
+                   blocked="$blocked $target"; echo "::endgroup::"; continue ;;
+              esac
+              IFS=$'\037' read -r failing pending unmet total <<< "$checks"
+
+              # ci.yml in both production repos declines to run lint, build and test on a
+              # tracking-only "codegen metadata" commit -- its job-level `if:` excludes
+              # exactly that message on push events, and the pull_request event skips them
+              # for any non-fork branch. Roughly half of every staging trunk's commits are
+              # these, so requiring those checks on one would stall the promote forever
+              # waiting for a signal the repo is configured never to emit.
+              #
+              # Honour that policy rather than subvert it: accept their absence for this
+              # commit specifically. Every other gate still applies -- nothing may be
+              # failing, nothing may still be running, and a human must still approve.
+              metadata_tip=0
+              [ "$(git -C "$d" log -1 --format=%B "$to_full")" = "codegen metadata" ] && metadata_tip=1
+
+              if [ -n "$failing" ]; then
+                echo "::error title=Promote blocked for ${target}::#${pr} has failing check(s): ${failing}. Fix them on the staging trunk, not on this branch -- it is overwritten on every promote."
+                blocked="$blocked $target"; echo "::endgroup::"; continue
+              fi
+              if [ -n "$pending" ]; then
+                echo "#${pr}: check(s) still running (${pending}) — re-run once green."
                 waiting="$waiting ${target}(#${pr})"; echo "::endgroup::"; continue
+              fi
+              # A rollup with nothing in it at all is not "still early" -- both production
+              # repos run ci.yml on a push to any branch, so it means Actions never ran on
+              # these commits. Say so distinctly instead of letting it look like a wait
+              # that a re-run will clear.
+              if [ "${total:-0}" -eq 0 ] && [ "$metadata_tip" != "1" ]; then
+                echo "::error title=Promote blocked for ${target}::no check runs reported at all on ${to} in ${prod}. Actions may be disabled there, or ${PROMOTE_BRANCH} may be excluded from ci.yml's push trigger."
+                blocked="$blocked $target"; echo "::endgroup::"; continue
+              fi
+              # The positive gate. Everything above only proves the absence of bad news,
+              # which a truncated or unexpected rollup satisfies trivially.
+              if [ -n "$unmet" ] && [ "$metadata_tip" != "1" ]; then
+                echo "::warning title=Required checks have not passed for ${target}::#${pr} has no SUCCESS from: ${unmet}. If this persists, CI is not running on ${PROMOTE_BRANCH} in ${prod}, or that repo names these jobs differently — see PROMOTE_REQUIRED_CHECKS."
+                waiting="$waiting ${target}(#${pr})"; echo "::endgroup::"; continue
+              fi
+              if [ "$metadata_tip" = "1" ] && { [ -n "$unmet" ] || [ "${total:-0}" -eq 0 ]; }; then
+                echo "::warning title=Required checks skipped by design for ${target}::${to} is a tracking-only \"codegen metadata\" commit, which ci.yml declines to run, so ${unmet:-the required checks} never reported. Proceeding on the remaining checks and the approval."
               fi
               if [ "$review" != "APPROVED" ]; then
                 echo "#${pr} is green but not approved (reviewDecision=${review}) — approve it, then re-run."
@@ -324,9 +427,25 @@ jobs:
             if [ -n "$pr" ]; then
               # Approvals survive a force-push here (dismiss_stale_reviews=false,
               # require_last_push_approval=false), so restaging onto the existing pull
-              # request would let an approval of the old commits authorise new ones
-              # nobody reviewed. Close it; a fresh pull request carries no reviews.
-              gh pr close "$pr" --repo "$prod" --comment "Superseded: the staging trunk advanced to ${to} while this was open. Closing rather than force-pushing, because an approval here would otherwise carry over to commits nobody reviewed." >/dev/null || true
+              # request would let an approval of the old commits authorise new ones nobody
+              # reviewed. Close it; a fresh pull request carries no reviews.
+              #
+              # This must fail CLOSED. If the close were swallowed and the branch
+              # force-pushed anyway, the still-open pull request would silently acquire the
+              # new head while keeping the old approval -- and the gate above would read
+              # that on the next run as "approved" and fast-forward production onto commits
+              # nobody has looked at.
+              if ! gh pr close "$pr" --repo "$prod" --comment "Superseded: the staging trunk advanced to ${to} while this was open. Closing rather than force-pushing, because an approval here would otherwise carry over to commits nobody reviewed." >/dev/null; then
+                echo "::error title=Promote blocked for ${target}::could not close superseded pull request #${pr} on ${prod}; refusing to force-push ${PROMOTE_BRANCH} while it is still open."
+                blocked="$blocked $target"; echo "::endgroup::"; continue
+              fi
+              # Confirm rather than trust: a zero exit is not proof, and everything below
+              # assumes no open pull request governs this branch.
+              state=$(gh pr view "$pr" --repo "$prod" --json state --jq '.state // empty') || state=""
+              if [ "$state" != "CLOSED" ]; then
+                echo "::error title=Promote blocked for ${target}::#${pr} on ${prod} still reports state '${state:-unknown}' after the close; refusing to force-push ${PROMOTE_BRANCH}."
+                blocked="$blocked $target"; echo "::endgroup::"; continue
+              fi
             fi
 
             # --- stage the commits and open a pull request for them ---
@@ -337,10 +456,31 @@ jobs:
               "**Approve this pull request - do not click Merge.** Squash and rebase both rewrite SHAs, which forks the production trunk away from staging and blocks all codegen until someone reconciles them by hand. Merge commits are disabled on this repo." \
               "" \
               "Once CI is green here and this has one approval, re-run \`stlc-promote.yml\` in the config repo. It fast-forwards \`main\` onto these exact commits, GitHub closes this pull request as merged, and the trunks stay byte-identical.")
-            gh pr create --repo "$prod" --base main --head "$PROMOTE_BRANCH" \
-              --title "promote: staging ${to} to production" \
-              --body "$body" >/dev/null
-            pr=$(gh pr list --repo "$prod" --head "$PROMOTE_BRANCH" --state open --json number --jq '.[0].number')
+
+            # The `chore:` prefix and the `target-main` label are load-bearing, not
+            # decoration. Both production repos run a lint-pr workflow that fails any pull
+            # request whose title is not a Conventional Commit, and any pull request
+            # targeting main that is neither from an allow-listed bot nor labelled
+            # `target-main`. This App is on neither allow-list, so without both of these
+            # every promote pull request would carry two failing checks by construction and
+            # the gate above would never open for either target.
+            if ! gh pr create --repo "$prod" --base main --head "$PROMOTE_BRANCH" \
+                 --title "chore: promote staging ${to} to production" \
+                 --label target-main \
+                 --body "$body" >/dev/null; then
+              echo "::error title=Promote blocked for ${target}::could not open the promote pull request on ${prod}. ${PROMOTE_BRANCH} now holds ${to}; re-running will retry."
+              blocked="$blocked $target"; echo "::endgroup::"; continue
+            fi
+            if ! pr=$(gh pr list --repo "$prod" --head "$PROMOTE_BRANCH" --state open --json number --jq '.[0].number // empty') || [ -z "$pr" ]; then
+              echo "::error title=Promote blocked for ${target}::opened a promote pull request on ${prod} but could not read its number back."
+              blocked="$blocked $target"; echo "::endgroup::"; continue
+            fi
+            # gh may apply labels in a follow-up call, in which case the `opened` event
+            # fires before the label lands and validate-pr-base fails once. Re-assert it:
+            # the check re-runs on `labeled`, and the gate above reads the newest result
+            # per check name, so the superseded failure does not latch.
+            gh pr edit "$pr" --repo "$prod" --add-label target-main >/dev/null 2>&1 \
+              || echo "::warning title=Could not label #${pr} on ${prod}::add 'target-main' by hand, or its validate-pr-base check will keep this promote blocked."
             echo "staged ${to} on ${PROMOTE_BRANCH}; pull request #${pr} awaiting checks + approval"
             waiting="$waiting ${target}(#${pr})"
             echo "::endgroup::"
