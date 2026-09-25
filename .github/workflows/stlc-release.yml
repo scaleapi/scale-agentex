@@ -1,0 +1,167 @@
+name: Release SDKs
+
+# Runs release-please against the PRODUCTION SDK repos to open release pull
+# requests and, once they merge, create the tag + GitHub Release that
+# publish-pypi.yml / publish-npm.yml trigger on. That last hop is the one the
+# Stainless SaaS used to perform; since it went read-only, every release has
+# been cut by hand.
+#
+# Runs from the config repo rather than inside each production repo, which is
+# where stlc's generated release-please.yml would put it. Two reasons:
+#
+#   1. A workflow can only read secrets from the repo it runs in, so the
+#      generated layout needs the App's private key in both production repos --
+#      and scale-agentex-python is PUBLIC.
+#   2. release-please does not need to run where the commits are. It operates
+#      entirely over the API: `--repo-url` names the target and the config and
+#      manifest are read from that repo. This repo's own release-please.yml
+#      proves it -- it has no checkout step.
+#
+# Uses the CLI rather than googleapis/release-please-action because
+# scale-agentex-typescript sets `allowed_actions: selected` and does not permit
+# that action. The CLI needs only actions/-owned steps, which are always allowed.
+on:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Comma-separated targets to release, or "all"'
+        required: false
+        default: all
+      dry_run:
+        description: 'Report what release-please would do without writing'
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: stlc-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ${{ vars.STLC_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout config repo
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Resolve production repos from the workspace config
+        id: repos
+        working-directory: stainless
+        run: |
+          set -euo pipefail
+          all=$(yq -r '.targets | to_entries[] | .value.production_repo | select(. != null and . != "null")' stainless.yml | sort -u)
+          if foreign=$(printf '%s\n' "$all" | grep -v '^scaleapi/' || true); [ -n "$foreign" ]; then
+            echo "::error title=Unsupported target repo::production repos outside the scaleapi org cannot share this token:%0A${foreign}"
+            exit 1
+          fi
+          echo "list=$(printf '%s\n' "$all" | sed 's#^scaleapi/##' | paste -sd, -)" >> "$GITHUB_OUTPUT"
+
+      - name: Mint release token
+        # `issues: write` is not optional and is easy to miss: release-please drives
+        # its autorelease:pending -> autorelease:tagged labels through the Issues API,
+        # and without it you get duplicate release pull requests.
+        #
+        # Deliberately NOT GITHUB_TOKEN: releases created by GITHUB_TOKEN do not
+        # trigger other workflows, so publish-pypi.yml / publish-npm.yml would never
+        # fire and the release would stop one step short of the registry.
+        id: release-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AGENTEX_SDK_SYNC_APP_ID }}
+          private-key: ${{ secrets.AGENTEX_SDK_SYNC_PRIVATE_KEY }}
+          owner: scaleapi
+          repositories: ${{ steps.repos.outputs.list }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+          permission-metadata: read
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run release-please per target
+        working-directory: stainless
+        env:
+          RP_TOKEN: ${{ steps.release-token.outputs.token }}
+          TARGETS: ${{ inputs.targets }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          released=""; skipped=""
+          summary_done=0
+          finish() {
+            rc=$?
+            if [ "$summary_done" = "0" ]; then
+              summary_done=1
+              {
+                if [ "$DRY_RUN" = "true" ]; then echo "### stlc release — DRY RUN"; else echo "### stlc release"; fi
+                echo ""
+                [ -n "$released" ] && echo "- ran release-please for:$released" || true
+                [ -n "$skipped" ] && echo "- skipped (not selected / no production repo):$skipped" || true
+                [ "$rc" != "0" ] && echo "" && echo "⚠️ exited with rc=$rc — see the log." || true
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          }
+          trap finish EXIT
+
+          yq -r '.targets | to_entries[] | [.key, (.value.production_repo // "")] | @tsv' stainless.yml > /tmp/targets.tsv
+          configured=$(cut -f1 /tmp/targets.tsv | paste -sd' ' -)
+
+          selected=""
+          if [ "$(printf '%s' "$TARGETS" | tr -d '[:space:]')" = "all" ]; then
+            selected="$configured"
+          else
+            unknown=""
+            while IFS= read -r raw; do
+              t=$(printf '%s' "$raw" | tr -d '[:space:]')
+              [ -z "$t" ] && continue
+              if printf '%s\n' $configured | grep -qx -- "$t"; then selected="$selected $t"; else unknown="$unknown $t"; fi
+            done <<< "$(printf '%s' "$TARGETS" | tr ',' '\n')"
+            [ -n "$unknown" ] && { echo "::error title=Unknown target::not in stainless.yml:$unknown%0AConfigured: $configured"; exit 1; }
+          fi
+
+          dry=""
+          [ "$DRY_RUN" = "true" ] && dry="--dry-run"
+
+          while IFS=$'\t' read -r target prod; do
+            case " $selected " in *" $target "*) ;; *) skipped="$skipped $target"; continue ;; esac
+            if [ -z "$prod" ] || [ "$prod" = "null" ]; then skipped="$skipped $target"; continue; fi
+
+            echo "::group::$target -> $prod"
+            # release-pr opens/updates the version-bump PR; github-release turns an
+            # already-merged one into a tag + GitHub Release. Running both every time
+            # is idempotent and is what makes a single dispatch carry a release all the
+            # way from "commits exist" to "registry publish triggered".
+            npx --yes release-please@16 release-pr \
+              --token="$RP_TOKEN" --repo-url="$prod" \
+              --config-file=release-please-config.json \
+              --manifest-file=.release-please-manifest.json $dry
+            npx --yes release-please@16 github-release \
+              --token="$RP_TOKEN" --repo-url="$prod" \
+              --config-file=release-please-config.json \
+              --manifest-file=.release-please-manifest.json $dry
+            released="$released $target"
+            echo "::endgroup::"
+          done < /tmp/targets.tsv
+
+      - name: Alert on failure
+        if: failure()
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.STLC_ALERT_WEBHOOK_URL }}
+        run: |
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          msg="stlc release failed in ${{ github.repository }}. SDK releases are not being cut. Run: $run_url"
+          echo "::error title=stlc release failed::$msg"
+          { echo "### ⚠️ stlc release failed"; echo ""; echo "$msg"; } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
+            curl -sS -X POST -H 'Content-Type: application/json' \
+              -d "$(jq -n --arg text "$msg" '{text:$text}')" "$ALERT_WEBHOOK_URL" || echo "::warning::Alert webhook POST failed"
+          fi

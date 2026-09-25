@@ -17,12 +17,17 @@ targets:
     production_repo: scaleapi/scale-agentex-typescript
     publish:
       npm: true
-      # Generates .github/workflows/release-please.yml. The release-please CONFIG
-      # is not regenerated -- it already exists on the branch, so scaffold-once
-      # preservation keeps it, which is what protects the hand-tuned shape.
-      release:
-        branch: main
-        prerelease: true
+      # NOTE: `release:` is deliberately NOT set. Setting it makes stlc generate
+      # .github/workflows/release-please.yml into the SDK repos, which promote then
+      # carries to production -- where it would need the App's private key as a
+      # repo secret to do anything, and scale-agentex-python is public.
+      #
+      # release-please runs from this repo instead, in .github/workflows/
+      # stlc-release.yml, targeting the production repos over the API with
+      # `--repo-url`. It needs no credential in either production repo.
+      #
+      # Re-adding `release:` here would resurrect the generated workflow on the
+      # staging trunks and promote it to production on the next promote.
     staging_repo: scaleapi/scale-agentex-typescript-staging
   python:
     keep_files:
@@ -32,11 +37,17 @@ targets:
     production_repo: scaleapi/scale-agentex-python
     publish:
       pypi: true
-      # prerelease: false -- this target ships plain 0.x.y and every python GitHub
-      # Release is marked non-prerelease, unlike typescript's alpha line.
-      release:
-        branch: main
-        prerelease: false
+      # NOTE: `release:` is deliberately NOT set. Setting it makes stlc generate
+      # .github/workflows/release-please.yml into the SDK repos, which promote then
+      # carries to production -- where it would need the App's private key as a
+      # repo secret to do anything, and scale-agentex-python is public.
+      #
+      # release-please runs from this repo instead, in .github/workflows/
+      # stlc-release.yml, targeting the production repos over the API with
+      # `--repo-url`. It needs no credential in either production repo.
+      #
+      # Re-adding `release:` here would resurrect the generated workflow on the
+      # staging trunks and promote it to production on the next promote.
     project_name: agentex-client
     staging_repo: scaleapi/scale-agentex-python-staging
 
