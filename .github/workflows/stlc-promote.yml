@@ -1,0 +1,154 @@
+name: Promote SDKs to production
+
+# Fast-forwards each production SDK trunk from its staging trunk.
+#
+# Deliberately NOT in the SDK repos, where upstream's example puts it. That layout
+# needs a PRODUCTION_REPO_TOKEN secret in every staging repo; here the config repo
+# already holds the agentex-sdk-sync App credentials and the App is installed on all
+# four SDK repos, so promoting from here needs no new secret anywhere and keeps the
+# App's private key in one place. The tradeoff is that upstream changes to their
+# example no longer drop in unmodified.
+#
+# Manual only. Promotion is a release decision, not something to fire on every push.
+on:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Comma-separated targets to promote, or "all"'
+        required: false
+        default: all
+      dry_run:
+        description: 'Report what would happen without pushing'
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  # Never promote two runs at once: both push the same production trunks.
+  group: stlc-promote
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    runs-on: ${{ vars.STLC_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout config repo
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Mint SDK promote token
+        # Writes production, so it is scoped tighter than it looks: contents only, and
+        # only the four SDK repos. No pull-requests, no workflows -- a fast-forward of
+        # an existing trunk needs neither.
+        #
+        # NOTE: this token can write the production SDK repos, which no token in
+        # stlc-generate.yml can. That asymmetry is deliberate: generation must never be
+        # able to reach production, and promotion is the one place that may.
+        id: promote-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AGENTEX_SDK_SYNC_APP_ID }}
+          private-key: ${{ secrets.AGENTEX_SDK_SYNC_PRIVATE_KEY }}
+          owner: scaleapi
+          repositories: scale-agentex-python,scale-agentex-typescript,scale-agentex-python-staging,scale-agentex-typescript-staging
+          permission-contents: write
+          permission-metadata: read
+
+      - name: Promote each target
+        working-directory: stainless
+        env:
+          GH_TOKEN: ${{ steps.promote-token.outputs.token }}
+          TARGETS: ${{ inputs.targets }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+
+          promoted=""
+          blocked=""
+          skipped=""
+
+          while IFS=$'\t' read -r target staging prod; do
+            case ",${TARGETS}," in
+              ,all,) ;;
+              *",${target},"*) ;;
+              *) continue ;;
+            esac
+
+            # One-repo targets have nothing to promote.
+            { [ -z "$prod" ] || [ "$prod" = "null" ] || [ "$staging" = "$prod" ]; } && continue
+
+            echo "::group::$target"
+            staging_url="https://x-access-token:${GH_TOKEN}@github.com/${staging}.git"
+            prod_url="https://x-access-token:${GH_TOKEN}@github.com/${prod}.git"
+
+            d=$(mktemp -d); git -C "$d" init -q
+            git -C "$d" -c credential.helper= fetch -q "$staging_url" main:refs/remotes/staging/main
+            git -C "$d" -c credential.helper= fetch -q "$prod_url" main:refs/remotes/prod/main
+
+            # Content compare first. After a release, production carries release-please
+            # commits staging lacks, so it is NOT behind even though the SHAs differ --
+            # comparing trees rather than SHAs is what stops a pointless promote.
+            merged=$(git -C "$d" merge-tree --write-tree prod/main staging/main) || merged=conflict
+            prod_tree=$(git -C "$d" rev-parse 'prod/main^{tree}')
+            if [ "$merged" = "$prod_tree" ]; then
+              echo "production already has staging's content — nothing to promote."
+              skipped="$skipped $target"
+              rm -rf "$d"; echo "::endgroup::"; continue
+            fi
+
+            # Fast-forward only. If production is not an ancestor of staging the trunks
+            # have forked, and force-pushing would silently destroy whatever production
+            # has that staging lacks. Refuse and let a human reconcile with a MERGE --
+            # never a rebase or cherry-pick, which rewrite SHAs and leave this check
+            # failing on every later run.
+            if ! git -C "$d" merge-base --is-ancestor prod/main staging/main; then
+              echo "::error title=Promote blocked for ${target}::production/main is not an ancestor of staging main. The trunks have forked; back-sync production into staging (merge, do not rebase) and re-run."
+              blocked="$blocked $target"
+              rm -rf "$d"; echo "::endgroup::"; continue
+            fi
+
+            from=$(git -C "$d" rev-parse --short prod/main)
+            to=$(git -C "$d" rev-parse --short staging/main)
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "would fast-forward ${prod} main: ${from} -> ${to}"
+            else
+              git -C "$d" -c credential.helper= push "$prod_url" staging/main:refs/heads/main
+              echo "promoted ${prod} main: ${from} -> ${to}"
+            fi
+            promoted="$promoted $target"
+            rm -rf "$d"
+            echo "::endgroup::"
+          done < <(yq -r '.targets | to_entries[] | [.key, (.value.staging_repo // .value.production_repo), (.value.production_repo // .value.staging_repo)] | @tsv' stainless.yml)
+
+          {
+            echo "### stlc promote"
+            echo ""
+            [ -n "$promoted" ] && echo "- promoted:$promoted" || true
+            [ -n "$skipped" ]  && echo "- already in sync:$skipped" || true
+            [ -n "$blocked" ]  && echo "- **blocked (forked trunk):**$blocked" || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "$blocked" ]; then
+            echo "::error title=Promote incomplete::blocked for:$blocked"
+            exit 1
+          fi
+
+      - name: Alert on failure
+        if: failure()
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.STLC_ALERT_WEBHOOK_URL }}
+        run: |
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          msg="stlc promote failed in ${{ github.repository }}. Production trunks may be partially promoted — check the step summary before re-running. Run: $run_url"
+          echo "::error title=stlc promote failed::$msg"
+          { echo "### ⚠️ stlc promote failed"; echo ""; echo "$msg"; } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
+            curl -sS -X POST -H 'Content-Type: application/json' \
+              -d "$(jq -n --arg text "$msg" '{text:$text}')" "$ALERT_WEBHOOK_URL" \
+              || echo "::warning::Alert webhook POST failed"
+          fi
