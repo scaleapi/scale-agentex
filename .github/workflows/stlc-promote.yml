@@ -63,9 +63,16 @@ jobs:
           echo "Token will be scoped to: $list"
 
       - name: Mint SDK promote token
-        # Writes production, so it is scoped tighter than it looks: contents only, and
-        # only the SDK repos stainless.yml actually names. No pull-requests, no
-        # workflows -- a fast-forward of an existing trunk needs neither.
+        # Writes production, so it is scoped to contents + workflows on only the SDK
+        # repos stainless.yml actually names. No pull-requests: a fast-forward opens
+        # nothing.
+        #
+        # `workflows: write` is NOT optional, and omitting it is what made the first
+        # real promote fail: GitHub refuses a push from a GitHub App that creates or
+        # updates any .github/workflows/** file without it. A trunk fast-forward
+        # carries whatever the diff contains, and this one carries release-please.yml.
+        # I originally dropped it reasoning that a fast-forward "needs neither" --
+        # that confuses what the operation is called with what it moves.
         #
         # NOTE: this token can write the production SDK repos, which no token in
         # stlc-generate.yml can. That asymmetry is deliberate: generation must never be
@@ -78,6 +85,7 @@ jobs:
           owner: scaleapi
           repositories: ${{ steps.repos.outputs.list }}
           permission-contents: write
+          permission-workflows: write
           permission-metadata: read
 
       - name: Promote each target
