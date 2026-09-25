@@ -65,24 +65,24 @@ env:
   SDK_OUTPUT: /tmp/sdk-output
   # How the seal-back pull request lands.
   #
-  # `review`, not `auto`, because on this repo `auto` cannot actually succeed.
-  # main is governed by BOTH a ruleset and classic branch protection. The App is
-  # a bypass actor on the ruleset, but classic protection requires one approving
-  # review and its `bypass_pull_request_allowances` does NOT cover that -- that
-  # setting exempts an actor from the requirement to open a pull request at all,
-  # not from a pull request's approval requirement. So `auto` arms an auto-merge
-  # that never fires and then fails the run on a condition no rerun can clear.
+  # `auto` does NOT mean "merges unattended" on this repo, and the distinction is
+  # worth knowing before anyone changes it. main is governed by a ruleset AND
+  # classic branch protection; the App bypasses the ruleset, but classic
+  # separately requires one approving review, and `bypass_pull_request_allowances`
+  # exempts an actor from having to OPEN a pull request -- not from a pull
+  # request's approval requirement. So the seal-back PR still needs a human.
   #
-  # With `review` the run posts a ::notice:: instead, and a human merges the
-  # pull request. That is a real cost: later builds cannot push until it lands,
-  # so an unmerged seal-back blocks codegen. Watch for the notice.
+  # What `auto` buys is that the human only has to approve: `gh pr merge --auto`
+  # succeeds at ARMING auto-merge even when the PR cannot merge yet, the step goes
+  # green, and GitHub merges it the moment the approval lands. Verified on #441.
   #
-  # To make `auto` viable you would have to let the App merge without an
-  # approval -- either by dropping classic protection's approval requirement
-  # (the ruleset already enforces a stricter one, so humans would be unaffected)
-  # or by consolidating both authorities into the ruleset. Both are branch
-  # protection changes on a public repo and were deliberately declined.
-  SEAL_BACK_MERGE: review
+  # `review` would mean approving AND merging by hand -- strictly more work for no
+  # extra safety. Only switch if you want the pull request to sit until someone
+  # deliberately merges it.
+  #
+  # Either way an unmerged seal-back blocks codegen: later builds cannot push
+  # until the tracking files land.
+  SEAL_BACK_MERGE: auto
   # Explicit rather than `all`. setup-stlc only installs the python + typescript toolchains and
   # plugins, so adding a target must be a deliberate two-file change here and in setup-stlc,
   # rather than a confusing mid-build plugin-resolution failure.
