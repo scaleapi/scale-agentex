@@ -1,0 +1,515 @@
+name: Generate SDKs with stlc
+
+# One workflow, three modes:
+# - pull_request: build every target, push a preview branch per staging repo, sticky-comment diff links.
+# - push to main: build and push staging main directly (Promote then fast-forwards production), then seal tracking files back here.
+# - schedule / dispatch: rebuild main; `stlc build` absorbs out-of-band staging custom code and re-seals, so this doubles as the tracking-file sync (the SDK repos' seal-dispatch fires it eagerly).
+on:
+  # The spec lives OUTSIDE the workspace, at agentex/openapi.yaml (stainless/workspace.json
+  # points at ../agentex/openapi.yaml), so it must appear in BOTH lists below or merges to main
+  # never trigger a build.
+  #
+  # Deliberately 'agentex/openapi.yaml' and not 'agentex/**': the spec is a committed artifact,
+  # regenerated and git-added by the pre-commit hook on agentex/src/** changes and freshness-
+  # checked by ci.yml's openapi-spec job. Watching the whole backend tree would fire a full
+  # two-target SDK build on every change that cannot affect the SDK.
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'agentex/openapi.yaml'
+      - 'stainless/**'
+      - '.github/workflows/stlc-generate.yml'
+      - '.github/actions/setup-stlc/**'
+  push:
+    branches: [main]
+    paths:
+      - 'agentex/openapi.yaml'
+      - 'stainless/**'
+      - '.github/workflows/stlc-generate.yml'
+      - '.github/actions/setup-stlc/**'
+  schedule:
+    # Poll for out-of-band staging custom code; the seal-custom-code dispatch covers the eager path.
+    - cron: '0 */6 * * *'
+  workflow_dispatch: {}
+  # Sent by the SDK repos' seal-dispatch job when custom code lands on staging main.
+  repository_dispatch:
+    types: [seal-custom-code]
+
+# Sync runs get a distinct name in the Actions list; push/PR runs keep the default via the empty-string fallback.
+run-name: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch') && 'Sync custom-code tracking' || '' }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Cancel superseded PR runs (last write wins; a preview branch is disposable).
+  #
+  # Never cancel a run on main. Those runs push to the SDK repos and then seal the
+  # tracking files back here, and a cancel between the two leaves the SDK repos
+  # ahead of the tracking files — the state later builds refuse, to avoid dropping
+  # the custom code the SDK repos now carry. Merging faster than a build takes
+  # would otherwise wedge generation on a regular basis.
+  #
+  # This costs no throughput: GitHub keeps only one *pending* run per group, so
+  # rapid merges still coalesce onto the newest commit. A pending run has pushed
+  # nothing, so dropping it is free — it is the in-flight run that must finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+env:
+  STAINLESS_WORKSPACE: stainless
+  # Where the build clones the SDK repos. The seal-back check reads the same
+  # path, so that it inspects the repos this run actually sealed against.
+  SDK_OUTPUT: /tmp/sdk-output
+  # How the seal-back pull request lands. `auto` merges it and fails the run if
+  # it cannot, because tracking files that never merge wedge every later build.
+  # Set to `review` if you want to merge seal-back pull requests by hand — then
+  # an unmerged one is reported as a notice instead of a failure, and keeping it
+  # moving is on you.
+  SEAL_BACK_MERGE: auto
+  # Explicit rather than `all`. setup-stlc only installs the python + typescript toolchains and
+  # plugins, so adding a target must be a deliberate two-file change here and in setup-stlc,
+  # rather than a confusing mid-build plugin-resolution failure.
+  #
+  DEFAULT_TARGETS: python,typescript
+
+jobs:
+  # skip changes that touch only stainless/custom-code/** so seal-back can't re-trigger generate —
+  # both the PR itself (when it was opened with a token whose events start workflow runs) and the
+  # push that merges it.
+  guard:
+    # Runner comes from the STLC_RUNNER repo/org variable when set; defaults to GitHub-hosted.
+    runs-on: ${{ vars.STLC_RUNNER || 'ubuntu-latest' }}
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - name: Decide whether this change only touches tracking files
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          # push: the range the push advanced over. pull_request: the PR's own range — the
+          # three-dot compare below measures it from the merge base, not the base branch tip.
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          case "$EVENT" in
+            push | pull_request) ;;
+            *) echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # NOTE: the compare API caps .files at ~300 entries. A >300-file diff whose first
+          # 300 entries all sit under stainless/custom-code/ would wrongly skip regeneration.
+          # Not reachable for a two-file seal-back, but don't widen this check.
+          changed=$(gh api "repos/$REPO/compare/$BASE...$HEAD" --jq '.files[].filename')
+          echo "Changed files:"; printf '%s\n' "$changed"
+          if [ -n "$changed" ] && ! printf '%s\n' "$changed" | grep -qvE '^stainless/custom-code/'; then
+            echo "Only tracking files changed — skipping regeneration (loop-breaker)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  generate:
+    needs: guard
+    # Fork pull requests get no repository secrets, so AGENTEX_SDK_SYNC_PRIVATE_KEY would be
+    # empty, both token mints would fail, and setup-stlc's install would 404 against the private
+    # scaleapi/stlc* repos -- a red check an external contributor can neither understand nor fix.
+    # This repo is public and does receive fork PRs, so skip them. Do NOT "fix" this with
+    # pull_request_target: that runs with full secrets against fork-authored code, and this
+    # workflow pushes to four repos.
+    if: >-
+      ${{ needs.guard.outputs.skip != 'true'
+      && (github.event_name != 'pull_request'
+      || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ${{ vars.STLC_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          # Same reason as BRANCH below: a workflow_dispatch on a feature branch would otherwise
+          # build and seal from that ref. github.ref is the PR merge ref on pull_request, which
+          # is the default checkout, so PR behavior is unchanged.
+          ref: ${{ github.event_name == 'pull_request' && github.ref || 'main' }}
+
+      - name: Mint SDK read token
+        # Read-only counterpart to the sync token below. Two consumers: setup-stlc installs the
+        # CLI family from the scaleapi/stlc* mirrors, and the codegen hold reads the production
+        # and staging SDK repos.
+        #
+        # `permission-contents: read` downscopes BELOW the App's app-wide `contents: write`, so
+        # this token cannot write any of the seven repos -- including the two production repos,
+        # which no token in this workflow should ever be able to touch. Keep it that way.
+        id: read-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AGENTEX_SDK_SYNC_APP_ID }}
+          private-key: ${{ secrets.AGENTEX_SDK_SYNC_PRIVATE_KEY }}
+          owner: scaleapi
+          # scale-agentex FIRST, deliberately. actions/create-github-app-token resolves the
+          # installation with GET /repos/<owner>/<repositories[0]>/installation, so the first
+          # entry doubles as the lookup key. Leading with a repo the App is definitely installed
+          # on means a missing repo later in the list fails as a 422 that NAMES it, instead of a
+          # bare 404 from the lookup that says only "not found" about the first entry.
+          repositories: scale-agentex,stlc,stlc-python,stlc-typescript,scale-agentex-python,scale-agentex-typescript,scale-agentex-python-staging,scale-agentex-typescript-staging
+          permission-contents: read
+          permission-metadata: read
+
+      - name: Setup stlc
+        uses: ./.github/actions/setup-stlc
+        with:
+          stlc-read-token: ${{ steps.read-token.outputs.token }}
+
+      - name: Mint SDK sync token
+        # GitHub App instead of a PAT: no expiry treadmill, no SSO re-auth, and -- critically --
+        # commits attribute to a real account. The config repo's ruleset requires an extra
+        # approval for unattributed changes, which is what blocked the seal-back PR from ever
+        # self-merging under the old `stlc-bot` identity.
+        #
+        # The token lives ONE HOUR. It is minted once here and used through the seal-back step.
+        # If a build ever runs long enough to outlive it, the seal-back is what fails, and the
+        # symptom is the SDK repos sitting ahead of the tracking files.
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AGENTEX_SDK_SYNC_APP_ID }}
+          private-key: ${{ secrets.AGENTEX_SDK_SYNC_PRIVATE_KEY }}
+          owner: scaleapi
+          repositories: scale-agentex,scale-agentex-python-staging,scale-agentex-typescript-staging
+          # Without these, the token silently inherits the App's FULL permission set, which
+          # includes `issues: write` -- granted for release-please elsewhere and useless here.
+          # `workflows: write` is not optional: `stlc build --push` carries `.github/workflows/**`
+          # as scaffold, and a push that touches those paths is rejected without it.
+          permission-contents: write
+          permission-workflows: write
+          permission-metadata: read
+
+      - name: Configure auth for stlc to push to SDK repos
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          # The numeric prefix is the BOT USER id (gh api users/'agentex-sdk-sync[bot]'), not the
+          # installation id. GitHub matches <id>+<login>@users.noreply.github.com against the
+          # user id; get this wrong and commits land unattributed, which is the whole thing the
+          # App was adopted to fix.
+          git config --global user.name  "agentex-sdk-sync[bot]"
+          git config --global user.email "333044712+agentex-sdk-sync[bot]@users.noreply.github.com"
+          gh auth setup-git
+
+      - name: Resolve commit message
+        # Use the merged PR's title as the SDK commit message.
+        id: msg
+        if: github.event_name == 'push'
+        env:
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FALLBACK: ${{ github.event.head_commit.message }}
+        run: |
+          pr_title=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq '.[0].title // empty')
+
+          if [ -n "$pr_title" ]; then
+            commit_msg="$pr_title"
+          else
+            commit_msg="$FALLBACK"
+          fi
+
+          {
+            echo "commit_msg<<MSG_EOF"
+            echo "$commit_msg"
+            echo "MSG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Hold codegen while production is ahead (release not back-synced)
+        # Builds of main push directly to staging main. If production is ahead, refuse and re-run after the back-sync.
+        # 
+        # An unreachable production repo warns and skips rather than failing.
+        if: github.event_name != 'pull_request'
+        working-directory: ${{ env.STAINLESS_WORKSPACE }}
+        env:
+          # The READ token, not the sync token. This step reads four repos -- both production
+          # and both staging -- and must not be able to write any of them. The read mint is
+          # downscoped to `contents: read`, which is exactly the property that matters for a
+          # guard whose whole job is to refuse to write when production is ahead.
+          #
+          # scale-agentex-typescript is private, so this genuinely needs credentials: the
+          # unauthenticated first attempt below only succeeds for public scale-agentex-python.
+          # If the read token ever stops covering these four, the step degrades to
+          # `::warning::Codegen hold skipped for <target>` -- it drops the guard silently
+          # rather than failing, so a missing repo here is invisible. Keep the mint's
+          # `repositories:` list and this step's needs in sync.
+          GH_TOKEN: ${{ steps.read-token.outputs.token }}
+          # Fail fast instead of prompting when a repo needs credentials.
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+
+          # `-c credential.helper=` sidesteps the `gh auth setup-git` helper, so the
+          # no-token attempt is genuinely unauthenticated and token calls use only the URL token.
+          ls_heads() { git -c credential.helper= ls-remote --heads "$1" main; }
+
+          held=""
+          while IFS=$'\t' read -r target staging prod; do
+            # Only hold on targets this run actually builds. The loop below reads every target
+            # in stainless.yml, but the build uses --targets "$DEFAULT_TARGETS", which may be a
+            # narrower set. Without this, a production repo that is ahead for a target we are
+            # NOT building would still exit 1 and block the targets we are.
+            case ",${DEFAULT_TARGETS}," in
+              ,all,) ;;                   # `all` builds every configured target -- no filter
+              *",${target},"*) ;;         # explicitly selected
+              *) continue ;;              # not in this run's target set
+            esac
+
+            # Skip one-repo targets (staging == production) and targets with no production repo.
+            { [ -z "$prod" ] || [ "$prod" = "null" ] || [ "$staging" = "$prod" ]; } && continue
+
+            # Try the production repo unauthenticated first, then with the token.
+            prod_url="https://github.com/${prod}.git"
+            if ! prod_heads=$(ls_heads "$prod_url"); then
+              prod_url="https://x-access-token:${GH_TOKEN}@github.com/${prod}.git"
+              if ! prod_heads=$(ls_heads "$prod_url"); then
+                echo "::warning title=Codegen hold skipped for ${target}::cannot verify production sync: ${prod} is unreachable with the configured credential. The hold is skipped for this target; grant the token read access to the production repo to enable it."
+                continue
+              fi
+            fi
+
+            # No production main yet → first release not cut → nothing to be ahead of.
+            [ -z "$prod_heads" ] && continue
+
+            staging_url="https://x-access-token:${GH_TOKEN}@github.com/${staging}.git"
+            if ! staging_heads=$(ls_heads "$staging_url"); then
+              echo "::warning title=Codegen hold skipped for ${target}::cannot verify production sync: staging repo ${staging} is unreachable. The hold is skipped for this target; if this is not transient, the build step will fail loudly on its own."
+              continue
+            fi
+
+            # No staging main yet → first build → nothing to compare against.
+            [ -z "$staging_heads" ] && continue
+
+            d=$(mktemp -d); git -C "$d" init -q
+            git -C "$d" -c credential.helper= fetch -q "$staging_url" main:refs/remotes/staging/main
+            git -C "$d" -c credential.helper= fetch -q "$prod_url" main:refs/remotes/prod/main
+            if ! git -C "$d" merge-base --is-ancestor prod/main staging/main; then
+              held="$held $target"
+            fi
+            rm -rf "$d"
+          done < <(yq -r '.targets | to_entries[] | [.key, (.value.staging_repo // .value.production_repo), (.value.production_repo // .value.staging_repo)] | @tsv' stainless.yml)
+          if [ -n "$held" ]; then
+            echo "::error title=Codegen held::production is ahead of the staging trunk (a release isn't back-synced yet) for:$held. Wait for the back-sync, then re-run."
+            exit 1
+          fi
+          echo "No target has production verified ahead of staging — proceeding to build."
+
+      - name: Generate SDKs and push
+        env:
+          # PR head ref on pull_request (an ephemeral preview branch); the trunk otherwise.
+          #
+          # Pinned to 'main' rather than github.ref_name: workflow_dispatch lets the operator
+          # pick any ref, and ref_name would then send a feature branch through the non-PR path
+          # -- pushing an SDK preview branch instead of syncing the trunk, and letting the
+          # seal-back step open a tracking-file PR derived from that preview. Keep this in step
+          # with --trunk-branch below.
+          BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || 'main' }}
+          COMMIT_MSG: ${{ steps.msg.outputs.commit_msg }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        working-directory: ${{ env.STAINLESS_WORKSPACE }}
+        run: |
+          echo "Building targets: $DEFAULT_TARGETS to branch: $BRANCH"
+          commit_args=()
+          if [ -n "$COMMIT_MSG" ]; then
+            commit_args=(--commit "$COMMIT_MSG")
+          fi
+          # --trunk-branch is the branch promoted to production; every other branch is
+          # an ephemeral preview (rebuilds overwrite their tip). Set it to your trunk.
+          stlc build \
+            --branch "$BRANCH" \
+            --trunk-branch main \
+            --output "$SDK_OUTPUT" \
+            --push \
+            --targets "$DEFAULT_TARGETS" \
+            "${commit_args[@]}"
+
+      - name: Render build manifest
+        # continue-on-error so a missing manifest (build aborted before writing
+        # one) doesn't mask the real failure.
+        id: manifest
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        working-directory: ${{ env.STAINLESS_WORKSPACE }}
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if ! stlc show --renderer=markdown --marker stlc-build-manifest \
+               --workflow-run-url "$RUN_URL" > /tmp/build-manifest.md; then
+            {
+              echo "## stlc build manifest"
+              echo ""
+              echo "Manifest render failed — no sticky comment will be posted."
+              echo "See the \"Generate SDKs and push\" step above for the underlying error."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          cat /tmp/build-manifest.md
+          cat /tmp/build-manifest.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment build manifest on PR
+        # Upstream uses marocchino/sticky-pull-request-comment@v2, which this repo's Actions
+        # allowlist blocks (allowed_actions: selected, verified_allowed: false). Same
+        # update-in-place behavior via actions/github-script@v7, which is allowlisted:
+        # `stlc show --marker` puts <!-- stlc-build-manifest --> at the top of the body, and
+        # we find our own previous comment by that marker instead of the action's `header`.
+        if: always() && steps.manifest.outcome == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- stlc-build-manifest -->';
+            const body = fs.readFileSync('/tmp/build-manifest.md', 'utf8');
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100,
+            });
+            // Only ever replace a comment this workflow authored. The marker is public, so
+            // `includes` on any author would let a human comment quoting the manifest be
+            // silently overwritten. Bot `type` cannot be spoofed by a user account, and the
+            // renderer always emits the marker first.
+            const mine = comments.find(
+              (c) =>
+                c.user &&
+                c.user.type === 'Bot' &&
+                typeof c.body === 'string' &&
+                c.body.trimStart().startsWith(marker),
+            );
+            if (mine) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: Re-mint SDK sync token for seal-back
+        # The sync token minted at the top of the job lives ONE HOUR, and everything between it
+        # and the seal-back -- toolchain install, two full SDK builds, lint, tests -- sits inside
+        # that window. Today a run takes ~5 minutes, so expiry is remote; the reason to re-mint
+        # anyway is the blast radius, not the odds. The seal-back runs `if: always()`, so it also
+        # runs after slow or failed builds (GitHub's job ceiling is six hours), and a seal-back
+        # that dies on an expired token leaves the SDK repos pushed but the tracking files
+        # uncommitted -- the state every later build refuses to work around.
+        #
+        # The `if:` MUST match the step below. With the default `success()` a red build would
+        # skip this mint and the seal-back would fall to the next term of its chain -- the
+        # hour-old job-start token, i.e. exactly the expiry risk this step exists to remove,
+        # reintroduced on the runs most likely to have burned the hour. (Only if that mint also
+        # failed does it reach GITHUB_TOKEN, which fails outright wherever the org blocks Actions
+        # from creating pull requests.)
+        #
+        # Scoped to the config repo alone: that is all the seal-back touches.
+        id: seal-token
+        if: ${{ always() && github.event_name != 'pull_request' }}
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AGENTEX_SDK_SYNC_APP_ID }}
+          private-key: ${{ secrets.AGENTEX_SDK_SYNC_PRIVATE_KEY }}
+          owner: scaleapi
+          repositories: scale-agentex
+          # Narrower than the push token above: the seal-back pushes a branch and opens/merges a
+          # pull request, and touches no workflow files. No `workflows: write`, no `issues: write`.
+          permission-contents: write
+          permission-pull-requests: write
+          permission-metadata: read
+
+      - name: Seal tracking files back to the config repo
+        # `stlc build` may rewrite the tracking files under stainless/custom-code/.
+        # main is protected, so land them via a PR on a shared branch (one seal-back PR
+        # at a time); merging won't loop (guard skips tracking-only pushes).
+        # Prefers the App token: where an org turns off "Allow GitHub Actions to create
+        # and approve pull requests", GITHUB_TOKEN fails this step with "GitHub Actions is
+        # not permitted to create or approve pull requests" -- after the branch has been
+        # pushed, leaving the tracking files stranded on an unmerged branch.
+        #
+        # `always()`, not `success()`: the build pushes to the SDK repos before its
+        # verification scripts run, so a red lint or test — or a cancel — leaves the
+        # SDK repos ahead of the tracking files, and skipping the seal-back is what
+        # turns that into a wedge later builds refuse to work around. The assert below
+        # is what makes running on any outcome safe.
+        if: ${{ always() && github.event_name != 'pull_request' }}
+        env:
+          # Fresh token first; the job-start token as a fallback if the re-mint itself failed
+          # (it can still be valid); GITHUB_TOKEN last, which works only where the org allows
+          # Actions to create pull requests -- see the note above.
+          GH_TOKEN: ${{ steps.seal-token.outputs.token || steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -z "$(git status --porcelain -- "$STAINLESS_WORKSPACE/custom-code")" ]; then
+            echo "Tracking files already in sync — nothing to seal."
+            exit 0
+          fi
+
+          # Only seal back tracking files whose commits actually reached the SDK repos.
+          # A build that sealed but failed before pushing leaves tracking files naming
+          # commits that exist nowhere else; committing those stalls every later build
+          # in a state only a merge inside the SDK repo can clear.
+          #
+          # Same --targets as the build: the check reads the SDK repos in the output
+          # directory, so a target this run never built has no repo there and would be
+          # reported as unverifiable.
+          if ! stlc status --workspace "$STAINLESS_WORKSPACE" --output "$SDK_OUTPUT" --targets "$DEFAULT_TARGETS" --assert-seals-pushed; then
+            echo "::error title=Seal-back skipped::the build sealed custom code it never pushed to the SDK repos (see above). Not committing the tracking files. Re-run this workflow once the push can succeed."
+            exit 1
+          fi
+          branch="stlc/seal-tracking"
+          git checkout -B "$branch"
+          git add "$STAINLESS_WORKSPACE/custom-code"
+          git commit -m "chore(stlc): seal custom-code tracking files"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "$branch"
+          open_pr=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')
+          if [ -z "$open_pr" ]; then
+            gh pr create --base main --head "$branch" \
+              --title "chore(stlc): seal custom-code tracking files" \
+              --body "Automated by the stlc generate workflow: \`stlc build\` re-sealed custom code (after a spec change on \`main\`, or after absorbing custom code that landed on a staging repo out of band), updating the tracking files under \`stainless/custom-code/\`. Merging brings the config repo in sync with the SDK repos. Safe to merge — tracking-files-only commits are skipped by this workflow, so it won't trigger another build."
+          fi
+          # SEAL_BACK_MERGE=review: the PR is a human's to merge, so stop here.
+          if [ "$SEAL_BACK_MERGE" = "review" ]; then
+            echo "::notice title=Seal-back PR open::merge $branch to bring the config repo in sync with the SDK repos. Later builds fail to push until it lands."
+            exit 0
+          fi
+
+          # Land the tracking files. `--auto` merges straight away when the PR is
+          # already mergeable, and otherwise queues on GitHub's auto-merge, which
+          # the repo must have enabled ("Allow auto-merge" in Settings). Without
+          # that setting the queue attempt fails, so fall back to merging now.
+          #
+          # Failing loudly is the point: an unmerged seal-back leaves the config
+          # repo a build behind the SDK repos, which wedges every later build
+          # (`push rejected: origin/main has commits this build does not include`).
+          # A warning on a green run is not a signal anyone acts on — this went
+          # unnoticed in the field until builds started failing.
+          if ! merge_error=$(gh pr merge --auto --squash "$branch" 2>&1); then
+            echo "Could not queue auto-merge for $branch: $merge_error"
+            echo "Trying an immediate merge instead."
+
+            if ! merge_error=$(gh pr merge --squash "$branch" 2>&1); then
+              echo "::error title=Seal-back PR not merged::the tracking files are pushed to $branch but the pull request could not be merged: $merge_error%0A%0AEnable \"Allow auto-merge\" on this repo (Settings -> General) so this lands unattended, or merge $branch by hand now. Until it merges the config repo stays a build behind the SDK repos and later builds will fail to push."
+              exit 1
+            fi
+          fi
+
+      - name: Alert on failure
+        if: failure()
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.STLC_ALERT_WEBHOOK_URL }}
+        run: |
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          msg="stlc generate failed in ${{ github.repository }} (${{ github.event_name }}). SDK builds and the custom-code tracking sync are stalled until this is fixed — investigate before the next build. Run: $run_url"
+          echo "::error title=stlc workflow failed::$msg"
+          { echo "### ⚠️ stlc workflow failed"; echo ""; echo "$msg"; } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
+            curl -sS -X POST -H 'Content-Type: application/json' \
+              -d "$(jq -n --arg text "$msg" '{text:$text}')" "$ALERT_WEBHOOK_URL" \
+              || echo "::warning::Alert webhook POST failed"
+          fi

@@ -1,0 +1,69 @@
+name: 'Setup stlc'
+description: 'Install the stlc CLI plus the python and typescript target plugins, and configure git auth to fetch the private scaleapi/stlc* repos. Intended for CI workflows that run stlc commands.'
+
+inputs:
+  stlc-read-token:
+    description: 'Token with read access to scaleapi/stlc, stlc-python and stlc-typescript. Normally a downscoped agentex-sdk-sync App token (contents: read) minted by the calling workflow.'
+    required: true
+
+# Trimmed from the upstream example, which provisions ten language toolchains and all twelve
+# stlc plugins. stainless.yml declares only `python` and `typescript`, so everything else was
+# pure runner time. Dropping Ruby/PHP/uv@v6 also removes the three `uses:` that this repo's
+# Actions allowlist (allowed_actions: selected, verified_allowed: false) would have blocked.
+#
+# If you add a target to stainless.yml you must add its toolchain and its stlc-<target>
+# package here, and widen DEFAULT_TARGETS in stlc-generate.yml.
+runs:
+  using: 'composite'
+  steps:
+    # The stlc CLI family is Node. Node also covers the typescript target.
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+
+    # corepack provides the package-manager shim the SDK repo asks for via its `packageManager`
+    # field. Note upstream's comment here claims the TypeScript SDK's scripts invoke pnpm --
+    # this one does not: it pins `yarn@1.22.22` and its scripts/ use only npm and yarn. corepack
+    # covers all three, so the step is right either way, but don't "simplify" it to pnpm.
+    - name: Enable corepack (yarn / pnpm shims)
+      shell: bash
+      run: corepack enable
+
+    # uv, not rye: this python target resolves to use_uv (edition python.2025-11-20). The
+    # generated SDK ships uv.lock and no noxfile.py/requirements.lock, and every one of its
+    # scripts/{bootstrap,lint,test,format,check-wheel-install} shells out to `uv`.
+    #
+    # Pinned to @v4 because the allowlist permits `astral-sh/setup-uv@v4` and not @v6, which is
+    # what upstream uses. Matches the version already used by this repo's ci.yml.
+    - name: Setup uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        enable-cache: false
+
+    - name: Install stlc
+      shell: bash
+      env:
+        STLC_READ_CREDENTIAL: ${{ inputs.stlc-read-token }}
+      run: |
+        # Rewrite prefix is `scaleapi/stlc`, NOT `scaleapi/`. The prefix has to be narrow enough
+        # to miss scale-agentex*: a rewrite on the whole org would point every scaleapi URL in
+        # the job at this read-only token, including the staging repos `stlc build --push` writes
+        # to. `scaleapi/stlc` prefix-matches all four stlc* repos and nothing else. (The trap
+        # below also scopes this to the step, but the narrow prefix is what makes it safe by
+        # construction rather than by timing.)
+        git_config_key="url.https://x-access-token:${STLC_READ_CREDENTIAL}@github.com/scaleapi/stlc.insteadOf"
+        cleanup_stlc_auth() { git config --global --unset-all "$git_config_key" || true; }
+        trap cleanup_stlc_auth EXIT
+        git config --global --add "$git_config_key" "https://github.com/scaleapi/stlc"
+
+        npm install -g \
+          "git+https://x-access-token:${STLC_READ_CREDENTIAL}@github.com/scaleapi/stlc.git" \
+          "git+https://x-access-token:${STLC_READ_CREDENTIAL}@github.com/scaleapi/stlc-python.git" \
+          "git+https://x-access-token:${STLC_READ_CREDENTIAL}@github.com/scaleapi/stlc-typescript.git"
+
+    - name: Check stlc CLI is callable
+      shell: bash
+      run: |
+        stlc --help >/dev/null && echo "stlc is callable"
+        stlc --version
