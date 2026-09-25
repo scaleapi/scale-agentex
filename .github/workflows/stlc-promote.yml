@@ -86,6 +86,8 @@ jobs:
           repositories: ${{ steps.repos.outputs.list }}
           permission-contents: write
           permission-workflows: write
+          # PR mode (below) opens and updates a promote pull request on production.
+          permission-pull-requests: write
           permission-metadata: read
 
       - name: Promote each target
@@ -94,13 +96,16 @@ jobs:
           GH_TOKEN: ${{ steps.promote-token.outputs.token }}
           TARGETS: ${{ inputs.targets }}
           DRY_RUN: ${{ inputs.dry_run }}
+          # Fixed name so the pull request is reusable across runs rather than
+          # accumulating one per promote. Force-pushed each time; it is disposable.
+          PROMOTE_BRANCH: stlc/promote
           GIT_TERMINAL_PROMPT: '0'
         run: |
           set -euo pipefail
 
           WORK=$(mktemp -d)
           PLAN="$WORK/plan.tsv"; : > "$PLAN"
-          pushed=""; planned=""; insync=""; forked=""
+          pushed=""; planned=""; insync=""; forked=""; waiting=""
 
           # The summary must survive an unexpected failure. Under `set -e` a fetch or
           # push error exits the script, and without this trap the operator is pointed
@@ -120,6 +125,7 @@ jobs:
                 echo ""
                 [ -n "$planned" ] && [ "$DRY_RUN" = "true" ] && echo "- would promote:$planned" || true
                 [ -n "$pushed" ] && echo "- **pushed to production:**$pushed" || true
+                [ -n "$waiting" ] && echo "- awaiting checks + approval:$waiting — approve the pull request, then re-run this workflow" || true
                 [ -n "$insync" ] && echo "- already in sync:$insync" || true
                 [ -n "$forked" ] && echo "- **blocked (forked trunk):**$forked" || true
                 # Only worth shouting about when production was partially written --
@@ -217,9 +223,24 @@ jobs:
 
             from=$(git -C "$d" rev-parse --short prod/main)
             to=$(git -C "$d" rev-parse --short staging/main)
-            printf '%s\t%s\t%s\t%s\n' "$target" "$prod_url" "$from" "$to" >> "$PLAN"
+            to_full=$(git -C "$d" rev-parse staging/main)
+
+            # Pick the landing mode from the production repo's own protection rather
+            # than from config. A branch with required status checks CANNOT accept a
+            # direct push of fresh commits -- they have no check runs, so the push is
+            # refused with "N of N required status checks are expected". No bypass
+            # covers that; bypass_pull_request_allowances only exempts the
+            # pull-request requirement. Deriving the mode here means the workflow
+            # self-corrects if those checks are ever added or removed.
+            if gh api "repos/${prod}/branches/main/protection" --jq '.required_status_checks.contexts | length' 2>/dev/null | grep -qvx 0; then
+              mode=pr
+            else
+              mode=ff
+            fi
+
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$target" "$mode" "$prod_url" "$prod" "$from" "$to" "$to_full" >> "$PLAN"
             planned="$planned $target"
-            echo "ready: ${prod} main ${from} -> ${to}"
+            echo "ready (${mode}): ${prod} main ${from} -> ${to}"
             echo "::endgroup::"
           done < "$WORK/configured.tsv"
 
@@ -241,13 +262,83 @@ jobs:
             exit 0
           fi
 
-          # PASS 2 -- push. Every selected target has already passed its checks.
-          while IFS=$'\t' read -r target prod_url from to; do
-            echo "::group::push $target"
-            git -C "$WORK/$target" -c credential.helper= push "$prod_url" staging/main:refs/heads/main
+          # PASS 2 -- land. Every selected target has already passed its checks.
+          #
+          # Two modes, because the production repos differ. A trunk with no required
+          # status checks takes the fast-forward directly. A trunk that HAS them
+          # cannot: fresh commits carry no check runs, so the push is refused. For
+          # those, stage the exact same commits on a branch, let CI run on those
+          # SHAs, and fast-forward main only once the checks are green and a human
+          # has approved. Same commits either way -- the trunks stay byte-identical,
+          # which a squash or rebase merge would destroy.
+          while IFS=$'\t' read -r target mode prod_url prod from to to_full; do
+            echo "::group::land $target ($mode)"
+            d="$WORK/$target"
+
+            if [ "$mode" = "ff" ]; then
+              git -C "$d" -c credential.helper= push "$prod_url" staging/main:refs/heads/main
+              pushed="$pushed $target"
+              planned=$(printf '%s' "$planned" | sed "s/ $target\b//")
+              echo "promoted ${from} -> ${to}"
+              echo "::endgroup::"; continue
+            fi
+
+            # --- PR mode ---
+            staged=$(git -C "$d" -c credential.helper= ls-remote "$prod_url" "refs/heads/$PROMOTE_BRANCH" | cut -f1)
+
+            if [ "$staged" != "$to_full" ]; then
+              # Stage (or restage) the promote branch and make sure a pull request
+              # exists for it. Force-push: the branch is disposable and must track
+              # whatever staging currently is.
+              git -C "$d" -c credential.helper= push --force "$prod_url" "staging/main:refs/heads/$PROMOTE_BRANCH"
+              if ! gh pr view "$PROMOTE_BRANCH" --repo "$prod" --json number >/dev/null 2>&1; then
+                body=$(printf '%s\n' \
+                  "Automated promote from the staging trunk, opened by stlc-promote.yml." \
+                  "" \
+                  "**Approve this pull request - do not click Merge.** Squash and rebase both rewrite SHAs, which forks the production trunk away from staging and blocks all codegen until someone reconciles them by hand. Merge commits are disabled on this repo." \
+                  "" \
+                  "Once CI is green here and this has one approval, re-run \`stlc-promote.yml\` in the config repo. It fast-forwards \`main\` to these exact commits, GitHub closes this pull request as merged, and the trunks stay byte-identical.")
+                gh pr create --repo "$prod" --base main --head "$PROMOTE_BRANCH" \
+                  --title "promote: staging ${to} to production" \
+                  --body "$body" >/dev/null
+              fi
+              pr=$(gh pr view "$PROMOTE_BRANCH" --repo "$prod" --json number --jq .number)
+              echo "staged ${to} on ${PROMOTE_BRANCH}; pull request #${pr} awaiting checks + approval"
+              waiting="$waiting ${target}(#${pr})"
+              echo "::endgroup::"; continue
+            fi
+
+            # Branch already matches staging. Check the gates.
+            pr_json=$(gh pr view "$PROMOTE_BRANCH" --repo "$prod" --json number,reviewDecision,statusCheckRollup 2>/dev/null || echo '')
+            if [ -z "$pr_json" ]; then
+              echo "::error title=Promote blocked for ${target}::${PROMOTE_BRANCH} matches staging but has no open pull request. Re-run to recreate it."
+              blocked="$blocked $target"; echo "::endgroup::"; continue
+            fi
+            pr=$(printf '%s' "$pr_json" | jq -r .number)
+            review=$(printf '%s' "$pr_json" | jq -r '.reviewDecision // "NONE"')
+            failing=$(printf '%s' "$pr_json" | jq -r '[.statusCheckRollup[]? | select((.conclusion // .state // "") | test("FAILURE|ERROR|CANCELLED"))] | length')
+            pending=$(printf '%s' "$pr_json" | jq -r '[.statusCheckRollup[]? | select((.conclusion // .state // "") == "" or (.state // "") == "PENDING")] | length')
+
+            if [ "$failing" != "0" ]; then
+              echo "::error title=Promote blocked for ${target}::pull request #${pr} has ${failing} failing check(s). Fix them on the staging trunk, not here -- this branch is overwritten on every promote."
+              blocked="$blocked $target"; echo "::endgroup::"; continue
+            fi
+            if [ "$pending" != "0" ]; then
+              echo "checks still running on #${pr} (${pending} pending) — re-run once green."
+              waiting="$waiting ${target}(#${pr})"; echo "::endgroup::"; continue
+            fi
+            if [ "$review" != "APPROVED" ]; then
+              echo "#${pr} is green but not approved (reviewDecision=${review}) — approve it, then re-run."
+              waiting="$waiting ${target}(#${pr})"; echo "::endgroup::"; continue
+            fi
+
+            # Green and approved. The required checks are satisfied FOR THIS SHA, so
+            # the fast-forward is now accepted.
+            git -C "$d" -c credential.helper= push "$prod_url" "staging/main:refs/heads/main"
             pushed="$pushed $target"
             planned=$(printf '%s' "$planned" | sed "s/ $target\b//")
-            echo "promoted ${from} -> ${to}"
+            echo "promoted ${from} -> ${to} via #${pr}"
+            git -C "$d" -c credential.helper= push "$prod_url" --delete "refs/heads/$PROMOTE_BRANCH" || echo "::warning::could not delete ${PROMOTE_BRANCH} on ${prod}"
             echo "::endgroup::"
           done < "$PLAN"
 
