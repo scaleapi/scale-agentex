@@ -111,6 +111,12 @@ jobs:
           # target whose CI names its jobs differently has to be added here, or its
           # promote waits forever with "missing a SUCCESS from".
           PROMOTE_REQUIRED_CHECKS: lint build test
+          # The subset of the above that ci.yml deliberately declines to run on a
+          # tracking-only "codegen metadata" commit (its job-level `if:` excludes exactly
+          # that message on push events). Only these are waived on such a commit --
+          # `test` carries no such clause and stays required, so a promote is never
+          # allowed through with no test evidence at all.
+          PROMOTE_METADATA_WAIVED_CHECKS: lint build
           GIT_TERMINAL_PROMPT: '0'
         run: |
           set -euo pipefail
@@ -294,7 +300,14 @@ jobs:
               echo "::error title=Promote blocked for ${target}::could not query pull requests on ${prod}; refusing to touch main without knowing whether one is in flight."
               blocked="$blocked $target"; echo "::endgroup::"; continue
             fi
-            staged=$(git -C "$d" -c credential.helper= ls-remote "$prod_url" "refs/heads/$PROMOTE_BRANCH" | cut -f1)
+            # Fail closed. An unreadable staged SHA must not be mistaken for "no branch":
+            # an empty $staged cannot equal $to_full, so the run would fall through to the
+            # restage path and force-push over a branch whose contents it never saw.
+            if ! staged_raw=$(git -C "$d" -c credential.helper= ls-remote "$prod_url" "refs/heads/$PROMOTE_BRANCH"); then
+              echo "::error title=Promote blocked for ${target}::could not read ${PROMOTE_BRANCH} on ${prod}; refusing to act without knowing what is staged there."
+              blocked="$blocked $target"; echo "::endgroup::"; continue
+            fi
+            staged=$(printf '%s' "$staged_raw" | cut -f1)
 
             # --- an open pull request whose head matches staging: check the gates ---
             if [ -n "$pr" ] && [ "$staged" = "$to_full" ]; then
@@ -320,11 +333,26 @@ jobs:
               # them can elect the placeholder and discard the only run that executed.
               # So prefer an entry that actually concluded pass or fail, and fall back to
               # the skipped ones only when nothing real ran.
+              # ci.yml declines to run lint and build on a tracking-only "codegen metadata"
+              # commit -- its job-level `if:` excludes exactly that message on push events.
+              # Roughly half of every staging trunk's commits are these, so requiring those
+              # two on one would stall the promote forever waiting for a signal the repo is
+              # configured never to emit.
+              #
+              # Waive those two names, and ONLY those two. An earlier version skipped the
+              # whole required-checks gate whenever the tip was a metadata commit, which
+              # also waived `test` -- and `test` carries no such clause, so the only reason
+              # it would be missing is that CI genuinely did not report. That turned a
+              # narrow, documented exemption into "promote anything with an approval".
+              metadata_tip=0
+              [ "$(git -C "$d" log -1 --format=%B "$to_full")" = "codegen metadata" ] && metadata_tip=1
+
               if ! rollup=$(gh pr view "$pr" --repo "$prod" --json statusCheckRollup); then
                 echo "::error title=Promote blocked for ${target}::could not read the checks of #${pr} on ${prod}."
                 blocked="$blocked $target"; echo "::endgroup::"; continue
               fi
-              if ! checks=$(printf '%s' "$rollup" | jq -r --arg req "$PROMOTE_REQUIRED_CHECKS" '
+              if ! checks=$(printf '%s' "$rollup" | jq -r --arg req "$PROMOTE_REQUIRED_CHECKS" \
+                    --arg waive "$([ "$metadata_tip" = "1" ] && printf '%s' "$PROMOTE_METADATA_WAIVED_CHECKS")" '
                     def key: (.name // .context // "?");
                     def stamp: (.completedAt // .startedAt // .createdAt // "");
                     def running:
@@ -336,7 +364,9 @@ jobs:
                              or $c == "ACTION_REQUIRED" or $c == "STARTUP_FAILURE") then "fail"
                         elif $c == "SUCCESS" then "pass"
                         else "skip" end;
-                    ( $req | split(" ") | map(select(length > 0)) ) as $required
+                    ( $req | split(" ") | map(select(length > 0)) ) as $req_all
+                    | ( $waive | split(" ") | map(select(length > 0)) ) as $waived
+                    | ( $req_all - $waived ) as $required
                     | [ .statusCheckRollup[]? | {k: key, r: running, o: outcome, t: stamp} ]
                     | group_by(.k)
                     | map( . as $g
@@ -351,7 +381,9 @@ jobs:
                         ([ $checks[] | select(.running) | .name ] | join(", ")),
                         ([ $required[] | select( . as $n
                              | ([ $checks[] | select(.name == $n and (.running | not) and .outcome == "pass") ] | length) == 0 ) ] | join(", ")),
-                        ($checks | length | tostring) ]
+                        ($checks | length | tostring),
+                        ([ $waived[] | select( . as $n
+                             | ([ $checks[] | select(.name == $n and (.running | not) and .outcome == "pass") ] | length) == 0 ) ] | join(", ")) ]
                     | join("\u001f")'); then
                 echo "::error title=Promote blocked for ${target}::could not classify the checks of #${pr} on ${prod}."
                 blocked="$blocked $target"; echo "::endgroup::"; continue
@@ -362,28 +394,11 @@ jobs:
               # passing checks as failing ones. US is not IFS whitespace and cannot occur
               # in a check name, so empty fields survive in position.
               case "$checks" in
-                *$'\037'*$'\037'*$'\037'*) ;;
+                *$'\037'*$'\037'*$'\037'*$'\037'*) ;;
                 *) echo "::error title=Promote blocked for ${target}::unreadable check summary for #${pr} on ${prod}."
                    blocked="$blocked $target"; echo "::endgroup::"; continue ;;
               esac
-              IFS=$'\037' read -r failing pending unmet total <<< "$checks"
-
-              # ci.yml in both production repos declines to run lint, build and test on a
-              # tracking-only "codegen metadata" commit -- its job-level `if:` excludes
-              # exactly that message on push events, and the pull_request event skips them
-              # for any non-fork branch. Roughly half of every staging trunk's commits are
-              # these, so requiring those checks on one would stall the promote forever
-              # waiting for a signal the repo is configured never to emit.
-              #
-              # Honour that policy rather than subvert it: accept their absence for this
-              # commit specifically. Every other gate still applies -- nothing may be
-              # failing, nothing may still be running, and a human must still approve.
-              #
-              # This does not give up all signal. Only `lint` and `build` carry the
-              # metadata clause; `test` does not, in either production repo, so it runs
-              # for real on these commits and still has to reach SUCCESS to clear the
-              # `failing`/`pending` gates above. If a target ever adds that clause to
-              # `test` as well, this exemption stops being narrow and should be revisited.
+              IFS=$'\037' read -r failing pending unmet total waived <<< "$checks"
               metadata_tip=0
               [ "$(git -C "$d" log -1 --format=%B "$to_full")" = "codegen metadata" ] && metadata_tip=1
 
@@ -399,18 +414,18 @@ jobs:
               # repos run ci.yml on a push to any branch, so it means Actions never ran on
               # these commits. Say so distinctly instead of letting it look like a wait
               # that a re-run will clear.
-              if [ "${total:-0}" -eq 0 ] && [ "$metadata_tip" != "1" ]; then
+              if [ "${total:-0}" -eq 0 ]; then
                 echo "::error title=Promote blocked for ${target}::no check runs reported at all on ${to} in ${prod}. Actions may be disabled there, or ${PROMOTE_BRANCH} may be excluded from ci.yml's push trigger."
                 blocked="$blocked $target"; echo "::endgroup::"; continue
               fi
               # The positive gate. Everything above only proves the absence of bad news,
               # which a truncated or unexpected rollup satisfies trivially.
-              if [ -n "$unmet" ] && [ "$metadata_tip" != "1" ]; then
+              if [ -n "$unmet" ]; then
                 echo "::warning title=Required checks have not passed for ${target}::#${pr} has no SUCCESS from: ${unmet}. If this persists, CI is not running on ${PROMOTE_BRANCH} in ${prod}, or that repo names these jobs differently — see PROMOTE_REQUIRED_CHECKS."
                 waiting="$waiting ${target}(#${pr})"; echo "::endgroup::"; continue
               fi
-              if [ "$metadata_tip" = "1" ] && { [ -n "$unmet" ] || [ "${total:-0}" -eq 0 ]; }; then
-                echo "::warning title=Required checks skipped by design for ${target}::${to} is a tracking-only \"codegen metadata\" commit, which ci.yml declines to run, so ${unmet:-the required checks} never reported. Proceeding on the remaining checks and the approval."
+              if [ -n "$waived" ]; then
+                echo "::warning title=Checks waived by design for ${target}::${to} is a tracking-only \"codegen metadata\" commit, which ci.yml declines to run, so ${waived} never reported. Every other required check still had to pass."
               fi
               if [ "$review" != "APPROVED" ]; then
                 echo "#${pr} is green but not approved (reviewDecision=${review}) — approve it, then re-run."
@@ -455,7 +470,11 @@ jobs:
             fi
 
             # --- stage the commits and open a pull request for them ---
-            git -C "$d" -c credential.helper= push --force "$prod_url" "staging/main:refs/heads/$PROMOTE_BRANCH"
+            if ! err=$(git -C "$d" -c credential.helper= push --force "$prod_url" "staging/main:refs/heads/$PROMOTE_BRANCH" 2>&1); then
+              echo "$err"
+              echo "::error title=Promote blocked for ${target}::could not stage ${to} on ${PROMOTE_BRANCH} in ${prod}; the branch is unchanged. A ruleset on ${PROMOTE_BRANCH}, or push protection, may be refusing it."
+              blocked="$blocked $target"; echo "::endgroup::"; continue
+            fi
             body=$(printf '%s\n' \
               "Automated promote from the staging trunk, opened by stlc-promote.yml." \
               "" \
@@ -491,6 +510,19 @@ jobs:
             waiting="$waiting ${target}(#${pr})"
             echo "::endgroup::"
           done < "$PLAN"
+
+          # Every `blocked` path above already printed ::error, but annotations do not
+          # change the job's conclusion: without this the step exits 0, the run goes
+          # green, and `Alert on failure` never fires -- so a half-promoted pair of
+          # production trunks would be announced by a green check. Exiting non-zero also
+          # lets finish() see rc != 0 and print its "exited mid-run" warning.
+          #
+          # `waiting` is deliberately NOT fatal. Checks still running, or an approval not
+          # yet given, is this workflow's normal steady state.
+          if [ -n "$blocked" ]; then
+            echo "::error title=Promote incomplete::blocked target(s):$blocked — see the step summary. Production may be partially promoted."
+            exit 1
+          fi
 
       - name: Alert on failure
         if: failure()
