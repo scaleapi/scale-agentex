@@ -63,12 +63,26 @@ env:
   # Where the build clones the SDK repos. The seal-back check reads the same
   # path, so that it inspects the repos this run actually sealed against.
   SDK_OUTPUT: /tmp/sdk-output
-  # How the seal-back pull request lands. `auto` merges it and fails the run if
-  # it cannot, because tracking files that never merge wedge every later build.
-  # Set to `review` if you want to merge seal-back pull requests by hand — then
-  # an unmerged one is reported as a notice instead of a failure, and keeping it
-  # moving is on you.
-  SEAL_BACK_MERGE: auto
+  # How the seal-back pull request lands.
+  #
+  # `review`, not `auto`, because on this repo `auto` cannot actually succeed.
+  # main is governed by BOTH a ruleset and classic branch protection. The App is
+  # a bypass actor on the ruleset, but classic protection requires one approving
+  # review and its `bypass_pull_request_allowances` does NOT cover that -- that
+  # setting exempts an actor from the requirement to open a pull request at all,
+  # not from a pull request's approval requirement. So `auto` arms an auto-merge
+  # that never fires and then fails the run on a condition no rerun can clear.
+  #
+  # With `review` the run posts a ::notice:: instead, and a human merges the
+  # pull request. That is a real cost: later builds cannot push until it lands,
+  # so an unmerged seal-back blocks codegen. Watch for the notice.
+  #
+  # To make `auto` viable you would have to let the App merge without an
+  # approval -- either by dropping classic protection's approval requirement
+  # (the ruleset already enforces a stricter one, so humans would be unaffected)
+  # or by consolidating both authorities into the ruleset. Both are branch
+  # protection changes on a public repo and were deliberately declined.
+  SEAL_BACK_MERGE: review
   # Explicit rather than `all`. setup-stlc only installs the python + typescript toolchains and
   # plugins, so adding a target must be a deliberate two-file change here and in setup-stlc,
   # rather than a confusing mid-build plugin-resolution failure.
