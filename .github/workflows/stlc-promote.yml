@@ -1,0 +1,259 @@
+name: Promote SDKs to production
+
+# Fast-forwards each production SDK trunk from its staging trunk.
+#
+# Deliberately NOT in the SDK repos, where upstream's example puts it. That layout
+# needs a PRODUCTION_REPO_TOKEN secret in every staging repo; here the config repo
+# already holds the agentex-sdk-sync App credentials and the App is installed on all
+# four SDK repos, so promoting from here needs no new secret anywhere and keeps the
+# App's private key in one place. The tradeoff is that upstream changes to their
+# example no longer drop in unmodified.
+#
+# Manual only. Promotion is a release decision, not something to fire on every push.
+on:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Comma-separated targets to promote, or "all"'
+        required: false
+        default: all
+      dry_run:
+        description: 'Report what would happen without pushing'
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  # Never promote two runs at once: both push the same production trunks.
+  group: stlc-promote
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    runs-on: ${{ vars.STLC_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout config repo
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Resolve SDK repos from the workspace config
+        # Derives the token's repository scope from the same stainless.yml the promote
+        # loop reads. A hardcoded list silently rots: adding a target would make the
+        # loop discover it and then fail on a fetch the token was never scoped for.
+        id: repos
+        working-directory: stainless
+        run: |
+          set -euo pipefail
+
+          all=$(yq -r '.targets | to_entries[] | [.value.staging_repo, .value.production_repo] | .[] | select(. != null and . != "null")' stainless.yml | sort -u)
+
+          # The token is minted with `owner: scaleapi`, so every repo must live there --
+          # a cross-org target needs a second mint, not a silently truncated name.
+          if foreign=$(printf '%s\n' "$all" | grep -v '^scaleapi/' || true); [ -n "$foreign" ]; then
+            echo "::error title=Unsupported target repo::stainless.yml references repos outside the scaleapi org, which this workflow's single token cannot cover:%0A${foreign}"
+            exit 1
+          fi
+
+          list=$(printf '%s\n' "$all" | sed 's#^scaleapi/##' | paste -sd, -)
+          echo "list=$list" >> "$GITHUB_OUTPUT"
+          echo "Token will be scoped to: $list"
+
+      - name: Mint SDK promote token
+        # Writes production, so it is scoped tighter than it looks: contents only, and
+        # only the SDK repos stainless.yml actually names. No pull-requests, no
+        # workflows -- a fast-forward of an existing trunk needs neither.
+        #
+        # NOTE: this token can write the production SDK repos, which no token in
+        # stlc-generate.yml can. That asymmetry is deliberate: generation must never be
+        # able to reach production, and promotion is the one place that may.
+        id: promote-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AGENTEX_SDK_SYNC_APP_ID }}
+          private-key: ${{ secrets.AGENTEX_SDK_SYNC_PRIVATE_KEY }}
+          owner: scaleapi
+          repositories: ${{ steps.repos.outputs.list }}
+          permission-contents: write
+          permission-metadata: read
+
+      - name: Promote each target
+        working-directory: stainless
+        env:
+          GH_TOKEN: ${{ steps.promote-token.outputs.token }}
+          TARGETS: ${{ inputs.targets }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+
+          WORK=$(mktemp -d)
+          PLAN="$WORK/plan.tsv"; : > "$PLAN"
+          pushed=""; planned=""; insync=""; forked=""
+
+          # The summary must survive an unexpected failure. Under `set -e` a fetch or
+          # push error exits the script, and without this trap the operator is pointed
+          # at a summary that says nothing about which targets already reached
+          # production -- the one fact they need.
+          summary_done=0
+          finish() {
+            rc=$?
+            if [ "$summary_done" = "0" ]; then
+              summary_done=1
+              {
+                if [ "$DRY_RUN" = "true" ]; then
+                  echo "### stlc promote — DRY RUN (nothing was pushed)"
+                else
+                  echo "### stlc promote"
+                fi
+                echo ""
+                [ -n "$planned" ] && [ "$DRY_RUN" = "true" ] && echo "- would promote:$planned" || true
+                [ -n "$pushed" ] && echo "- **pushed to production:**$pushed" || true
+                [ -n "$insync" ] && echo "- already in sync:$insync" || true
+                [ -n "$forked" ] && echo "- **blocked (forked trunk):**$forked" || true
+                # Only worth shouting about when production was partially written --
+                # a validation failure with nothing pushed is already self-evident
+                # from the error annotation.
+                if [ "$rc" != "0" ] && [ -n "$pushed" ]; then
+                  echo ""
+                  echo "⚠️ exited mid-run (rc=$rc). The targets under **pushed to production** already landed; the rest did not. Production trunks may now differ from each other."
+                fi
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+            rm -rf "$WORK"
+          }
+          trap finish EXIT
+
+          yq -r '.targets | to_entries[] | [.key, (.value.staging_repo // .value.production_repo), (.value.production_repo // .value.staging_repo)] | @tsv' stainless.yml > "$WORK/configured.tsv"
+          configured=$(cut -f1 "$WORK/configured.tsv" | paste -sd' ' -)
+
+          # Split on comma and trim. The input is documented as comma-separated, and
+          # `python, typescript` is the natural way to write it -- an exact match on
+          # ",${target}," silently drops every entry that carries a space, promoting a
+          # subset while reporting success. An unrecognised name is an error, not a
+          # no-op: a typo must not look like a clean run.
+          selected=""
+          if [ "$(printf '%s' "$TARGETS" | tr -d '[:space:]')" = "all" ]; then
+            selected="$configured"
+          else
+            unknown=""
+            while IFS= read -r raw; do
+              t=$(printf '%s' "$raw" | tr -d '[:space:]')
+              [ -z "$t" ] && continue
+              if printf '%s\n' $configured | grep -qx -- "$t"; then
+                selected="$selected $t"
+              else
+                unknown="$unknown $t"
+              fi
+            done <<< "$(printf '%s' "$TARGETS" | tr ',' '\n')"
+            if [ -n "$unknown" ]; then
+              echo "::error title=Unknown target::not configured in stainless.yml:$unknown%0AConfigured targets: $configured"
+              exit 1
+            fi
+            [ -z "$selected" ] && { echo "::error title=No targets selected::input was '$TARGETS'"; exit 1; }
+          fi
+          echo "Selected:$selected"
+
+          # PASS 1 -- evaluate every selected target, write nothing.
+          #
+          # Splitting evaluation from pushing is the whole point. Pushing inside the
+          # loop means an early target can reach production and a later forked target
+          # then fails the job, leaving the production trunks inconsistent with each
+          # other -- a worse state than not promoting at all, and one this workflow
+          # otherwise exists to prevent.
+          while IFS=$'\t' read -r target staging prod; do
+            case " $selected " in *" $target "*) ;; *) continue ;; esac
+            { [ -z "$prod" ] || [ "$prod" = "null" ] || [ "$staging" = "$prod" ]; } && continue
+
+            echo "::group::check $target"
+            staging_url="https://x-access-token:${GH_TOKEN}@github.com/${staging}.git"
+            prod_url="https://x-access-token:${GH_TOKEN}@github.com/${prod}.git"
+
+            d="$WORK/$target"; mkdir -p "$d"; git -C "$d" init -q
+            git -C "$d" -c credential.helper= fetch -q "$staging_url" main:refs/remotes/staging/main
+            git -C "$d" -c credential.helper= fetch -q "$prod_url" main:refs/remotes/prod/main
+
+            # Content compare before SHA compare. After a release production carries
+            # release-please commits staging lacks, so it is not "behind" even though
+            # the SHAs differ -- comparing trees is what stops a promote that would
+            # undo a release.
+            merged=$(git -C "$d" merge-tree --write-tree prod/main staging/main) || merged=conflict
+            prod_tree=$(git -C "$d" rev-parse 'prod/main^{tree}')
+            if [ "$merged" = "$prod_tree" ]; then
+              echo "production already has staging's content."
+              # Content is the right question for "is there anything to promote?", but
+              # it is not the question the codegen hold asks. The hold needs production
+              # to be an ANCESTOR of staging, and identical trees do not imply that --
+              # a rebase or cherry-picked release gives the same content from different
+              # commits. Promote cannot repair that (a fast-forward is impossible once
+              # the trunks fork); the back-sync owns the repair. But say so, because
+              # otherwise every surface reports healthy while codegen stays held.
+              if ! git -C "$d" merge-base --is-ancestor prod/main staging/main; then
+                echo "::warning title=Forked trunk for ${target}::nothing to promote, but production/main is not an ancestor of staging main, so the codegen hold is blocking builds for this target. Identical content, divergent history. Merge production into staging (never rebase) to clear it."
+              fi
+              insync="$insync $target"
+              echo "::endgroup::"; continue
+            fi
+
+            # Fast-forward only. A forked trunk cannot be resolved by a push; it needs
+            # a MERGE in the staging repo, by a human. Rebase and cherry-pick rewrite
+            # SHAs and leave this check failing on every later run.
+            if ! git -C "$d" merge-base --is-ancestor prod/main staging/main; then
+              echo "::error title=Promote blocked for ${target}::production/main is not an ancestor of staging main. The trunks have forked; back-sync production into staging (merge, do not rebase) and re-run."
+              forked="$forked $target"
+              echo "::endgroup::"; continue
+            fi
+
+            from=$(git -C "$d" rev-parse --short prod/main)
+            to=$(git -C "$d" rev-parse --short staging/main)
+            printf '%s\t%s\t%s\t%s\n' "$target" "$prod_url" "$from" "$to" >> "$PLAN"
+            planned="$planned $target"
+            echo "ready: ${prod} main ${from} -> ${to}"
+            echo "::endgroup::"
+          done < "$WORK/configured.tsv"
+
+          # Gate: refuse the whole run if any selected target is forked. Nothing has
+          # been written yet, so this leaves production untouched rather than partly
+          # promoted.
+          if [ -n "$forked" ]; then
+            echo "::error title=Promote aborted::forked trunk for:$forked — nothing was pushed. Reconcile and re-run."
+            exit 1
+          fi
+
+          if [ -z "$planned" ]; then
+            echo "Nothing to promote."
+            exit 0
+          fi
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run — would promote:$planned"
+            exit 0
+          fi
+
+          # PASS 2 -- push. Every selected target has already passed its checks.
+          while IFS=$'\t' read -r target prod_url from to; do
+            echo "::group::push $target"
+            git -C "$WORK/$target" -c credential.helper= push "$prod_url" staging/main:refs/heads/main
+            pushed="$pushed $target"
+            planned=$(printf '%s' "$planned" | sed "s/ $target\b//")
+            echo "promoted ${from} -> ${to}"
+            echo "::endgroup::"
+          done < "$PLAN"
+
+      - name: Alert on failure
+        if: failure()
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.STLC_ALERT_WEBHOOK_URL }}
+        run: |
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          msg="stlc promote failed in ${{ github.repository }}. Production trunks may be partially promoted — check the step summary before re-running. Run: $run_url"
+          echo "::error title=stlc promote failed::$msg"
+          { echo "### ⚠️ stlc promote failed"; echo ""; echo "$msg"; } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
+            curl -sS -X POST -H 'Content-Type: application/json' \
+              -d "$(jq -n --arg text "$msg" '{text:$text}')" "$ALERT_WEBHOOK_URL" \
+              || echo "::warning::Alert webhook POST failed"
+          fi

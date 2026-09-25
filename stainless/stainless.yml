@@ -17,6 +17,12 @@ targets:
     production_repo: scaleapi/scale-agentex-typescript
     publish:
       npm: true
+      # Generates .github/workflows/release-please.yml. The release-please CONFIG
+      # is not regenerated -- it already exists on the branch, so scaffold-once
+      # preservation keeps it, which is what protects the hand-tuned shape.
+      release:
+        branch: main
+        prerelease: true
     staging_repo: scaleapi/scale-agentex-typescript-staging
   python:
     keep_files:
@@ -26,6 +32,11 @@ targets:
     production_repo: scaleapi/scale-agentex-python
     publish:
       pypi: true
+      # prerelease: false -- this target ships plain 0.x.y and every python GitHub
+      # Release is marked non-prerelease, unlike typescript's alpha line.
+      release:
+        branch: main
+        prerelease: false
     project_name: agentex-client
     staging_repo: scaleapi/scale-agentex-python-staging
 

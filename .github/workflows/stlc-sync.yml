@@ -1,0 +1,235 @@
+name: Back-sync production to staging
+
+# The mirror image of stlc-promote.yml: brings production's release commits back
+# onto the staging trunks.
+#
+# Not optional, and the failure it prevents is not obvious. After a release,
+# production carries release-please's version and changelog commits that staging
+# lacks, so production is AHEAD. stlc-generate.yml's codegen hold refuses to build
+# in that state -- so without this, one release blocks all SDK generation until a
+# human reconciles the trunks by hand. That is exactly what happened on 2026-09-25.
+#
+# Lives in the config repo for the same reason stlc-promote.yml does: the App
+# credentials are here and the staging repos hold no secrets.
+on:
+  schedule:
+    # Twice hourly. A cheap pure-git check, and the window between a release and
+    # the next codegen attempt is what this is racing to close.
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Comma-separated targets to sync, or "all"'
+        required: false
+        default: all
+
+concurrency:
+  group: stlc-back-sync
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  back-sync:
+    runs-on: ${{ vars.STLC_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout config repo
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Resolve SDK repos from the workspace config
+        # Derives both token scopes from the same stainless.yml the sync loop reads.
+        # Hardcoded lists rot: adding a target would make the loop discover it and
+        # then fail on a fetch the token was never scoped for.
+        id: repos
+        working-directory: stainless
+        run: |
+          set -euo pipefail
+          prod=$(yq -r '.targets | to_entries[] | .value.production_repo | select(. != null and . != "null")' stainless.yml | sort -u)
+          stg=$(yq -r '.targets | to_entries[] | .value.staging_repo | select(. != null and . != "null")' stainless.yml | sort -u)
+          if foreign=$(printf '%s\n%s\n' "$prod" "$stg" | grep -v '^scaleapi/' | grep -v '^$' || true); [ -n "$foreign" ]; then
+            echo "::error title=Unsupported target repo::stainless.yml references repos outside the scaleapi org:%0A${foreign}"
+            exit 1
+          fi
+          echo "prod=$(printf '%s\n' "$prod" | sed 's#^scaleapi/##' | paste -sd, -)" >> "$GITHUB_OUTPUT"
+          echo "staging=$(printf '%s\n' "$stg" | sed 's#^scaleapi/##' | paste -sd, -)" >> "$GITHUB_OUTPUT"
+
+      - name: Mint production read token
+        # Two tokens, deliberately. This one reads production and CANNOT write it --
+        # a back-sync that could write production would be a promote with the
+        # direction reversed, and the whole point of splitting the two stages is
+        # that only stlc-promote.yml may touch production.
+        id: prod-read
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AGENTEX_SDK_SYNC_APP_ID }}
+          private-key: ${{ secrets.AGENTEX_SDK_SYNC_PRIVATE_KEY }}
+          owner: scaleapi
+          repositories: ${{ steps.repos.outputs.prod }}
+          permission-contents: read
+          permission-metadata: read
+
+      - name: Mint staging write token
+        id: staging-write
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AGENTEX_SDK_SYNC_APP_ID }}
+          private-key: ${{ secrets.AGENTEX_SDK_SYNC_PRIVATE_KEY }}
+          owner: scaleapi
+          repositories: ${{ steps.repos.outputs.staging }}
+          permission-contents: write
+          permission-metadata: read
+
+      - name: Back-sync each target
+        working-directory: stainless
+        env:
+          PROD_TOKEN: ${{ steps.prod-read.outputs.token }}
+          STAGING_TOKEN: ${{ steps.staging-write.outputs.token }}
+          TARGETS: ${{ inputs.targets || 'all' }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+
+          WORK=$(mktemp -d)
+          PLAN="$WORK/plan.tsv"; : > "$PLAN"
+          synced=""; planned=""; current=""; forked=""
+
+          # Written from a trap so an unexpected fetch or push error cannot leave the
+          # operator with an empty summary. After a partial run the only fact that
+          # matters is which trunks already moved.
+          summary_done=0
+          finish() {
+            rc=$?
+            if [ "$summary_done" = "0" ]; then
+              summary_done=1
+              {
+                echo "### stlc back-sync"
+                echo ""
+                [ -n "$synced" ] && echo "- **back-synced:**$synced (custom-code tracking is now stale; the next scheduled generate re-seals it)" || true
+                [ -n "$current" ] && echo "- already current:$current" || true
+                [ -n "$forked" ] && echo "- **blocked (forked trunk):**$forked — codegen stays held for these targets" || true
+                if [ "$rc" != "0" ] && [ -n "$synced" ]; then
+                  echo ""
+                  echo "⚠️ exited mid-run (rc=$rc). The targets under **back-synced** already moved; the rest did not."
+                fi
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+            rm -rf "$WORK"
+          }
+          trap finish EXIT
+
+          yq -r '.targets | to_entries[] | [.key, (.value.staging_repo // .value.production_repo), (.value.production_repo // .value.staging_repo)] | @tsv' stainless.yml > "$WORK/configured.tsv"
+          configured=$(cut -f1 "$WORK/configured.tsv" | paste -sd' ' -)
+
+          # Split on comma and trim; an unrecognised name is an error rather than a
+          # silent no-op. `python, typescript` must not quietly sync only python.
+          selected=""
+          if [ "$(printf '%s' "$TARGETS" | tr -d '[:space:]')" = "all" ]; then
+            selected="$configured"
+          else
+            unknown=""
+            while IFS= read -r raw; do
+              t=$(printf '%s' "$raw" | tr -d '[:space:]')
+              [ -z "$t" ] && continue
+              if printf '%s\n' $configured | grep -qx -- "$t"; then
+                selected="$selected $t"
+              else
+                unknown="$unknown $t"
+              fi
+            done <<< "$(printf '%s' "$TARGETS" | tr ',' '\n')"
+            if [ -n "$unknown" ]; then
+              echo "::error title=Unknown target::not configured in stainless.yml:$unknown%0AConfigured targets: $configured"
+              exit 1
+            fi
+            [ -z "$selected" ] && { echo "::error title=No targets selected::input was '$TARGETS'"; exit 1; }
+          fi
+          echo "Selected:$selected"
+
+          # PASS 1 -- evaluate every selected target, write nothing. Pushing inside the
+          # discovery loop lets one trunk move before a later target is found forked,
+          # leaving the staging trunks inconsistent with each other.
+          while IFS=$'\t' read -r target staging prod; do
+            case " $selected " in *" $target "*) ;; *) continue ;; esac
+            { [ -z "$prod" ] || [ "$prod" = "null" ] || [ "$staging" = "$prod" ]; } && continue
+
+            echo "::group::check $target"
+            staging_url="https://x-access-token:${STAGING_TOKEN}@github.com/${staging}.git"
+            prod_url="https://x-access-token:${PROD_TOKEN}@github.com/${prod}.git"
+
+            d="$WORK/$target"; mkdir -p "$d"; git -C "$d" init -q
+            git -C "$d" -c credential.helper= fetch -q "$staging_url" main:refs/remotes/staging/main
+            git -C "$d" -c credential.helper= fetch -q "$prod_url" main:refs/remotes/prod/main
+
+            # Test ANCESTRY, not content. This is deliberately the same predicate the
+            # codegen hold uses, because keeping it true is the entire job here.
+            #
+            # An earlier version skipped when the trees matched. That is not the same
+            # question: identical content does NOT imply shared lineage -- a rebase,
+            # a cherry-pick or a hand-applied release produces the same tree from a
+            # different commit. In that state the content check reported "already
+            # current" on every scheduled run while the hold blocked codegen forever,
+            # with nothing failing and nothing alerting. Reproduced before fixing.
+            #
+            # Ancestry is also the stronger test: if production IS an ancestor of
+            # staging then merging it changes nothing, so the content check adds no
+            # information the ancestry check does not already give.
+            if git -C "$d" merge-base --is-ancestor prod/main staging/main; then
+              echo "staging already contains production's history."
+              current="$current $target"
+              echo "::endgroup::"; continue
+            fi
+
+            # Fast-forward only. A forked trunk needs a MERGE in the staging repo, by a
+            # human; rebase and cherry-pick rewrite SHAs and leave this failing forever.
+            if ! git -C "$d" merge-base --is-ancestor staging/main prod/main; then
+              # Call out the confusing shape explicitly: when the trees already match,
+              # every surface looks healthy and only the hold disagrees.
+              same_tree=""
+              if [ "$(git -C "$d" rev-parse 'staging/main^{tree}')" = "$(git -C "$d" rev-parse 'prod/main^{tree}')" ]; then
+                same_tree=" NOTE: the two trunks have IDENTICAL content but divergent history, so nothing looks wrong except that codegen stays held. This is what a rebase or cherry-pick of a release commit produces."
+              fi
+              echo "::error title=Back-sync blocked for ${target}::staging main is not an ancestor of production/main. The trunks have forked; merge production into staging by hand (never rebase) and re-run.${same_tree}"
+              forked="$forked $target"
+              echo "::endgroup::"; continue
+            fi
+
+            from=$(git -C "$d" rev-parse --short staging/main)
+            to=$(git -C "$d" rev-parse --short prod/main)
+            printf '%s\t%s\t%s\t%s\n' "$target" "$staging_url" "$from" "$to" >> "$PLAN"
+            planned="$planned $target"
+            echo "ready: ${staging} main ${from} -> ${to}"
+            echo "::endgroup::"
+          done < "$WORK/configured.tsv"
+
+          if [ -n "$forked" ]; then
+            echo "::error title=Back-sync aborted::forked trunk for:$forked — nothing was pushed. Reconcile and re-run."
+            exit 1
+          fi
+
+          [ -z "$planned" ] && { echo "Nothing to back-sync."; exit 0; }
+
+          # PASS 2 -- push. Every selected target has already passed its checks.
+          while IFS=$'\t' read -r target staging_url from to; do
+            echo "::group::push $target"
+            git -C "$WORK/$target" -c credential.helper= push "$staging_url" prod/main:refs/heads/main
+            synced="$synced $target"
+            echo "back-synced ${from} -> ${to}"
+            echo "::endgroup::"
+          done < "$PLAN"
+
+      - name: Alert on failure
+        if: failure()
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.STLC_ALERT_WEBHOOK_URL }}
+        run: |
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          msg="stlc back-sync failed in ${{ github.repository }}. While a back-sync is outstanding the codegen hold blocks ALL SDK generation for the affected target. Run: $run_url"
+          echo "::error title=stlc back-sync failed::$msg"
+          { echo "### ⚠️ stlc back-sync failed"; echo ""; echo "$msg"; } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
+            curl -sS -X POST -H 'Content-Type: application/json' \
+              -d "$(jq -n --arg text "$msg" '{text:$text}')" "$ALERT_WEBHOOK_URL" \
+              || echo "::warning::Alert webhook POST failed"
+          fi
