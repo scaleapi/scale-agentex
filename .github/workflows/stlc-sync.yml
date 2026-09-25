@@ -1,0 +1,154 @@
+name: Back-sync production to staging
+
+# The mirror image of stlc-promote.yml: brings production's release commits back
+# onto the staging trunks.
+#
+# Not optional, and the failure it prevents is not obvious. After a release,
+# production carries release-please's version and changelog commits that staging
+# lacks, so production is AHEAD. stlc-generate.yml's codegen hold refuses to build
+# in that state -- so without this, one release blocks all SDK generation until a
+# human reconciles the trunks by hand. That is exactly what happened on 2026-09-25.
+#
+# Lives in the config repo for the same reason stlc-promote.yml does: the App
+# credentials are here and the staging repos hold no secrets.
+on:
+  schedule:
+    # Twice hourly. A cheap pure-git check, and the window between a release and
+    # the next codegen attempt is what this is racing to close.
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Comma-separated targets to sync, or "all"'
+        required: false
+        default: all
+
+concurrency:
+  group: stlc-back-sync
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  back-sync:
+    runs-on: ${{ vars.STLC_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout config repo
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Mint production read token
+        # Two tokens, deliberately. This one reads production and CANNOT write it --
+        # a back-sync that could write production would be a promote with the
+        # direction reversed, and the whole point of splitting the two stages is
+        # that only stlc-promote.yml may touch production.
+        id: prod-read
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AGENTEX_SDK_SYNC_APP_ID }}
+          private-key: ${{ secrets.AGENTEX_SDK_SYNC_PRIVATE_KEY }}
+          owner: scaleapi
+          repositories: scale-agentex-python,scale-agentex-typescript
+          permission-contents: read
+          permission-metadata: read
+
+      - name: Mint staging write token
+        id: staging-write
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AGENTEX_SDK_SYNC_APP_ID }}
+          private-key: ${{ secrets.AGENTEX_SDK_SYNC_PRIVATE_KEY }}
+          owner: scaleapi
+          repositories: scale-agentex-python-staging,scale-agentex-typescript-staging
+          permission-contents: write
+          permission-metadata: read
+
+      - name: Back-sync each target
+        working-directory: stainless
+        env:
+          PROD_TOKEN: ${{ steps.prod-read.outputs.token }}
+          STAGING_TOKEN: ${{ steps.staging-write.outputs.token }}
+          TARGETS: ${{ inputs.targets || 'all' }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+
+          synced=""
+          forked=""
+          current=""
+
+          while IFS=$'\t' read -r target staging prod; do
+            case ",${TARGETS}," in
+              ,all,) ;;
+              *",${target},"*) ;;
+              *) continue ;;
+            esac
+
+            { [ -z "$prod" ] || [ "$prod" = "null" ] || [ "$staging" = "$prod" ]; } && continue
+
+            echo "::group::$target"
+            staging_url="https://x-access-token:${STAGING_TOKEN}@github.com/${staging}.git"
+            prod_url="https://x-access-token:${PROD_TOKEN}@github.com/${prod}.git"
+
+            d=$(mktemp -d); git -C "$d" init -q
+            git -C "$d" -c credential.helper= fetch -q "$staging_url" main:refs/remotes/staging/main
+            git -C "$d" -c credential.helper= fetch -q "$prod_url" main:refs/remotes/prod/main
+
+            # Would merging production into staging change staging's tree? If not,
+            # staging already has production's content and there is nothing to pull back.
+            merged=$(git -C "$d" merge-tree --write-tree staging/main prod/main) || merged=conflict
+            staging_tree=$(git -C "$d" rev-parse 'staging/main^{tree}')
+            if [ "$merged" = "$staging_tree" ]; then
+              echo "staging already has production's content."
+              current="$current $target"
+              rm -rf "$d"; echo "::endgroup::"; continue
+            fi
+
+            # Fast-forward only, same reasoning as the promote. If staging is not an
+            # ancestor of production the trunks have forked and this cannot be resolved
+            # by a push -- it needs a MERGE in the staging repo, by a human. Rebasing or
+            # cherry-picking rewrites SHAs and leaves this check failing forever.
+            if ! git -C "$d" merge-base --is-ancestor staging/main prod/main; then
+              echo "::error title=Back-sync blocked for ${target}::staging main is not an ancestor of production/main. The trunks have forked; merge production into staging by hand (never rebase) and re-run."
+              forked="$forked $target"
+              rm -rf "$d"; echo "::endgroup::"; continue
+            fi
+
+            from=$(git -C "$d" rev-parse --short staging/main)
+            to=$(git -C "$d" rev-parse --short prod/main)
+            git -C "$d" -c credential.helper= push "$staging_url" prod/main:refs/heads/main
+            echo "back-synced ${staging} main: ${from} -> ${to}"
+            synced="$synced $target"
+            rm -rf "$d"
+            echo "::endgroup::"
+          done < <(yq -r '.targets | to_entries[] | [.key, (.value.staging_repo // .value.production_repo), (.value.production_repo // .value.staging_repo)] | @tsv' stainless.yml)
+
+          {
+            echo "### stlc back-sync"
+            echo ""
+            [ -n "$synced" ]  && echo "- back-synced:$synced (custom-code tracking is now stale; the next scheduled generate re-seals it)" || true
+            [ -n "$current" ] && echo "- already current:$current" || true
+            [ -n "$forked" ]  && echo "- **blocked (forked trunk):**$forked" || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "$forked" ]; then
+            echo "::error title=Back-sync incomplete::blocked for:$forked — codegen stays held for these targets until the trunks are reconciled."
+            exit 1
+          fi
+
+      - name: Alert on failure
+        if: failure()
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.STLC_ALERT_WEBHOOK_URL }}
+        run: |
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          msg="stlc back-sync failed in ${{ github.repository }}. While a back-sync is outstanding the codegen hold blocks ALL SDK generation for the affected target. Run: $run_url"
+          echo "::error title=stlc back-sync failed::$msg"
+          { echo "### ⚠️ stlc back-sync failed"; echo ""; echo "$msg"; } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
+            curl -sS -X POST -H 'Content-Type: application/json' \
+              -d "$(jq -n --arg text "$msg" '{text:$text}')" "$ALERT_WEBHOOK_URL" \
+              || echo "::warning::Alert webhook POST failed"
+          fi
