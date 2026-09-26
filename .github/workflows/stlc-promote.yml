@@ -320,8 +320,14 @@ jobs:
 
             # --- an open pull request whose head matches staging: check the gates ---
             if [ -n "$pr" ] && [ "$staged" = "$to_full" ]; then
-              if ! review=$(gh pr view "$pr" --repo "$prod" --json reviewDecision --jq '.reviewDecision // "NONE"'); then
-                echo "::error title=Promote blocked for ${target}::could not read the review state of #${pr} on ${prod}."
+              # Count actual approvals rather than reading `reviewDecision`. The pull request
+              # is opened as a DRAFT (see below), and GitHub reports an EMPTY reviewDecision
+              # on drafts even when reviews exist -- verified on a live draft carrying a
+              # review. Gating on it would therefore never open. `latestReviews` gives the
+              # current review per reviewer and is populated on drafts.
+              if ! approvals=$(gh pr view "$pr" --repo "$prod" --json latestReviews \
+                    --jq '[.latestReviews[]? | select(.state == "APPROVED")] | length'); then
+                echo "::error title=Promote blocked for ${target}::could not read the reviews of #${pr} on ${prod}."
                 blocked="$blocked $target"; echo "::endgroup::"; continue
               fi
 
@@ -436,8 +442,8 @@ jobs:
               if [ -n "$waived" ]; then
                 echo "::warning title=Checks waived by design for ${target}::${to} is a tracking-only \"codegen metadata\" commit, which ci.yml declines to run, so ${waived} never reported. Every other required check still had to pass."
               fi
-              if [ "$review" != "APPROVED" ]; then
-                echo "#${pr} is green but not approved (reviewDecision=${review}) — approve it, then re-run."
+              if [ "${approvals:-0}" -lt 1 ]; then
+                echo "#${pr} is green but has no approving review — approve it, then re-run."
                 waiting="$waiting ${target}(#${pr})"; echo "::endgroup::"; continue
               fi
 
@@ -487,7 +493,9 @@ jobs:
             body=$(printf '%s\n' \
               "Automated promote from the staging trunk, opened by stlc-promote.yml." \
               "" \
-              "**Approve this pull request - do not click Merge.** Squash and rebase both rewrite SHAs, which forks the production trunk away from staging and blocks all codegen until someone reconciles them by hand. Merge commits are disabled on this repo." \
+              "**Approve this pull request. Do not mark it ready for review and merge it.**" \
+              "" \
+              "It is a draft on purpose: GitHub disables Merge on drafts, and merging this is the one action that breaks the pipeline. This repo allows squash only, so a merge would collapse these commits into one new SHA on production, forking it from the staging trunk and holding all codegen until someone merges production back by hand." \
               "" \
               "Once CI is green here and this has one approval, re-run \`stlc-promote.yml\` in the config repo. It fast-forwards \`main\` onto these exact commits, GitHub closes this pull request as merged, and the trunks stay byte-identical.")
 
@@ -498,7 +506,20 @@ jobs:
             # `target-main`. This App is on neither allow-list, so without both of these
             # every promote pull request would carry two failing checks by construction and
             # the gate above would never open for either target.
+            # --draft is the only thing that actually stops this pull request being merged.
+            # These repos allow squash only, so clicking Merge collapses the staged commits
+            # into one new SHA on production, forking it from the staging trunk and holding
+            # codegen until a human merges production back. That happened on 2026-09-25 with
+            # a pull request whose body said, in bold, not to merge it -- and the merge went
+            # through with zero approving reviews, because a maintainer's merge is not
+            # subject to the review requirement. A written warning is not a control.
+            #
+            # GitHub disables Merge on a draft but still runs checks (no workflow in either
+            # production repo gates on draft state) and still accepts reviews. The workflow
+            # never needs it undrafted: it fast-forwards main onto these commits and then
+            # deletes the branch, which closes the pull request either way.
             if ! gh pr create --repo "$prod" --base main --head "$PROMOTE_BRANCH" \
+                 --draft \
                  --title "chore: promote staging ${to} to production" \
                  --label target-main \
                  --body "$body" >/dev/null; then
