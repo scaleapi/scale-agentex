@@ -319,6 +319,96 @@ jobs:
           fi
           echo "No target has production verified ahead of staging — proceeding to build."
 
+      - name: Verify each seal anchor sits on the trunk it seals
+        # The failure this prevents deleted 5,224 lines across 105 files from the python
+        # staging trunk on 2026-09-21 -- 14 source files and 10 test files gone outright --
+        # while `stlc status`, `stlc repair --dry-run` and `stlc build --push` all reported
+        # success.
+        #
+        # A seal replays the CONTENT diff between `base` and `integrated`, so whatever the
+        # trunk holds outside that range is OVERWRITTEN, not merely skipped. That is only
+        # safe while `integrated` names a commit on the trunk being sealed. On 2026-09-21 it
+        # named a build from six days earlier that lived on a side branch, so the replay
+        # restored a tree predating the trunk's entire custom-code history.
+        #
+        # Only the off-trunk case is fatal, and it cannot occur in normal operation: after a
+        # successful seal-back `integrated` IS the trunk tip. A trunk that is merely AHEAD of
+        # its anchor is the ordinary out-of-band-custom-code state that `stlc build` exists to
+        # absorb -- failing that would block the very run that re-anchors -- so it warns and
+        # lists what is at stake instead.
+        if: github.event_name != 'pull_request'
+        working-directory: ${{ env.STAINLESS_WORKSPACE }}
+        env:
+          # Read token, as with the codegen hold: this guard only ever reads.
+          GH_TOKEN: ${{ steps.read-token.outputs.token }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          set -euo pipefail
+
+          offtrunk=""; unverified=""
+          while IFS=$'\t' read -r target staging prod; do
+            case ",${DEFAULT_TARGETS}," in
+              ,all,) ;;
+              *",${target},"*) ;;
+              *) continue ;;
+            esac
+            { [ -z "$staging" ] || [ "$staging" = "null" ]; } && continue
+
+            tracking=$(ls "custom-code/${target}"/*.json 2>/dev/null | head -1 || true)
+            if [ -z "$tracking" ]; then
+              echo "${target}: no tracking file yet — nothing sealed, nothing to verify."
+              continue
+            fi
+            integrated=$(jq -r '.integrated // empty' "$tracking")
+            if [ -z "$integrated" ]; then
+              echo "${target}: tracking file carries no \`integrated\` — nothing to verify."
+              continue
+            fi
+
+            staging_url="https://x-access-token:${GH_TOKEN}@github.com/${staging}.git"
+            d=$(mktemp -d); git -C "$d" init -q
+            # Fail closed. Warning and continuing would skip the guard entirely while the
+            # NEXT step still builds and pushes -- it mints its own write token, so an
+            # unreachable staging repo here does not stop it. That is precisely the
+            # destructive case this guard exists for: unverifiable anchor, build proceeds,
+            # custom code reverted. If the read token cannot see a repo the write token can,
+            # the mints are out of sync and that is worth failing over.
+            if ! git -C "$d" -c credential.helper= fetch -q "$staging_url" main:refs/remotes/staging/main; then
+              echo "::error title=Cannot verify the seal anchor for ${target}::${staging} is unreachable with the read credential, so it is unknown whether integrated ${integrated} is on the trunk. Refusing to build rather than replaying an unverified diff. Check the read token's repositories: list."
+              unverified="$unverified $target"; rm -rf "$d"; continue
+            fi
+
+            # Fetching `main` brings its whole history, so an `integrated` that is genuinely on
+            # the trunk is present here. Absent means it lives somewhere else entirely -- which
+            # is exactly the 2026-09-21 shape.
+            if ! git -C "$d" cat-file -e "${integrated}^{commit}" 2>/dev/null; then
+              echo "::error title=Seal anchor is not on the trunk for ${target}::integrated ${integrated} does not exist anywhere in ${staging} main. It is on a side branch or was never pushed, so a build would replay a diff computed from a different lineage and revert this trunk's custom code. Re-anchor ${tracking} onto a commit that is on main."
+              offtrunk="$offtrunk $target"; rm -rf "$d"; continue
+            fi
+            if ! git -C "$d" merge-base --is-ancestor "$integrated" staging/main; then
+              echo "::error title=Seal anchor is not on the trunk for ${target}::integrated ${integrated} is not an ancestor of ${staging} main. Re-anchor ${tracking} onto a commit that is on main."
+              offtrunk="$offtrunk $target"; rm -rf "$d"; continue
+            fi
+
+            ahead=$(git -C "$d" rev-list --count "${integrated}..staging/main")
+            if [ "$ahead" != "0" ]; then
+              echo "::warning title=Trunk is ahead of its seal anchor for ${target}::${staging} main has ${ahead} commit(s) past integrated ${integrated}. \`stlc build\` is expected to absorb them, but it has silently reverted this shape before — check the build manifest before trusting the result."
+              # `-n 20`, not `| head -20`: head closes the pipe, git dies of SIGPIPE (141),
+              # and `set -o pipefail` turns this warning-only branch into a failed job --
+              # but only once a trunk is more than 20 commits ahead.
+              git -C "$d" log -n 20 --oneline "${integrated}..staging/main" | sed 's/^/    /'
+            else
+              echo "${target}: anchor ${integrated} is the trunk tip."
+            fi
+            rm -rf "$d"
+          done < <(yq -r '.targets | to_entries[] | [.key, (.value.staging_repo // .value.production_repo), (.value.production_repo // .value.staging_repo)] | @tsv' stainless.yml)
+
+          if [ -n "$offtrunk" ] || [ -n "$unverified" ]; then
+            [ -n "$offtrunk" ] && echo "::error title=Codegen aborted::seal anchor is off-trunk for:$offtrunk — building would revert custom code. Nothing was built."
+            [ -n "$unverified" ] && echo "::error title=Codegen aborted::seal anchor could not be verified for:$unverified — refusing to build without knowing what the replay would overwrite. Nothing was built."
+            exit 1
+          fi
+
       - name: Generate SDKs and push
         env:
           # PR head ref on pull_request (an ephemeral preview branch); the trunk otherwise.
