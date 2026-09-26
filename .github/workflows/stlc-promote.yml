@@ -90,6 +90,15 @@ jobs:
           # PR mode (below) opens and updates a promote pull request on production.
           permission-pull-requests: write
           permission-metadata: read
+          # Reading the promote pull request's checks needs this, and `pull-requests: write`
+          # does NOT imply it. Without it the gate's rollup read fails with
+          #   GraphQL: Resource not accessible by integration (...statusCheckRollup)
+          # which fails closed and blocks the target -- correct, but unpromotable. It only
+          # surfaced once a promote pull request survived to a second run, because the first
+          # run creates the pull request and never reads its checks.
+          #
+          # Read-only, and only over the SDK repos this token is already scoped to.
+          permission-checks: read
 
       - name: Promote each target
         working-directory: stainless
