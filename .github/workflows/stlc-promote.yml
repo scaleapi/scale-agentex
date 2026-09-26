@@ -506,6 +506,7 @@ jobs:
             # `target-main`. This App is on neither allow-list, so without both of these
             # every promote pull request would carry two failing checks by construction and
             # the gate above would never open for either target.
+            #
             # --draft is the only thing that actually stops this pull request being merged.
             # These repos allow squash only, so clicking Merge collapses the staged commits
             # into one new SHA on production, forking it from the staging trunk and holding
