@@ -362,7 +362,32 @@ jobs:
               metadata_tip=0
               [ "$(git -C "$d" log -1 --format=%B "$to_full")" = "codegen metadata" ] && metadata_tip=1
 
-              if ! rollup=$(gh pr view "$pr" --repo "$prod" --json statusCheckRollup); then
+              # Fetch only the fields the classifier below reads. `gh pr view --json
+              # statusCheckRollup` also requests every check's
+              # checkSuite.workflowRun.workflow.name, and reading workflowRun needs the
+              # Actions permission. On a PUBLIC production repo workflow runs are publicly
+              # readable, so that went unnoticed; on a PRIVATE one every entry failed with
+              # "Resource not accessible by integration" and the gate blocked the target.
+              # This token deliberately holds checks:read and nothing broader, so ask for
+              # less rather than grant more. The output keeps the same
+              # {statusCheckRollup: [...]} shape, so the classifier is unchanged.
+              #
+              # Raw GraphQL returns null for a running check's conclusion and completedAt
+              # where gh substituted "" and a zero time. The classifier already treats
+              # those alike: for a running entry it reads only the status, never the
+              # timestamp. Paginated, since a matrix of re-run checks passes 100 entries.
+              rollup_query='query($owner:String!,$name:String!,$number:Int!,$endCursor:String){
+                repository(owner:$owner,name:$name){ pullRequest(number:$number){
+                  commits(last:1){ nodes{ commit{ statusCheckRollup{
+                    contexts(first:100, after:$endCursor){
+                      pageInfo{ hasNextPage endCursor }
+                      nodes{ __typename
+                        ... on CheckRun { name status conclusion startedAt completedAt }
+                        ... on StatusContext { context state createdAt } } } } } } } } } }'
+              if ! rollup=$(gh api graphql --paginate \
+                    -f owner="${prod%%/*}" -f name="${prod##*/}" -F number="$pr" -f query="$rollup_query" \
+                    --jq '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]?' \
+                  | jq -s '{statusCheckRollup: .}'); then
                 echo "::error title=Promote blocked for ${target}::could not read the checks of #${pr} on ${prod}."
                 blocked="$blocked $target"; echo "::endgroup::"; continue
               fi
