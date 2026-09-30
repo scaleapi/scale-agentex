@@ -9,6 +9,9 @@ name: Back-sync production to staging
 # in that state -- so without this, one release blocks all SDK generation until a
 # human reconciles the trunks by hand. That is exactly what happened on 2026-09-25.
 #
+# Dispatch it by hand as the last step of the runbook at the top of
+# stlc-promote.yml, and after any pull request merged by hand on production main.
+#
 # Lives in the config repo for the same reason stlc-promote.yml does: the App
 # credentials are here and the staging repos hold no secrets.
 on:
@@ -72,6 +75,13 @@ jobs:
           permission-metadata: read
 
       - name: Mint staging write token
+        # `workflows: write` is NOT optional. GitHub rejects a push from an App token
+        # that adds or changes any .github/workflows/** file without it, and a
+        # back-sync carries whatever production gained. A production commit touching a
+        # workflow file -- a pull request merged by hand on production main, say --
+        # would otherwise wedge the back-sync, and with it every codegen run: the hold
+        # fails the whole build while any target is held.
+        # The App holds it: stlc-promote.yml and stlc-generate.yml already mint it.
         id: staging-write
         uses: actions/create-github-app-token@v2
         with:
@@ -80,6 +90,7 @@ jobs:
           owner: scaleapi
           repositories: ${{ steps.repos.outputs.staging }}
           permission-contents: write
+          permission-workflows: write
           permission-metadata: read
 
       - name: Back-sync each target
