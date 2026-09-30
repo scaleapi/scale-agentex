@@ -306,12 +306,17 @@ jobs:
             [ -z "$staging_heads" ] && continue
 
             d=$(mktemp -d); git -C "$d" init -q
+            # A throwaway clone: no background maintenance. git fetch starts auto-maintenance
+            # detached by default, and it can still be writing into .git when the cleanup
+            # below runs, so `rm -rf` fails with "Directory not empty" and, under set -e,
+            # fails the whole run for a temp directory the runner discards anyway.
+            git -C "$d" config maintenance.auto false; git -C "$d" config gc.auto 0
             git -C "$d" -c credential.helper= fetch -q "$staging_url" main:refs/remotes/staging/main
             git -C "$d" -c credential.helper= fetch -q "$prod_url" main:refs/remotes/prod/main
             if ! git -C "$d" merge-base --is-ancestor prod/main staging/main; then
               held="$held $target"
             fi
-            rm -rf "$d"
+            rm -rf "$d" || true
           done < <(yq -r '.targets | to_entries[] | [.key, (.value.staging_repo // .value.production_repo), (.value.production_repo // .value.staging_repo)] | @tsv' stainless.yml)
           if [ -n "$held" ]; then
             echo "::error title=Codegen held::production is ahead of the staging trunk (a release isn't back-synced yet) for:$held. Wait for the back-sync, then re-run."
@@ -367,6 +372,8 @@ jobs:
 
             staging_url="https://x-access-token:${GH_TOKEN}@github.com/${staging}.git"
             d=$(mktemp -d); git -C "$d" init -q
+            # No background maintenance in a throwaway clone; see the codegen hold above.
+            git -C "$d" config maintenance.auto false; git -C "$d" config gc.auto 0
             # Fail closed. Warning and continuing would skip the guard entirely while the
             # NEXT step still builds and pushes -- it mints its own write token, so an
             # unreachable staging repo here does not stop it. That is precisely the
@@ -375,7 +382,7 @@ jobs:
             # the mints are out of sync and that is worth failing over.
             if ! git -C "$d" -c credential.helper= fetch -q "$staging_url" main:refs/remotes/staging/main; then
               echo "::error title=Cannot verify the seal anchor for ${target}::${staging} is unreachable with the read credential, so it is unknown whether integrated ${integrated} is on the trunk. Refusing to build rather than replaying an unverified diff. Check the read token's repositories: list."
-              unverified="$unverified $target"; rm -rf "$d"; continue
+              unverified="$unverified $target"; rm -rf "$d" || true; continue
             fi
 
             # Fetching `main` brings its whole history, so an `integrated` that is genuinely on
@@ -383,11 +390,11 @@ jobs:
             # is exactly the 2026-09-21 shape.
             if ! git -C "$d" cat-file -e "${integrated}^{commit}" 2>/dev/null; then
               echo "::error title=Seal anchor is not on the trunk for ${target}::integrated ${integrated} does not exist anywhere in ${staging} main. It is on a side branch or was never pushed, so a build would replay a diff computed from a different lineage and revert this trunk's custom code. Re-anchor ${tracking} onto a commit that is on main."
-              offtrunk="$offtrunk $target"; rm -rf "$d"; continue
+              offtrunk="$offtrunk $target"; rm -rf "$d" || true; continue
             fi
             if ! git -C "$d" merge-base --is-ancestor "$integrated" staging/main; then
               echo "::error title=Seal anchor is not on the trunk for ${target}::integrated ${integrated} is not an ancestor of ${staging} main. Re-anchor ${tracking} onto a commit that is on main."
-              offtrunk="$offtrunk $target"; rm -rf "$d"; continue
+              offtrunk="$offtrunk $target"; rm -rf "$d" || true; continue
             fi
 
             ahead=$(git -C "$d" rev-list --count "${integrated}..staging/main")
@@ -400,7 +407,7 @@ jobs:
             else
               echo "${target}: anchor ${integrated} is the trunk tip."
             fi
-            rm -rf "$d"
+            rm -rf "$d" || true
           done < <(yq -r '.targets | to_entries[] | [.key, (.value.staging_repo // .value.production_repo), (.value.production_repo // .value.staging_repo)] | @tsv' stainless.yml)
 
           if [ -n "$offtrunk" ] || [ -n "$unverified" ]; then
