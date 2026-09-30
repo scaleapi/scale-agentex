@@ -243,7 +243,8 @@ jobs:
       - name: Hold codegen while production is ahead (release not back-synced)
         # Builds of main push directly to staging main. If production is ahead, refuse and re-run after the back-sync.
         # 
-        # An unreachable production repo warns and skips rather than failing.
+        # Fails closed: a repo it still cannot read after retries stops the build, since the hold
+        # cannot tell whether production is ahead. An unverified hold is no hold at all.
         if: github.event_name != 'pull_request'
         working-directory: ${{ env.STAINLESS_WORKSPACE }}
         env:
@@ -254,10 +255,9 @@ jobs:
           #
           # scale-agentex-typescript is private, so this genuinely needs credentials: the
           # unauthenticated first attempt below only succeeds for public scale-agentex-python.
-          # If the read token ever stops covering these four, the step degrades to
-          # `::warning::Codegen hold skipped for <target>` -- it drops the guard silently
-          # rather than failing, so a missing repo here is invisible. Keep the mint's
-          # `repositories:` list and this step's needs in sync.
+          # If the read token ever stops covering these four, the step fails with
+          # `::error::Codegen hold could not verify <target>` and nothing is built. Keep the
+          # mint's `repositories:` list and this step's needs in sync.
           GH_TOKEN: ${{ steps.read-token.outputs.token }}
           # Fail fast instead of prompting when a repo needs credentials.
           GIT_TERMINAL_PROMPT: '0'
@@ -285,7 +285,7 @@ jobs:
           ls_heads() { git -c credential.helper= ls-remote --heads "$1" main; }
           ls_heads_auth() { git_read -c credential.helper= ls-remote --heads "$1" main; }
 
-          held=""
+          held=""; unverified=""
           while IFS=$'\t' read -r target staging prod; do
             # Only hold on targets this run actually builds. The loop below reads every target
             # in stainless.yml, but the build uses --targets "$DEFAULT_TARGETS", which may be a
@@ -305,7 +305,8 @@ jobs:
             if ! prod_heads=$(ls_heads "$prod_url"); then
               prod_url="https://x-access-token:${GH_TOKEN}@github.com/${prod}.git"
               if ! prod_heads=$(ls_heads_auth "$prod_url"); then
-                echo "::warning title=Codegen hold skipped for ${target}::cannot verify production sync: ${prod} is unreachable with the configured credential. The hold is skipped for this target; grant the token read access to the production repo to enable it."
+                echo "::error title=Codegen hold could not verify ${target}::${prod} is unreachable with the read token, so the hold cannot tell whether production is ahead of staging. Nothing is built. Check the read token's repositories: list, or re-run if GitHub was having trouble."
+                unverified="$unverified $target"
                 continue
               fi
             fi
@@ -315,7 +316,8 @@ jobs:
 
             staging_url="https://x-access-token:${GH_TOKEN}@github.com/${staging}.git"
             if ! staging_heads=$(ls_heads_auth "$staging_url"); then
-              echo "::warning title=Codegen hold skipped for ${target}::cannot verify production sync: staging repo ${staging} is unreachable. The hold is skipped for this target; if this is not transient, the build step will fail loudly on its own."
+              echo "::error title=Codegen hold could not verify ${target}::staging repo ${staging} is unreachable with the read token, so the hold cannot tell whether production is ahead of it. Nothing is built. Check the read token's repositories: list, or re-run if GitHub was having trouble."
+              unverified="$unverified $target"
               continue
             fi
 
@@ -337,6 +339,10 @@ jobs:
           done < <(yq -r '.targets | to_entries[] | [.key, (.value.staging_repo // .value.production_repo), (.value.production_repo // .value.staging_repo)] | @tsv' stainless.yml)
           if [ -n "$held" ]; then
             echo "::error title=Codegen held::production is ahead of the staging trunk (a release isn't back-synced yet) for:$held. Wait for the back-sync, then re-run."
+            exit 1
+          fi
+          if [ -n "$unverified" ]; then
+            echo "::error title=Codegen aborted::the hold could not verify production sync for:$unverified — refusing to build without knowing whether production is ahead. Nothing was built."
             exit 1
           fi
           echo "No target has production verified ahead of staging — proceeding to build."
