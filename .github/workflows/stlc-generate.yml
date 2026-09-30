@@ -243,7 +243,8 @@ jobs:
       - name: Hold codegen while production is ahead (release not back-synced)
         # Builds of main push directly to staging main. If production is ahead, refuse and re-run after the back-sync.
         # 
-        # An unreachable production repo warns and skips rather than failing.
+        # Fails closed: a repo it still cannot read after retries stops the build, since the hold
+        # cannot tell whether production is ahead. An unverified hold is no hold at all.
         if: github.event_name != 'pull_request'
         working-directory: ${{ env.STAINLESS_WORKSPACE }}
         env:
@@ -254,21 +255,37 @@ jobs:
           #
           # scale-agentex-typescript is private, so this genuinely needs credentials: the
           # unauthenticated first attempt below only succeeds for public scale-agentex-python.
-          # If the read token ever stops covering these four, the step degrades to
-          # `::warning::Codegen hold skipped for <target>` -- it drops the guard silently
-          # rather than failing, so a missing repo here is invisible. Keep the mint's
-          # `repositories:` list and this step's needs in sync.
+          # If the read token ever stops covering these four, the step fails with
+          # `::error::Codegen hold could not verify <target>` and nothing is built. Keep the
+          # mint's `repositories:` list and this step's needs in sync.
           GH_TOKEN: ${{ steps.read-token.outputs.token }}
           # Fail fast instead of prompting when a repo needs credentials.
           GIT_TERMINAL_PROMPT: '0'
         run: |
           set -euo pipefail
 
+          # A freshly minted App token is sometimes refused by GitHub's git servers for a
+          # moment ("remote: Repository not found") even though the mint succeeded; the same
+          # read a few seconds later works. Only reads go through this, so a retry is always
+          # safe; pushes are never retried.
+          git_read() {
+            local attempt=1
+            until git "$@"; do
+              [ "$attempt" -ge 4 ] && return 1
+              echo "::warning title=git read retried::attempt $attempt failed; retrying in $((attempt * 5))s" >&2
+              sleep $((attempt * 5))
+              attempt=$((attempt + 1))
+            done
+          }
+
           # `-c credential.helper=` sidesteps the `gh auth setup-git` helper, so the
           # no-token attempt is genuinely unauthenticated and token calls use only the URL token.
+          # Only the token reads are retried: the no-token attempt fails for good on a private
+          # repo, and retrying it would add ~30 s to every run.
           ls_heads() { git -c credential.helper= ls-remote --heads "$1" main; }
+          ls_heads_auth() { git_read -c credential.helper= ls-remote --heads "$1" main; }
 
-          held=""
+          held=""; unverified=""
           while IFS=$'\t' read -r target staging prod; do
             # Only hold on targets this run actually builds. The loop below reads every target
             # in stainless.yml, but the build uses --targets "$DEFAULT_TARGETS", which may be a
@@ -287,8 +304,9 @@ jobs:
             prod_url="https://github.com/${prod}.git"
             if ! prod_heads=$(ls_heads "$prod_url"); then
               prod_url="https://x-access-token:${GH_TOKEN}@github.com/${prod}.git"
-              if ! prod_heads=$(ls_heads "$prod_url"); then
-                echo "::warning title=Codegen hold skipped for ${target}::cannot verify production sync: ${prod} is unreachable with the configured credential. The hold is skipped for this target; grant the token read access to the production repo to enable it."
+              if ! prod_heads=$(ls_heads_auth "$prod_url"); then
+                echo "::error title=Codegen hold could not verify ${target}::${prod} is unreachable with the read token, so the hold cannot tell whether production is ahead of staging. Nothing is built. Check the read token's repositories: list, or re-run if GitHub was having trouble."
+                unverified="$unverified $target"
                 continue
               fi
             fi
@@ -297,8 +315,9 @@ jobs:
             [ -z "$prod_heads" ] && continue
 
             staging_url="https://x-access-token:${GH_TOKEN}@github.com/${staging}.git"
-            if ! staging_heads=$(ls_heads "$staging_url"); then
-              echo "::warning title=Codegen hold skipped for ${target}::cannot verify production sync: staging repo ${staging} is unreachable. The hold is skipped for this target; if this is not transient, the build step will fail loudly on its own."
+            if ! staging_heads=$(ls_heads_auth "$staging_url"); then
+              echo "::error title=Codegen hold could not verify ${target}::staging repo ${staging} is unreachable with the read token, so the hold cannot tell whether production is ahead of it. Nothing is built. Check the read token's repositories: list, or re-run if GitHub was having trouble."
+              unverified="$unverified $target"
               continue
             fi
 
@@ -306,15 +325,24 @@ jobs:
             [ -z "$staging_heads" ] && continue
 
             d=$(mktemp -d); git -C "$d" init -q
-            git -C "$d" -c credential.helper= fetch -q "$staging_url" main:refs/remotes/staging/main
-            git -C "$d" -c credential.helper= fetch -q "$prod_url" main:refs/remotes/prod/main
+            # A throwaway clone: no background maintenance. git fetch starts auto-maintenance
+            # detached by default, and it can still be writing into .git when the cleanup
+            # below runs, so `rm -rf` fails with "Directory not empty" and, under set -e,
+            # fails the whole run for a temp directory the runner discards anyway.
+            git -C "$d" config maintenance.auto false; git -C "$d" config gc.auto 0
+            git_read -C "$d" -c credential.helper= fetch -q "$staging_url" main:refs/remotes/staging/main
+            git_read -C "$d" -c credential.helper= fetch -q "$prod_url" main:refs/remotes/prod/main
             if ! git -C "$d" merge-base --is-ancestor prod/main staging/main; then
               held="$held $target"
             fi
-            rm -rf "$d"
+            rm -rf "$d" || true
           done < <(yq -r '.targets | to_entries[] | [.key, (.value.staging_repo // .value.production_repo), (.value.production_repo // .value.staging_repo)] | @tsv' stainless.yml)
           if [ -n "$held" ]; then
             echo "::error title=Codegen held::production is ahead of the staging trunk (a release isn't back-synced yet) for:$held. Wait for the back-sync, then re-run."
+            exit 1
+          fi
+          if [ -n "$unverified" ]; then
+            echo "::error title=Codegen aborted::the hold could not verify production sync for:$unverified — refusing to build without knowing whether production is ahead. Nothing was built."
             exit 1
           fi
           echo "No target has production verified ahead of staging — proceeding to build."
@@ -345,6 +373,20 @@ jobs:
         run: |
           set -euo pipefail
 
+          # A freshly minted App token is sometimes refused by GitHub's git servers for a
+          # moment ("remote: Repository not found") even though the mint succeeded; the same
+          # read a few seconds later works. Only reads go through this, so a retry is always
+          # safe; pushes are never retried.
+          git_read() {
+            local attempt=1
+            until git "$@"; do
+              [ "$attempt" -ge 4 ] && return 1
+              echo "::warning title=git read retried::attempt $attempt failed; retrying in $((attempt * 5))s" >&2
+              sleep $((attempt * 5))
+              attempt=$((attempt + 1))
+            done
+          }
+
           offtrunk=""; unverified=""
           while IFS=$'\t' read -r target staging prod; do
             case ",${DEFAULT_TARGETS}," in
@@ -367,15 +409,17 @@ jobs:
 
             staging_url="https://x-access-token:${GH_TOKEN}@github.com/${staging}.git"
             d=$(mktemp -d); git -C "$d" init -q
+            # No background maintenance in a throwaway clone; see the codegen hold above.
+            git -C "$d" config maintenance.auto false; git -C "$d" config gc.auto 0
             # Fail closed. Warning and continuing would skip the guard entirely while the
             # NEXT step still builds and pushes -- it mints its own write token, so an
             # unreachable staging repo here does not stop it. That is precisely the
             # destructive case this guard exists for: unverifiable anchor, build proceeds,
             # custom code reverted. If the read token cannot see a repo the write token can,
             # the mints are out of sync and that is worth failing over.
-            if ! git -C "$d" -c credential.helper= fetch -q "$staging_url" main:refs/remotes/staging/main; then
+            if ! git_read -C "$d" -c credential.helper= fetch -q "$staging_url" main:refs/remotes/staging/main; then
               echo "::error title=Cannot verify the seal anchor for ${target}::${staging} is unreachable with the read credential, so it is unknown whether integrated ${integrated} is on the trunk. Refusing to build rather than replaying an unverified diff. Check the read token's repositories: list."
-              unverified="$unverified $target"; rm -rf "$d"; continue
+              unverified="$unverified $target"; rm -rf "$d" || true; continue
             fi
 
             # Fetching `main` brings its whole history, so an `integrated` that is genuinely on
@@ -383,11 +427,11 @@ jobs:
             # is exactly the 2026-09-21 shape.
             if ! git -C "$d" cat-file -e "${integrated}^{commit}" 2>/dev/null; then
               echo "::error title=Seal anchor is not on the trunk for ${target}::integrated ${integrated} does not exist anywhere in ${staging} main. It is on a side branch or was never pushed, so a build would replay a diff computed from a different lineage and revert this trunk's custom code. Re-anchor ${tracking} onto a commit that is on main."
-              offtrunk="$offtrunk $target"; rm -rf "$d"; continue
+              offtrunk="$offtrunk $target"; rm -rf "$d" || true; continue
             fi
             if ! git -C "$d" merge-base --is-ancestor "$integrated" staging/main; then
               echo "::error title=Seal anchor is not on the trunk for ${target}::integrated ${integrated} is not an ancestor of ${staging} main. Re-anchor ${tracking} onto a commit that is on main."
-              offtrunk="$offtrunk $target"; rm -rf "$d"; continue
+              offtrunk="$offtrunk $target"; rm -rf "$d" || true; continue
             fi
 
             ahead=$(git -C "$d" rev-list --count "${integrated}..staging/main")
@@ -400,7 +444,7 @@ jobs:
             else
               echo "${target}: anchor ${integrated} is the trunk tip."
             fi
-            rm -rf "$d"
+            rm -rf "$d" || true
           done < <(yq -r '.targets | to_entries[] | [.key, (.value.staging_repo // .value.production_repo), (.value.production_repo // .value.staging_repo)] | @tsv' stainless.yml)
 
           if [ -n "$offtrunk" ] || [ -n "$unverified" ]; then
@@ -423,6 +467,38 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         working-directory: ${{ env.STAINLESS_WORKSPACE }}
         run: |
+          # A freshly minted App token is sometimes refused by GitHub's git servers for a
+          # moment ("remote: Repository not found") even though the mint succeeded; the same
+          # read a few seconds later works. Only reads go through this, so a retry is always
+          # safe; pushes are never retried.
+          git_read() {
+            local attempt=1
+            until git "$@"; do
+              [ "$attempt" -ge 4 ] && return 1
+              echo "::warning title=git read retried::attempt $attempt failed; retrying in $((attempt * 5))s" >&2
+              sleep $((attempt * 5))
+              attempt=$((attempt + 1))
+            done
+          }
+
+          # The sync token's first use is stlc's own clone of the staging repos, which cannot be
+          # retried from here: one refusal there fails the whole run. So read every staging repo
+          # this run builds first, retried, and only build once the token is accepted. No token
+          # in the URL: this goes through the `gh auth setup-git` helper and this step's
+          # GH_TOKEN, exactly as stlc does.
+          while IFS=$'\t' read -r target staging _; do
+            case ",${DEFAULT_TARGETS}," in
+              ,all,) ;;
+              *",${target},"*) ;;
+              *) continue ;;
+            esac
+            { [ -z "$staging" ] || [ "$staging" = "null" ]; } && continue
+            if ! git_read ls-remote --heads "https://github.com/${staging}.git" main >/dev/null; then
+              echo "::error title=SDK sync token refused::${staging} is unreachable with the sync token, even after retries. Nothing was built. Check the sync token's repositories: list, or re-run if GitHub was having trouble."
+              exit 1
+            fi
+          done < <(yq -r '.targets | to_entries[] | [.key, (.value.staging_repo // .value.production_repo), (.value.production_repo // .value.staging_repo)] | @tsv' stainless.yml)
+
           echo "Building targets: $DEFAULT_TARGETS to branch: $BRANCH"
           commit_args=()
           if [ -n "$COMMIT_MSG" ]; then
