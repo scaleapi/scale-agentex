@@ -131,6 +131,22 @@ jobs:
           }
           trap finish EXIT
 
+          # A freshly minted App token is occasionally not honoured by git for the first
+          # second or so: the first fetch below then fails with "Repository not found"
+          # even though the same token works a moment later. Retry a fetch briefly
+          # before failing. A real scope or permission problem still fails, after ~12 s.
+          # Fetches only: the push runs seconds later, and retrying a rejected push would
+          # just delay a real error.
+          git_retry() {
+            local i
+            for i in 1 2 3 4; do
+              "$@" && return 0
+              [ "$i" -lt 4 ] || return 1
+              echo "::notice::git failed (attempt $i/4); retrying in $((i * 2))s"
+              sleep $((i * 2))
+            done
+          }
+
           yq -r '.targets | to_entries[] | [.key, (.value.staging_repo // .value.production_repo), (.value.production_repo // .value.staging_repo)] | @tsv' stainless.yml > "$WORK/configured.tsv"
           configured=$(cut -f1 "$WORK/configured.tsv" | paste -sd' ' -)
 
@@ -170,8 +186,8 @@ jobs:
             prod_url="https://x-access-token:${PROD_TOKEN}@github.com/${prod}.git"
 
             d="$WORK/$target"; mkdir -p "$d"; git -C "$d" init -q
-            git -C "$d" -c credential.helper= fetch -q "$staging_url" main:refs/remotes/staging/main
-            git -C "$d" -c credential.helper= fetch -q "$prod_url" main:refs/remotes/prod/main
+            git_retry git -C "$d" -c credential.helper= fetch -q "$staging_url" main:refs/remotes/staging/main
+            git_retry git -C "$d" -c credential.helper= fetch -q "$prod_url" main:refs/remotes/prod/main
 
             # Test ANCESTRY, not content. This is deliberately the same predicate the
             # codegen hold uses, because keeping it true is the entire job here.
