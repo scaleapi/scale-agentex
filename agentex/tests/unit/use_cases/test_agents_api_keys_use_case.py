@@ -268,9 +268,7 @@ class TestExtractAgentKeyFromAuthorization:
         assert extract_agent_key_from_authorization("AgentKey   ") is None
 
     def test_strips_surrounding_whitespace(self):
-        assert (
-            extract_agent_key_from_authorization("  AgentKey  abc123  ") == "abc123"
-        )
+        assert extract_agent_key_from_authorization("  AgentKey  abc123  ") == "abc123"
 
 
 @pytest.mark.asyncio
