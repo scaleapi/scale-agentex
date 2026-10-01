@@ -6,6 +6,7 @@ from pydantic import ConfigDict, Field
 
 from src.api.schemas.tasks import Task
 from src.utils.model_utils import BaseModel
+from src.utils.task_constants import CURRENT_STATE_DESCRIPTION
 
 
 class TaskRelationships(str, Enum):
@@ -73,6 +74,7 @@ class TaskEntity(BaseModel):
         None,
         title="Task metadata",
     )
+    current_state: str | None = Field(None, title=CURRENT_STATE_DESCRIPTION)
 
     # allow extra fields for agents relationships
     model_config = ConfigDict(extra="allow")
@@ -80,15 +82,4 @@ class TaskEntity(BaseModel):
 
 def convert_task_to_entity(task: Task) -> TaskEntity:
     """Converts the pydantic model from the API layer to the domain layer"""
-
-    return TaskEntity(
-        id=task.id,
-        name=task.name,
-        status=TaskStatus[task.status.value] if task.status is not None else None,
-        status_reason=task.status_reason,
-        created_at=task.created_at,
-        updated_at=task.updated_at,
-        cleaned_at=task.cleaned_at,
-        params=task.params,
-        task_metadata=task.task_metadata,
-    )
+    return TaskEntity.model_validate(task)
