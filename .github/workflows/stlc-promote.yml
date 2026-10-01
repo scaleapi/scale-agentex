@@ -222,6 +222,20 @@ jobs:
           }
           trap finish EXIT
 
+          # A freshly minted App token is sometimes refused by GitHub's git servers for a
+          # moment ("remote: Repository not found") even though the mint succeeded; the same
+          # read a few seconds later works. Only reads go through this, so a retry is always
+          # safe; pushes are never retried.
+          git_read() {
+            local attempt=1
+            until git "$@"; do
+              [ "$attempt" -ge 4 ] && return 1
+              echo "::warning title=git read retried::attempt $attempt failed; retrying in $((attempt * 5))s" >&2
+              sleep $((attempt * 5))
+              attempt=$((attempt + 1))
+            done
+          }
+
           yq -r '.targets | to_entries[] | [.key, (.value.staging_repo // .value.production_repo), (.value.production_repo // .value.staging_repo)] | @tsv' stainless.yml > "$WORK/configured.tsv"
           configured=$(cut -f1 "$WORK/configured.tsv" | paste -sd' ' -)
 
@@ -268,8 +282,8 @@ jobs:
             prod_url="https://x-access-token:${GH_TOKEN}@github.com/${prod}.git"
 
             d="$WORK/$target"; mkdir -p "$d"; git -C "$d" init -q
-            git -C "$d" -c credential.helper= fetch -q "$staging_url" main:refs/remotes/staging/main
-            git -C "$d" -c credential.helper= fetch -q "$prod_url" main:refs/remotes/prod/main
+            git_read -C "$d" -c credential.helper= fetch -q "$staging_url" main:refs/remotes/staging/main
+            git_read -C "$d" -c credential.helper= fetch -q "$prod_url" main:refs/remotes/prod/main
 
             # Content compare before SHA compare. After a release production carries
             # release-please commits staging lacks, so it is not "behind" even though
@@ -377,7 +391,7 @@ jobs:
             # Fail closed. An unreadable staged SHA must not be mistaken for "no branch":
             # an empty $staged cannot equal $to_full, so the run would fall through to the
             # restage path and force-push over a branch whose contents it never saw.
-            if ! staged_raw=$(git -C "$d" -c credential.helper= ls-remote "$prod_url" "refs/heads/$PROMOTE_BRANCH"); then
+            if ! staged_raw=$(git_read -C "$d" -c credential.helper= ls-remote "$prod_url" "refs/heads/$PROMOTE_BRANCH"); then
               echo "::error title=Promote blocked for ${target}::could not read ${PROMOTE_BRANCH} on ${prod}; refusing to act without knowing what is staged there."
               blocked="$blocked $target"; echo "::endgroup::"; continue
             fi
