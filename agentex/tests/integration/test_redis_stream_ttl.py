@@ -19,9 +19,9 @@ class TestRedisStreamTTL:
         # while still catching a regression where EXPIRE isn't called.
         assert ttl > 0, f"Expected positive TTL, got {ttl}"
         assert ttl <= 3600, f"Expected TTL <= 3600, got {ttl}"
-        assert (
-            ttl >= 3480
-        ), f"Expected TTL >= 3480 (within 120s of configured), got {ttl}"
+        assert ttl >= 3480, (
+            f"Expected TTL >= 3480 (within 120s of configured), got {ttl}"
+        )
 
         # Cleanup
         await repo.redis.delete(topic)
