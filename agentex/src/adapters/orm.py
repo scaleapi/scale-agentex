@@ -152,6 +152,49 @@ class AgentTaskTrackerORM(BaseORM):
     )
 
 
+class TaskStateORM(BaseORM):
+    """Task state on PostgreSQL: one row per (task, agent) pair.
+
+    Optional storage backend for task state (selected per deployment via
+    TASK_STATE_STORAGE_PHASE); MongoDB remains the default. Nothing reads or
+    writes this table until the Postgres task-state repository lands.
+    """
+
+    __tablename__ = "task_states"
+
+    id = Column(String, primary_key=True, default=orm_id)
+    # Both FKs are bare (no ON DELETE action), deliberately: MongoDB has no
+    # cascades, so state deletion is application-driven on both backends, and
+    # the FK alone prevents orphaned rows. This matches the sibling child
+    # tables of tasks (task_agents, events), whose bare FKs already reject the
+    # existing DELETE /tasks path for any task with children; task_states
+    # behaves identically rather than cascading on one backend only.
+    task_id = Column(String, ForeignKey("tasks.id"), nullable=False)
+    agent_id = Column(String, ForeignKey("agents.id"), nullable=False)
+    state = Column(JSONB, nullable=False)
+    # NOT NULL with a server default: the repository must OMIT unset (None)
+    # timestamps when constructing rows. SQLAlchemy renders an explicitly
+    # assigned None as a literal NULL, which violates the constraint instead
+    # of falling back to the default (StateEntity defaults these to None).
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        # The (task_id, agent_id) index is deliberately absent: its shape is
+        # the open write-semantics decision (a unique constraint backing an
+        # atomic upsert, or a plain compound index mirroring MongoDB) and it
+        # ships with the repository that reads this table.
+        Index("ix_task_states_agent_id", "agent_id"),
+    )
+
+
 class SpanORM(BaseORM):
     __tablename__ = "spans"
     id = Column(String, primary_key=True, default=orm_id)  # Using UUIDs for IDs
