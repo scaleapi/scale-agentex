@@ -17,12 +17,12 @@ To set up your development environment for Agentex, please refer to the [README.
 1. **Fork** the repository.
 2. **Clone** your fork:
     ```bash
-    git clone https://github.com/<your-username>/agentex.git
-    cd agentex
+    git clone https://github.com/<your-username>/scale-agentex.git
+    cd scale-agentex
     ```
 3. **Set the original repo as upstream** (recommended):
     ```bash
-    git remote add upstream https://github.com/scaleapi/agentex.git
+    git remote add upstream https://github.com/scaleapi/scale-agentex.git
     ```
 4. **Create a new branch** for your feature or bugfix:
     ```bash
@@ -30,14 +30,15 @@ To set up your development environment for Agentex, please refer to the [README.
     ```
 5. **Make your changes.**  
    Follow project coding style and conventions.
-6. **Test your changes:**
+6. **Test your changes** (backend; runs from the repo root or from `agentex/`):
     ```bash
     make test
     ```
-    Run linter/formatter as required:
+    Run the linter/formatter checks as required:
     ```bash
     make lint
     ```
+    For the developer UI, run `npm run lint`, `npm run typecheck`, and `npm test` inside `agentex-ui/`.
 7. **Commit your changes** (see commit message guidelines below).
 8. **Push** to your fork:
     ```bash
