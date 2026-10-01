@@ -46,6 +46,21 @@ markdown_extensions:
       custom_checkbox: true
 nav:
   - Introduction: index.md
+  - Repository Packages:
+      - Overview: packages/overview.md
+      - Workspace: packages/workspace.md
+      - Agentex Backend (`agentex/`):
+          - Overview: packages/agentex-backend/index.md
+          - API layer: packages/agentex-backend/api-layer.md
+          - Domain layer: packages/agentex-backend/domain-layer.md
+          - Adapters: packages/agentex-backend/adapters.md
+          - Config & dependencies: packages/agentex-backend/config-and-deps.md
+          - Temporal: packages/agentex-backend/temporal.md
+          - Database & migrations: packages/agentex-backend/database-and-migrations.md
+          - Testing: packages/agentex-backend/testing.md
+      - Agentex UI (`agentex-ui/`):
+          - Overview: packages/agentex-ui/index.md
+          - Structure: packages/agentex-ui/structure.md
   - Getting Started:
       - Architecture Overview: getting_started/agentex_overview.md
       - Choose Your Agent Type: getting_started/choose_your_agent_type.md
