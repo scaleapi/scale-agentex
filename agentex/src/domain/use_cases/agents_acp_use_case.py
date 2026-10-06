@@ -253,6 +253,7 @@ class AgentsACPUseCase(TaskMessageMixin):
             logger.error(
                 f"Authentication service unavailable: {e}. Max retries reached."
             )
+            await self.task_service.fail_task(task, str(e))
             raise e from e
         except Exception as e:
             logger.error(f"Error granting authorization for task {task.id}: {e}")
