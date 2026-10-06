@@ -189,10 +189,7 @@ def _describe_provider_error(exc: Exception) -> str:
     # HttpRequestHandler; other exceptions may embed credentials.
     if not isinstance(exc, GenericException):
         return type(exc).__name__
-    parts = [f"{type(exc).__name__} (status {exc.code})", exc.message]
-    if isinstance(exc.detail, str) and exc.detail:
-        parts.append(exc.detail)
-    description = ": ".join(str(part) for part in parts)
+    description = f"{type(exc).__name__} (status {exc.code}): {exc.message}"
     return re.sub(r"[^\x20-\x7e]", "?", description)[:500]
 
 

@@ -93,6 +93,7 @@ async def test_provider_unavailable_remains_retryable_and_is_not_cached(
     assert not served
     assert "user-secret" not in caplog.text
     assert "pod-secret" not in caplog.text
+    assert "[REDACTED]" not in caplog.text
 
     provider_status["code"] = 200
     recovered = await client.get("/protected")
