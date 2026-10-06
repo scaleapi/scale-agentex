@@ -483,7 +483,7 @@ def test_redaction_is_single_pass_and_keeps_cookie_names():
         _redact("session ok, value 9z", ["session=9z"])
         == "session ok, value [REDACTED]"
     )
-    assert _redact("tok abc== abc", ["abc=="]) == "tok [REDACTED] abc"
+    assert _redact("tok abc== abc", ["abc=="]) == "tok [REDACTED] [REDACTED]"
 
 
 @pytest.mark.asyncio

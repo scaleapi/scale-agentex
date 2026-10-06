@@ -189,6 +189,9 @@ def _redact(text: str | None, secrets: Iterable[str]) -> str | None:
             _, sep, rest = part.partition("=")
             if sep and rest.strip("="):
                 candidates.add(rest)
+            elif rest:
+                # Trailing base64 padding; providers may echo it stripped.
+                candidates.add(part.rstrip("="))
     candidates.discard("")
     if not candidates:
         return text
