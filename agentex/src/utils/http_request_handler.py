@@ -23,6 +23,11 @@ SERVICE_ACCOUNT_AUTH_ERROR_VALUES = frozenset(
     {"unauthenticated", "forbidden", "unavailable"}
 )
 _MIN_REDACTED_LENGTH = 8
+_MAX_ERROR_MESSAGE_LENGTH = 200
+_CREDENTIAL_HEADER_PATTERN = re.compile(
+    r"authorization|cookie|token|key|secret|session|credential|password",
+    re.IGNORECASE,
+)
 
 
 class HttpRequestHandler:
@@ -62,6 +67,7 @@ class HttpRequestHandler:
             ServiceError: For server errors or unexpected responses
         """
         client = get_async_client(base_url)
+        secrets = _credential_values(headers)
 
         try:
             # Auth credentials must not be forwarded to a redirect destination.
@@ -76,7 +82,7 @@ class HttpRequestHandler:
 
             raise AuthenticationServiceUnavailableError(
                 message="Service unreachable or timed out",
-                detail=_redact(error_detail, (headers or {}).values()),
+                detail=_redact(error_detail, secrets),
             ) from err
 
         if response.status_code == 200:
@@ -89,10 +95,12 @@ class HttpRequestHandler:
                 ) from err
 
         # Extract error message from response if possible
-        error_message = _redact(
-            HttpRequestHandler._extract_error_message(response) or response.text[:200],
-            (headers or {}).values(),
-        )
+        # Redact before truncating so a cut cannot leave a partial credential.
+        error_message = (
+            _redact(HttpRequestHandler._extract_error_message(response), secrets)
+            or _redact(response.text, secrets)
+            or ""
+        )[:_MAX_ERROR_MESSAGE_LENGTH]
 
         service_account_error = response.headers.get(SERVICE_ACCOUNT_AUTH_ERROR_HEADER)
         if service_account_error is not None:
@@ -158,8 +166,16 @@ class HttpRequestHandler:
         except Exception:
             # If JSON parsing fails, try to return some text
             if response.text:
-                return response.text[:200]  # Limit length
+                return response.text
         return None
+
+
+def _credential_values(headers: dict[str, str] | None) -> list[str]:
+    return [
+        value
+        for name, value in (headers or {}).items()
+        if _CREDENTIAL_HEADER_PATTERN.search(name)
+    ]
 
 
 def _redact(text: str | None, secrets: Iterable[str]) -> str | None:

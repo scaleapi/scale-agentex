@@ -29,7 +29,8 @@ from src.api.schemas.authorization_types import (
     AgentexResourceType,
     AuthorizedOperationType,
 )
-from src.utils.http_request_handler import HttpRequestHandler
+from src.domain.exceptions import ServiceError
+from src.utils.http_request_handler import _MIN_REDACTED_LENGTH, HttpRequestHandler
 
 pytestmark = pytest.mark.unit
 
@@ -441,6 +442,42 @@ async def test_provider_errors_redact_echoed_credentials(token_path, provider_re
     assert "user-secret-credential" not in exc.value.message
     assert "pod-token-value" not in exc.value.message
     assert exc.value.message == "bad [REDACTED] [REDACTED]"
+
+
+@pytest.mark.asyncio
+async def test_truncated_plain_text_error_cannot_leak_credential_prefix(token_path):
+    pod_token = "a" * 300
+    token_path.write_text(pod_token)
+
+    def handle(request):
+        return httpx.Response(500, text="invalid token " + pod_token)
+
+    with pytest.raises(AuthenticationServiceUnavailableError) as exc:
+        await call_provider("authz", handle)
+
+    assert exc.value.detail == "invalid token [REDACTED]"
+    assert "a" * _MIN_REDACTED_LENGTH not in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_non_credential_headers_are_not_redacted():
+    def handle(request):
+        return httpx.Response(400, json={"detail": "expected application/json"})
+
+    async with httpx.AsyncClient(
+        base_url="https://auth.example", transport=httpx.MockTransport(handle)
+    ) as client:
+        with patch(
+            "src.utils.http_request_handler.get_async_client", return_value=client
+        ):
+            with pytest.raises(ServiceError) as exc:
+                await HttpRequestHandler.post_with_error_handling(
+                    "https://auth.example",
+                    "/v1/authn",
+                    headers={"Content-Type": "application/json"},
+                )
+
+    assert exc.value.detail == "expected application/json"
 
 
 @pytest.mark.asyncio
