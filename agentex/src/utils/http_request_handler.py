@@ -52,7 +52,10 @@ class HttpRequestHandler:
         client = get_async_client(base_url)
 
         try:
-            response = await client.post(path, json=json, headers=headers)
+            # Auth credentials must not be forwarded to a redirect destination.
+            response = await client.post(
+                path, json=json, headers=headers, follow_redirects=False
+            )
         except httpx.RequestError as err:
             # Network/timeout errors
             error_detail = str(err)

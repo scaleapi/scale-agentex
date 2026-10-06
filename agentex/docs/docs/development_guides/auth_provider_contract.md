@@ -40,6 +40,26 @@ behind the same wire format.
   the forwarded headers. Provider responses should therefore be a pure function of
   the request headers.
 
+### Optional Kubernetes caller identity
+
+To authenticate the Agentex API and worker pods to your provider, mount a projected
+ServiceAccount token with audience `agentex-auth` at
+`/var/run/secrets/agentex-auth/token`. Set `AGENTEX_AUTH_SA_TOKEN_PATH` to use a
+different path. Both proxies read the file on every outgoing request to support
+token rotation and send it as `X-Kubernetes-Service-Account-Token` alongside the
+user's credentials or authorization payload.
+
+The proxies remove any incoming header with this name, regardless of case, so an
+end user cannot supply the pod's identity. Missing or empty token files omit the
+header, preserving local development and compatibility with providers that do not
+require it. Other read failures stop the request. Provider redirects are rejected
+to avoid forwarding credentials to another destination.
+
+The provider must validate the token's audience and allowed ServiceAccount
+identity before trusting the caller. When enabling this validation on an existing
+deployment, first deploy token mounts and token-sending code to **all API and
+worker pods**, then enable enforcement at the provider.
+
 ### Allowlisted (unauthenticated) routes
 
 These routes bypass the provider entirely and are never sent to `/v1/authn`:
@@ -60,7 +80,7 @@ These routes bypass the provider entirely and are never sent to `/v1/authn`:
 | Transport | HTTP/1.1, JSON request and response bodies (`Content-Type: application/json`) |
 | Method | All endpoints are `POST` |
 | Base path | `AGENTEX_AUTH_URL` is the origin; paths below are appended verbatim |
-| Auth of the provider itself | Out of scope — secure the network path (mTLS / private network / shared secret) as you see fit |
+| Caller identity | Optional projected Kubernetes token as described above; other provider-specific mechanisms can also secure the connection |
 
 ### Status code semantics
 
@@ -139,7 +159,8 @@ Verify the caller's credentials and return their principal context.
 
 **Request.** Agentex forwards the incoming request's headers (lowercased) as the
 outbound request headers. It strips hop-by-hop headers (`content-length`, `host`,
-`connection`, `transfer-encoding`, `expect`). The request body is empty — **all
+`connection`, `transfer-encoding`, `expect`) and replaces the reserved Kubernetes
+token header with the pod's token when mounted. The request body is empty — **all
 input is in the headers.** The provider reads whatever credential headers it
 cares about, for example:
 
