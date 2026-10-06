@@ -7,6 +7,9 @@ from sqlalchemy import select
 from src.adapters.authentication.adapter_agentex_authn_proxy import (
     AgentexAuthenticationProxy,
 )
+from src.adapters.authentication.exceptions import (
+    AuthenticationServiceUnavailableError,
+)
 from src.adapters.orm import AgentAPIKeyORM, AgentORM
 from src.config.dependencies import middleware_async_read_only_session_maker
 from src.utils.logging import make_logger
@@ -156,12 +159,22 @@ async def verify_auth_gateway(
             getattr(principal_context, "account_id", None),
         )
         return None  # Authentication successful
+    except AuthenticationServiceUnavailableError:
+        logger.warning(
+            "[authentication_middleware] Authentication service unavailable for %s %s",
+            request.method,
+            request.url.path,
+        )
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Authentication service unavailable"},
+        )
     except Exception as exc:
         logger.error(
             "[authentication_middleware] Request for %s %s failed with %s",
             request.method,
             request.url.path,
-            str(exc),
+            type(exc).__name__,
         )
         return JSONResponse(
             status_code=401,

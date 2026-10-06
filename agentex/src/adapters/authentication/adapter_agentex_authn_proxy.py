@@ -19,5 +19,7 @@ class AgentexAuthenticationProxy(AuthenticationGateway[AgentexAuthPrincipalConte
         self, headers: dict[str, str]
     ) -> AgentexAuthPrincipalContext:
         return await HttpRequestHandler.post_with_error_handling(
-            self.agentex_auth_url, "/v1/authn", headers=agentex_auth_headers(headers)
+            self.agentex_auth_url,
+            "/v1/authn",
+            headers=await agentex_auth_headers(headers),
         )

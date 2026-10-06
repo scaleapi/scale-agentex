@@ -31,8 +31,8 @@ behind the same wire format.
   the variable.
 - **Authentication is middleware.** On every non-allowlisted request, Agentex
   forwards the incoming request headers to `POST {AGENTEX_AUTH_URL}/v1/authn`. A
-  `200` returns a **principal context** that Agentex attaches to the request; any
-  failure becomes a `401` to the original caller.
+  `200` returns a **principal context** that Agentex attaches to the request.
+  Service-unavailable failures return `503`; other failures return `401`.
 - **Authorization is inline.** When handling a request, Agentex calls the
   `/v1/authz/*` endpoints, passing back the exact principal context it received
   from `/v1/authn`.
@@ -100,13 +100,11 @@ decide what happened. The body matters only where noted (`/v1/authn` principal,
 
 A network/timeout failure reaching the provider is treated as service-unavailable.
 
-> **`/v1/authn` collapses every failure to `401`.** The status-code distinctions
-> above (`502`/`503`/`5xx`) are preserved only for the **authz** endpoints, which
-> are called inside request handlers. Authentication runs in middleware that
-> catches *any* non-`200` from the provider — including `5xx` — and returns a flat
-> `401 Unauthorized` to the original caller. A `503` from your authn endpoint
-> during an outage will therefore reach clients as `401`, not as a retryable
-> service-unavailable error.
+> **Authentication preserves service-unavailable failures as `503`.** Provider
+> `503` responses, network/timeouts, and unreadable or malformed pod-token files
+> return `503` to the original caller and are not cached. Other authentication
+> failures still return `401 Unauthorized`. Authorization endpoints preserve the
+> status-code distinctions listed above.
 
 ### The principal context (opaque round-trip)
 

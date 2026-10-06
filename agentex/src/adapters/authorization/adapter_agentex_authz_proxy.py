@@ -39,7 +39,7 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
             self.agentex_auth_url,
             "/v1/authz/grant",
             json=payload,
-            headers=agentex_auth_headers(),
+            headers=await agentex_auth_headers(),
         )
 
     async def revoke(
@@ -57,7 +57,7 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
             self.agentex_auth_url,
             "/v1/authz/revoke",
             json=payload,
-            headers=agentex_auth_headers(),
+            headers=await agentex_auth_headers(),
         )
 
     async def check(
@@ -75,7 +75,7 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
             self.agentex_auth_url,
             "/v1/authz/check",
             json=payload,
-            headers=agentex_auth_headers(),
+            headers=await agentex_auth_headers(),
         )
         return True  # request was successful
 
@@ -94,7 +94,7 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
             self.agentex_auth_url,
             "/v1/authz/search",
             json=payload,
-            headers=agentex_auth_headers(),
+            headers=await agentex_auth_headers(),
         )
         # Wildcard sentinel: a provider signals "all resources of this type" with
         # {"unscoped": true} rather than enumerating ids. Map only the exact JSON
@@ -121,7 +121,7 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
             self.agentex_auth_url,
             "/v1/authz/register",
             json=payload,
-            headers=agentex_auth_headers(),
+            headers=await agentex_auth_headers(),
         )
 
     async def deregister_resource(
@@ -137,7 +137,7 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
             self.agentex_auth_url,
             "/v1/authz/deregister",
             json=payload,
-            headers=agentex_auth_headers(),
+            headers=await agentex_auth_headers(),
         )
 
 

@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 from collections.abc import Mapping
@@ -11,7 +12,7 @@ SERVICE_ACCOUNT_TOKEN_HEADER = "X-Kubernetes-Service-Account-Token"
 DEFAULT_TOKEN_PATH = "/var/run/secrets/agentex-auth/token"
 
 
-def agentex_auth_headers(
+async def agentex_auth_headers(
     headers: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     """Build headers for the configured auth provider using this pod's identity."""
@@ -23,8 +24,10 @@ def agentex_auth_headers(
     }
     token_path = os.environ.get("AGENTEX_AUTH_SA_TOKEN_PATH", DEFAULT_TOKEN_PATH)
     try:
-        # Reopen on every request to follow Kubernetes projected-token rotation.
-        token = Path(token_path).read_text(encoding="utf-8").strip()
+        # Reopen for rotation without blocking API/worker event loops on file IO.
+        token = (
+            await asyncio.to_thread(Path(token_path).read_text, encoding="utf-8")
+        ).strip()
     except FileNotFoundError:
         return outbound_headers
     except (OSError, UnicodeError):

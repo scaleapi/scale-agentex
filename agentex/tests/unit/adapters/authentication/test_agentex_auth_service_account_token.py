@@ -1,4 +1,6 @@
+import asyncio
 import json
+import threading
 from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
@@ -159,7 +161,8 @@ async def test_missing_or_empty_token_omits_header(
     assert SERVICE_ACCOUNT_TOKEN_HEADER not in sent_requests[0].headers
 
 
-def test_default_path_is_used_when_override_is_unset(token_path, monkeypatch):
+@pytest.mark.asyncio
+async def test_default_path_is_used_when_override_is_unset(token_path, monkeypatch):
     token_path.write_text("default-mounted-token")
     monkeypatch.delenv("AGENTEX_AUTH_SA_TOKEN_PATH")
     monkeypatch.setattr(
@@ -167,9 +170,9 @@ def test_default_path_is_used_when_override_is_unset(token_path, monkeypatch):
         str(token_path),
     )
 
-    assert (
-        agentex_auth_headers()[SERVICE_ACCOUNT_TOKEN_HEADER] == "default-mounted-token"
-    )
+    assert (await agentex_auth_headers())[
+        SERVICE_ACCOUNT_TOKEN_HEADER
+    ] == "default-mounted-token"
 
 
 @pytest.mark.parametrize("failure", ["permission", "invalid_encoding"])
@@ -196,6 +199,43 @@ async def test_unreadable_token_fails_without_exposing_secrets(
     assert exc.value.detail is None
     assert exc.value.__suppress_context__
     assert not sent_requests
+
+
+@pytest.mark.parametrize("proxy_type", ["authn", "authz"])
+@pytest.mark.asyncio
+async def test_slow_token_read_leaves_event_loop_responsive(
+    proxy_type, monkeypatch, token_path, sent_requests
+):
+    loop = asyncio.get_running_loop()
+    read_started = asyncio.Event()
+    release_read = threading.Event()
+
+    def read_token(*args, **kwargs):
+        loop.call_soon_threadsafe(read_started.set)
+        # Finite wait also lets the test fail instead of hanging if IO regresses
+        # to running on the event loop.
+        if not release_read.wait(timeout=2):
+            raise TimeoutError("token read was not released")
+        return "pod-token"
+
+    monkeypatch.setattr(Path, "read_text", read_token)
+    request = asyncio.create_task(
+        authn_proxy().verify_headers({})
+        if proxy_type == "authn"
+        else call_authz(
+            AgentexAuthorizationProxy(agentex_auth_url="https://auth.example"), "check"
+        )
+    )
+    try:
+        await asyncio.wait_for(read_started.wait(), timeout=1)
+        # This coroutine must resume while the filesystem read is still blocked.
+        assert not request.done()
+        assert not sent_requests
+    finally:
+        release_read.set()
+        await request
+
+    assert sent_requests[0].headers[SERVICE_ACCOUNT_TOKEN_HEADER] == "pod-token"
 
 
 @pytest.mark.parametrize(
