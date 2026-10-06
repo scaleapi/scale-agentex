@@ -7,10 +7,13 @@ from unittest.mock import patch
 
 import httpx
 import pytest
+from src.adapters.authentication import service_account_token
 from src.adapters.authentication.adapter_agentex_authn_proxy import (
     AgentexAuthenticationProxy,
 )
 from src.adapters.authentication.exceptions import (
+    AuthenticationError,
+    AuthenticationGatewayError,
     AuthenticationServiceUnavailableError,
 )
 from src.adapters.authentication.service_account_token import (
@@ -20,12 +23,12 @@ from src.adapters.authentication.service_account_token import (
 from src.adapters.authorization.adapter_agentex_authz_proxy import (
     AgentexAuthorizationProxy,
 )
+from src.adapters.authorization.exceptions import AuthorizationError
 from src.api.schemas.authorization_types import (
     AgentexResource,
     AgentexResourceType,
     AuthorizedOperationType,
 )
-from src.domain.exceptions import ServiceError
 from src.utils.http_request_handler import HttpRequestHandler
 
 pytestmark = pytest.mark.unit
@@ -301,7 +304,7 @@ async def test_provider_redirect_cannot_forward_credentials(proxy_type, token_pa
         with patch(
             "src.utils.http_request_handler.get_async_client", return_value=client
         ):
-            with pytest.raises(ServiceError) as exc:
+            with pytest.raises(AuthenticationGatewayError) as exc:
                 if proxy_type == "authn":
                     await authn_proxy().verify_headers({})
                 else:
@@ -312,6 +315,143 @@ async def test_provider_redirect_cannot_forward_credentials(proxy_type, token_pa
                         "check",
                     )
 
-    assert exc.value.code == 307
+    assert exc.value.code == 502
+    assert "redirect status 307" in exc.value.message
+    assert "/v1/auth" in exc.value.message
+    assert "other.example" not in exc.value.message
     assert len(requests) == 1
     assert requests[0].url.host == "auth.example"
+
+
+@pytest.fixture
+def provider_response():
+    response = {"status": 200, "headers": {}, "json": {}}
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(
+            response["status"], headers=response["headers"], json=response["json"]
+        )
+
+    return response, requests, handle
+
+
+async def call_provider(proxy_type, handle):
+    async with httpx.AsyncClient(
+        base_url="https://auth.example", transport=httpx.MockTransport(handle)
+    ) as client:
+        with patch(
+            "src.utils.http_request_handler.get_async_client", return_value=client
+        ):
+            if proxy_type == "authn":
+                return await authn_proxy().verify_headers(
+                    {"authorization": "Bearer user-secret-credential"}
+                )
+            return await call_authz(
+                AgentexAuthorizationProxy(agentex_auth_url="https://auth.example"),
+                "check",
+            )
+
+
+@pytest.mark.parametrize("reason", ["unauthenticated", "forbidden", "unavailable"])
+@pytest.mark.parametrize("status", [401, 403, 503])
+@pytest.mark.parametrize("proxy_type", ["authn", "authz"])
+@pytest.mark.asyncio
+async def test_service_account_rejection_is_a_service_error(
+    proxy_type, status, reason, token_path, provider_response, caplog
+):
+    token_path.write_text("pod-token")
+    response, _, handle = provider_response
+    response.update(
+        status=status,
+        headers={"X-Service-Account-Auth-Error": reason},
+        json={"detail": "caller rejected"},
+    )
+
+    with pytest.raises(AuthenticationServiceUnavailableError) as exc:
+        await call_provider(proxy_type, handle)
+
+    assert exc.value.code == 503
+    assert reason in exc.value.message
+    assert f"X-Service-Account-Auth-Error={reason} (status {status})" in caplog.text
+    assert any(record.levelname == "ERROR" for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_unrecognized_service_account_reason_is_not_echoed(
+    token_path, provider_response, caplog
+):
+    token_path.write_text("pod-token")
+    response, _, handle = provider_response
+    response.update(status=401, headers={"X-Service-Account-Auth-Error": "injected"})
+
+    with pytest.raises(AuthenticationServiceUnavailableError) as exc:
+        await call_provider("authn", handle)
+
+    assert "unrecognized" in exc.value.message
+    assert "injected" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"), [(401, AuthenticationError), (403, AuthorizationError)]
+)
+@pytest.mark.asyncio
+async def test_user_rejection_without_service_account_header_stays_client_error(
+    status, expected, token_path, provider_response
+):
+    token_path.write_text("pod-token")
+    response, _, handle = provider_response
+    response.update(status=status, json={"detail": "user rejected"})
+
+    with pytest.raises(expected) as exc:
+        await call_provider("authz", handle)
+
+    assert exc.value.message == "user rejected"
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 504])
+@pytest.mark.parametrize("proxy_type", ["authn", "authz"])
+@pytest.mark.asyncio
+async def test_provider_5xx_is_service_unavailable(
+    proxy_type, status, token_path, provider_response
+):
+    token_path.write_text("pod-token")
+    response, _, handle = provider_response
+    response.update(status=status, json={"detail": "upstream down"})
+
+    with pytest.raises(AuthenticationServiceUnavailableError) as exc:
+        await call_provider(proxy_type, handle)
+
+    assert exc.value.code == 503
+    assert exc.value.detail == "upstream down"
+
+
+@pytest.mark.asyncio
+async def test_provider_errors_redact_echoed_credentials(token_path, provider_response):
+    token_path.write_text("pod-token-value")
+    response, _, handle = provider_response
+    response.update(
+        status=403, json={"detail": "bad user-secret-credential pod-token-value"}
+    )
+
+    with pytest.raises(AuthorizationError) as exc:
+        await call_provider("authn", handle)
+
+    assert "user-secret-credential" not in exc.value.message
+    assert "pod-token-value" not in exc.value.message
+    assert exc.value.message == "bad [REDACTED] [REDACTED]"
+
+
+@pytest.mark.asyncio
+async def test_missing_token_file_warns_once_with_path(
+    token_path, sent_requests, monkeypatch, caplog
+):
+    monkeypatch.setattr(service_account_token, "_missing_token_paths_warned", set())
+
+    await agentex_auth_headers()
+    await agentex_auth_headers()
+
+    warnings = [r for r in caplog.records if str(token_path) in r.getMessage()]
+    assert len(warnings) == 1
+    assert warnings[0].levelname == "WARNING"

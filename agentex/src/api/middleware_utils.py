@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
@@ -7,11 +9,9 @@ from sqlalchemy import select
 from src.adapters.authentication.adapter_agentex_authn_proxy import (
     AgentexAuthenticationProxy,
 )
-from src.adapters.authentication.exceptions import (
-    AuthenticationServiceUnavailableError,
-)
 from src.adapters.orm import AgentAPIKeyORM, AgentORM
 from src.config.dependencies import middleware_async_read_only_session_maker
+from src.domain.exceptions import GenericException, ServiceError
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
@@ -159,11 +159,13 @@ async def verify_auth_gateway(
             getattr(principal_context, "account_id", None),
         )
         return None  # Authentication successful
-    except AuthenticationServiceUnavailableError:
+    except ServiceError as exc:
         logger.warning(
-            "[authentication_middleware] Authentication service unavailable for %s %s",
+            "[authentication_middleware] Authentication service unavailable for "
+            "%s %s: %s",
             request.method,
             request.url.path,
+            _describe_provider_error(exc),
         )
         return JSONResponse(
             status_code=503,
@@ -174,12 +176,24 @@ async def verify_auth_gateway(
             "[authentication_middleware] Request for %s %s failed with %s",
             request.method,
             request.url.path,
-            type(exc).__name__,
+            _describe_provider_error(exc),
         )
         return JSONResponse(
             status_code=401,
             content={"detail": "Unauthorized"},
         )
+
+
+def _describe_provider_error(exc: Exception) -> str:
+    # Provider messages are redacted of outbound header values by
+    # HttpRequestHandler; other exceptions may embed credentials.
+    if not isinstance(exc, GenericException):
+        return type(exc).__name__
+    parts = [f"{type(exc).__name__} (status {exc.code})", exc.message]
+    if isinstance(exc.detail, str) and exc.detail:
+        parts.append(exc.detail)
+    description = ": ".join(str(part) for part in parts)
+    return re.sub(r"[^\x20-\x7e]", "?", description)[:500]
 
 
 def get_request_headers_to_forward(

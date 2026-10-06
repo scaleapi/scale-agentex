@@ -30,7 +30,7 @@ async def gateway_client(monkeypatch, tmp_path):
     monkeypatch.setattr(
         authentication_middleware, "get_auth_cache", AsyncMock(return_value=cache)
     )
-    provider_status = {"code": 200}
+    provider_status = {"code": 200, "headers": {}}
     provider_requests = []
 
     def handle(request):
@@ -39,7 +39,9 @@ async def gateway_client(monkeypatch, tmp_path):
             raise httpx.ReadTimeout("user-secret pod-secret", request=request)
         if provider_status["code"] != 200:
             return httpx.Response(
-                provider_status["code"], json={"detail": "user-secret pod-secret"}
+                provider_status["code"],
+                headers=provider_status["headers"],
+                json={"detail": "user-secret pod-secret"},
             )
         return httpx.Response(200, json={"user_id": "user"})
 
@@ -77,7 +79,7 @@ async def test_valid_user_reaches_protected_route(gateway_client):
     assert served == [{"user_id": "user"}]
 
 
-@pytest.mark.parametrize("provider_failure", [503, "timeout"])
+@pytest.mark.parametrize("provider_failure", [500, 502, 503, 504, 307, "timeout"])
 async def test_provider_unavailable_remains_retryable_and_is_not_cached(
     gateway_client, provider_failure, caplog
 ):
@@ -135,3 +137,34 @@ async def test_bad_user_credentials_still_return_401(gateway_client, caplog):
     assert not served
     assert "user-secret" not in caplog.text
     assert "pod-secret" not in caplog.text
+
+
+async def test_bad_user_credentials_log_provider_status(gateway_client, caplog):
+    client, _, provider_status, _, _ = gateway_client
+    provider_status["code"] = 401
+
+    await client.get("/protected")
+
+    assert "AuthenticationError (status 401)" in caplog.text
+    assert "[REDACTED]" in caplog.text
+
+
+@pytest.mark.parametrize("status", [401, 403])
+async def test_service_account_rejection_returns_503(gateway_client, status, caplog):
+    client, _, provider_status, provider_requests, served = gateway_client
+    provider_status["code"] = status
+    provider_status["headers"] = {"X-Service-Account-Auth-Error": "forbidden"}
+
+    response = await client.get("/protected")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Authentication service unavailable"}
+    assert not served
+    assert f"X-Service-Account-Auth-Error=forbidden (status {status})" in caplog.text
+    assert "user-secret" not in caplog.text
+    assert "pod-secret" not in caplog.text
+
+    provider_status["code"] = 200
+    recovered = await client.get("/protected")
+    assert recovered.status_code == 200
+    assert len(provider_requests) == 2

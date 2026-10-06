@@ -1,3 +1,5 @@
+import re
+from collections.abc import Iterable
 from typing import Any
 
 import httpx
@@ -12,6 +14,15 @@ from src.adapters.authorization.exceptions import (
 )
 from src.domain.exceptions import ServiceError
 from src.utils.cached_httpx_client import get_async_client
+from src.utils.logging import make_logger
+
+logger = make_logger(__name__)
+
+SERVICE_ACCOUNT_AUTH_ERROR_HEADER = "X-Service-Account-Auth-Error"
+SERVICE_ACCOUNT_AUTH_ERROR_VALUES = frozenset(
+    {"unauthenticated", "forbidden", "unavailable"}
+)
+_MIN_REDACTED_LENGTH = 8
 
 
 class HttpRequestHandler:
@@ -27,11 +38,12 @@ class HttpRequestHandler:
         Make a POST request and automatically raise appropriate exceptions based on response.
 
         Error handling logic:
+        - X-Service-Account-Auth-Error → Service unavailable error (this
+          service's own identity was rejected, not the user's credentials)
+        - 3xx → Gateway error (redirects are not followed)
         - 401 → AuthenticationError
         - 403 → AuthorizationError
-        - 502 → Gateway error (bad gateway)
-        - 503+ → Service unavailable error
-        - Other 5xx → Service error
+        - 5xx → Service unavailable error
         - Other non-200 → Service error with details
         - Network errors → ServiceUnavailableError
 
@@ -63,13 +75,52 @@ class HttpRequestHandler:
                 error_detail = f"Request to {err.request.url} failed: {error_detail}"
 
             raise AuthenticationServiceUnavailableError(
-                message="Service unreachable or timed out", detail=error_detail
+                message="Service unreachable or timed out",
+                detail=_redact(error_detail, (headers or {}).values()),
             ) from err
 
-        # Extract error message from response if possible
-        error_message = HttpRequestHandler._extract_error_message(response)
+        if response.status_code == 200:
+            try:
+                return response.json()
+            except Exception as err:
+                raise ServiceError(
+                    message="Failed to parse response",
+                    detail=f"Invalid JSON: {str(err)}",
+                ) from err
 
-        # Handle specific status codes
+        # Extract error message from response if possible
+        error_message = _redact(
+            HttpRequestHandler._extract_error_message(response) or response.text[:200],
+            (headers or {}).values(),
+        )
+
+        service_account_error = response.headers.get(SERVICE_ACCOUNT_AUTH_ERROR_HEADER)
+        if service_account_error is not None:
+            reason = service_account_error.strip().lower()
+            if reason not in SERVICE_ACCOUNT_AUTH_ERROR_VALUES:
+                reason = "unrecognized"
+            logger.error(
+                "Auth provider rejected this service's identity on %s: "
+                "%s=%s (status %s)",
+                path,
+                SERVICE_ACCOUNT_AUTH_ERROR_HEADER,
+                reason,
+                response.status_code,
+            )
+            raise AuthenticationServiceUnavailableError(
+                message=f"Auth provider rejected this service's identity ({reason})",
+                detail=error_message,
+            )
+
+        if 300 <= response.status_code < 400:
+            raise AuthenticationGatewayError(
+                message=(
+                    f"Auth provider returned redirect status {response.status_code} "
+                    f"for {path}; redirects are not followed, so configure the "
+                    "provider URL with its final origin"
+                ),
+            )
+
         if response.status_code == 401:
             raise AuthenticationError(
                 message=error_message or "Unauthorized – missing or invalid credentials"
@@ -80,39 +131,17 @@ class HttpRequestHandler:
                 message=error_message or "Forbidden – principal lacks permission"
             )
 
-        # Handle server errors
-        if response.status_code == 502:
-            raise AuthenticationGatewayError(
-                message="Bad gateway", detail=error_message or response.text[:200]
-            )
-
-        if response.status_code == 503:
-            raise AuthenticationServiceUnavailableError(
-                message="Service temporarily unavailable",
-                detail=error_message or response.text[:200],
-            )
-
         if response.status_code >= 500:
-            raise ServiceError(
-                message=f"Server error (status {response.status_code})",
-                detail=error_message or response.text[:200],
+            raise AuthenticationServiceUnavailableError(
+                message=f"Auth provider error (status {response.status_code})",
+                detail=error_message,
             )
 
-        # Handle any other non-200 status
-        if response.status_code != 200:
-            raise ServiceError(
-                message=f"Unexpected response status {response.status_code}",
-                code=response.status_code,
-                detail=error_message or response.text[:200],
-            )
-
-        # Parse JSON response
-        try:
-            return response.json()
-        except Exception as err:
-            raise ServiceError(
-                message="Failed to parse response", detail=f"Invalid JSON: {str(err)}"
-            ) from err
+        raise ServiceError(
+            message=f"Unexpected response status {response.status_code}",
+            code=response.status_code,
+            detail=error_message,
+        )
 
     @staticmethod
     def _extract_error_message(response: httpx.Response) -> str | None:
@@ -131,3 +160,17 @@ class HttpRequestHandler:
             if response.text:
                 return response.text[:200]  # Limit length
         return None
+
+
+def _redact(text: str | None, secrets: Iterable[str]) -> str | None:
+    """Remove outbound header values (credentials) a provider may echo back."""
+    if not text:
+        return text
+    candidates = set()
+    for value in secrets:
+        candidates.add(value)
+        candidates.update(re.split(r"[\s;,=]+", value))
+    for candidate in sorted(candidates, key=len, reverse=True):
+        if len(candidate) >= _MIN_REDACTED_LENGTH:
+            text = text.replace(candidate, "[REDACTED]")
+    return text
