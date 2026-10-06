@@ -22,7 +22,6 @@ SERVICE_ACCOUNT_AUTH_ERROR_HEADER = "X-Service-Account-Auth-Error"
 SERVICE_ACCOUNT_AUTH_ERROR_VALUES = frozenset(
     {"unauthenticated", "forbidden", "unavailable"}
 )
-_MIN_REDACTED_LENGTH = 8
 _MAX_ERROR_MESSAGE_LENGTH = 200
 _CREDENTIAL_HEADER_PATTERN = re.compile(
     r"authorization|cookie|token|key|secret|session|credential|password",
@@ -185,8 +184,16 @@ def _redact(text: str | None, secrets: Iterable[str]) -> str | None:
     candidates = set()
     for value in secrets:
         candidates.add(value)
-        candidates.update(re.split(r"[\s;,=]+", value))
-    for candidate in sorted(candidates, key=len, reverse=True):
-        if len(candidate) >= _MIN_REDACTED_LENGTH:
-            text = text.replace(candidate, "[REDACTED]")
-    return text
+        for part in re.split(r"[\s;,]+", value):
+            candidates.add(part)
+            _, sep, rest = part.partition("=")
+            if sep and rest.strip("="):
+                candidates.add(rest)
+    candidates.discard("")
+    if not candidates:
+        return text
+    # One pass, longest first, so a replacement is never rescanned.
+    pattern = "|".join(
+        re.escape(candidate) for candidate in sorted(candidates, key=len, reverse=True)
+    )
+    return re.sub(pattern, "[REDACTED]", text)

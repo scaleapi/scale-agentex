@@ -30,7 +30,7 @@ from src.api.schemas.authorization_types import (
     AuthorizedOperationType,
 )
 from src.domain.exceptions import ServiceError
-from src.utils.http_request_handler import _MIN_REDACTED_LENGTH, HttpRequestHandler
+from src.utils.http_request_handler import HttpRequestHandler, _redact
 
 pytestmark = pytest.mark.unit
 
@@ -456,7 +456,34 @@ async def test_truncated_plain_text_error_cannot_leak_credential_prefix(token_pa
         await call_provider("authz", handle)
 
     assert exc.value.detail == "invalid token [REDACTED]"
-    assert "a" * _MIN_REDACTED_LENGTH not in exc.value.detail
+    assert "aa" not in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_short_echoed_credentials_are_redacted():
+    def handle(request):
+        return httpx.Response(401, json={"detail": "bad abc"})
+
+    async with httpx.AsyncClient(
+        base_url="https://auth.example", transport=httpx.MockTransport(handle)
+    ) as client:
+        with patch(
+            "src.utils.http_request_handler.get_async_client", return_value=client
+        ):
+            with pytest.raises(AuthenticationError) as exc:
+                await authn_proxy().verify_headers({"authorization": "Bearer abc"})
+
+    assert "abc" not in exc.value.message
+    assert exc.value.message == "bad [REDACTED]"
+
+
+def test_redaction_is_single_pass_and_keeps_cookie_names():
+    assert _redact("x abc y", ["abc", "RED"]) == "x [REDACTED] y"
+    assert (
+        _redact("session ok, value 9z", ["session=9z"])
+        == "session ok, value [REDACTED]"
+    )
+    assert _redact("tok abc== abc", ["abc=="]) == "tok [REDACTED] abc"
 
 
 @pytest.mark.asyncio
