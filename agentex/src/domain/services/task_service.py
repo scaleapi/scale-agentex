@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Annotated, Any
 
 from fastapi import Depends
@@ -51,6 +51,7 @@ class AgentTaskService:
         task_name: str | None = None,
         task_params: dict[str, Any] | None = None,
         task_metadata: dict[str, Any] | None = None,
+        grant_owner: Callable[[TaskEntity], Awaitable[None]] | None = None,
     ) -> TaskEntity:
         """
         Create a new task record in the repository with single agent (maintains existing interface).
@@ -61,6 +62,8 @@ class AgentTaskService:
             task_params: The parameters for the task
             task_metadata: Caller-provided metadata to persist on the task row.
                 Not forwarded to the agent.
+            grant_owner: Called after registration and before persisting; if it
+                raises, the task is deregistered and never persisted.
         Returns:
             Task containing the created task info
         """
@@ -81,14 +84,22 @@ class AgentTaskService:
             parent=AgentexResource.agent(agent.id),
         )
         try:
+            if grant_owner is not None:
+                await grant_owner(task_entity)
             return await self.task_repository.create(
                 agent_id=agent.id,
                 task=task_entity,
             )
         except Exception:
-            await self.authorization_service.deregister_resource(
-                AgentexResource.task(task_entity.id),
-            )
+            try:
+                await self.authorization_service.deregister_resource(
+                    AgentexResource.task(task_entity.id),
+                )
+            except Exception:
+                logger.exception(
+                    "task authorization deregister failed for unpersisted task %s",
+                    task_entity.id,
+                )
             raise
 
     async def create_task_and_forward_to_acp(

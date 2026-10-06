@@ -237,7 +237,7 @@ class AgentsACPUseCase(TaskMessageMixin):
             raise e
 
     async def grant_with_retry(self, task: TaskEntity, attempts: int = 0) -> None:
-        """Grant ownership for a newly created task."""
+        """Grant ownership for a task that is registered but not yet persisted."""
         try:
             await self.authorization_service.grant(
                 resource=AgentexResource.task(task.id),
@@ -256,7 +256,6 @@ class AgentsACPUseCase(TaskMessageMixin):
             raise e from e
         except Exception as e:
             logger.error(f"Error granting authorization for task {task.id}: {e}")
-            await self.task_service.fail_task(task, str(e))
             raise e from e
 
     async def _get_or_create_task(
@@ -336,9 +335,9 @@ class AgentsACPUseCase(TaskMessageMixin):
             task_name=task_name,
             task_params=task_params,
             task_metadata=task_metadata,
+            grant_owner=self.grant_with_retry,
         )
         logger.info(f"[agent_id={agent.id}] Created task {task.id}")
-        await self.grant_with_retry(task)
         return task
 
     async def _resolve_acp_url(
