@@ -4,6 +4,7 @@ import { InfiniteData, useQueryClient } from '@tanstack/react-query';
 
 import { subscribeTaskState } from '@/hooks/custom-subscribe-task-state';
 import { updateTaskInInfiniteQuery } from '@/hooks/use-create-task';
+import { spansKeys } from '@/hooks/use-spans';
 import {
   taskMessagesKeys,
   taskMessagesMetaKeys,
@@ -103,7 +104,9 @@ export function useTaskSubscription({
           });
 
           if (!hasStreamingMessages && messages.length > 0) {
-            queryClient.invalidateQueries({ queryKey: ['spans', taskId] });
+            queryClient.invalidateQueries({
+              queryKey: spansKeys.byTaskId(taskId),
+            });
           }
         },
         onAgentsChange() {},
