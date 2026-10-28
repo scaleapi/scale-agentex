@@ -113,16 +113,20 @@ async def create_webhook_trigger(
 ) -> CreateWebhookTriggerResponse:
     """Wire a webhook trigger in one call.
 
-    Registers the source's signature-verification key (github/slack) for the agent and
+    Registers the source's signature-verification key (github/slack/linear) for the agent and
     returns the ready-to-paste forward webhook URL plus the signing secret (shown once).
     The webhook then flows through the existing /agents/forward ingress, which verifies
     the signature against this key. Bundles the existing key-create + URL composition so
     a UI (or a curl) can set up a trigger without two steps.
     """
-    if request.source not in (AgentAPIKeyType.GITHUB, AgentAPIKeyType.SLACK):
+    if request.source not in (
+        AgentAPIKeyType.GITHUB,
+        AgentAPIKeyType.SLACK,
+        AgentAPIKeyType.LINEAR,
+    ):
         raise HTTPException(
             status_code=400,
-            detail="source must be 'github' or 'slack' for a webhook trigger.",
+            detail="source must be 'github', 'slack' or 'linear' for a webhook trigger.",
         )
     agent = await agent_use_case.get(name=request.agent_name)
 
@@ -157,6 +161,18 @@ async def create_webhook_trigger(
             detail=(
                 "Slack triggers must supply 'secret' set to the Slack app's Signing Secret "
                 "(from your app credentials); it can't be generated."
+            ),
+        )
+
+    # Linear is the same: it signs every delivery with the OAuth app's webhook signing
+    # secret, and the trigger's name must be the app's OAuth client id (the payload's
+    # oauthClientId, which validate_linear_delivery_webhook looks the key up by).
+    if request.source == AgentAPIKeyType.LINEAR and not request.secret:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Linear triggers must supply 'secret' set to the Linear OAuth app's webhook "
+                "signing secret; it can't be generated."
             ),
         )
 

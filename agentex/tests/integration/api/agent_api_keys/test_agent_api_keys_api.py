@@ -5,6 +5,7 @@ Tests the full HTTP request → FastAPI → response cycle with API-first valida
 
 import hashlib
 import hmac
+import json
 import time
 
 import pytest
@@ -72,6 +73,19 @@ class TestAgentAPIKeysIntegration:
             agent_id=test_agent.id,
             api_key_type=AgentAPIKeyType.SLACK,
             api_key="test-api-key-value",
+        )
+        return await agent_api_key_repo.create(agent_api_key)
+
+    @pytest_asyncio.fixture
+    async def test_agent_api_key_linear(self, isolated_repositories, test_agent):
+        """A Linear webhook key: named by the OAuth app's client id"""
+        agent_api_key_repo = isolated_repositories["agent_api_key_repository"]
+        agent_api_key = AgentAPIKeyEntity(
+            id=orm_id(),
+            name="test-oauth-client-id",
+            agent_id=test_agent.id,
+            api_key_type=AgentAPIKeyType.LINEAR,
+            api_key="test-linear-signing-secret",
         )
         return await agent_api_key_repo.create(agent_api_key)
 
@@ -862,3 +876,86 @@ class TestAgentAPIKeysIntegration:
             headers={"x-agent-api-key": "invalid-api-key"},
         )
         assert response.status_code == 401
+
+    async def test_forwarding_request_with_linear(
+        self,
+        isolated_client,
+        test_agent_api_key_linear,
+        isolated_api_key_http_client,
+    ):
+        """Test forwarding a Linear webhook: signature over the raw body, fresh webhookTimestamp"""
+        mock_request = Request(method="POST", url="http://example.com")
+        isolated_api_key_http_client.build_request.return_value = mock_request
+        mock_response = {"message": "Forwarded request successfully"}
+        isolated_api_key_http_client.send.return_value = Response(
+            status_code=200, json=mock_response, request=mock_request
+        )
+        path = "/agents/forward/name/test-agent/linear/webhook"
+
+        def body(**fields):
+            payload = {
+                "type": "AgentSessionEvent",
+                "oauthClientId": test_agent_api_key_linear.name,
+                "webhookTimestamp": int(time.time() * 1000),
+                **fields,
+            }
+            return json.dumps(payload).encode()
+
+        def signed(payload_body, secret=test_agent_api_key_linear.api_key):
+            return hmac.new(
+                secret.encode("utf-8"), msg=payload_body, digestmod=hashlib.sha256
+            ).hexdigest()
+
+        async def post(payload_body, signature):
+            return await isolated_client.post(
+                path,
+                content=payload_body,
+                headers={
+                    "content-type": "application/json",
+                    "linear-signature": signature,
+                },
+            )
+
+        # Not JSON
+        response = await post(b"not json", "sig")
+        assert response.status_code == 400
+        assert response.json() == {
+            "detail": "Failed to parse Linear webhook payload as JSON."
+        }
+
+        # Missing or stale webhookTimestamp (a replay)
+        response = await post(body(webhookTimestamp=None), "sig")
+        assert response.status_code == 400
+        assert response.json() == {
+            "detail": "Linear webhook payload missing webhookTimestamp."
+        }
+        stale = body(webhookTimestamp=int((time.time() - 60 * 10) * 1000))
+        response = await post(stale, signed(stale))
+        assert response.status_code == 400
+        assert response.json() == {
+            "detail": "Linear webhook request has bad timestamp."
+        }
+
+        # Missing or unknown OAuth client
+        response = await post(body(oauthClientId=None), "sig")
+        assert response.status_code == 400
+        assert response.json() == {
+            "detail": "Linear webhook payload missing OAuth client ID."
+        }
+        unknown = body(oauthClientId="other-client")
+        response = await post(unknown, signed(unknown))
+        assert response.status_code == 404
+        assert response.json() == {
+            "detail": "No API key found for Linear app other-client."
+        }
+
+        # Bad signature: wrong secret
+        payload_body = body()
+        response = await post(payload_body, signed(payload_body, secret="wrong-secret"))
+        assert response.status_code == 401
+        assert response.json() == {"detail": "Invalid Linear webhook signature"}
+
+        # Good signature
+        response = await post(payload_body, signed(payload_body))
+        assert response.status_code == 200
+        assert response.json() == mock_response

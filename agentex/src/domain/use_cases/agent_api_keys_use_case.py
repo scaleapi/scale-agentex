@@ -386,6 +386,12 @@ class AgentAPIKeysUseCase:
                 agent_id, request, content
             )
 
+        if request.headers.get("linear-signature"):
+            # This is a Linear webhook, use the API key from the ACP
+            return await self.validate_linear_delivery_webhook(
+                agent_id, request, content
+            )
+
         if self.auth_gateway_enabled:
             # If auth gateway is enabled, use it to verify the agent identity
             error_response = await verify_auth_gateway(request, self.auth_gateway)
@@ -565,6 +571,71 @@ class AgentAPIKeysUseCase:
         expected_signature = "v0=" + hash_object.hexdigest()
         if not hmac.compare_digest(expected_signature, signature_header):
             error_msg = "Invalid Slack webhook signature"
+            logger.warning(error_msg)
+            return JSONResponse(status_code=401, content={"detail": error_msg})
+
+        return None
+
+    async def validate_linear_delivery_webhook(
+        self, agent_id: str, request: Request, payload_body: bytes
+    ) -> JSONResponse | None:
+        """
+        Validate Linear delivery webhook for forward requests.
+        Returns None if valid, otherwise JSONResponse with error.
+
+        Linear signs the raw body with the OAuth app's webhook signing secret
+        (hex HMAC-SHA256 in ``Linear-Signature``) and puts the send time in the
+        body's ``webhookTimestamp`` (ms). The key is looked up by the payload's
+        ``oauthClientId``, as a Slack key is by ``api_app_id``.
+        """
+        signature_header = request.headers.get("linear-signature")
+        assert signature_header, "Missing linear-signature header."
+
+        try:
+            payload_json = json.loads(payload_body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            payload_json = None
+        if not isinstance(payload_json, dict):
+            error_msg = "Failed to parse Linear webhook payload as JSON."
+            logger.warning(error_msg)
+            return JSONResponse(status_code=400, content={"detail": error_msg})
+
+        webhook_timestamp = payload_json.get("webhookTimestamp")
+        if isinstance(webhook_timestamp, bool) or not isinstance(
+            webhook_timestamp, int | float
+        ):
+            error_msg = "Linear webhook payload missing webhookTimestamp."
+            logger.warning(error_msg)
+            return JSONResponse(status_code=400, content={"detail": error_msg})
+        # Linear's guidance: reject deliveries more than a minute old (replays).
+        if abs(time.time() * 1000 - webhook_timestamp) > 60 * 1000:
+            error_msg = "Linear webhook request has bad timestamp."
+            logger.warning(error_msg)
+            return JSONResponse(status_code=400, content={"detail": error_msg})
+
+        oauth_client_id = payload_json.get("oauthClientId")
+        if not oauth_client_id or not isinstance(oauth_client_id, str):
+            # Currently only supporting Linear webhooks of an OAuth app
+            error_msg = "Linear webhook payload missing OAuth client ID."
+            logger.warning(error_msg)
+            return JSONResponse(status_code=400, content={"detail": error_msg})
+
+        api_key_entity = await self.agent_api_key_repo.get_by_agent_id_and_name(
+            agent_id=agent_id, name=oauth_client_id, api_key_type=AgentAPIKeyType.LINEAR
+        )
+        if not api_key_entity:
+            error_msg = f"No API key found for Linear app {oauth_client_id}."
+            logger.warning(error_msg)
+            return JSONResponse(status_code=404, content={"detail": error_msg})
+
+        # Validate the signature over the exact raw body
+        expected_signature = hmac.new(
+            api_key_entity.api_key.encode("utf-8"),
+            msg=payload_body,
+            digestmod=hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(expected_signature, signature_header):
+            error_msg = "Invalid Linear webhook signature"
             logger.warning(error_msg)
             return JSONResponse(status_code=401, content={"detail": error_msg})
 

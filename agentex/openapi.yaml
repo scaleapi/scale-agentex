@@ -2825,7 +2825,7 @@ paths:
       description: 'Wire a webhook trigger in one call.
 
 
-        Registers the source''s signature-verification key (github/slack) for the
+        Registers the source''s signature-verification key (github/slack/linear) for the
         agent and
 
         returns the ready-to-paste forward webhook URL plus the signing secret (shown
@@ -4412,6 +4412,7 @@ components:
       - external
       - github
       - slack
+      - linear
       title: AgentAPIKeyType
     AgentInputType:
       type: string
@@ -5289,13 +5290,15 @@ components:
           description: The agent the webhook drives.
         source:
           $ref: '#/components/schemas/AgentAPIKeyType'
-          description: Webhook source whose signature is verified (github or slack).
+          description: Webhook source whose signature is verified (github, slack or
+            linear).
           default: github
         name:
           type: string
           title: Name
-          description: 'Signature-lookup key: the repo full_name (github) or api_app_id
-            (slack) that the forward ingress matches the incoming webhook against.'
+          description: 'Signature-lookup key: the repo full_name (github), api_app_id
+            (slack) or OAuth client id (linear) that the forward ingress matches the
+            incoming webhook against.'
         forward_path:
           type: string
           title: Forward Path
@@ -5308,7 +5311,8 @@ components:
           title: Secret
           description: Signing secret. For GitHub, omit to generate one, or provide
             an existing webhook secret. For Slack, this is required and must be the
-            Slack app's Signing Secret.
+            Slack app's Signing Secret. For Linear, this is required and must be the
+            Linear OAuth app's webhook signing secret.
         base_url:
           anyOf:
           - type: string
