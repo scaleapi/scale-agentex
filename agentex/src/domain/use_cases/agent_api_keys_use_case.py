@@ -59,6 +59,10 @@ def extract_agent_key_from_authorization(header_value: str | None) -> str | None
 
 
 class AgentAPIKeysUseCase:
+    # Linear's guidance: reject a delivery whose webhookTimestamp is more than a
+    # minute from now (a replay). Milliseconds, as Linear sends the timestamp.
+    LINEAR_WEBHOOK_MAX_AGE_MS = 60 * 1000
+
     def __init__(
         self,
         agent_api_key_repository: DAgentAPIKeyRepository,
@@ -607,8 +611,7 @@ class AgentAPIKeysUseCase:
             error_msg = "Linear webhook payload missing webhookTimestamp."
             logger.warning(error_msg)
             return JSONResponse(status_code=400, content={"detail": error_msg})
-        # Linear's guidance: reject deliveries more than a minute old (replays).
-        if abs(time.time() * 1000 - webhook_timestamp) > 60 * 1000:
+        if abs(time.time() * 1000 - webhook_timestamp) > self.LINEAR_WEBHOOK_MAX_AGE_MS:
             error_msg = "Linear webhook request has bad timestamp."
             logger.warning(error_msg)
             return JSONResponse(status_code=400, content={"detail": error_msg})

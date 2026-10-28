@@ -955,7 +955,19 @@ class TestAgentAPIKeysIntegration:
         assert response.status_code == 401
         assert response.json() == {"detail": "Invalid Linear webhook signature"}
 
-        # Good signature
-        response = await post(payload_body, signed(payload_body))
+        # Nothing rejected reached the agent
+        isolated_api_key_http_client.build_request.assert_not_called()
+        isolated_api_key_http_client.send.assert_not_called()
+
+        # Good signature: forwarded once, with the exact signed bytes and signature
+        signature = signed(payload_body)
+        response = await post(payload_body, signature)
         assert response.status_code == 200
         assert response.json() == mock_response
+        isolated_api_key_http_client.build_request.assert_called_once()
+        built = isolated_api_key_http_client.build_request.call_args
+        assert built[0][0] == "POST"
+        assert built[1]["content"] == payload_body
+        assert built[1]["headers"]["linear-signature"] == signature
+        isolated_api_key_http_client.send.assert_called_once()
+        assert isolated_api_key_http_client.send.call_args[0][0] == mock_request
