@@ -2825,8 +2825,8 @@ paths:
       description: 'Wire a webhook trigger in one call.
 
 
-        Registers the source''s signature-verification key (github/slack/linear) for the
-        agent and
+        Registers the source''s signature-verification key (github/slack/linear) for
+        the agent and
 
         returns the ready-to-paste forward webhook URL plus the signing secret (shown
         once).
