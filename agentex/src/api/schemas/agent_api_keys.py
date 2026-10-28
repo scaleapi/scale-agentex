@@ -62,12 +62,13 @@ class CreateWebhookTriggerRequest(BaseModel):
     agent_name: str = Field(..., description="The agent the webhook drives.")
     source: AgentAPIKeyType = Field(
         AgentAPIKeyType.GITHUB,
-        description="Webhook source whose signature is verified (github or slack).",
+        description="Webhook source whose signature is verified (github, slack or linear).",
     )
     name: str = Field(
         ...,
-        description="Signature-lookup key: the repo full_name (github) or api_app_id "
-        "(slack) that the forward ingress matches the incoming webhook against.",
+        description="Signature-lookup key: the repo full_name (github), api_app_id "
+        "(slack) or OAuth client id (linear) that the forward ingress matches the incoming "
+        "webhook against.",
     )
     forward_path: str = Field(
         ...,
@@ -79,7 +80,8 @@ class CreateWebhookTriggerRequest(BaseModel):
         description=(
             "Signing secret. For GitHub, omit to generate one, or provide an existing "
             "webhook secret. For Slack, this is required and must be the Slack app's "
-            "Signing Secret."
+            "Signing Secret. For Linear, this is required and must be the Linear OAuth "
+            "app's webhook signing secret."
         ),
     )
     base_url: str | None = Field(

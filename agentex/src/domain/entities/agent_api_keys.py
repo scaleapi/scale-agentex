@@ -11,6 +11,7 @@ class AgentAPIKeyType(str, Enum):
     EXTERNAL = "external"  # Used for API keys provided via x-agent-api-key header
     GITHUB = "github"  # Used for verifying signature in GitHub webhook requests
     SLACK = "slack"  # Used for verifying signature in Slack webhook requests
+    LINEAR = "linear"  # Used for verifying signature in Linear webhook requests
 
 
 class AgentAPIKeyEntity(BaseModel):

@@ -172,6 +172,28 @@ class TestCreateWebhookTrigger:
         assert resp.secret == "slack-signing-secret"
         assert akuc.create.await_args.kwargs["api_key"] == "slack-signing-secret"
 
+    async def test_linear_without_secret_rejected(self, monkeypatch):
+        # Linear signs with the OAuth app's webhook signing secret, like Slack.
+        req = CreateWebhookTriggerRequest(
+            agent_name="a", source=AgentAPIKeyType.LINEAR, name="client-id", forward_path="linear/webhook"
+        )
+        with pytest.raises(HTTPException) as exc:
+            await self._call(monkeypatch, req)
+        assert exc.value.status_code == 400
+
+    async def test_linear_with_provided_secret_ok(self, monkeypatch):
+        req = CreateWebhookTriggerRequest(
+            agent_name="a",
+            source=AgentAPIKeyType.LINEAR,
+            name="client-id",
+            forward_path="linear/webhook",
+            secret="linear-signing-secret",
+        )
+        resp, akuc = await self._call(monkeypatch, req)
+        assert resp.source == AgentAPIKeyType.LINEAR
+        assert resp.webhook_path == "/agents/forward/name/a/linear/webhook"
+        assert akuc.create.await_args.kwargs["api_key"] == "linear-signing-secret"
+
     async def test_secret_schema_documents_slack_requirement(self):
         description = CreateWebhookTriggerRequest.model_fields["secret"].description
 
