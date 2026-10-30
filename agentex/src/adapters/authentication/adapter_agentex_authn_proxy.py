@@ -1,4 +1,5 @@
 from src.adapters.authentication.port import AuthenticationGateway
+from src.adapters.authentication.service_account_token import agentex_auth_headers
 from src.api.schemas.principal_context import AgentexAuthPrincipalContext
 from src.config.dependencies import DEnvironmentVariable
 from src.config.environment_variables import Environment, EnvVarKeys
@@ -18,5 +19,7 @@ class AgentexAuthenticationProxy(AuthenticationGateway[AgentexAuthPrincipalConte
         self, headers: dict[str, str]
     ) -> AgentexAuthPrincipalContext:
         return await HttpRequestHandler.post_with_error_handling(
-            self.agentex_auth_url, "/v1/authn", headers=headers
+            self.agentex_auth_url,
+            "/v1/authn",
+            headers=await agentex_auth_headers(headers),
         )

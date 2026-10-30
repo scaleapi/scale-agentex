@@ -31,14 +31,46 @@ behind the same wire format.
   the variable.
 - **Authentication is middleware.** On every non-allowlisted request, Agentex
   forwards the incoming request headers to `POST {AGENTEX_AUTH_URL}/v1/authn`. A
-  `200` returns a **principal context** that Agentex attaches to the request; any
-  failure becomes a `401` to the original caller.
+  `200` returns a **principal context** that Agentex attaches to the request.
+  Provider-side failures (`3xx`, `5xx`, rejected caller identity, network errors)
+  return `503`; user credential failures return `401`.
 - **Authorization is inline.** When handling a request, Agentex calls the
   `/v1/authz/*` endpoints, passing back the exact principal context it received
   from `/v1/authn`.
 - **Responses are cached.** Agentex caches successful `/v1/authn` results keyed on
   the forwarded headers. Provider responses should therefore be a pure function of
   the request headers.
+
+### Optional Kubernetes caller identity
+
+To authenticate the Agentex API and worker pods to your provider, mount a projected
+ServiceAccount token with audience `agentex-auth` at
+`/var/run/secrets/agentex-auth/token`. Set `AGENTEX_AUTH_SA_TOKEN_PATH` to use a
+different path. Both proxies read the file on every outgoing request to support
+token rotation and send it as `X-Kubernetes-Service-Account-Token` alongside the
+user's credentials or authorization payload.
+
+The proxies remove any incoming header with this name, regardless of case, so an
+end user cannot supply the pod's identity. Missing or empty token files omit the
+header, preserving local development and compatibility with providers that do not
+require it; each process logs one warning naming the expected path. Other read
+failures stop the request. Provider redirects are not followed, to avoid
+forwarding credentials to another destination: point `AGENTEX_AUTH_URL` at the
+provider's final origin (for example `https://` rather than an `http://` URL that
+redirects).
+
+When the provider rejects the caller's ServiceAccount identity (rather than the
+user's credentials), it should set `X-Service-Account-Auth-Error` to
+`unauthenticated`, `forbidden`, or `unavailable` on the `401`/`403`/`503`
+response. Agentex treats any response carrying this header as a provider-side
+failure: it logs an error with the header value and status and surfaces
+service-unavailable (`503`) instead of a user `401`/`403`, so callers and
+scheduled runs retry instead of treating the user as unauthorized.
+
+The provider must validate the token's audience and allowed ServiceAccount
+identity before trusting the caller. When enabling this validation on an existing
+deployment, first deploy token mounts and token-sending code to **all API and
+worker pods**, then enable enforcement at the provider.
 
 ### Allowlisted (unauthenticated) routes
 
@@ -60,7 +92,7 @@ These routes bypass the provider entirely and are never sent to `/v1/authn`:
 | Transport | HTTP/1.1, JSON request and response bodies (`Content-Type: application/json`) |
 | Method | All endpoints are `POST` |
 | Base path | `AGENTEX_AUTH_URL` is the origin; paths below are appended verbatim |
-| Auth of the provider itself | Out of scope — secure the network path (mTLS / private network / shared secret) as you see fit |
+| Caller identity | Optional projected Kubernetes token as described above; other provider-specific mechanisms can also secure the connection |
 
 ### Status code semantics
 
@@ -71,22 +103,23 @@ decide what happened. The body matters only where noted (`/v1/authn` principal,
 | Status | Meaning to Agentex | Resulting behavior |
 | --- | --- | --- |
 | `200` | Success | Proceed. For `check`, the principal is authorized. For `search`, read `items` or the `unscoped` sentinel. |
+| `3xx` | Redirect (not followed) | Surfaced as a `502` gateway error naming the redirect status and path |
 | `401` | Unauthenticated — missing/invalid credentials | Request rejected as `401 Unauthorized` |
 | `403` | Authenticated but not permitted | Treated as a permission denial (e.g. `check` failed) |
-| `502` | Provider acted as a bad gateway | Surfaced as a gateway error |
-| `503` | Provider temporarily unavailable | Surfaced as service-unavailable |
-| other `5xx` | Provider internal error | Surfaced as a service error |
+| `5xx` | Provider unavailable or internal error | Surfaced as service-unavailable (`503`) |
 | other non-`200` | Unexpected | Surfaced as a service error |
+| any status with `X-Service-Account-Auth-Error` | Provider rejected the Agentex pod's identity | Surfaced as service-unavailable (`503`) |
 
 A network/timeout failure reaching the provider is treated as service-unavailable.
 
-> **`/v1/authn` collapses every failure to `401`.** The status-code distinctions
-> above (`502`/`503`/`5xx`) are preserved only for the **authz** endpoints, which
-> are called inside request handlers. Authentication runs in middleware that
-> catches *any* non-`200` from the provider — including `5xx` — and returns a flat
-> `401 Unauthorized` to the original caller. A `503` from your authn endpoint
-> during an outage will therefore reach clients as `401`, not as a retryable
-> service-unavailable error.
+> **Authentication preserves provider-side failures as `503`.** Provider `3xx`
+> and `5xx` responses, rejected caller identity, network/timeouts, and unreadable
+> or malformed pod-token files return `503` to the original caller and are not
+> cached. User credential failures (`401`/`403` without
+> `X-Service-Account-Auth-Error`) return `401 Unauthorized`. Authorization
+> endpoints preserve the status-code distinctions listed above. Agentex logs the
+> provider status and its error message, with any forwarded credential values
+> redacted.
 
 ### The principal context (opaque round-trip)
 
@@ -139,7 +172,8 @@ Verify the caller's credentials and return their principal context.
 
 **Request.** Agentex forwards the incoming request's headers (lowercased) as the
 outbound request headers. It strips hop-by-hop headers (`content-length`, `host`,
-`connection`, `transfer-encoding`, `expect`). The request body is empty — **all
+`connection`, `transfer-encoding`, `expect`) and replaces the reserved Kubernetes
+token header with the pod's token when mounted. The request body is empty — **all
 input is in the headers.** The provider reads whatever credential headers it
 cares about, for example:
 

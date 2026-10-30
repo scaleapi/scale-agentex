@@ -275,6 +275,27 @@ class TestLaunchScheduledAgentRun:
         # Denied before any task creation.
         use_case.handle_rpc_request.assert_not_called()
 
+    async def test_retries_when_auth_provider_rejects_service_identity(
+        self, activity_instance, monkeypatch
+    ):
+        from src.adapters.authentication.exceptions import (
+            AuthenticationServiceUnavailableError,
+        )
+
+        schedule = _schedule()
+        activity_instance.schedule_repository.get.return_value = schedule
+        use_case = _fake_use_case(_agent(ACPType.ASYNC), TaskEntity(id="t"))
+        use_case.authorization_service.check = AsyncMock(
+            side_effect=AuthenticationServiceUnavailableError(
+                message="Auth provider rejected this service's identity (forbidden)"
+            )
+        )
+        _patch_use_case(monkeypatch, use_case)
+
+        with pytest.raises(AuthenticationServiceUnavailableError):
+            await activity_instance.launch_scheduled_agent_run(schedule.id, "fire-1")
+        use_case.handle_rpc_request.assert_not_called()
+
     async def test_skips_when_agent_deleted(self, activity_instance, monkeypatch):
         schedule = _schedule()
         activity_instance.schedule_repository.get.return_value = schedule

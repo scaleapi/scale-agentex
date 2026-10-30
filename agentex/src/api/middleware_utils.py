@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
@@ -9,6 +11,7 @@ from src.adapters.authentication.adapter_agentex_authn_proxy import (
 )
 from src.adapters.orm import AgentAPIKeyORM, AgentORM
 from src.config.dependencies import middleware_async_read_only_session_maker
+from src.domain.exceptions import GenericException, ServiceError
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
@@ -156,17 +159,38 @@ async def verify_auth_gateway(
             getattr(principal_context, "account_id", None),
         )
         return None  # Authentication successful
+    except ServiceError as exc:
+        logger.warning(
+            "[authentication_middleware] Authentication service unavailable for "
+            "%s %s: %s",
+            request.method,
+            request.url.path,
+            _describe_provider_error(exc),
+        )
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Authentication service unavailable"},
+        )
     except Exception as exc:
         logger.error(
             "[authentication_middleware] Request for %s %s failed with %s",
             request.method,
             request.url.path,
-            str(exc),
+            _describe_provider_error(exc),
         )
         return JSONResponse(
             status_code=401,
             content={"detail": "Unauthorized"},
         )
+
+
+def _describe_provider_error(exc: Exception) -> str:
+    # Provider messages are redacted of outbound header values by
+    # HttpRequestHandler; other exceptions may embed credentials.
+    if not isinstance(exc, GenericException):
+        return type(exc).__name__
+    description = f"{type(exc).__name__} (status {exc.code}): {exc.message}"
+    return re.sub(r"[^\x20-\x7e]", "?", description)[:500]
 
 
 def get_request_headers_to_forward(
