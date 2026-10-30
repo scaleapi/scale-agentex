@@ -640,7 +640,12 @@ class TestCheckpointRepository:
         repo = isolated_repositories["checkpoint_repository"]
 
         blobs = [
-            {"channel": "empty_channel", "version": "v1", "type": "empty", "blob": None},
+            {
+                "channel": "empty_channel",
+                "version": "v1",
+                "type": "empty",
+                "blob": None,
+            },
         ]
         checkpoint = {
             "id": "cp-1",

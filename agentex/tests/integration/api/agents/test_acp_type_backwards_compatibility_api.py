@@ -70,9 +70,9 @@ class TestACPTypeBackwardsCompatibilityIntegration:
         get_response = await isolated_client.get(f"/agents/{agent_id}")
         assert get_response.status_code == 200
         agent_data = get_response.json()
-        assert (
-            agent_data["acp_type"] == "agentic"
-        ), "API should return 'agentic' for legacy agents, not convert to 'async'"
+        assert agent_data["acp_type"] == "agentic", (
+            "API should return 'agentic' for legacy agents, not convert to 'async'"
+        )
 
         # Retrieve by name
         get_by_name_response = await isolated_client.get(

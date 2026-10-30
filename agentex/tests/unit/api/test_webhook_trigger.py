@@ -95,7 +95,9 @@ class TestCreateWebhookTrigger:
             name="o/r",
             forward_path="github-pr/cfg-9?mode=review#frag ment",
         )
-        resp, _ = await self._call(monkeypatch, req, base_env="https://sgp.example.com/")
+        resp, _ = await self._call(
+            monkeypatch, req, base_env="https://sgp.example.com/"
+        )
 
         assert (
             resp.webhook_path
@@ -154,7 +156,10 @@ class TestCreateWebhookTrigger:
         # Slack signs with the app's existing Signing Secret — we can't generate one,
         # so omitting it must 400 rather than store a random value that never matches.
         req = CreateWebhookTriggerRequest(
-            agent_name="a", source=AgentAPIKeyType.SLACK, name="my-app", forward_path="slack"
+            agent_name="a",
+            source=AgentAPIKeyType.SLACK,
+            name="my-app",
+            forward_path="slack",
         )
         with pytest.raises(HTTPException) as exc:
             await self._call(monkeypatch, req)

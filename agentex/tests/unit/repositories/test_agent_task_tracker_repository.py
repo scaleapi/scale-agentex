@@ -89,9 +89,9 @@ async def test_agent_task_tracker_repository_crud_operations(postgres_url):
     # The task creation should have automatically created an AgentTaskTracker
     # Let's find it and test our operations
     all_trackers = await tracker_repo.list()
-    assert (
-        len(all_trackers) >= 1
-    ), "Task creation should have created an AgentTaskTracker"
+    assert len(all_trackers) >= 1, (
+        "Task creation should have created an AgentTaskTracker"
+    )
 
     # Find our tracker
     our_tracker = None
