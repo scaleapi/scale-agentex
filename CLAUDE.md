@@ -319,7 +319,7 @@ Check `agentex/docker-compose.yml` for default values.
 ### Database Migrations
 
 Always create migrations when changing models:
-1. Modify SQLAlchemy models in `database/models/`
+1. Modify the SQLAlchemy models in `src/adapters/orm.py`
 2. Run `make migration NAME="description"` from `agentex/`
 3. Review generated migration in `database/migrations/versions/`
 4. Apply with `make apply-migrations`
@@ -380,7 +380,7 @@ Use the escape hatch for "this needs a maintenance window with traffic shifted a
 
 ##### Anti-pattern → linter rule reference
 
-The migration linter at `agentex/scripts/lint_migrations.py` enforces these rules at PR time via `.github/workflows/migration-lint.yml`. It only checks files changed vs the PR base, so existing migrations are not retro-flagged. The mapping below is what the linter catches:
+The migration linter at `agentex/scripts/ci_tools/migration_lint.py` enforces these rules at PR time via `.github/workflows/migration-lint.yml`. It only checks files changed vs the PR base, so existing migrations are not retro-flagged. The mapping below is what the linter catches:
 
 | Anti-pattern | Linter rule |
 |---|---|
@@ -393,7 +393,7 @@ The migration linter at `agentex/scripts/lint_migrations.py` enforces these rule
 Run the linter locally before pushing:
 
 ```bash
-agentex/scripts/lint_migrations.py --base-ref origin/main
+python3 agentex/scripts/ci_tools/migration_lint.py --base origin/main
 ```
 
 ##### Other rules
@@ -443,7 +443,7 @@ sudo systemctl stop redis-server
 
 ### Adding Database Tables
 
-1. Create SQLAlchemy model in `database/models/`
+1. Add the SQLAlchemy model to `src/adapters/orm.py`
 2. Generate migration: `make migration NAME="add_table_name"`
 3. Review and edit migration file if needed
 4. Apply migration: `make apply-migrations`
