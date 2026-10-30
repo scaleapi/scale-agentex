@@ -66,6 +66,19 @@ class AgentsUseCase:
                 "authorization deregister failed for agent %s; swallowed", agent_id
             )
 
+    async def _safe_terminate_healthcheck_workflow(self, agent_id: str) -> None:
+        """Best-effort termination of the monitor for a soft-deleted agent."""
+        try:
+            await self.temporal_adapter.terminate_workflow(
+                workflow_id=f"healthcheck_workflow_{agent_id}",
+                reason="Agent deleted",
+            )
+        except Exception:
+            logger.exception(
+                "health check workflow termination failed for agent %s; swallowed",
+                agent_id,
+            )
+
     async def _register_in_auth(
         self,
         agent_id: str,
@@ -437,6 +450,7 @@ class AgentsUseCase:
         agent.status = AgentStatus.DELETED
         agent.status_reason = "Agent deleted successfully"
         await self.agent_repo.update(agent)
+        await self._safe_terminate_healthcheck_workflow(agent.id)
         # Best-effort: remove the agent from the authorization graph after the
         # soft-delete. The route revokes ownership separately after delete
         # succeeds.

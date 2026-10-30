@@ -24,6 +24,7 @@ from temporalio.runtime import OpenTelemetryConfig
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from src.adapters.http.adapter_httpx import HttpxGateway
+from src.adapters.temporal.adapter_temporal import TemporalAdapter
 from src.adapters.temporal.client_factory import TemporalClientFactory
 from src.config import dependencies
 from src.config.dependencies import (
@@ -37,16 +38,26 @@ from src.config.dependencies import (
 from src.config.environment_variables import EnvironmentVariables
 from src.domain.repositories.agent_repository import AgentRepository
 from src.temporal.activities.healthcheck_activities import HealthCheckActivities
+from src.temporal.activities.healthcheck_reconciliation_activities import (
+    HealthCheckReconciliationActivities,
+)
 from src.temporal.activities.retention_cleanup_activities import (
     RetentionCleanupActivities,
 )
 from src.temporal.activities.scheduled_agent_run_activities import (
     ScheduledAgentRunActivities,
 )
+from src.temporal.healthcheck_reconciliation import reconcile_healthcheck_workflows
+from src.temporal.run_healthcheck_reconciliation_schedule import (
+    ensure_reconciliation_schedule,
+)
 from src.temporal.scheduled_agent_run_factory import (
     build_agent_run_schedule_repository,
 )
 from src.temporal.task_retention_factory import build_task_retention_use_case
+from src.temporal.workflows.healthcheck_reconciliation_workflow import (
+    HealthCheckReconciliationWorkflow,
+)
 from src.temporal.workflows.healthcheck_workflow import HealthCheckWorkflow
 from src.temporal.workflows.retention_cleanup_workflow import (
     RetentionCleanupSweepWorkflow,
@@ -230,6 +241,11 @@ def create_agentex_server_worker(
         agent_repo=agent_repo,
         http_client=http_client,
     )
+    health_check_reconciliation_activities = HealthCheckReconciliationActivities(
+        agent_repo=agent_repo,
+        temporal_adapter=TemporalAdapter(global_dependencies.temporal_client),
+        task_queue=task_queue,
+    )
 
     retention_use_case = build_task_retention_use_case(global_dependencies)
     # Reuse the repository the factory already built (avoids a duplicate
@@ -249,6 +265,7 @@ def create_agentex_server_worker(
             task_queue=task_queue,
             workflows=[
                 HealthCheckWorkflow,
+                HealthCheckReconciliationWorkflow,
                 RetentionCleanupSweepWorkflow,
                 RetentionCleanupTaskWorkflow,
                 ScheduledAgentRunWorkflow,
@@ -256,6 +273,7 @@ def create_agentex_server_worker(
             activities=[
                 health_check_activities.check_status_activity,
                 health_check_activities.update_agent_status_activity,
+                health_check_reconciliation_activities.reconcile,
                 retention_activities.load_cleanup_config,
                 retention_activities.find_cleanup_candidates,
                 retention_activities.find_multi_agent_cleanup_candidates,
@@ -266,6 +284,35 @@ def create_agentex_server_worker(
             max_concurrent_activities=50,
         )
     )
+
+
+async def bootstrap_healthcheck_reconciliation(
+    agent_repo: AgentRepository,
+    global_dependencies: GlobalDependencies,
+    task_queue: str,
+) -> None:
+    """Create the recurring schedule and run a best-effort startup sweep."""
+    env = EnvironmentVariables.refresh()
+    if not env or not env.ENABLE_HEALTH_CHECK_WORKFLOW:
+        return
+    if not TemporalClientFactory.is_temporal_configured(env):
+        logger.error("Temporal is not configured; skipping health-check bootstrap")
+        return
+
+    adapter = TemporalAdapter(global_dependencies.temporal_client)
+    await ensure_reconciliation_schedule(adapter, task_queue)
+    try:
+        totals = await reconcile_healthcheck_workflows(
+            agent_repo,
+            adapter,
+            task_queue,
+        )
+        logger.info("Startup health-check reconciliation completed", extra=totals)
+    except Exception:
+        # The schedule has already been installed and will retry the sweep.
+        logger.exception(
+            "Startup health-check reconciliation failed; schedule will retry"
+        )
 
 
 async def main() -> None:
@@ -286,6 +333,14 @@ async def main() -> None:
             session_maker = database_async_read_write_session_maker(engine)
             read_only_session_maker = database_async_read_only_session_maker(engine)
             agent_repo = AgentRepository(session_maker, read_only_session_maker)
+            task_queue = os.environ.get(
+                "AGENTEX_SERVER_TASK_QUEUE", AGENTEX_SERVER_TASK_QUEUE
+            )
+            await bootstrap_healthcheck_reconciliation(
+                agent_repo,
+                global_dependencies,
+                task_queue,
+            )
 
             worker_task = create_agentex_server_worker(
                 agent_repo=agent_repo,

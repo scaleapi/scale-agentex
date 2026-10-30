@@ -213,7 +213,6 @@ services:
         pushd database/migrations &&
         alembic upgrade head &&
         popd &&
-        python src/temporal/run_healthcheck_workflow.py &&
         python src/temporal/run_retention_cleanup_schedule.py &&
         echo 'Starting API server...' &&
         uvicorn src.api.app:app --host 0.0.0.0 --port 5003 --reload --reload-dir /app/src --reload-include '*.py' --workers 1

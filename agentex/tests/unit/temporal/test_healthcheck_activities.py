@@ -33,18 +33,52 @@ async def test_ready_status_update_only_recovers_unhealthy(
     agent_repo.get.return_value = agent
     activities = HealthCheckActivities(agent_repo, AsyncMock())
 
-    await activities.update_agent_status_activity("agent-1", "Ready")
+    result = await activities.update_agent_status_activity("agent-1", "Ready")
 
     agent_repo.get.assert_awaited_once_with(id="agent-1")
     if should_recover:
         assert agent.status == AgentStatus.READY
         assert agent.status_reason == "Agent health check reported Ready"
         agent_repo.update.assert_awaited_once_with(item=agent)
+        assert result == {
+            "changed": True,
+            "prior_status": "Unhealthy",
+            "current_status": "Ready",
+            "should_continue": True,
+        }
         return
 
     assert agent.status == current_status
     assert agent.status_reason == "Existing status reason"
     agent_repo.update.assert_not_awaited()
+    assert result["changed"] is False
+    assert result["current_status"] == current_status.value
+    assert result["should_continue"] is (current_status == AgentStatus.READY)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize("target_status", ["Ready", "Unhealthy"])
+async def test_health_status_update_never_resurrects_deleted_agent(target_status):
+    agent = SimpleNamespace(
+        status=AgentStatus.DELETED,
+        status_reason="Agent deleted successfully",
+    )
+    agent_repo = AsyncMock()
+    agent_repo.get.return_value = agent
+    activities = HealthCheckActivities(agent_repo, AsyncMock())
+
+    result = await activities.update_agent_status_activity("agent-1", target_status)
+
+    assert agent.status == AgentStatus.DELETED
+    assert agent.status_reason == "Agent deleted successfully"
+    agent_repo.update.assert_not_awaited()
+    assert result == {
+        "changed": False,
+        "prior_status": "Deleted",
+        "current_status": "Deleted",
+        "should_continue": False,
+    }
 
 
 @pytest.mark.unit
