@@ -329,7 +329,7 @@ In a **Temporal** workflow the body is the same — construct the `UnifiedEmitte
 - **Usage + final text** — `auto_send_turn` returns a `TurnResult` (`final_text`, `usage`) with normalized token/cost numbers.
 - **Streamed tool args survive async** — the emitter honors streamed `ToolRequestDelta`s on the Redis channel, not just sync.
 
-To add a framework that doesn't have a `HarnessTurn` yet, follow the `agentex-add-agent-framework` workflow: write a tap + a `<Fw>Turn`, export both from `agentex.lib.adk`. There is no per-framework async streamer or tracing handler to author.
+To add a framework that doesn't have a `HarnessTurn` yet, follow [Adding a Framework Harness](adding_a_framework_harness.md): write a tap + a `<Fw>Turn`, export both from `agentex.lib.adk`. There is no per-framework async streamer or tracing handler to author.
 
 ## OpenAI Agents SDK Streaming
 
