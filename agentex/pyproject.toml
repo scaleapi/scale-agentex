@@ -9,6 +9,7 @@ dependencies = [
     "fastapi>=0.115.0,<0.137.0",  # <0.137.0 keeps app.routes flat; 0.137.0's _IncludedRouter (no .path) crashes injected OTel instrumentation on OPTIONS preflights -> 500
     "litellm>=1.84.0,<2",  # >=1.84.0 clears CVE-2026-49468 (CRITICAL auth bypass)
     "python-dotenv>=1.2.2,<2",
+    "azure-identity>=1.16.1,<2.0.0",
     "temporalio>=1.18.0,<2",
     "uvicorn[standard]>=0.35.0,<0.36",
     "redis>=5.1.0,<6",

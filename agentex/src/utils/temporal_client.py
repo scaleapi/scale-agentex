@@ -14,6 +14,8 @@ from temporalio.converter import (
 )
 from temporalio.runtime import OpenTelemetryConfig, Runtime, TelemetryConfig
 
+from src.utils.temporal_auth import connect_temporal_client
+
 
 class DateTimeJSONEncoder(AdvancedJSONEncoder):
     def default(self, o: Any) -> Any:
@@ -53,16 +55,18 @@ custom_data_converter = dataclasses.replace(
 
 async def get_temporal_client(temporal_address: str, metrics_url: str = None) -> Client:
     if not metrics_url:
-        client = await Client.connect(
-            target_host=temporal_address, data_converter=custom_data_converter
+        client = await connect_temporal_client(
+            {"target_host": temporal_address, "data_converter": custom_data_converter}
         )
     else:
         runtime = Runtime(
             telemetry=TelemetryConfig(metrics=OpenTelemetryConfig(url=metrics_url))
         )
-        client = await Client.connect(
-            target_host=temporal_address,
-            data_converter=custom_data_converter,
-            runtime=runtime,
+        client = await connect_temporal_client(
+            {
+                "target_host": temporal_address,
+                "data_converter": custom_data_converter,
+                "runtime": runtime,
+            }
         )
     return client
