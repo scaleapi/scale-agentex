@@ -3,7 +3,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import pytest
-from src.adapters.crud_store.exceptions import ItemDoesNotExist
+from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
 from src.api.schemas.agents_rpc import (
     CancelTaskRequest,
     SendEventRequest,
@@ -2430,3 +2430,95 @@ class TestAgentsACPUseCase:
         task_after = await task_service.get_task(name="same-params-task")
         # Params should still be the same
         assert task_after.params == task_params
+
+    async def test_get_or_create_task_returns_winner_when_create_loses_name_race(
+        self,
+        agents_acp_use_case,
+        agent_repository,
+        task_service,
+        authorization_service,
+        sample_agent,
+    ):
+        """A concurrent create of the same name returns the existing task, not an error"""
+        # Given - another request has already inserted a task with this name, but
+        # our lookup ran before that insert committed (simulated by making the
+        # first get_task(name=...) miss)
+        await create_or_get_agent(agent_repository, sample_agent)
+        winner = await task_service.create_task(
+            agent=sample_agent, task_name="raced-task"
+        )
+        real_get_task = task_service.get_task
+        missed = False
+
+        async def get_task_missing_once(*args, **kwargs):
+            nonlocal missed
+            if kwargs.get("name") == "raced-task" and not missed:
+                missed = True
+                raise ItemDoesNotExist("not found yet")
+            return await real_get_task(*args, **kwargs)
+
+        task_service.get_task = get_task_missing_once
+        authorization_service.grant.reset_mock()
+
+        # When
+        result = await agents_acp_use_case._get_or_create_task(
+            agent=sample_agent, task_name="raced-task"
+        )
+
+        # Then - the winner's task comes back, and only the winner grants access
+        assert result.id == winner.id
+        authorization_service.grant.assert_not_called()
+
+    async def test_get_or_create_task_name_race_applies_params_to_winner(
+        self,
+        agents_acp_use_case,
+        agent_repository,
+        task_service,
+        sample_agent,
+    ):
+        """The losing request's params are applied to the winner's task, as for any get-or-create hit"""
+        # Given
+        await create_or_get_agent(agent_repository, sample_agent)
+        winner = await task_service.create_task(
+            agent=sample_agent,
+            task_name="raced-params-task",
+            task_params={"version": 1},
+        )
+        real_get_task = task_service.get_task
+        missed = False
+
+        async def get_task_missing_once(*args, **kwargs):
+            nonlocal missed
+            if kwargs.get("name") == "raced-params-task" and not missed:
+                missed = True
+                raise ItemDoesNotExist("not found yet")
+            return await real_get_task(*args, **kwargs)
+
+        task_service.get_task = get_task_missing_once
+
+        # When
+        result = await agents_acp_use_case._get_or_create_task(
+            agent=sample_agent,
+            task_name="raced-params-task",
+            task_params={"version": 2},
+        )
+
+        # Then
+        assert result.id == winner.id
+        assert result.params == {"version": 2}
+
+    async def test_get_or_create_task_duplicate_without_name_is_raised(
+        self,
+        agents_acp_use_case,
+        sample_agent,
+    ):
+        """Without a name there is no get-or-create key, so a duplicate error propagates"""
+        # Given
+        agents_acp_use_case.task_service = AsyncMock()
+        agents_acp_use_case.task_service.create_task.side_effect = (
+            DuplicateItemError(message="Item already exists")
+        )
+
+        # When / Then
+        with pytest.raises(DuplicateItemError):
+            await agents_acp_use_case._get_or_create_task(agent=sample_agent)

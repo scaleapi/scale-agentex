@@ -9,7 +9,7 @@ from fastapi import Depends
 from src.adapters.authentication.exceptions import (
     AuthenticationServiceUnavailableError,
 )
-from src.adapters.crud_store.exceptions import ItemDoesNotExist
+from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
 from src.api.schemas.authorization_types import AgentexResource
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
 from src.domain.entities.agents_rpc import (
@@ -267,6 +267,7 @@ class AgentsACPUseCase(TaskMessageMixin):
         task_name: str | None = None,
         task_params: dict[str, Any] | None = None,
         task_metadata: dict[str, Any] | None = None,
+        _retry_on_name_conflict: bool = True,
     ) -> TaskEntity:
         """Return the existing task if *task_id* is provided, otherwise create a new one.
 
@@ -277,6 +278,10 @@ class AgentsACPUseCase(TaskMessageMixin):
         the existing task's params before the task is returned (*task_metadata* is only
         applied at creation time). When neither an id nor a matching name is given, a
         brand-new task is created (name may be None).
+
+        Concurrent calls with the same new *task_name* all resolve to the same task:
+        the lookup and the insert are not atomic, so a caller whose insert loses the
+        race on the unique name constraint re-reads and returns the winner's task.
 
         Note: Only one of task_id or task_name should be provided (enforced by validators).
         """
@@ -331,12 +336,32 @@ class AgentsACPUseCase(TaskMessageMixin):
             return task
 
         # Create a new task if it doesn't exist
-        task = await self.task_service.create_task(
-            agent=agent,
-            task_name=task_name,
-            task_params=task_params,
-            task_metadata=task_metadata,
-        )
+        try:
+            task = await self.task_service.create_task(
+                agent=agent,
+                task_name=task_name,
+                task_params=task_params,
+                task_metadata=task_metadata,
+            )
+        except DuplicateItemError:
+            if not task_name or not _retry_on_name_conflict:
+                raise
+            # A concurrent request created a task with this name between our
+            # lookup and insert. Get-or-create semantics mean we return that
+            # task, so re-run once through the existing-task path (which also
+            # handles INTERRUPTED resume and params updates). The winner's
+            # request owns the access grant, so we don't grant again here.
+            logger.info(
+                f"[agent_id={agent.id}] Lost create race for task name, "
+                "reusing the existing task"
+            )
+            return await self._get_or_create_task(
+                agent=agent,
+                task_name=task_name,
+                task_params=task_params,
+                task_metadata=task_metadata,
+                _retry_on_name_conflict=False,
+            )
         logger.info(f"[agent_id={agent.id}] Created task {task.id}")
         await self.grant_with_retry(task)
         return task
