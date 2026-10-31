@@ -22,6 +22,7 @@ from src.adapters.temporal.exceptions import TemporalConnectionError
 from src.config.environment_variables import EnvironmentVariables
 from src.utils.logging import make_logger
 from src.utils.observability import temporal_client_interceptors
+from src.utils.temporal_auth import connect_temporal_client
 
 logger = make_logger(__name__)
 
@@ -137,7 +138,7 @@ class TemporalClientFactory:
                 connect_options["runtime"] = runtime
 
             # Create the client
-            client = await Client.connect(**connect_options)
+            client = await connect_temporal_client(connect_options)
             logger.info(
                 f"Successfully created Temporal client for address: {temporal_address}"
             )
