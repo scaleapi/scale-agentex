@@ -69,14 +69,20 @@ class TemporalTokenSession:
 
     async def _run(self) -> None:
         try:
+            delay = max(
+                _MIN_REFRESH_DELAY_SECONDS,
+                self.token.expires_on - self.now() - _REFRESH_MARGIN_SECONDS,
+            )
             while True:
-                refresh_in = max(
-                    _MIN_REFRESH_DELAY_SECONDS,
-                    self.token.expires_on - self.now() - _REFRESH_MARGIN_SECONDS,
+                await self.sleep(delay)
+                delay = (
+                    max(
+                        _MIN_REFRESH_DELAY_SECONDS,
+                        self.token.expires_on - self.now() - _REFRESH_MARGIN_SECONDS,
+                    )
+                    if await self.refresh_once()
+                    else _RETRY_DELAY_SECONDS
                 )
-                await self.sleep(refresh_in)
-                if not await self.refresh_once():
-                    await self.sleep(_RETRY_DELAY_SECONDS)
         finally:
             await self.credential.close()
 

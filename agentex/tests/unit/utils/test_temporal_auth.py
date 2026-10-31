@@ -24,6 +24,24 @@ class FakeCredential:
         self.closed = True
 
 
+class RetryCredential:
+    def __init__(self, results, now):
+        self.results = iter(results)
+        self.now = now
+        self.call_times = []
+        self.closed = False
+
+    async def get_token(self, _scope):
+        self.call_times.append(self.now())
+        result = next(self.results)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    async def close(self):
+        self.closed = True
+
+
 async def test_connect_without_scope_preserves_legacy_path(monkeypatch):
     monkeypatch.delenv("TEMPORAL_AUTH_SCOPE", raising=False)
     client = MagicMock()
@@ -186,3 +204,32 @@ async def test_refresh_expired_replacement_never_clears_authentication():
 
     assert refreshed is False
     assert client.api_key == _INITIAL
+
+
+async def test_refresh_failure_retries_after_one_retry_delay():
+    clock = {"now": 0}
+    initial = AccessToken(_INITIAL, 345)
+    credential = RetryCredential(
+        [RuntimeError("identity unavailable"), AccessToken(_RENEWED, 1_000)],
+        lambda: clock["now"],
+    )
+
+    async def advance(delay):
+        clock["now"] += delay
+        if len(credential.call_times) == 2:
+            raise StopAsyncIteration
+
+    session = TemporalTokenSession(
+        client=MagicMock(api_key=_INITIAL),
+        credential=credential,
+        scope=_SCOPE,
+        token=initial,
+        now=lambda: clock["now"],
+        sleep=advance,
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        await session._run()
+
+    assert credential.call_times == [45, 75]
+    assert credential.closed is True
