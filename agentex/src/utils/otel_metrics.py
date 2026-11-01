@@ -95,7 +95,9 @@ def _detected_resource() -> Resource:
 def _unique_instance_id(resource: Resource) -> str:
     """Worker-unique service.instance.id (OTel #4390)."""
     pid = os.getpid()
-    existing = resource.attributes.get("service.instance.id")
+    # Only honor an explicitly configured id: since opentelemetry-sdk 1.45,
+    # Resource.create() fills service.instance.id with a random UUID by default.
+    existing = OTELResourceDetector().detect().attributes.get("service.instance.id")
     if existing:
         existing = str(existing)
         suffix = f".{pid}"

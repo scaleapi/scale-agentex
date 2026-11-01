@@ -190,6 +190,26 @@ def test_unique_instance_id_builds_when_missing(monkeypatch):
 
 
 @pytest.mark.unit
+def test_unique_instance_id_ignores_sdk_generated_default(monkeypatch):
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
+    monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "k8s.pod.name=my-pod")
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 42)
+    base = Resource.create({"service.instance.id": "sdk-generated-uuid"})
+    assert otel_metrics._unique_instance_id(base) == "agentex.my-pod.42"
+
+
+@pytest.mark.unit
+def test_unique_instance_id_is_idempotent(monkeypatch):
+    monkeypatch.setenv(
+        "OTEL_RESOURCE_ATTRIBUTES",
+        "k8s.pod.name=my-pod,service.instance.id=agentex.my-pod.agentex.42",
+    )
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 42)
+    base = get_aggregated_resources([OTELResourceDetector()])
+    assert otel_metrics._unique_instance_id(base) == "agentex.my-pod.agentex.42"
+
+
+@pytest.mark.unit
 def test_sync_instance_id_to_env_updates_env(monkeypatch):
     monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
     monkeypatch.setenv(
