@@ -10,7 +10,10 @@ from src.adapters.authentication.exceptions import (
     AuthenticationServiceUnavailableError,
 )
 from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
-from src.api.schemas.authorization_types import AgentexResource
+from src.api.schemas.authorization_types import (
+    AgentexResource,
+    AuthorizedOperationType,
+)
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
 from src.domain.entities.agents_rpc import (
     ACP_TYPE_TO_ALLOWED_RPC_METHODS,
@@ -53,6 +56,7 @@ from src.domain.services.task_message_service import DTaskMessageService
 from src.domain.services.task_service import DAgentTaskService
 from src.utils.acp_url import resolve_acp_url
 from src.utils.logging import make_logger
+from src.utils.task_authorization import check_task_or_collapse_to_404
 
 logger = make_logger(__name__)
 
@@ -282,7 +286,8 @@ class AgentsACPUseCase(TaskMessageMixin):
         Concurrent calls with the same new *task_name* all resolve to the same task:
         the lookup and the insert are not atomic, so a caller whose insert loses the
         race on the unique name constraint re-reads the winner's task from the
-        primary (a read replica may not have it yet) and returns it.
+        primary (a read replica may not have it yet) and returns it, provided the
+        caller has update permission on that task.
 
         Note: Only one of task_id or task_name should be provided (enforced by validators).
         """
@@ -298,6 +303,17 @@ class AgentsACPUseCase(TaskMessageMixin):
             except ItemDoesNotExist:
                 # Task doesn't exist - will create below
                 task = None
+            else:
+                if _after_name_conflict:
+                    # The request was authorized to create a new task, not to use
+                    # an existing one, and the winner may belong to another
+                    # caller. Require update permission before resuming, changing
+                    # or returning it, as the route does for an existing name.
+                    await check_task_or_collapse_to_404(
+                        self.authorization_service,
+                        task.id,
+                        AuthorizedOperationType.update,
+                    )
         else:
             # No identifier provided - will create below
             task = None
@@ -355,8 +371,9 @@ class AgentsACPUseCase(TaskMessageMixin):
             # handles INTERRUPTED resume and params updates). The re-run reads
             # the name from the primary: the conflict proves the row is
             # committed there, but a lagging read replica may still miss it.
-            # The winner's request owns the access grant, so we don't grant
-            # again here.
+            # It also checks the caller's update permission on that task. The
+            # winner's request owns the access grant, so we don't grant again
+            # here.
             logger.info(
                 f"[agent_id={agent.id}] Lost create race for task name, "
                 "reusing the existing task"

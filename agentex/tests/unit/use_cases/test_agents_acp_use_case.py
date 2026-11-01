@@ -3,10 +3,15 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import pytest
+from src.adapters.authorization.exceptions import AuthorizationError
 from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
 from src.api.schemas.agents_rpc import (
     CancelTaskRequest,
     SendEventRequest,
+)
+from src.api.schemas.authorization_types import (
+    AgentexResource,
+    AuthorizedOperationType,
 )
 from src.domain.entities.agent_api_keys import AgentAPIKeyEntity, AgentAPIKeyType
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
@@ -2543,6 +2548,64 @@ class TestAgentsACPUseCase:
         # Then
         assert result.id == winner.id
         authorization_service.grant.assert_not_called()
+        authorization_service.check.assert_awaited_once_with(
+            resource=AgentexResource.task(winner.id),
+            operation=AuthorizedOperationType.update,
+        )
+
+    @pytest.mark.parametrize(
+        ("can_read", "expected_error"),
+        [(False, ItemDoesNotExist), (True, AuthorizationError)],
+    )
+    async def test_get_or_create_task_name_race_denies_caller_without_update(
+        self,
+        agents_acp_use_case,
+        agent_repository,
+        task_service,
+        authorization_service,
+        sample_agent,
+        can_read,
+        expected_error,
+    ):
+        """Losing the race doesn't let a caller use a task it can't update"""
+        # Given - another caller won the race, and this caller was only
+        # authorized to create a new task
+        await create_or_get_agent(agent_repository, sample_agent)
+        task_name = f"someone-elses-task-{uuid4()}"
+        winner = await task_service.create_task(
+            agent=sample_agent,
+            task_name=task_name,
+            task_params={"owner": "winner"},
+        )
+        real_get_task = task_service.get_task
+        missed = False
+
+        async def get_task_missing_once(*args, **kwargs):
+            nonlocal missed
+            if kwargs.get("name") == task_name and not missed:
+                missed = True
+                raise ItemDoesNotExist("not found yet")
+            return await real_get_task(*args, **kwargs)
+
+        async def check(resource, operation):
+            if operation == AuthorizedOperationType.read and can_read:
+                return
+            raise AuthorizationError("denied")
+
+        task_service.get_task = get_task_missing_once
+        authorization_service.check.side_effect = check
+
+        # When / Then - 404 if the caller can't see the task, 403 if it can
+        with pytest.raises(expected_error):
+            await agents_acp_use_case._get_or_create_task(
+                agent=sample_agent,
+                task_name=task_name,
+                task_params={"owner": "loser"},
+            )
+
+        # The winner's task is left untouched
+        stored = await real_get_task(id=winner.id)
+        assert stored.params == {"owner": "winner"}
 
     async def test_get_or_create_task_duplicate_without_name_is_raised(
         self,
