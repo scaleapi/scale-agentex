@@ -2507,6 +2507,43 @@ class TestAgentsACPUseCase:
         assert result.id == winner.id
         assert result.params == {"version": 2}
 
+    async def test_get_or_create_task_name_race_reads_winner_from_primary(
+        self,
+        agents_acp_use_case,
+        agent_repository,
+        task_service,
+        authorization_service,
+        sample_agent,
+    ):
+        """A lagging read replica can't hide the winner's task after a name conflict"""
+        # Given - the winner's insert is committed on the primary, but the read
+        # replica hasn't caught up: every replica lookup by name misses, and only
+        # a read from the primary finds the task
+        await create_or_get_agent(agent_repository, sample_agent)
+        winner = await task_service.create_task(
+            agent=sample_agent, task_name="replica-lag-task"
+        )
+        real_get_task = task_service.get_task
+
+        async def get_task_lagging_replica(*args, **kwargs):
+            if kwargs.get("name") == "replica-lag-task" and not kwargs.get(
+                "use_primary"
+            ):
+                raise ItemDoesNotExist("not on the replica yet")
+            return await real_get_task(*args, **kwargs)
+
+        task_service.get_task = get_task_lagging_replica
+        authorization_service.grant.reset_mock()
+
+        # When
+        result = await agents_acp_use_case._get_or_create_task(
+            agent=sample_agent, task_name="replica-lag-task"
+        )
+
+        # Then
+        assert result.id == winner.id
+        authorization_service.grant.assert_not_called()
+
     async def test_get_or_create_task_duplicate_without_name_is_raised(
         self,
         agents_acp_use_case,
@@ -2515,8 +2552,8 @@ class TestAgentsACPUseCase:
         """Without a name there is no get-or-create key, so a duplicate error propagates"""
         # Given
         agents_acp_use_case.task_service = AsyncMock()
-        agents_acp_use_case.task_service.create_task.side_effect = (
-            DuplicateItemError(message="Item already exists")
+        agents_acp_use_case.task_service.create_task.side_effect = DuplicateItemError(
+            message="Item already exists"
         )
 
         # When / Then

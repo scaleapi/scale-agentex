@@ -175,12 +175,15 @@ class AgentTaskService:
         id: str | None = None,
         name: str | None = None,
         relationships: list[TaskRelationships] | None = None,
+        use_primary: bool = False,
     ) -> TaskEntity:
         """
         Get a task from the repository.
+
+        Reads from the read replica unless *use_primary* is set.
         """
         return await self.task_repository.get(
-            id=id, name=name, relationships=relationships
+            id=id, name=name, relationships=relationships, use_primary=use_primary
         )
 
     async def transition_task_status(

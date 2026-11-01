@@ -267,7 +267,7 @@ class AgentsACPUseCase(TaskMessageMixin):
         task_name: str | None = None,
         task_params: dict[str, Any] | None = None,
         task_metadata: dict[str, Any] | None = None,
-        _retry_on_name_conflict: bool = True,
+        _after_name_conflict: bool = False,
     ) -> TaskEntity:
         """Return the existing task if *task_id* is provided, otherwise create a new one.
 
@@ -281,7 +281,8 @@ class AgentsACPUseCase(TaskMessageMixin):
 
         Concurrent calls with the same new *task_name* all resolve to the same task:
         the lookup and the insert are not atomic, so a caller whose insert loses the
-        race on the unique name constraint re-reads and returns the winner's task.
+        race on the unique name constraint re-reads the winner's task from the
+        primary (a read replica may not have it yet) and returns it.
 
         Note: Only one of task_id or task_name should be provided (enforced by validators).
         """
@@ -291,7 +292,9 @@ class AgentsACPUseCase(TaskMessageMixin):
             task = await self.task_service.get_task(id=task_id)
         elif task_name:
             try:
-                task = await self.task_service.get_task(name=task_name)
+                task = await self.task_service.get_task(
+                    name=task_name, use_primary=_after_name_conflict
+                )
             except ItemDoesNotExist:
                 # Task doesn't exist - will create below
                 task = None
@@ -344,13 +347,16 @@ class AgentsACPUseCase(TaskMessageMixin):
                 task_metadata=task_metadata,
             )
         except DuplicateItemError:
-            if not task_name or not _retry_on_name_conflict:
+            if not task_name or _after_name_conflict:
                 raise
             # A concurrent request created a task with this name between our
             # lookup and insert. Get-or-create semantics mean we return that
             # task, so re-run once through the existing-task path (which also
-            # handles INTERRUPTED resume and params updates). The winner's
-            # request owns the access grant, so we don't grant again here.
+            # handles INTERRUPTED resume and params updates). The re-run reads
+            # the name from the primary: the conflict proves the row is
+            # committed there, but a lagging read replica may still miss it.
+            # The winner's request owns the access grant, so we don't grant
+            # again here.
             logger.info(
                 f"[agent_id={agent.id}] Lost create race for task name, "
                 "reusing the existing task"
@@ -360,7 +366,7 @@ class AgentsACPUseCase(TaskMessageMixin):
                 task_name=task_name,
                 task_params=task_params,
                 task_metadata=task_metadata,
-                _retry_on_name_conflict=False,
+                _after_name_conflict=True,
             )
         logger.info(f"[agent_id={agent.id}] Created task {task.id}")
         await self.grant_with_retry(task)
