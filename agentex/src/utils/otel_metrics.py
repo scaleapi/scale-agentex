@@ -63,6 +63,7 @@ from opentelemetry.sdk.resources import (
     SERVICE_VERSION,
     OTELResourceDetector,
     Resource,
+    ServiceInstanceIdResourceDetector,
 )
 
 from src.utils.logging import make_logger
@@ -104,6 +105,21 @@ def _detected_resource() -> Resource:
     return OTELResourceDetector().detect()
 
 
+def _sdk_generated_instance_id() -> str | None:
+    """The random per-process id the SDK invents when nothing configures one.
+
+    The detector memoizes it, so repeated calls in one process return the same
+    value. Useful only as a last-resort uniqueness source -- it is opaque and
+    changes on every restart, so a configured identity always beats it.
+    """
+    generated = (
+        ServiceInstanceIdResourceDetector()
+        .detect()
+        .attributes.get("service.instance.id")
+    )
+    return str(generated) if generated else None
+
+
 def _unique_instance_id(resource: Resource) -> str:
     """Worker-unique service.instance.id (OTel #4390)."""
     pid = os.getpid()
@@ -117,8 +133,13 @@ def _unique_instance_id(resource: Resource) -> str:
         or os.environ.get("OTEL_SERVICE_NAME")
         or "unknown"
     )
-    pod = resource.attributes.get("k8s.pod.name") or "unknown"
-    return f"{service}.{pod}.{pid}"
+    # Off Kubernetes there is no pod name, and pids repeat freely across
+    # containers and hosts -- two replicas would otherwise both report
+    # `<service>.unknown.<pid>` and silently merge their counter streams at a
+    # shared collector. The SDK's random id is a poor identity but a sound
+    # tiebreaker, so it stands in only when nothing better is configured.
+    pod = resource.attributes.get("k8s.pod.name") or _sdk_generated_instance_id()
+    return f"{service}.{pod or 'unknown'}.{pid}"
 
 
 def _sync_instance_id_to_env(instance_id: str) -> None:

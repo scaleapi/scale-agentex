@@ -203,6 +203,39 @@ def test_detected_resource_omits_the_sdk_generated_instance_id(monkeypatch):
 
 
 @pytest.mark.unit
+def test_unique_instance_id_without_a_pod_name_stays_unique(monkeypatch):
+    """Off Kubernetes there is no pod name and pids repeat across containers.
+
+    Two replicas must not both report `agentex.unknown.42` -- at a shared
+    collector that merges their counter streams into one wrong series. The
+    SDK's random id is a poor identity but a sound tiebreaker, so it stands in
+    for the missing pod rather than the literal "unknown".
+    """
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
+    monkeypatch.delenv("OTEL_RESOURCE_ATTRIBUTES", raising=False)
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 42)
+
+    instance_id = otel_metrics._unique_instance_id(otel_metrics._detected_resource())
+
+    assert instance_id == f"agentex.{otel_metrics._sdk_generated_instance_id()}.42"
+    assert instance_id != "agentex.unknown.42"
+
+
+@pytest.mark.unit
+def test_unique_instance_id_prefers_the_pod_over_the_sdk_id(monkeypatch):
+    """The SDK id is a last resort: a real pod name is readable and stable
+    across restarts, so it wins whenever one is present."""
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
+    monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "k8s.pod.name=my-pod")
+    monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 42)
+
+    assert (
+        otel_metrics._unique_instance_id(otel_metrics._detected_resource())
+        == "agentex.my-pod.42"
+    )
+
+
+@pytest.mark.unit
 def test_sync_instance_id_to_env_updates_env(monkeypatch):
     monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
     monkeypatch.setenv(
