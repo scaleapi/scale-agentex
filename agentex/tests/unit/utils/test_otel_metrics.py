@@ -21,9 +21,7 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from opentelemetry.sdk.resources import (
-    OTELResourceDetector,
     Resource,
-    get_aggregated_resources,
 )
 from src.utils import cache_metrics, otel_metrics
 
@@ -176,7 +174,7 @@ def test_unique_instance_id_extends_operator_value(monkeypatch):
         "k8s.pod.name=my-pod,service.instance.id=agentex.my-pod.agentex",
     )
     monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 42)
-    base = get_aggregated_resources([OTELResourceDetector()])
+    base = otel_metrics._detected_resource()
     assert otel_metrics._unique_instance_id(base) == "agentex.my-pod.agentex.42"
 
 
@@ -185,8 +183,23 @@ def test_unique_instance_id_builds_when_missing(monkeypatch):
     monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
     monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "k8s.pod.name=my-pod")
     monkeypatch.setattr(otel_metrics.os, "getpid", lambda: 42)
-    base = get_aggregated_resources([OTELResourceDetector()])
+    base = otel_metrics._detected_resource()
     assert otel_metrics._unique_instance_id(base) == "agentex.my-pod.42"
+
+
+@pytest.mark.unit
+def test_detected_resource_omits_the_sdk_generated_instance_id(monkeypatch):
+    """`_detected_resource` reports what the operator configured, nothing else.
+
+    Since opentelemetry-sdk 1.3x the SDK's default resource invents a random
+    UUID for `service.instance.id`. If that leaks in here, `_unique_instance_id`
+    always takes its "existing value" branch and every process reports
+    `<random-uuid>.<pid>` -- unique, but opaque and different on every restart.
+    """
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "agentex")
+    monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "k8s.pod.name=my-pod")
+
+    assert "service.instance.id" not in otel_metrics._detected_resource().attributes
 
 
 @pytest.mark.unit
