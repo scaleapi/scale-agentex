@@ -834,6 +834,28 @@ class TestAgentsAPIIntegration:
         assert response.status_code == 400
         assert "agent_card_metadata" in response.json()["message"]
 
+    @pytest.mark.parametrize(
+        "raw_filter",
+        [
+            '{"skill": "x\\u0000"}',
+            '{"skill\\u0000": "x"}',
+            '{"skill": ["x\\u0000"]}',
+            '{"skill": {"nested": "x\\u0000"}}',
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_list_agents_agent_card_metadata_nul_byte_returns_400(
+        self, isolated_client, raw_filter
+    ):
+        r"""A `\u0000` escape decodes to a valid str but cannot be stored in a
+        PostgreSQL text value. Rejected here, not by the driver mid-query where
+        it would surface as a 500."""
+        response = await isolated_client.get(
+            "/agents", params={"agent_card_metadata": raw_filter}
+        )
+        assert response.status_code == 400
+        assert "agent_card_metadata" in response.json()["message"]
+
     @pytest.mark.asyncio
     async def test_list_agents_agent_card_metadata_empty_object_requires_metadata(
         self, isolated_client
