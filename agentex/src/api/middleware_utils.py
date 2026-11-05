@@ -13,16 +13,24 @@ from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
 
-# Routes (and their prefixes) that bypass authentication
+# Routes (and their prefixes) that bypass authentication.
+#
+# The OpenAPI schema, the UIs that render it (/swagger, and /api, which is
+# redoc_url) and the MkDocs site at /docs are deliberately NOT here. The schema
+# is a complete description of every route, parameter and model this service
+# exposes; served anonymously on an internet-facing deployment it hands an
+# unauthenticated caller the whole attack surface for free, and the docs site
+# describes the same setup in prose. They all stay mounted -- an authenticated
+# session still reaches them -- they just no longer bypass the auth provider.
+#
+# Client and SDK codegen is unaffected: scripts/generate_openapi_spec.py builds
+# the committed spec in-process from `fastapi_app.openapi()` and never fetches
+# it over HTTP.
 WHITELISTED_ROUTES: set[str] = {
     "/agents/register",
     "/agents/forward",
     "/slack",
     "/linear",
-    "/docs",
-    "/api",
-    "/openapi.json",
-    "/redoc",
     "/favicon.ico",
     "/health",
     "/healthcheck",
