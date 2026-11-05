@@ -16,6 +16,7 @@ import { v4 } from 'uuid';
 import { toast } from '@/components/ui/toast';
 import { fetchMessagesPage, MESSAGES_PAGE_SIZE } from '@/hooks/fetch-messages';
 import { agentsKeys } from '@/hooks/use-agents';
+import { spansKeys } from '@/hooks/use-spans';
 
 import type AgentexSDK from 'agentex';
 import type { IDeltaAccumulator } from 'agentex/lib';
@@ -165,7 +166,9 @@ export function useSendMessage({
           }
 
           // Refetch spans now that the agent has finished processing
-          queryClient.invalidateQueries({ queryKey: ['spans', taskId] });
+          queryClient.invalidateQueries({
+            queryKey: spansKeys.byTaskId(taskId),
+          });
 
           // Refetch all loaded pages so the cache stays consistent when the
           // user has scrolled up and loaded older pages — refetching only
@@ -253,7 +256,9 @@ export function useSendMessage({
             });
 
             if (response.result.type === 'done') {
-              queryClient.invalidateQueries({ queryKey: ['spans', taskId] });
+              queryClient.invalidateQueries({
+                queryKey: spansKeys.byTaskId(taskId),
+              });
             }
           }
 
