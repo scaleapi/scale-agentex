@@ -133,15 +133,38 @@ def _parse_finite_float(raw: str) -> float:
     return value
 
 
+def _reject_nul_bytes(value: object) -> None:
+    r"""Reject ``\u0000`` anywhere in the decoded filter.
+
+    JSON permits the escape and ``json.loads`` decodes it happily, but a
+    PostgreSQL ``text`` value cannot hold a NUL. The driver only discovers that
+    while encoding the JSONB bind parameter, which raises
+    ``asyncpg.exceptions.UntranslatableCharacterError`` from inside the query --
+    too late for any handler but the catch-all, so caller error became a 500.
+    """
+    if isinstance(value, str):
+        if "\x00" in value:
+            raise ValueError("strings must not contain \\u0000")
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            _reject_nul_bytes(key)
+            _reject_nul_bytes(item)
+    elif isinstance(value, list):
+        for item in value:
+            _reject_nul_bytes(item)
+
+
 def _parse_agent_card_metadata(raw: str) -> dict:
-    """Decode the JSON-encoded ``agent_card_metadata`` query value into a dict.
+    r"""Decode the JSON-encoded ``agent_card_metadata`` query value into a dict.
 
     Python's ``json`` module accepts values that aren't interoperable JSON --
     the bare ``NaN``/``Infinity`` constants, float literals that overflow to
     infinity, and integers too large to render. Those all satisfy an
     ``isinstance(..., dict)`` check but blow up further down at the JSONB bind
-    parameter, turning caller error into an uncontrolled 500. Reject them here
-    so every malformed input surfaces as a 400.
+    parameter, turning caller error into an uncontrolled 500. A ``\u0000``
+    escape decodes to a perfectly ordinary ``str`` and fails the same way, one
+    layer lower, in the driver. Reject them all here so every malformed input
+    surfaces as a 400.
     """
     try:
         parsed = json.loads(
@@ -161,6 +184,13 @@ def _parse_agent_card_metadata(raw: str) -> dict:
             status_code=400,
             detail="agent_card_metadata must be a JSON object",
         )
+    try:
+        _reject_nul_bytes(parsed)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"agent_card_metadata is not a storable JSON object: {exc}",
+        ) from exc
     return parsed
 
 
