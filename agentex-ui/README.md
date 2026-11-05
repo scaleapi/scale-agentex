@@ -42,7 +42,7 @@ A modern web interface for building, testing, and monitoring intelligent agents.
 
 ### Developer Experience
 
-- **Real-time Updates** - Live task and message updates via WebSocket subscriptions
+- **Real-time Updates** - Live task and message updates streamed over HTTP (`GET /tasks/{id}/stream`, server-sent events)
 - **Optimistic UI** - Instant feedback with automatic cache updates
 - **Error Handling** - User-friendly error messages with toast notifications
 - **Dark Mode** - WCAG-compliant dark mode with proper contrast ratios
@@ -53,7 +53,7 @@ A modern web interface for building, testing, and monitoring intelligent agents.
 - **Styling**: Tailwind CSS v4, shadcn/ui components
 - **State Management**: React Query for server state
 - **Data Fetching**: Agentex SDK (`agentex`) for API client + RPC helpers
-- **Real-time**: WebSocket subscriptions for live updates
+- **Real-time**: streaming HTTP subscriptions (server-sent events) for live updates
 
 ## Prerequisites
 
@@ -177,7 +177,7 @@ For Docker-related commands, see the Docker section in `build.ps1 help`.
 - `hooks/use-agents.ts` - Fetches all agents via React Query
 - `hooks/use-tasks.ts` - Task list with infinite scroll pagination
 - `hooks/use-task-messages.ts` - Message fetching and sending with message streaming for sync agents
-- `hooks/use-task-subscription.ts` - Real-time task updates via WebSocket for async agents
+- `hooks/use-task-subscription.ts` - Real-time task updates via the HTTP event stream for async agents
 - `hooks/use-spans.ts` - Execution trace data
 
 **Components:**
