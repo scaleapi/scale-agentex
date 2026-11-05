@@ -205,19 +205,7 @@ class AgentTaskService:
         if updated_task is None:
             return None
 
-        try:
-            topic = get_task_event_stream_topic(task_id=task_id)
-            await self.stream_repository.send_data(
-                topic,
-                TaskStreamTaskUpdatedEventEntity(
-                    type="task_updated", task=updated_task
-                ).model_dump(mode="json"),
-            )
-            logger.info(f"task_updated event published to topic: {topic}")
-        except Exception as e:
-            logger.error(
-                f"Error sending task_updated event to stream: {e}", exc_info=True
-            )
+        await self._publish_task_updated(updated_task)
 
         return updated_task
 
@@ -227,13 +215,29 @@ class AgentTaskService:
         """
         updated_task = await self.task_repository.update(task)
 
+        await self._publish_task_updated(updated_task)
+
+        return updated_task
+
+    async def update_mutable_fields(
+        self, task_id: str, fields: dict[str, Any]
+    ) -> TaskEntity | None:
+        """Column-scoped atomic update, then publish task_updated. Returns updated entity or None."""
+        updated_task = await self.task_repository.update_mutable_fields(task_id, fields)
+        if updated_task is None:
+            return None
+
+        await self._publish_task_updated(updated_task)
+
+        return updated_task
+
+    async def _publish_task_updated(self, task: TaskEntity) -> None:
         try:
-            # The Redis adapter now handles binary data properly
             topic = get_task_event_stream_topic(task_id=task.id)
             await self.stream_repository.send_data(
                 topic,
                 TaskStreamTaskUpdatedEventEntity(
-                    type="task_updated", task=updated_task
+                    type="task_updated", task=task
                 ).model_dump(mode="json"),
             )
             logger.info(f"task_updated event published to topic: {topic}")
@@ -241,8 +245,6 @@ class AgentTaskService:
             logger.error(
                 f"Error sending task_updated event to stream: {e}", exc_info=True
             )
-
-        return updated_task
 
     async def merge_task_params(self, task_id: str, patch: dict) -> TaskEntity | None:
         """Atomically shallow-merge ``patch`` into ``tasks.params``. Returns
