@@ -1766,9 +1766,9 @@ class TestLinkOffer:
 
         for method, payload in (c.args for c in api.await_args_list):
             if method == "chat.postMessage":
-                assert (
-                    payload["channel"] == "D_DM"
-                ), f"the nonce was posted to {payload['channel']}, not the DM"
+                assert payload["channel"] == "D_DM", (
+                    f"the nonce was posted to {payload['channel']}, not the DM"
+                )
         # Nothing that lands in channel history mentions it.
         broadcast = [
             p
@@ -2812,9 +2812,9 @@ def test_duplicate_names_resolve_the_same_way_for_every_worker():
     other = {"id": "x", "name": "something-else", "created_at": "2020-01-01T00:00:00"}
 
     for order in ([older, newer, other], [newer, other, older], [other, newer, older]):
-        assert (
-            sg._canonical_named(order, "slack-agentex-bot") == "b-older"
-        ), "list order must not change the answer"
+        assert sg._canonical_named(order, "slack-agentex-bot") == "b-older", (
+            "list order must not change the answer"
+        )
     assert sg._canonical_named([older, newer], "absent") is None
 
 
@@ -3047,9 +3047,9 @@ async def test_cooldown_is_released_when_nothing_could_be_delivered(monkeypatch)
 
     await uc._notify_config_forbidden(_inbound(team_id="T", user="U1"))
 
-    assert deleted == [
-        "slack:config_forbidden:T:U1"
-    ], "nothing was delivered, so the next turn must be allowed to retry"
+    assert deleted == ["slack:config_forbidden:T:U1"], (
+        "nothing was delivered, so the next turn must be allowed to retry"
+    )
 
 
 @pytest.mark.asyncio

@@ -175,9 +175,9 @@ async def test_agent_repository_crud_operations(postgres_url, isolated_test_sche
 
         # Should be empty after rollback
         agent_list = await repository2.list()
-        assert (
-            len(agent_list) == 0
-        ), f"Expected 0 agents after rollback, got {len(agent_list)}"
+        assert len(agent_list) == 0, (
+            f"Expected 0 agents after rollback, got {len(agent_list)}"
+        )
         print("✅ TRANSACTION ROLLBACK verification successful")
 
     finally:

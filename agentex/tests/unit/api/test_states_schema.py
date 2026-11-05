@@ -1,6 +1,7 @@
 import pytest
 from src.api.schemas.states import UpdateStateRequest
 
+
 @pytest.mark.unit
 def test_update_state_request_ignores_legacy_parent_identifiers():
     request = UpdateStateRequest.model_validate(

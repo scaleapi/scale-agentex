@@ -126,8 +126,8 @@ async def test_five_failed_probes_mark_unhealthy_and_stop(monkeypatch):
 
     await workflow_instance.run({"agent_id": "agent-1", "acp_url": "http://agent"})
 
-    assert status_updates == [
-        ["agent-1", "Unhealthy"]
-    ], "the fifth consecutive failed probe must mark the agent unhealthy"
+    assert status_updates == [["agent-1", "Unhealthy"]], (
+        "the fifth consecutive failed probe must mark the agent unhealthy"
+    )
     assert probe_count == 5, "the workflow must wait for five failed probes"
     continue_as_new.assert_not_called()
