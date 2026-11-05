@@ -74,6 +74,7 @@ nav:
           - Claude Code: development_guides/claude_code_agents.md
           - Codex: development_guides/codex_agents.md
           - OpenAI Local Sandbox: development_guides/local_sandbox.md
+          - Adding a Framework Harness: development_guides/adding_a_framework_harness.md
       - Race Conditions: development_guides/race_conditions.md
       - Message Handling: development_guides/message_handling.md
       - Events vs Messages: development_guides/events_vs_messages.md

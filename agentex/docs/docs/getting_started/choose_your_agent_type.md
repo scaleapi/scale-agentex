@@ -45,7 +45,7 @@ How to choose:
 - **Wrapping a coding CLI** → Claude Code (spawns the `claude` CLI) or Codex (spawns the `codex` CLI) as a local subprocess, streamed through the harness.
 - **Want tools + good defaults and unsure** → OpenAI Agents SDK (the Recommended option for Sync and Temporal).
 
-To add a framework that isn't in the list, see the `agentex-add-agent-framework` workflow.
+To add a framework that isn't in the list, see [Adding a Framework Harness](../development_guides/adding_a_framework_harness.md).
 
 ---
 
