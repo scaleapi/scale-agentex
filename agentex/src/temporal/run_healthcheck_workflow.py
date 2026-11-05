@@ -2,9 +2,6 @@ import asyncio
 
 from src.adapters.temporal.adapter_temporal import TemporalAdapter
 from src.adapters.temporal.client_factory import TemporalClientFactory
-from src.adapters.temporal.exceptions import (
-    TemporalWorkflowAlreadyExistsError,
-)
 from src.config.dependencies import (
     GlobalDependencies,
     database_async_read_only_session_maker,
@@ -12,24 +9,28 @@ from src.config.dependencies import (
     database_async_read_write_session_maker,
 )
 from src.config.environment_variables import EnvironmentVariables
-from src.domain.entities.agents import AgentStatus
 from src.domain.repositories.agent_repository import AgentRepository
-from src.temporal.workflows.healthcheck_workflow import HealthCheckWorkflow
+from src.temporal.healthcheck_reconciliation import (
+    MONITORED_AGENT_PAGE_SIZE,
+    MONITORED_AGENT_STATUSES,
+    reconcile_healthcheck_workflows,
+)
+from src.temporal.run_healthcheck_reconciliation_schedule import (
+    ensure_reconciliation_schedule,
+)
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
-READY_AGENT_PAGE_SIZE = 200
+
+# Kept as module exports for callers/tests that use the bootstrap script's policy.
+__all__ = ["MONITORED_AGENT_PAGE_SIZE", "MONITORED_AGENT_STATUSES", "main"]
 
 
 async def main() -> None:
-    """
-    Main entry point for ensuring a health check workflow is running for each agent.
-    """
-    # Initialize global dependencies for this thread
+    """Run an immediate health-workflow reconciliation during server startup."""
     global_dependencies = GlobalDependencies()
     await global_dependencies.load()
 
-    # Check if health check workflow is enabled and configured
     environment_variables = EnvironmentVariables.refresh()
     if not environment_variables:
         logger.error("Environment variables are not configured")
@@ -41,55 +42,20 @@ async def main() -> None:
     if not task_queue:
         logger.error("Health check task queue is not configured")
         return
-    # Check if Temporal is configured
     if not TemporalClientFactory.is_temporal_configured(environment_variables):
         logger.error("Temporal is not configured, skipping workflow creation")
         return
 
-    # Initialize repository and list ready agents
     engine = database_async_read_write_engine()
     session_maker = database_async_read_write_session_maker(engine)
     read_only_session_maker = database_async_read_only_session_maker(engine)
     agent_repo = AgentRepository(session_maker, read_only_session_maker)
-
     adapter = TemporalAdapter(temporal_client=global_dependencies.temporal_client)
-    logger.info(f"Adding Health Check workflows to task queue: {task_queue}")
 
-    page_number = 1
-    while True:
-        agents = await agent_repo.list(
-            filters={"status": AgentStatus.READY},
-            limit=READY_AGENT_PAGE_SIZE,
-            page_number=page_number,
-            order_by="id",
-            order_direction="asc",
-        )
-        if not agents:
-            break
-
-        # Try to add health check workflows to task queue for each ready agent
-        for agent in agents:
-            try:
-                await adapter.start_workflow(
-                    workflow_id=f"healthcheck_workflow_{agent.id}",
-                    workflow=HealthCheckWorkflow,
-                    args=[{"agent_id": agent.id, "acp_url": agent.acp_url}],
-                    task_queue=task_queue,
-                )
-            except TemporalWorkflowAlreadyExistsError:
-                # Expected if workflow is already running for existing agent registration
-                logger.info(
-                    f"Health check workflow already exists for agent {agent.id}"
-                )
-            except Exception as e:
-                # Unexpected error, don't raise here to continue with the next agent
-                logger.error(
-                    f"Failed to start health check workflow for agent {agent.id}: {e}"
-                )
-
-        if len(agents) < READY_AGENT_PAGE_SIZE:
-            break
-        page_number += 1
+    await ensure_reconciliation_schedule(adapter, task_queue)
+    logger.info(f"Adding health check workflows to task queue: {task_queue}")
+    totals = await reconcile_healthcheck_workflows(agent_repo, adapter, task_queue)
+    logger.info("Health check workflow reconciliation completed", extra=totals)
 
 
 if __name__ == "__main__":
