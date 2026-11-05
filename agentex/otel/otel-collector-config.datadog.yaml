@@ -1,0 +1,76 @@
+# OpenTelemetry Collector configuration WITH Datadog fan-out.
+#
+# Duplicates traces and metrics to BOTH the LGTM path (Prometheus / Tempo) and
+# Datadog. This is the "collector sink" phase of the ddtrace -> LGTM migration:
+# once the app stops emitting to Datadog directly via ddtrace, the collector
+# keeps Datadog fed, so there is no gap in Datadog coverage.
+#
+# Because a single OTel SDK produces the spans, the SAME trace_id is exported to
+# both backends -- one trace, two destinations.
+#
+# Requirements / usage:
+#   - Uses the otel/opentelemetry-collector-contrib image (datadog exporter),
+#     which docker-compose already runs.
+#   - Set DD_API_KEY (required) and optionally DD_SITE (default datadoghq.com).
+#   - Optionally set TEMPO_OTLP_ENDPOINT to also fan traces out to Tempo; if
+#     unset, the Tempo exporter is simply not referenced (see pipelines below).
+#   - Enable by mounting THIS file at /etc/otel-collector-config.yaml instead of
+#     otel-collector-config.yaml (docker-compose volume / --config).
+#
+# This file is OPT-IN and does not change the default (keyless) local collector.
+# It is also the reference pattern for the Helm-managed production collector.
+#
+# IMPORTANT (migration safety): deploy + verify this Datadog fan-out in an
+# environment BEFORE disabling app-side ddtrace there. Never remove the app's
+# Datadog source until the collector is confirmed exporting to Datadog, or that
+# environment loses traces.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+exporters:
+  debug:
+    verbosity: normal
+
+  # LGTM metrics path.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: agentex
+    send_timestamps: true
+    metric_expiration: 5m
+
+  # Datadog fan-out. Traces + metrics are duplicated here in addition to the
+  # LGTM path, so Datadog is fed by the collector rather than by app ddtrace.
+  datadog:
+    api:
+      key: ${env:DD_API_KEY}
+      site: ${env:DD_SITE:-datadoghq.com}
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    # Traces fan out to Datadog (and console). Add an OTLP/Tempo exporter here
+    # when a Tempo endpoint is available to also feed the LGTM trace backend.
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [datadog, debug]
+    # Metrics fan out to both the LGTM (Prometheus) path and Datadog.
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus, datadog, debug]
