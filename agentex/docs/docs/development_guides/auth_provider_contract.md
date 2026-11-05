@@ -45,11 +45,16 @@ behind the same wire format.
 These routes bypass the provider entirely and are never sent to `/v1/authn`:
 
 ```
-/agents/register   /agents/forward   /docs   /api   /openapi.json   /redoc
-/favicon.ico   /health   /healthcheck   /healthz   /readyz   /ping   /echo
+/agents/register   /agents/forward   /slack   /linear   /favicon.ico
+/health   /healthcheck   /healthz   /readyz   /ping   /echo
 ```
 
 (plus any sub-path under them, and all `OPTIONS` preflight requests).
+
+The API documentation surfaces — `/openapi.json`, `/swagger`, `/api` (ReDoc)
+and the MkDocs site at `/docs` — are **not** allowlisted. They are still
+served, but the provider authenticates them like any other route, because the
+schema enumerates every route, parameter and model the service exposes.
 
 ---
 
