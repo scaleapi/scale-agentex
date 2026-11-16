@@ -26,3 +26,11 @@ class AgentAPIKeyEntity(BaseModel):
         description="The type of the API key (either internal or external)",
     )
     api_key: str = Field(..., description="The API key")
+    app_token_encrypted: str | None = Field(
+        None,
+        description="Encrypted Slack app-level token; set when the trigger is served "
+        "over Socket Mode.",
+    )
+    forward_path: str | None = Field(
+        None, description="Agent subpath a Socket Mode event is forwarded to."
+    )

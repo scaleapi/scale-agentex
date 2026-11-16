@@ -84,6 +84,15 @@ class CreateWebhookTriggerRequest(BaseModel):
             "app's webhook signing secret."
         ),
     )
+    app_token: str | None = Field(
+        None,
+        description=(
+            "Slack only. The app's app-level token (xapp-..., scope connections:write). "
+            "When set, agentex receives the app's events over Socket Mode and forwards "
+            "them to forward_path, so the app needs no public Request URL. Stored "
+            "encrypted and never returned."
+        ),
+    )
     base_url: str | None = Field(
         None,
         description="Optional public agentex base URL for the returned webhook_url; "

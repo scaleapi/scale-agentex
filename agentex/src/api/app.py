@@ -54,6 +54,9 @@ from src.config.dependencies import (
 )
 from src.config.environment_variables import EnvVarKeys
 from src.domain.exceptions import GenericException
+from src.domain.services.slack_socket_mode_bridge import (
+    create_slack_socket_mode_bridge,
+)
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
@@ -107,6 +110,15 @@ async def lifespan(_: FastAPI):
         global_deps = GlobalDependencies()
         if global_deps.postgres_metrics_collector:
             await global_deps.postgres_metrics_collector.start_collection()
+
+        if resolve_environment_variable_dependency(
+            EnvVarKeys.SLACK_SOCKET_MODE_ENABLED
+        ):
+            bridge = create_slack_socket_mode_bridge()
+            if bridge is not None:
+                # Pushed after the dependency shutdowns, so it runs before them.
+                cleanup.push_async_callback(bridge.stop)
+                await bridge.start()
 
         yield
 

@@ -20,6 +20,7 @@ from src.domain.entities.agent_api_keys import AgentAPIKeyType
 from src.domain.services.authorization_service import DAuthorizationService
 from src.domain.use_cases.agent_api_keys_use_case import DAgentAPIKeysUseCase
 from src.domain.use_cases.agents_use_case import DAgentsUseCase
+from src.utils import credential_encryption
 from src.utils.agent_api_key_authorization import (
     API_KEY_NOT_FOUND_MESSAGE,
     _check_api_key_or_collapse_to_404,
@@ -183,12 +184,34 @@ async def create_webhook_trigger(
             detail="forward_path must not contain control characters.",
         )
 
+    app_token_encrypted = None
+    if request.app_token is not None:
+        if request.source != AgentAPIKeyType.SLACK:
+            raise HTTPException(
+                status_code=400,
+                detail="app_token is only supported for Slack triggers.",
+            )
+        if not request.app_token.startswith("xapp-"):
+            raise HTTPException(
+                status_code=400,
+                detail="app_token must be a Slack app-level token (xapp-...).",
+            )
+        if not credential_encryption.is_configured():
+            raise HTTPException(
+                status_code=503,
+                detail="This deployment cannot store app tokens: credential "
+                "encryption is not configured.",
+            )
+        app_token_encrypted = credential_encryption.encrypt(request.app_token)
+
     secret = request.secret if request.secret is not None else secrets.token_hex(32)
     agent_api_key_entity = await agent_api_key_use_case.create(
         agent_id=agent.id,
         api_key=str(secret),
         name=request.name,
         api_key_type=request.source,
+        app_token_encrypted=app_token_encrypted,
+        forward_path=forward_path if app_token_encrypted else None,
     )
 
     encoded_agent_name = quote(request.agent_name, safe="")

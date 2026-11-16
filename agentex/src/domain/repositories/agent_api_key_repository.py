@@ -1,3 +1,4 @@
+import builtins
 from typing import Annotated
 
 from fastapi import Depends
@@ -12,6 +13,7 @@ from src.config.dependencies import (
     DDatabaseAsyncReadWriteSessionMaker,
 )
 from src.domain.entities.agent_api_keys import AgentAPIKeyEntity, AgentAPIKeyType
+from src.domain.entities.agents import AgentStatus
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
@@ -169,6 +171,25 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
             result = await session.execute(query)
             row = result.scalars().first()
             return AgentAPIKeyEntity.model_validate(row) if row else None
+
+    async def list_slack_socket_mode_triggers(
+        self,
+    ) -> builtins.list[AgentAPIKeyEntity]:
+        """Slack triggers that carry an app token, on agents that are not deleted."""
+        async with self.start_async_db_session(allow_writes=False) as session:
+            query = (
+                select(AgentAPIKeyORM)
+                .join(AgentORM, AgentORM.id == AgentAPIKeyORM.agent_id)
+                .where(
+                    AgentAPIKeyORM.api_key_type == AgentAPIKeyType.SLACK,
+                    AgentAPIKeyORM.app_token_encrypted.is_not(None),
+                    AgentORM.status != AgentStatus.DELETED,
+                )
+            )
+            result = await session.execute(query)
+            return [
+                AgentAPIKeyEntity.model_validate(row) for row in result.scalars().all()
+            ]
 
     async def delete_by_agent_name_and_key_name(
         self, agent_name: str, key_name: str, api_key_type: AgentAPIKeyType

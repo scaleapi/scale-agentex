@@ -177,6 +177,36 @@ curl -X POST $HOST/agent_api_keys \
   }'
 ```
 
+#### Slack over Socket Mode
+
+If Slack cannot reach agentex over HTTP (for example, the ingress only admits an IP allowlist, and Slack publishes no source IPs), agentex can receive the app's events over [Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode) instead.
+Create an app-level token with the `connections:write` scope under Basic Information, enable Socket Mode on the app, and register the trigger with that token:
+
+```bash
+curl -X POST $HOST/agent_api_keys/webhook-trigger \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_name": "<AGENT_NAME>",
+    "source": "slack",
+    "name": "A123ABC456",
+    "secret": "abcdefg12345",
+    "forward_path": "slack/events",
+    "app_token": "xapp-..."
+  }'
+```
+
+Each agentex API process then holds one Socket Mode connection for the app and POSTs every Events API payload to `forward_path` on the agent, the same route and body an HTTP delivery would reach (`url_verification` never happens over a socket).
+Slack's `retry_attempt` arrives as the usual `X-Slack-Retry-Num` and `X-Slack-Retry-Reason` headers.
+An event is acknowledged only after the agent answers 2xx within 2.5 seconds; otherwise Slack redelivers it.
+Interactivity and slash-command payloads are not forwarded.
+
+Operator notes:
+
+- Socket Mode is off unless `SLACK_SOCKET_MODE_ENABLED=true`, and it refuses to start without `AGENTEX_CREDENTIAL_ENCRYPTION_KEY`, which encrypts the stored app token.
+- **One owner per Slack app.** Slack delivers each event to one of the app's open connections. If an agent, or a second agentex environment, also opens a socket for the same app, events are split between them and each side misses some. Register a given app's token in exactly one environment, and remove any Socket Mode client from the agent.
+- Slack allows at most 10 open connections per app. Every API process opens one, so more than 10 API processes (replicas times workers) exceeds the cap.
+- If Slack rejects the token (revoked, invalid, wrong type), agentex logs one error and stops that app's connection. To change the token, delete the trigger and register it again; agentex picks up added and removed triggers within a minute.
+
 ### Deleting API Keys
 
 If you'd like to remove an existing API key for whatever reason, first grab its ID by listing the keys for the appropriate agent as above.

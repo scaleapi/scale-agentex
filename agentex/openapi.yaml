@@ -5313,6 +5313,15 @@ components:
             an existing webhook secret. For Slack, this is required and must be the
             Slack app's Signing Secret. For Linear, this is required and must be the
             Linear OAuth app's webhook signing secret.
+        app_token:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: App Token
+          description: Slack only. The app's app-level token (xapp-..., scope connections:write).
+            When set, agentex receives the app's events over Socket Mode and forwards
+            them to forward_path, so the app needs no public Request URL. Stored encrypted
+            and never returned.
         base_url:
           anyOf:
           - type: string
