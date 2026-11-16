@@ -224,7 +224,10 @@ jobs:
 
       - name: Run agent integration test
         env:
-          OPENAI_API_KEY: ${{ secrets.TUTORIAL_OPENAI_API_KEY }}
+          # OpenAI calls go through an internal gateway that passes the OpenAI API through
+          # unchanged. The key and the gateway URL are both secrets, scoped to this CI.
+          OPENAI_API_KEY: ${{ secrets.TUTORIAL_SMIG_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.TUTORIAL_OPENAI_BASE_URL }}
         run: |
           # Set variables for this agent
           AGENT_NAME="${{ matrix.agent.agent_name }}"
@@ -273,6 +276,8 @@ jobs:
               -e MONGODB_URI=mongodb://agentex-mongodb:27017 \
               -e MONGODB_DATABASE_NAME=agentex \
               -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
+              -e OPENAI_BASE_URL="${OPENAI_BASE_URL}" \
+              -e OPENAI_AGENTS_DISABLE_TRACING=1 \
               -p 8000:8000 \
               --network agentex-network \
               "${AGENT_IMAGE}" \
@@ -289,6 +294,8 @@ jobs:
               -e AGENTEX_API_BASE_URL=http://agentex:5003 \
               -e REDIS_URL=redis://agentex-redis:6379 \
               -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
+              -e OPENAI_BASE_URL="${OPENAI_BASE_URL}" \
+              -e OPENAI_AGENTS_DISABLE_TRACING=1 \
               -p 8000:8000 \
               --network agentex-network \
               "${AGENT_IMAGE}"
