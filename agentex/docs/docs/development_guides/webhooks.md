@@ -195,16 +195,18 @@ curl -X POST $HOST/agent_api_keys/webhook-trigger \
   }'
 ```
 
-Each agentex API process then holds one Socket Mode connection for the app and POSTs every Events API payload to `forward_path` on the agent, the same route and body an HTTP delivery would reach (`url_verification` never happens over a socket).
+The Slack Socket Mode bridge then holds one connection for the app and POSTs every Events API payload to `forward_path` on the agent, the same route and body an HTTP delivery would reach (`url_verification` never happens over a socket).
 Slack's `retry_attempt` arrives as the usual `X-Slack-Retry-Num` and `X-Slack-Retry-Reason` headers.
 An event is acknowledged only after the agent answers 2xx within 2.5 seconds; otherwise Slack redelivers it.
 Interactivity and slash-command payloads are not forwarded.
 
 Operator notes:
 
-- Socket Mode is off unless `SLACK_SOCKET_MODE_ENABLED=true`, and it refuses to start without `AGENTEX_CREDENTIAL_ENCRYPTION_KEY`, which encrypts the stored app token.
+- The bridge is its own process, not part of the API: run `python src/run_slack_socket_mode_bridge.py` (from `agentex/`, the same image as the API) as a separate Deployment with 2 replicas, one process each. It needs the same database settings as the API plus `AGENTEX_CREDENTIAL_ENCRYPTION_KEY`, which encrypts the stored app token; without that key it logs one error and exits. API pods never open sockets.
+- Probes are served on port 5004: `/healthz` for liveness and `/readyz` for readiness. Readiness means the trigger list has loaded; it does not wait for every Slack connection, so one revoked token doesn't take a replica out.
+- On SIGTERM the bridge closes its sockets, and Slack moves delivery to the other replica.
 - **One owner per Slack app.** Slack delivers each event to one of the app's open connections. If an agent, or a second agentex environment, also opens a socket for the same app, events are split between them and each side misses some. Register a given app's token in exactly one environment, and remove any Socket Mode client from the agent.
-- Slack allows at most 10 open connections per app. Every API process opens one, so more than 10 API processes (replicas times workers) exceeds the cap.
+- Each bridge replica opens one connection per app, so connections per app equal the replica count. Slack allows at most 10 per app; keep the replica count at or below that.
 - If Slack rejects the token (revoked, invalid, wrong type), agentex logs one error and stops that app's connection. To change the token, delete the trigger and register it again; agentex picks up added and removed triggers within a minute.
 
 ### Deleting API Keys

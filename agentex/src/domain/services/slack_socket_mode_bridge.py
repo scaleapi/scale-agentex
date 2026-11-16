@@ -1,9 +1,10 @@
 """Receive Slack webhook-trigger events over Socket Mode instead of HTTP.
 
 A Slack trigger registered with an app-level token gets one Socket Mode connection
-per API process. Slack spreads an app's events across its open connections (at most
-10 per app) and delivers each envelope to one of them, so every process can hold a
-connection without duplicating work. Each ``events_api`` envelope is forwarded to
+per bridge process (``src/run_slack_socket_mode_bridge.py``), never per API worker:
+Slack caps an app at 10 open connections. Slack delivers each envelope to one of the
+app's connections, so several bridge replicas don't duplicate work, and when one
+closes its socket the others keep receiving. Each ``events_api`` envelope is forwarded to
 the agent exactly as ``/agents/forward`` would forward the HTTP delivery, and acked
 only once the agent has accepted it: an unacked envelope is redelivered by Slack,
 which is the retry path when an agent is slow or down.
@@ -123,6 +124,9 @@ class SlackSocketModeBridge:
         # ciphertext so a re-registered token is tried again.
         self._rejected: set[tuple[str, str]] = set()
         self._task: asyncio.Task | None = None
+        # Set once the trigger list has loaded. Deliberately not tied to sockets
+        # being connected: one revoked token must not take the bridge out.
+        self.ready = False
 
     async def start(self) -> None:
         if self._task is None:
@@ -153,6 +157,7 @@ class SlackSocketModeBridge:
             t.id: t
             for t in await self._agent_api_key_repo.list_slack_socket_mode_triggers()
         }
+        self.ready = True
         for trigger_id, connection in list(self._connections.items()):
             trigger = triggers.get(trigger_id)
             if (
@@ -313,8 +318,8 @@ def create_slack_socket_mode_bridge() -> SlackSocketModeBridge | None:
     """
     if not credential_encryption.is_configured():
         logger.error(
-            "SLACK_SOCKET_MODE_ENABLED is set but %s is not configured; Slack "
-            "Socket Mode is disabled.",
+            "%s is not configured, so stored Slack app tokens cannot be read; "
+            "the Slack Socket Mode bridge will not start.",
             credential_encryption.ENV_KEY,
         )
         return None

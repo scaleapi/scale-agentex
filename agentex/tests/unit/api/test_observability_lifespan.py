@@ -51,8 +51,15 @@ async def test_cleanup_runs_after_startup_or_dependency_failure(
         "GlobalDependencies",
         lambda: SimpleNamespace(postgres_metrics_collector=None),
     )
+    from src.domain.services.slack_socket_mode_bridge import SlackSocketModeBridge
     from src.utils import observability
 
+    async def start_bridge(self):
+        record("slack-socket-mode")
+
+    # Sockets belong to the dedicated bridge process; per-API-worker sockets
+    # would exceed Slack's 10-connection cap per app.
+    monkeypatch.setattr(SlackSocketModeBridge, "start", start_bridge)
     monkeypatch.setattr(observability, "shutdown", close_adapter)
     monkeypatch.setattr(observability, "uses_observability_adapter", lambda: managed)
 
@@ -70,3 +77,4 @@ async def test_cleanup_runs_after_startup_or_dependency_failure(
     assert calls[-4:] == expected
     assert ("metrics-init" in calls) is not managed
     assert ("serve" in calls) is (failure != "startup")
+    assert "slack-socket-mode" not in calls

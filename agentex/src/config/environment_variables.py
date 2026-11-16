@@ -60,7 +60,6 @@ class EnvVarKeys(str, Enum):
     ENABLE_HEALTH_CHECK_WORKFLOW = "ENABLE_HEALTH_CHECK_WORKFLOW"
     ENABLE_AGENT_RUN_SCHEDULES = "ENABLE_AGENT_RUN_SCHEDULES"
     WEBHOOK_REQUEST_TIMEOUT = "WEBHOOK_REQUEST_TIMEOUT"
-    SLACK_SOCKET_MODE_ENABLED = "SLACK_SOCKET_MODE_ENABLED"
     RETENTION_CLEANUP_ENABLED = "RETENTION_CLEANUP_ENABLED"
     RETENTION_CLEANUP_AGENT_ALLOWLIST = "RETENTION_CLEANUP_AGENT_ALLOWLIST"
     RETENTION_CLEANUP_IDLE_DAYS = "RETENTION_CLEANUP_IDLE_DAYS"
@@ -200,8 +199,6 @@ class EnvironmentVariables(BaseModel):
     # Gates the agent run schedules API. Off by default; enabled in development.
     ENABLE_AGENT_RUN_SCHEDULES: bool = False
     WEBHOOK_REQUEST_TIMEOUT: float = 15.0  # Webhook request timeout in seconds
-    # Hold Slack Socket Mode connections for Slack triggers that carry an app token.
-    SLACK_SOCKET_MODE_ENABLED: bool = False
     RETENTION_CLEANUP_ENABLED: bool = False
     RETENTION_CLEANUP_AGENT_ALLOWLIST: list[str] = []
     RETENTION_CLEANUP_IDLE_DAYS: int = 7
@@ -319,9 +316,6 @@ class EnvironmentVariables(BaseModel):
             ),
             WEBHOOK_REQUEST_TIMEOUT=float(
                 os.environ.get(EnvVarKeys.WEBHOOK_REQUEST_TIMEOUT, "15.0")
-            ),
-            SLACK_SOCKET_MODE_ENABLED=_parse_bool_env(
-                EnvVarKeys.SLACK_SOCKET_MODE_ENABLED, default=False
             ),
             RETENTION_CLEANUP_ENABLED=_parse_bool_env(
                 EnvVarKeys.RETENTION_CLEANUP_ENABLED, default=False

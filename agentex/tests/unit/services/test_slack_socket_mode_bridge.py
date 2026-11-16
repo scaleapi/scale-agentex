@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+import src.run_slack_socket_mode_bridge as entrypoint
 from slack_sdk.errors import SlackApiError
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.web.async_client import AsyncWebClient
@@ -131,3 +132,52 @@ class TestRejectedToken:
         connections_open.assert_awaited_once()
         connect.assert_not_awaited()
         assert bridge._connections == {}
+        # A dead token must not hold the bridge out of readiness.
+        assert bridge.ready
+
+
+@pytest.mark.unit
+class TestShutdown:
+    async def test_stop_closes_open_sockets(self, monkeypatch):
+        monkeypatch.setattr(mod.credential_encryption, "decrypt", lambda _: "xapp-1")
+        monkeypatch.setattr(
+            AsyncWebClient,
+            "apps_connections_open",
+            AsyncMock(return_value={"url": "wss://example.invalid"}),
+        )
+        monkeypatch.setattr(mod._TriggerSocketModeClient, "connect", AsyncMock())
+        bridge, _ = _bridge(lambda request: httpx.Response(200))
+        await bridge.refresh()
+        client = bridge._connections[TRIGGER.id].client
+
+        await bridge.stop()
+
+        assert client.closed
+        assert client.aiohttp_client_session.closed
+        assert bridge._connections == {}
+
+    async def test_sigterm_path_stops_bridge(self, monkeypatch):
+        fake = MagicMock(start=AsyncMock(), stop=AsyncMock(), ready=True)
+        monkeypatch.setattr(entrypoint, "startup_global_dependencies", AsyncMock())
+        monkeypatch.setattr(entrypoint, "create_slack_socket_mode_bridge", lambda: fake)
+        monkeypatch.setattr(entrypoint.dependencies, "async_shutdown", AsyncMock())
+        monkeypatch.setattr(entrypoint.HttpxGateway, "close_clients", AsyncMock())
+
+        task = asyncio.create_task(entrypoint.main(probe_port=0))
+        while not fake.start.await_count:
+            await asyncio.sleep(0)
+        # _run_cli turns SIGTERM into this cancellation.
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        fake.stop.assert_awaited_once()
+
+    async def test_refuses_to_start_without_encryption_key(self, monkeypatch):
+        monkeypatch.setattr(entrypoint, "startup_global_dependencies", AsyncMock())
+        monkeypatch.setattr(mod.credential_encryption, "is_configured", lambda: False)
+        monkeypatch.setattr(entrypoint.dependencies, "async_shutdown", AsyncMock())
+        monkeypatch.setattr(entrypoint.HttpxGateway, "close_clients", AsyncMock())
+
+        with pytest.raises(SystemExit):
+            await entrypoint.main(probe_port=0)
