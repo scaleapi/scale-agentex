@@ -202,7 +202,7 @@ Interactivity and slash-command payloads are not forwarded.
 
 Operator notes:
 
-- The bridge is its own process, not part of the API: run `python src/run_slack_socket_mode_bridge.py` (from `agentex/`, the same image as the API) as a separate Deployment with 2 replicas, one process each. It needs the same database settings as the API plus `AGENTEX_CREDENTIAL_ENCRYPTION_KEY`, which encrypts the stored app token; without that key it logs one error and exits. API pods never open sockets.
+- The bridge is its own process, not part of the API: run `python -m src.run_slack_socket_mode_bridge` (from `agentex/`, the same image as the API, like the Temporal worker's `python -m src.temporal.run_worker`) as a separate Deployment with 2 replicas, one process each. It needs the same database settings as the API plus `AGENTEX_CREDENTIAL_ENCRYPTION_KEY`, which encrypts the stored app token; without that key it logs one error and exits. API pods never open sockets.
 - Probes are served on port 5004: `/healthz` for liveness and `/readyz` for readiness. Readiness means the trigger list has loaded; it does not wait for every Slack connection, so one revoked token doesn't take a replica out.
 - On SIGTERM the bridge closes its sockets, and Slack moves delivery to the other replica.
 - **One owner per Slack app.** Slack delivers each event to one of the app's open connections. If an agent, or a second agentex environment, also opens a socket for the same app, events are split between them and each side misses some. Register a given app's token in exactly one environment, and remove any Socket Mode client from the agent.
