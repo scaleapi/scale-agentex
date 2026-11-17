@@ -179,8 +179,8 @@ curl -X POST $HOST/agent_api_keys \
 
 #### Slack over Socket Mode
 
-If Slack cannot reach agentex over HTTP (for example, the ingress only admits an IP allowlist, and Slack publishes no source IPs), agentex can receive the app's events over [Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode) instead.
-Create an app-level token with the `connections:write` scope under Basic Information, enable Socket Mode on the app, and register the trigger with that token:
+If Slack cannot reach agentex over HTTP (for example, when agentex runs in a private network), agentex can receive the app's events over [Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode) instead.
+Enable Socket Mode on the app and create an app-level token as that guide describes, then register the trigger with that token:
 
 ```bash
 curl -X POST $HOST/agent_api_keys/webhook-trigger \
@@ -204,12 +204,7 @@ Interactivity and slash-command payloads are not forwarded.
 
 Operator notes:
 
-- The bridge is its own process, not part of the API: run `python -m src.run_slack_socket_mode_bridge` (from `agentex/`, the same image as the API, like the Temporal worker's `python -m src.temporal.run_worker`) as a separate Deployment with 2 replicas, one process each. It needs only `DATABASE_URL` and `AGENTEX_CREDENTIAL_ENCRYPTION_KEY`, which encrypts the stored app token; without that key it logs one error and exits. It does not connect to Temporal, MongoDB or Redis. API pods never open sockets.
-- Probes are served on port 5004: `/healthz` for liveness and `/readyz` for readiness. Readiness means the trigger list has loaded; it does not wait for every Slack connection, so one revoked token doesn't take a replica out.
-- On SIGTERM the bridge closes its sockets, and Slack moves delivery to the other replica.
-- **One owner per Slack app.** Slack delivers each event to one of the app's open connections. If an agent, or a second agentex environment, also opens a socket for the same app, events are split between them and each side misses some. Register a given app's token in exactly one environment, and remove any Socket Mode client from the agent. Within one environment, registering a second Socket Mode trigger for an app another trigger already serves returns 409; if two such triggers exist anyway, the bridge connects only the earliest-registered one and logs an error.
-- Each bridge replica opens one connection per app, so connections per app equal the replica count. Slack allows at most 10 per app; keep the replica count at or below that.
-- If Slack rejects the token (revoked, invalid, wrong type), agentex logs one error and stops that app's connection. To change the token, delete the trigger and register it again; agentex picks up added and removed triggers within a minute.
+- The bridge is its own process, not part of the API: run `python -m src.run_slack_socket_mode_bridge` (from `agentex/`, the same image as the API, like the Temporal worker's `python -m src.temporal.run_worker`) as a separate Deployment with 2 replicas, one process each. It needs only `DATABASE_URL` and `AGENTEX_CREDENTIAL_ENCRYPTION_KEY`, which encrypts the stored app token; without that key it logs one error and exits. It does not connect to Temporal, MongoDB or Redis.
 
 ### Deleting API Keys
 

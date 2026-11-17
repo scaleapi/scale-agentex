@@ -219,8 +219,8 @@ async def create_webhook_trigger(
         api_key=str(secret),
         name=request.name,
         api_key_type=request.source,
-        app_token_encrypted=app_token_encrypted,
-        forward_path=forward_path if app_token_encrypted else None,
+        slack_socket_mode_app_token_encrypted=app_token_encrypted,
+        slack_socket_mode_forward_path=forward_path if app_token_encrypted else None,
     )
 
     encoded_agent_name = quote(request.agent_name, safe="")

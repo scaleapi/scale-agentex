@@ -24,8 +24,8 @@ TRIGGER = AgentAPIKeyEntity(
     name="A123",
     api_key_type=AgentAPIKeyType.SLACK,
     api_key="signing-secret",
-    app_token_encrypted="ciphertext",
-    forward_path="slack/events",
+    slack_socket_mode_app_token_encrypted="ciphertext",
+    slack_socket_mode_forward_path="slack/events",
 )
 
 

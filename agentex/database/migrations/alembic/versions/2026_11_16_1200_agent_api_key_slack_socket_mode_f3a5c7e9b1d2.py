@@ -24,14 +24,14 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.execute(
         "ALTER TABLE agent_api_keys "
-        "ADD COLUMN IF NOT EXISTS app_token_encrypted VARCHAR, "
-        "ADD COLUMN IF NOT EXISTS forward_path VARCHAR;"
+        "ADD COLUMN IF NOT EXISTS slack_socket_mode_app_token_encrypted VARCHAR, "
+        "ADD COLUMN IF NOT EXISTS slack_socket_mode_forward_path VARCHAR;"
     )
 
 
 def downgrade() -> None:
     op.execute(
         "ALTER TABLE agent_api_keys "
-        "DROP COLUMN IF EXISTS forward_path, "
-        "DROP COLUMN IF EXISTS app_token_encrypted;"
+        "DROP COLUMN IF EXISTS slack_socket_mode_forward_path, "
+        "DROP COLUMN IF EXISTS slack_socket_mode_app_token_encrypted;"
     )

@@ -205,7 +205,8 @@ class SlackSocketModeBridge:
             trigger = triggers.get(trigger_id)
             if (
                 trigger is None
-                or trigger.app_token_encrypted != connection.app_token_encrypted
+                or trigger.slack_socket_mode_app_token_encrypted
+                != connection.app_token_encrypted
                 or connection.client.closed
             ):
                 if connection.client.rejected:
@@ -214,21 +215,28 @@ class SlackSocketModeBridge:
         for trigger in triggers.values():
             if trigger.id in self._connections:
                 continue
-            if (trigger.id, trigger.app_token_encrypted) in self._rejected:
+            if (
+                trigger.id,
+                trigger.slack_socket_mode_app_token_encrypted,
+            ) in self._rejected:
                 continue
             await self._open(trigger)
 
     async def _open(self, trigger: AgentAPIKeyEntity) -> None:
-        assert trigger.app_token_encrypted
+        assert trigger.slack_socket_mode_app_token_encrypted
         try:
-            app_token = credential_encryption.decrypt(trigger.app_token_encrypted)
+            app_token = credential_encryption.decrypt(
+                trigger.slack_socket_mode_app_token_encrypted
+            )
         except credential_encryption.CredentialEncryptionError as exc:
             logger.error(
                 "Cannot read the app token for Slack Socket Mode trigger %s: %s",
                 trigger.id,
                 exc,
             )
-            self._rejected.add((trigger.id, trigger.app_token_encrypted))
+            self._rejected.add(
+                (trigger.id, trigger.slack_socket_mode_app_token_encrypted)
+            )
             return
 
         client = _TriggerSocketModeClient(trigger=trigger, app_token=app_token)
@@ -238,7 +246,9 @@ class SlackSocketModeBridge:
             # inside connect()'s retry loop; connect() reuses the URL.
             client.wss_uri = await client.issue_new_wss_url()
         except AppTokenRejected:
-            self._rejected.add((trigger.id, trigger.app_token_encrypted))
+            self._rejected.add(
+                (trigger.id, trigger.slack_socket_mode_app_token_encrypted)
+            )
             await client.close()
             return
         except Exception as exc:
@@ -249,7 +259,7 @@ class SlackSocketModeBridge:
                 type(exc).__name__,
             )
         self._connections[trigger.id] = _Connection(
-            app_token_encrypted=trigger.app_token_encrypted,
+            app_token_encrypted=trigger.slack_socket_mode_app_token_encrypted,
             client=client,
             connect_task=asyncio.create_task(client.connect()),
         )
@@ -333,7 +343,7 @@ class SlackSocketModeBridge:
                     return False
                 url = (
                     f"{resolve_acp_url(agent.acp_url)}/"
-                    f"{(trigger.forward_path or '').lstrip('/')}"
+                    f"{(trigger.slack_socket_mode_forward_path or '').lstrip('/')}"
                 )
                 response = await self._http_client.post(
                     url, content=body, headers=headers

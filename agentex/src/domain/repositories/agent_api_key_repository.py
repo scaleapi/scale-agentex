@@ -186,7 +186,7 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
                 .join(AgentORM, AgentORM.id == AgentAPIKeyORM.agent_id)
                 .where(
                     AgentAPIKeyORM.api_key_type == AgentAPIKeyType.SLACK,
-                    AgentAPIKeyORM.app_token_encrypted.is_not(None),
+                    AgentAPIKeyORM.slack_socket_mode_app_token_encrypted.is_not(None),
                     AgentORM.status != AgentStatus.DELETED,
                 )
             )

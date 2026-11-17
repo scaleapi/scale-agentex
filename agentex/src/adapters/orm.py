@@ -186,12 +186,8 @@ class AgentAPIKeyORM(BaseORM):
     name = Column(String(256), nullable=False, index=True)
     api_key_type = Column(SQLAlchemyEnum(AgentAPIKeyType), nullable=False)
     api_key = Column(String, nullable=False)
-    # Slack app-level token (Fernet, src/utils/credential_encryption.py); set only on
-    # Slack triggers whose events arrive over Socket Mode instead of HTTP.
-    app_token_encrypted = Column(String, nullable=True)
-    # The agent subpath a socket-delivered event is POSTed to. Over HTTP it is read
-    # from the request URL, which a socket delivery does not have.
-    forward_path = Column(String, nullable=True)
+    slack_socket_mode_app_token_encrypted = Column(String, nullable=True)
+    slack_socket_mode_forward_path = Column(String, nullable=True)
 
     # Indexes for efficient querying
     __table_args__ = (

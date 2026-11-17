@@ -107,8 +107,8 @@ class AgentAPIKeysUseCase:
         agent_id: str,
         api_key_type: AgentAPIKeyType,
         api_key: str,
-        app_token_encrypted: str | None = None,
-        forward_path: str | None = None,
+        slack_socket_mode_app_token_encrypted: str | None = None,
+        slack_socket_mode_forward_path: str | None = None,
     ) -> AgentAPIKeyEntity:
         agent = await self.get_agent(agent_id=agent_id)
         if not agent:
@@ -132,8 +132,8 @@ class AgentAPIKeysUseCase:
             agent_id=agent.id,
             api_key_type=api_key_type,
             api_key=api_key,
-            app_token_encrypted=app_token_encrypted,
-            forward_path=forward_path,
+            slack_socket_mode_app_token_encrypted=slack_socket_mode_app_token_encrypted,
+            slack_socket_mode_forward_path=slack_socket_mode_forward_path,
         )
         return await self.agent_api_key_repo.create(item=agent_api_key)
 
