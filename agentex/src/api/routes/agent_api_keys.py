@@ -4,7 +4,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
 
-from src.adapters.crud_store.exceptions import ItemDoesNotExist
+from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
 from src.api.schemas.agent_api_keys import (
     AgentAPIKey,
     CreateAPIKeyRequest,
@@ -99,6 +99,14 @@ async def create_api_key(
         name=agent_api_key_entity.name,
         api_key_type=agent_api_key_entity.api_key_type,
         api_key=str(new_api_key),  # Return the inserted API key
+    )
+
+
+def _slack_app_already_served(app_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail=f"Slack app '{app_id}' is already served over Socket Mode by another "
+        "trigger; delete that trigger first.",
     )
 
 
@@ -204,24 +212,29 @@ async def create_webhook_trigger(
             )
         # Slack gives each event to one of an app's connections, so a second
         # Socket Mode trigger for the same app would take part of the first
-        # one's events.
+        # one's events. The table's unique constraint enforces this; checking first
+        # keeps the auth registration in create() from running for a request that
+        # is bound to fail.
         if await agent_api_key_use_case.has_slack_socket_mode_trigger(request.name):
-            raise HTTPException(
-                status_code=409,
-                detail=f"Slack app '{request.name}' is already served over Socket "
-                "Mode by another trigger; delete that trigger first.",
-            )
+            raise _slack_app_already_served(request.name)
         app_token_encrypted = credential_encryption.encrypt(request.app_token)
 
     secret = request.secret if request.secret is not None else secrets.token_hex(32)
-    agent_api_key_entity = await agent_api_key_use_case.create(
-        agent_id=agent.id,
-        api_key=str(secret),
-        name=request.name,
-        api_key_type=request.source,
-        slack_socket_mode_app_token_encrypted=app_token_encrypted,
-        slack_socket_mode_forward_path=forward_path if app_token_encrypted else None,
-    )
+    try:
+        agent_api_key_entity = await agent_api_key_use_case.create(
+            agent_id=agent.id,
+            api_key=str(secret),
+            name=request.name,
+            api_key_type=request.source,
+            slack_socket_mode_app_token_encrypted=app_token_encrypted,
+            slack_socket_mode_forward_path=forward_path,
+        )
+    except DuplicateItemError:
+        # Only the Socket Mode insert has a unique key a client can collide on: a
+        # concurrent registration for the same app got there first.
+        if app_token_encrypted is None:
+            raise
+        raise _slack_app_already_served(request.name) from None
 
     encoded_agent_name = quote(request.agent_name, safe="")
     encoded_forward_path = quote(forward_path, safe="/")

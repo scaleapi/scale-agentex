@@ -35,7 +35,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.config.dependencies import database_async_read_write_session_maker
-from src.domain.entities.agent_api_keys import AgentAPIKeyEntity
+from src.domain.entities.agent_api_keys import (
+    AgentAPIKeyEntity,
+    SlackSocketModeAppEntity,
+)
 from src.domain.entities.agents import AgentStatus
 from src.domain.repositories.agent_api_key_repository import AgentAPIKeyRepository
 from src.domain.repositories.agent_repository import AgentRepository
@@ -97,36 +100,6 @@ class _TriggerSocketModeClient(SocketModeClient):
                 )
                 raise AppTokenRejected(error) from exc
             raise
-
-
-def _one_trigger_per_app(
-    triggers: list[AgentAPIKeyEntity],
-) -> dict[str, AgentAPIKeyEntity]:
-    """Keep the earliest-registered trigger for each Slack app, keyed by trigger id.
-
-    Slack hands each event to one of an app's connections, so two triggers for the
-    same app would each see only part of its events. Registration refuses a second
-    socket trigger for an app; this covers rows that predate that check.
-    """
-    by_app: dict[str, list[AgentAPIKeyEntity]] = {}
-    for trigger in triggers:
-        by_app.setdefault(trigger.name or "", []).append(trigger)
-    kept: dict[str, AgentAPIKeyEntity] = {}
-    for app_id, candidates in by_app.items():
-        candidates.sort(key=lambda t: (t.created_at is None, t.created_at, t.id))
-        owner, *duplicates = candidates
-        if duplicates:
-            logger.error(
-                "Slack app %s has %d Socket Mode triggers; serving only trigger %s "
-                "(agent %s) and ignoring %s",
-                app_id,
-                len(candidates),
-                owner.id,
-                owner.agent_id,
-                ", ".join(t.id for t in duplicates),
-            )
-        kept[owner.id] = owner
-    return kept
 
 
 def _slack_signature_headers(
@@ -197,58 +170,52 @@ class SlackSocketModeBridge:
 
     async def refresh(self) -> None:
         """Open connections for new triggers and close them for removed ones."""
-        triggers = _one_trigger_per_app(
-            await self._agent_api_key_repo.list_slack_socket_mode_triggers()
-        )
+        served = {
+            trigger.id: (trigger, app)
+            for trigger, app in await self._agent_api_key_repo.list_slack_socket_mode_apps()
+        }
         self.ready = True
         for trigger_id, connection in list(self._connections.items()):
-            trigger = triggers.get(trigger_id)
+            current = served.get(trigger_id)
             if (
-                trigger is None
-                or trigger.slack_socket_mode_app_token_encrypted
-                != connection.app_token_encrypted
+                current is None
+                or current[1].app_token_encrypted != connection.app_token_encrypted
                 or connection.client.closed
             ):
                 if connection.client.rejected:
                     self._rejected.add((trigger_id, connection.app_token_encrypted))
                 await self._close(trigger_id)
-        for trigger in triggers.values():
+        for trigger, app in served.values():
             if trigger.id in self._connections:
                 continue
-            if (
-                trigger.id,
-                trigger.slack_socket_mode_app_token_encrypted,
-            ) in self._rejected:
+            if (trigger.id, app.app_token_encrypted) in self._rejected:
                 continue
-            await self._open(trigger)
+            await self._open(trigger, app)
 
-    async def _open(self, trigger: AgentAPIKeyEntity) -> None:
-        assert trigger.slack_socket_mode_app_token_encrypted
+    async def _open(
+        self, trigger: AgentAPIKeyEntity, app: SlackSocketModeAppEntity
+    ) -> None:
         try:
-            app_token = credential_encryption.decrypt(
-                trigger.slack_socket_mode_app_token_encrypted
-            )
+            app_token = credential_encryption.decrypt(app.app_token_encrypted)
         except credential_encryption.CredentialEncryptionError as exc:
             logger.error(
                 "Cannot read the app token for Slack Socket Mode trigger %s: %s",
                 trigger.id,
                 exc,
             )
-            self._rejected.add(
-                (trigger.id, trigger.slack_socket_mode_app_token_encrypted)
-            )
+            self._rejected.add((trigger.id, app.app_token_encrypted))
             return
 
         client = _TriggerSocketModeClient(trigger=trigger, app_token=app_token)
-        client.socket_mode_request_listeners.append(partial(self._on_request, trigger))
+        client.socket_mode_request_listeners.append(
+            partial(self._on_request, trigger, app)
+        )
         try:
             # Called once up front so a rejected token stops here instead of
             # inside connect()'s retry loop; connect() reuses the URL.
             client.wss_uri = await client.issue_new_wss_url()
         except AppTokenRejected:
-            self._rejected.add(
-                (trigger.id, trigger.slack_socket_mode_app_token_encrypted)
-            )
+            self._rejected.add((trigger.id, app.app_token_encrypted))
             await client.close()
             return
         except Exception as exc:
@@ -259,7 +226,7 @@ class SlackSocketModeBridge:
                 type(exc).__name__,
             )
         self._connections[trigger.id] = _Connection(
-            app_token_encrypted=trigger.slack_socket_mode_app_token_encrypted,
+            app_token_encrypted=app.app_token_encrypted,
             client=client,
             connect_task=asyncio.create_task(client.connect()),
         )
@@ -284,6 +251,7 @@ class SlackSocketModeBridge:
     async def _on_request(
         self,
         trigger: AgentAPIKeyEntity,
+        app: SlackSocketModeAppEntity,
         client: SocketModeClient,
         request: SocketModeRequest,
     ) -> None:
@@ -298,6 +266,7 @@ class SlackSocketModeBridge:
             return
         if await self.forward_event(
             trigger,
+            app,
             request.payload,
             retry_attempt=request.retry_attempt,
             retry_reason=request.retry_reason,
@@ -309,6 +278,7 @@ class SlackSocketModeBridge:
     async def forward_event(
         self,
         trigger: AgentAPIKeyEntity,
+        app: SlackSocketModeAppEntity,
         payload: dict,
         retry_attempt: int | None,
         retry_reason: str | None,
@@ -341,10 +311,7 @@ class SlackSocketModeBridge:
                         trigger.agent_id,
                     )
                     return False
-                url = (
-                    f"{resolve_acp_url(agent.acp_url)}/"
-                    f"{(trigger.slack_socket_mode_forward_path or '').lstrip('/')}"
-                )
+                url = f"{resolve_acp_url(agent.acp_url)}/{app.forward_path.lstrip('/')}"
                 response = await self._http_client.post(
                     url, content=body, headers=headers
                 )

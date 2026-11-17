@@ -1,7 +1,6 @@
 """Ack and reconnect behaviour of the Slack Socket Mode bridge."""
 
 import asyncio
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -12,7 +11,11 @@ from slack_sdk.errors import SlackApiError
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.web.slack_response import SlackResponse
-from src.domain.entities.agent_api_keys import AgentAPIKeyEntity, AgentAPIKeyType
+from src.domain.entities.agent_api_keys import (
+    AgentAPIKeyEntity,
+    AgentAPIKeyType,
+    SlackSocketModeAppEntity,
+)
 from src.domain.entities.agents import AgentStatus
 from src.domain.services import slack_socket_mode_bridge as mod
 from src.domain.services.slack_socket_mode_bridge import SlackSocketModeBridge
@@ -24,18 +27,26 @@ TRIGGER = AgentAPIKeyEntity(
     name="A123",
     api_key_type=AgentAPIKeyType.SLACK,
     api_key="signing-secret",
-    slack_socket_mode_app_token_encrypted="ciphertext",
-    slack_socket_mode_forward_path="slack/events",
+)
+APP = SlackSocketModeAppEntity(
+    id="app-1",
+    agent_api_key_id=TRIGGER.id,
+    agent_id=TRIGGER.agent_id,
+    slack_app_id="A123",
+    app_token_encrypted="ciphertext",
+    forward_path="slack/events",
 )
 
 
-def _bridge(handler, triggers=(TRIGGER,)) -> tuple[SlackSocketModeBridge, MagicMock]:
+def _bridge(
+    handler, served=((TRIGGER, APP),)
+) -> tuple[SlackSocketModeBridge, MagicMock]:
     agent_repo = MagicMock()
     agent_repo.get = AsyncMock(
         return_value=MagicMock(status=AgentStatus.READY, acp_url="http://agent:8000")
     )
     key_repo = MagicMock()
-    key_repo.list_slack_socket_mode_triggers = AsyncMock(return_value=list(triggers))
+    key_repo.list_slack_socket_mode_apps = AsyncMock(return_value=list(served))
     bridge = SlackSocketModeBridge(
         agent_api_key_repository=key_repo,
         agent_repository=agent_repo,
@@ -66,7 +77,7 @@ class TestEnvelopeAck:
         bridge, _ = _bridge(handler)
         client = MagicMock(send_socket_mode_response=AsyncMock())
 
-        await bridge._on_request(TRIGGER, client, _envelope())
+        await bridge._on_request(TRIGGER, APP, client, _envelope())
 
         assert str(seen[0].url) == "http://agent:8000/slack/events"
         assert "x-slack-retry-num" not in seen[0].headers
@@ -79,7 +90,7 @@ class TestEnvelopeAck:
         bridge, _ = _bridge(lambda request: httpx.Response(503))
         client = MagicMock(send_socket_mode_response=AsyncMock())
 
-        await bridge._on_request(TRIGGER, client, _envelope())
+        await bridge._on_request(TRIGGER, APP, client, _envelope())
 
         client.send_socket_mode_response.assert_not_awaited()
 
@@ -93,7 +104,7 @@ class TestEnvelopeAck:
         bridge, _ = _bridge(slow)
         client = MagicMock(send_socket_mode_response=AsyncMock())
 
-        await bridge._on_request(TRIGGER, client, _envelope())
+        await bridge._on_request(TRIGGER, APP, client, _envelope())
 
         client.send_socket_mode_response.assert_not_awaited()
 
@@ -108,7 +119,7 @@ class TestEnvelopeAck:
         client = MagicMock(send_socket_mode_response=AsyncMock())
 
         await bridge._on_request(
-            TRIGGER, client, _envelope(retry_attempt=2, retry_reason="timeout")
+            TRIGGER, APP, client, _envelope(retry_attempt=2, retry_reason="timeout")
         )
 
         assert seen[0].headers["x-slack-retry-num"] == "2"
@@ -124,7 +135,7 @@ class TestEnvelopeAck:
         bridge, _ = _bridge(handler)
         client = MagicMock(send_socket_mode_response=AsyncMock())
 
-        await bridge._on_request(TRIGGER, client, _envelope())
+        await bridge._on_request(TRIGGER, APP, client, _envelope())
 
         forwarded = seen[0]
         assert verify_signature(
@@ -146,37 +157,9 @@ class TestEnvelopeAck:
         )
         client = MagicMock(send_socket_mode_response=AsyncMock())
 
-        await bridge._on_request(TRIGGER, client, _envelope())
+        await bridge._on_request(TRIGGER, APP, client, _envelope())
 
         client.send_socket_mode_response.assert_awaited_once()
-
-
-@pytest.mark.unit
-class TestOneConnectionPerApp:
-    async def test_only_the_earliest_trigger_for_an_app_connects(self, monkeypatch):
-        monkeypatch.setattr(mod.credential_encryption, "decrypt", lambda _: "xapp-1")
-        monkeypatch.setattr(
-            AsyncWebClient,
-            "apps_connections_open",
-            AsyncMock(return_value={"url": "wss://example.invalid"}),
-        )
-        monkeypatch.setattr(mod._TriggerSocketModeClient, "connect", AsyncMock())
-        later = TRIGGER.model_copy(
-            update={
-                "id": "key-2",
-                "agent_id": "agent-2",
-                "created_at": datetime(2026, 2, 1, tzinfo=UTC),
-            }
-        )
-        earlier = TRIGGER.model_copy(
-            update={"created_at": datetime(2026, 1, 1, tzinfo=UTC)}
-        )
-        bridge, _ = _bridge(lambda request: httpx.Response(200), [later, earlier])
-
-        await bridge.refresh()
-
-        assert list(bridge._connections) == [earlier.id]
-        await bridge.stop()
 
 
 @pytest.mark.unit

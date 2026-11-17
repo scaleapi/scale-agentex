@@ -2,17 +2,22 @@ import builtins
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy import select
+from sqlalchemy import delete, insert, select
 from src.adapters.crud_store.adapter_postgres import (
     PostgresCRUDRepository,
+    async_sql_exception_handler,
 )
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
-from src.adapters.orm import AgentAPIKeyORM, AgentORM
+from src.adapters.orm import AgentAPIKeyORM, AgentORM, SlackSocketModeAppORM
 from src.config.dependencies import (
     DDatabaseAsyncReadOnlySessionMaker,
     DDatabaseAsyncReadWriteSessionMaker,
 )
-from src.domain.entities.agent_api_keys import AgentAPIKeyEntity, AgentAPIKeyType
+from src.domain.entities.agent_api_keys import (
+    AgentAPIKeyEntity,
+    AgentAPIKeyType,
+    SlackSocketModeAppEntity,
+)
 from src.domain.entities.agents import AgentStatus
 from src.utils.logging import make_logger
 
@@ -172,29 +177,74 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
             row = result.scalars().first()
             return AgentAPIKeyEntity.model_validate(row) if row else None
 
-    async def list_slack_socket_mode_triggers(
-        self, app_id: str | None = None
-    ) -> builtins.list[AgentAPIKeyEntity]:
-        """Slack triggers that carry an app token, on agents that are not deleted.
+    async def create_with_slack_socket_mode_app(
+        self, item: AgentAPIKeyEntity, app: SlackSocketModeAppEntity
+    ) -> AgentAPIKeyEntity:
+        """Create a Slack trigger and its Socket Mode app row in one transaction.
+
+        A row left behind by a soft-deleted agent is removed first: deleting an agent
+        keeps its keys, and the app must stay registrable on another agent.
+
+        Raises:
+            DuplicateItemError: A live agent already serves this Slack app.
+        """
+        async with (
+            self.start_async_db_session(True) as session,
+            async_sql_exception_handler(),
+        ):
+            deleted_agents = select(AgentORM.id).where(
+                AgentORM.status == AgentStatus.DELETED
+            )
+            await session.execute(
+                delete(SlackSocketModeAppORM).where(
+                    SlackSocketModeAppORM.slack_app_id == app.slack_app_id,
+                    SlackSocketModeAppORM.agent_id.in_(deleted_agents),
+                )
+            )
+            values = {k: v for k, v in item.to_dict().items() if v is not None}
+            row = (
+                await session.execute(
+                    insert(AgentAPIKeyORM)
+                    .values(**values)
+                    .returning(*AgentAPIKeyORM.__table__.columns)
+                )
+            ).one()
+            await session.execute(
+                insert(SlackSocketModeAppORM).values(
+                    **{k: v for k, v in app.to_dict().items() if v is not None}
+                )
+            )
+            await session.commit()
+            return AgentAPIKeyEntity.model_validate(dict(row._mapping))
+
+    async def list_slack_socket_mode_apps(
+        self, slack_app_id: str | None = None
+    ) -> builtins.list[tuple[AgentAPIKeyEntity, SlackSocketModeAppEntity]]:
+        """Socket Mode apps on agents that are not deleted, each with its trigger.
 
         Args:
-            app_id: Only triggers for this Slack app (the trigger name), if given.
+            slack_app_id: Only this Slack app, if given.
         """
         async with self.start_async_db_session(allow_writes=False) as session:
             query = (
-                select(AgentAPIKeyORM)
-                .join(AgentORM, AgentORM.id == AgentAPIKeyORM.agent_id)
-                .where(
-                    AgentAPIKeyORM.api_key_type == AgentAPIKeyType.SLACK,
-                    AgentAPIKeyORM.slack_socket_mode_app_token_encrypted.is_not(None),
-                    AgentORM.status != AgentStatus.DELETED,
+                select(AgentAPIKeyORM, SlackSocketModeAppORM)
+                .join(
+                    SlackSocketModeAppORM,
+                    (SlackSocketModeAppORM.agent_api_key_id == AgentAPIKeyORM.id)
+                    & (SlackSocketModeAppORM.agent_id == AgentAPIKeyORM.agent_id),
                 )
+                .join(AgentORM, AgentORM.id == AgentAPIKeyORM.agent_id)
+                .where(AgentORM.status != AgentStatus.DELETED)
             )
-            if app_id is not None:
-                query = query.where(AgentAPIKeyORM.name == app_id)
+            if slack_app_id is not None:
+                query = query.where(SlackSocketModeAppORM.slack_app_id == slack_app_id)
             result = await session.execute(query)
             return [
-                AgentAPIKeyEntity.model_validate(row) for row in result.scalars().all()
+                (
+                    AgentAPIKeyEntity.model_validate(trigger),
+                    SlackSocketModeAppEntity.model_validate(app),
+                )
+                for trigger, app in result.all()
             ]
 
     async def delete_by_agent_name_and_key_name(

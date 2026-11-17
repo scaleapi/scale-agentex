@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import src.api.routes.agent_api_keys as mod
 from fastapi import HTTPException
+from src.adapters.crud_store.exceptions import DuplicateItemError
 from src.api.routes.agent_api_keys import create_webhook_trigger
 from src.api.schemas.agent_api_keys import CreateWebhookTriggerRequest
 from src.domain.entities.agent_api_keys import AgentAPIKeyType
@@ -23,6 +24,7 @@ class TestCreateWebhookTrigger:
         existing=None,
         base_env=None,
         app_served_over_socket=False,
+        create_error=None,
     ):
         # The agent-authorization helper does real authz work; stub it to a no-op.
         monkeypatch.setattr(mod, "_check_agent_or_collapse_to_404", AsyncMock())
@@ -40,7 +42,8 @@ class TestCreateWebhookTrigger:
             return_value=app_served_over_socket
         )
         akuc.create = AsyncMock(
-            return_value=MagicMock(id="key-1", api_key_type=request.source)
+            return_value=MagicMock(id="key-1", api_key_type=request.source),
+            side_effect=create_error,
         )
 
         resp = await create_webhook_trigger(
@@ -188,10 +191,22 @@ class TestCreateWebhookTrigger:
         assert resp.secret == "slack-signing-secret"
         assert akuc.create.await_args.kwargs["api_key"] == "slack-signing-secret"
 
-    async def test_second_socket_trigger_for_a_slack_app_conflicts(self, monkeypatch):
+    @pytest.mark.parametrize(
+        ("served", "create_error"),
+        [
+            pytest.param(True, None, id="already-registered"),
+            # A concurrent registration passed the same check and inserted first;
+            # the table's unique constraint is what catches it.
+            pytest.param(False, DuplicateItemError("dup"), id="concurrent-insert"),
+        ],
+    )
+    async def test_second_socket_trigger_for_a_slack_app_conflicts(
+        self, monkeypatch, served, create_error
+    ):
         # Slack splits an app's events across its connections, so a second
         # Socket Mode trigger would silently take part of the first one's events.
         monkeypatch.setattr(mod.credential_encryption, "is_configured", lambda: True)
+        monkeypatch.setattr(mod.credential_encryption, "encrypt", lambda _: "ct")
         req = CreateWebhookTriggerRequest(
             agent_name="b",
             source=AgentAPIKeyType.SLACK,
@@ -201,7 +216,12 @@ class TestCreateWebhookTrigger:
             app_token="xapp-1-A123-example",
         )
         with pytest.raises(HTTPException) as exc:
-            await self._call(monkeypatch, req, app_served_over_socket=True)
+            await self._call(
+                monkeypatch,
+                req,
+                app_served_over_socket=served,
+                create_error=create_error,
+            )
         assert exc.value.status_code == 409
 
     async def test_linear_without_secret_rejected(self, monkeypatch):

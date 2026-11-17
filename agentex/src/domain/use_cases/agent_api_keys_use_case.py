@@ -22,6 +22,7 @@ from src.config.environment_variables import EnvVarKeys
 from src.domain.entities.agent_api_keys import (
     AgentAPIKeyEntity,
     AgentAPIKeyType,
+    SlackSocketModeAppEntity,
 )
 from src.domain.entities.agents import AgentEntity, AgentStatus
 from src.domain.repositories.agent_api_key_repository import (
@@ -108,7 +109,7 @@ class AgentAPIKeysUseCase:
         api_key_type: AgentAPIKeyType,
         api_key: str,
         slack_socket_mode_app_token_encrypted: str | None = None,
-        slack_socket_mode_forward_path: str | None = None,
+        slack_socket_mode_forward_path: str = "",
     ) -> AgentAPIKeyEntity:
         agent = await self.get_agent(agent_id=agent_id)
         if not agent:
@@ -132,10 +133,20 @@ class AgentAPIKeysUseCase:
             agent_id=agent.id,
             api_key_type=api_key_type,
             api_key=api_key,
-            slack_socket_mode_app_token_encrypted=slack_socket_mode_app_token_encrypted,
-            slack_socket_mode_forward_path=slack_socket_mode_forward_path,
         )
-        return await self.agent_api_key_repo.create(item=agent_api_key)
+        if slack_socket_mode_app_token_encrypted is None:
+            return await self.agent_api_key_repo.create(item=agent_api_key)
+        return await self.agent_api_key_repo.create_with_slack_socket_mode_app(
+            item=agent_api_key,
+            app=SlackSocketModeAppEntity(
+                id=orm_id(),
+                agent_api_key_id=api_key_id,
+                agent_id=agent.id,
+                slack_app_id=name,
+                app_token_encrypted=slack_socket_mode_app_token_encrypted,
+                forward_path=slack_socket_mode_forward_path,
+            ),
+        )
 
     async def _register_api_key_in_auth(
         self,
@@ -229,7 +240,9 @@ class AgentAPIKeysUseCase:
     async def has_slack_socket_mode_trigger(self, app_id: str) -> bool:
         """Whether a live agent already serves this Slack app over Socket Mode."""
         return bool(
-            await self.agent_api_key_repo.list_slack_socket_mode_triggers(app_id=app_id)
+            await self.agent_api_key_repo.list_slack_socket_mode_apps(
+                slack_app_id=app_id
+            )
         )
 
     async def get_external_by_agent_id_and_key(

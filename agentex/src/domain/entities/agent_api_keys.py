@@ -26,11 +26,27 @@ class AgentAPIKeyEntity(BaseModel):
         description="The type of the API key (either internal or external)",
     )
     api_key: str = Field(..., description="The API key")
-    slack_socket_mode_app_token_encrypted: str | None = Field(
-        None,
-        description="Encrypted Slack app-level token; set when the trigger is served "
-        "over Socket Mode.",
+
+
+class SlackSocketModeAppEntity(BaseModel):
+    """A Slack app whose events agentex receives over Socket Mode.
+
+    Attached to the app's Slack webhook trigger (an ``AgentAPIKeyEntity`` of type
+    ``slack``), which still holds the signing secret.
+    """
+
+    id: str = Field(..., description="The unique identifier of the row.")
+    agent_api_key_id: str = Field(
+        ..., description="The Slack webhook trigger this app's events are served for."
     )
-    slack_socket_mode_forward_path: str | None = Field(
-        None, description="Agent subpath a Socket Mode event is forwarded to."
+    agent_id: str = Field(..., description="The agent that owns the trigger.")
+    slack_app_id: str = Field(
+        ..., description="The Slack app id; at most one row per app."
     )
+    app_token_encrypted: str = Field(
+        ..., description="The app-level token (xapp-...), encrypted."
+    )
+    forward_path: str = Field(
+        ..., description="The agent subpath each event is POSTed to."
+    )
+    created_at: datetime | None = Field(None, description="When the row was created.")
