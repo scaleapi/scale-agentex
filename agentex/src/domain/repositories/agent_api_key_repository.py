@@ -173,9 +173,13 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
             return AgentAPIKeyEntity.model_validate(row) if row else None
 
     async def list_slack_socket_mode_triggers(
-        self,
+        self, app_id: str | None = None
     ) -> builtins.list[AgentAPIKeyEntity]:
-        """Slack triggers that carry an app token, on agents that are not deleted."""
+        """Slack triggers that carry an app token, on agents that are not deleted.
+
+        Args:
+            app_id: Only triggers for this Slack app (the trigger name), if given.
+        """
         async with self.start_async_db_session(allow_writes=False) as session:
             query = (
                 select(AgentAPIKeyORM)
@@ -186,6 +190,8 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
                     AgentORM.status != AgentStatus.DELETED,
                 )
             )
+            if app_id is not None:
+                query = query.where(AgentAPIKeyORM.name == app_id)
             result = await session.execute(query)
             return [
                 AgentAPIKeyEntity.model_validate(row) for row in result.scalars().all()

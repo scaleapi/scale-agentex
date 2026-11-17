@@ -5,7 +5,8 @@ per bridge process (``src/run_slack_socket_mode_bridge.py``), never per API work
 Slack caps an app at 10 open connections. Slack delivers each envelope to one of the
 app's connections, so several bridge replicas don't duplicate work, and when one
 closes its socket the others keep receiving. Each ``events_api`` envelope is forwarded to
-the agent exactly as ``/agents/forward`` would forward the HTTP delivery, and acked
+the agent exactly as ``/agents/forward`` would forward the HTTP delivery, signed with the
+trigger's signing secret as Slack signs one, and acked
 only once the agent has accepted it: an unacked envelope is redelivered by Slack,
 which is the retry path when an agent is slow or down.
 
@@ -17,7 +18,10 @@ between them.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
+import time
 from dataclasses import dataclass
 from functools import partial
 from typing import Any
@@ -27,14 +31,10 @@ from slack_sdk.errors import SlackApiError
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
-from src.config.dependencies import (
-    database_async_read_only_session_maker,
-    database_async_read_write_engine,
-    database_async_read_write_session_maker,
-    httpx_client,
-)
+from src.config.dependencies import database_async_read_write_session_maker
 from src.domain.entities.agent_api_keys import AgentAPIKeyEntity
 from src.domain.entities.agents import AgentStatus
 from src.domain.repositories.agent_api_key_repository import AgentAPIKeyRepository
@@ -73,13 +73,12 @@ class _TriggerSocketModeClient(SocketModeClient):
         self.rejected = False
 
     async def issue_new_wss_url(self) -> str:
-        # Overridden rather than wrapped: slack_sdk also calls this on every
-        # reconnect, and on a revoked token its connect/monitor loops would retry
-        # (and log a traceback) every few seconds forever.
+        # slack_sdk also calls this on every reconnect, and on a revoked token its
+        # connect/monitor loops would retry (and log a traceback) every few seconds
+        # forever. The base method still handles rate limiting (it waits out
+        # Retry-After); only the errors no retry can fix stop the connection.
         try:
-            response = await self.web_client.apps_connections_open(
-                app_token=self.app_token
-            )
+            return await super().issue_new_wss_url()
         except SlackApiError as exc:
             error = exc.response.get("error")
             if error in REJECTED_TOKEN_ERRORS:
@@ -98,7 +97,52 @@ class _TriggerSocketModeClient(SocketModeClient):
                 )
                 raise AppTokenRejected(error) from exc
             raise
-        return response["url"]
+
+
+def _one_trigger_per_app(
+    triggers: list[AgentAPIKeyEntity],
+) -> dict[str, AgentAPIKeyEntity]:
+    """Keep the earliest-registered trigger for each Slack app, keyed by trigger id.
+
+    Slack hands each event to one of an app's connections, so two triggers for the
+    same app would each see only part of its events. Registration refuses a second
+    socket trigger for an app; this covers rows that predate that check.
+    """
+    by_app: dict[str, list[AgentAPIKeyEntity]] = {}
+    for trigger in triggers:
+        by_app.setdefault(trigger.name or "", []).append(trigger)
+    kept: dict[str, AgentAPIKeyEntity] = {}
+    for app_id, candidates in by_app.items():
+        candidates.sort(key=lambda t: (t.created_at is None, t.created_at, t.id))
+        owner, *duplicates = candidates
+        if duplicates:
+            logger.error(
+                "Slack app %s has %d Socket Mode triggers; serving only trigger %s "
+                "(agent %s) and ignoring %s",
+                app_id,
+                len(candidates),
+                owner.id,
+                owner.agent_id,
+                ", ".join(t.id for t in duplicates),
+            )
+        kept[owner.id] = owner
+    return kept
+
+
+def _slack_signature_headers(
+    signing_secret: str, body: bytes, timestamp: int
+) -> dict[str, str]:
+    """The headers Slack sets on an HTTP delivery, for the same body.
+
+    An agent that checks Slack's v0 signature itself then accepts a socket delivery
+    exactly as it would an HTTP one.
+    """
+    basis = f"v0:{timestamp}:".encode() + body
+    digest = hmac.new(signing_secret.encode(), basis, hashlib.sha256).hexdigest()
+    return {
+        "x-slack-request-timestamp": str(timestamp),
+        "x-slack-signature": f"v0={digest}",
+    }
 
 
 @dataclass
@@ -153,10 +197,9 @@ class SlackSocketModeBridge:
 
     async def refresh(self) -> None:
         """Open connections for new triggers and close them for removed ones."""
-        triggers = {
-            t.id: t
-            for t in await self._agent_api_key_repo.list_slack_socket_mode_triggers()
-        }
+        triggers = _one_trigger_per_app(
+            await self._agent_api_key_repo.list_slack_socket_mode_triggers()
+        )
         self.ready = True
         for trigger_id, connection in list(self._connections.items()):
             trigger = triggers.get(trigger_id)
@@ -262,10 +305,15 @@ class SlackSocketModeBridge:
     ) -> bool:
         """POST an Events API payload to the trigger's agent route.
 
-        Returns whether the agent accepted it (2xx) within the ack deadline; the
+        Returns whether the agent accepted it (2xx) within the ack deadline, or
+        declined a redelivery with ``X-Slack-No-Retry: 1`` as it can over HTTP; the
         caller acks only then, so anything else is redelivered by Slack.
         """
-        headers = {"content-type": "application/json"}
+        body = json.dumps(payload).encode()
+        headers = {
+            "content-type": "application/json",
+            **_slack_signature_headers(trigger.api_key, body, int(time.time())),
+        }
         # Over HTTP Slack sends these only on redeliveries; the first delivery
         # over a socket has retry_attempt 0.
         if retry_attempt:
@@ -288,7 +336,7 @@ class SlackSocketModeBridge:
                     f"{(trigger.forward_path or '').lstrip('/')}"
                 )
                 response = await self._http_client.post(
-                    url, content=json.dumps(payload).encode(), headers=headers
+                    url, content=body, headers=headers
                 )
         except (TimeoutError, httpx.HTTPError, ItemDoesNotExist) as exc:
             logger.warning(
@@ -298,38 +346,37 @@ class SlackSocketModeBridge:
                 type(exc).__name__,
             )
             return False
-        if not response.is_success:
-            logger.warning(
-                "Agent %s answered %s to a Slack Socket Mode event for trigger %s; "
-                "leaving it unacked for redelivery",
+        if response.is_success:
+            return True
+        if response.headers.get("x-slack-no-retry") == "1":
+            logger.info(
+                "Agent %s answered %s with X-Slack-No-Retry to a Slack Socket Mode "
+                "event for trigger %s; acking so Slack does not redeliver it",
                 trigger.agent_id,
                 response.status_code,
                 trigger.id,
             )
-            return False
-        return True
-
-
-def create_slack_socket_mode_bridge() -> SlackSocketModeBridge | None:
-    """Build the bridge from the global dependencies, or None if it can't run.
-
-    App tokens are stored encrypted, so without the encryption key no trigger can
-    be served; refuse once here rather than failing per trigger.
-    """
-    if not credential_encryption.is_configured():
-        logger.error(
-            "%s is not configured, so stored Slack app tokens cannot be read; "
-            "the Slack Socket Mode bridge will not start.",
-            credential_encryption.ENV_KEY,
+            return True
+        logger.warning(
+            "Agent %s answered %s to a Slack Socket Mode event for trigger %s; "
+            "leaving it unacked for redelivery",
+            trigger.agent_id,
+            response.status_code,
+            trigger.id,
         )
-        return None
-    engine = database_async_read_write_engine()
-    rw_session_maker = database_async_read_write_session_maker(engine)
-    ro_session_maker = database_async_read_only_session_maker(engine)
+        return False
+
+
+def create_slack_socket_mode_bridge(
+    engine: AsyncEngine, http_client: httpx.AsyncClient
+) -> SlackSocketModeBridge:
+    """Build the bridge on one database engine and HTTP client.
+
+    The bridge only reads triggers and agents, so every session uses ``engine``.
+    """
+    session_maker = database_async_read_write_session_maker(engine)
     return SlackSocketModeBridge(
-        agent_api_key_repository=AgentAPIKeyRepository(
-            rw_session_maker, ro_session_maker
-        ),
-        agent_repository=AgentRepository(rw_session_maker, ro_session_maker),
-        http_client=httpx_client(),
+        agent_api_key_repository=AgentAPIKeyRepository(session_maker, session_maker),
+        agent_repository=AgentRepository(session_maker, session_maker),
+        http_client=http_client,
     )

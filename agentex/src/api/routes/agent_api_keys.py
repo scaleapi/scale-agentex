@@ -202,6 +202,15 @@ async def create_webhook_trigger(
                 detail="This deployment cannot store app tokens: credential "
                 "encryption is not configured.",
             )
+        # Slack gives each event to one of an app's connections, so a second
+        # Socket Mode trigger for the same app would take part of the first
+        # one's events.
+        if await agent_api_key_use_case.has_slack_socket_mode_trigger(request.name):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Slack app '{request.name}' is already served over Socket "
+                "Mode by another trigger; delete that trigger first.",
+            )
         app_token_encrypted = credential_encryption.encrypt(request.app_token)
 
     secret = request.secret if request.secret is not None else secrets.token_hex(32)

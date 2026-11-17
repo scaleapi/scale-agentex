@@ -20,21 +20,40 @@ import asyncio
 import signal
 from contextlib import AsyncExitStack
 
+import httpx
 from aiohttp import web
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from src.adapters.http.adapter_httpx import HttpxGateway
-from src.config import dependencies
-from src.config.dependencies import startup_global_dependencies
+from src.config.environment_variables import EnvironmentVariables
 from src.domain.services.slack_socket_mode_bridge import (
     SlackSocketModeBridge,
     create_slack_socket_mode_bridge,
 )
+from src.utils import credential_encryption
+from src.utils.database import async_db_engine_creator
 from src.utils.logging import make_logger
 from src.utils.otel_metrics import shutdown_otel_metrics
 
 logger = make_logger(__name__)
 
 PROBE_PORT = 5004
+
+
+def create_engine(database_url: str) -> AsyncEngine:
+    """The bridge's only database connection: a small pool for trigger and agent reads.
+
+    The bridge does not load the API's global dependencies (Temporal, MongoDB,
+    Redis, Kubernetes config); it needs none of them, and waiting on them would
+    delay the probe server.
+    """
+    return create_async_engine(
+        "postgresql+asyncpg://",
+        async_creator=async_db_engine_creator(database_url),
+        pool_size=2,
+        max_overflow=3,
+        pool_pre_ping=True,
+        pool_recycle=3600,
+    )
 
 
 def build_probe_app(bridge: SlackSocketModeBridge) -> web.Application:
@@ -58,14 +77,22 @@ async def main(probe_port: int = PROBE_PORT) -> None:
             cleanup.push_async_callback(asyncio.to_thread, observability.shutdown)
         else:
             cleanup.callback(shutdown_otel_metrics)
-        cleanup.callback(dependencies.shutdown)
-        cleanup.push_async_callback(dependencies.async_shutdown)
-        cleanup.push_async_callback(HttpxGateway.close_clients)
-        await startup_global_dependencies()
 
-        bridge = create_slack_socket_mode_bridge()
-        if bridge is None:
+        # App tokens are stored encrypted, so without the key no trigger can be
+        # served; refuse once here rather than failing per trigger.
+        if not credential_encryption.is_configured():
+            logger.error(
+                "%s is not configured, so stored Slack app tokens cannot be read; "
+                "the Slack Socket Mode bridge will not start.",
+                credential_encryption.ENV_KEY,
+            )
             raise SystemExit(1)
+
+        engine = create_engine(EnvironmentVariables.refresh().DATABASE_URL)
+        cleanup.push_async_callback(engine.dispose)
+        http_client = httpx.AsyncClient()
+        cleanup.push_async_callback(http_client.aclose)
+        bridge = create_slack_socket_mode_bridge(engine, http_client)
 
         runner = web.AppRunner(build_probe_app(bridge))
         await runner.setup()

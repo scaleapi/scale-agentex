@@ -226,6 +226,12 @@ class AgentAPIKeysUseCase:
             agent_id=agent_id, name=name, api_key_type=api_key_type
         )
 
+    async def has_slack_socket_mode_trigger(self, app_id: str) -> bool:
+        """Whether a live agent already serves this Slack app over Socket Mode."""
+        return bool(
+            await self.agent_api_key_repo.list_slack_socket_mode_triggers(app_id=app_id)
+        )
+
     async def get_external_by_agent_id_and_key(
         self, agent_id: str, api_key: str
     ) -> AgentAPIKeyEntity | None:
