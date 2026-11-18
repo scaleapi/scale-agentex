@@ -17,6 +17,7 @@ from src.api.schemas.authorization_types import (
     AuthorizedOperationType,
 )
 from src.domain.entities.agent_api_keys import AgentAPIKeyType
+from src.domain.services import slack_socket_mode_bridge
 from src.domain.services.authorization_service import DAuthorizationService
 from src.domain.use_cases.agent_api_keys_use_case import DAgentAPIKeysUseCase
 from src.domain.use_cases.agents_use_case import DAgentsUseCase
@@ -100,6 +101,29 @@ async def create_api_key(
         api_key_type=agent_api_key_entity.api_key_type,
         api_key=str(new_api_key),  # Return the inserted API key
     )
+
+
+async def _check_app_token_belongs_to(app_token: str, app_id: str) -> None:
+    try:
+        token_app_id = await slack_socket_mode_bridge.read_slack_app_id(app_token)
+    except slack_socket_mode_bridge.AppTokenRejected as exc:
+        raise HTTPException(
+            status_code=400, detail=f"Slack rejected app_token: {exc}."
+        ) from exc
+    except Exception as exc:
+        logger.warning(
+            "Reading the Slack app id for app_token failed (%s)", type(exc).__name__
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Could not confirm with Slack which app app_token belongs to; "
+            "try again.",
+        ) from exc
+    if token_app_id != app_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"app_token belongs to Slack app '{token_app_id}', not '{app_id}'.",
+        )
 
 
 def _slack_app_already_served(app_id: str) -> HTTPException:
@@ -210,6 +234,9 @@ async def create_webhook_trigger(
                 detail="This deployment cannot store app tokens: credential "
                 "encryption is not configured.",
             )
+        # The app id is the trigger's name and is unique across agents, so an
+        # unchecked one would let any caller reserve someone else's app.
+        await _check_app_token_belongs_to(request.app_token, request.name)
         # Slack gives each event to one of an app's connections, so a second
         # Socket Mode trigger for the same app would take part of the first
         # one's events. The table's unique constraint enforces this; checking first

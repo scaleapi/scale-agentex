@@ -43,6 +43,8 @@ async def _serve(app: web.Application) -> tuple[web.AppRunner, str]:
 @dataclass
 class FakeSlack:
     base_url: str = ""
+    # The app Slack names in hello, i.e. the app the token belongs to.
+    app_id: str = SLACK_APP_ID
     connections_opened: int = 0
     # Each URL is good for one connection attempt; set to fail the first one, as a
     # network blip would.
@@ -77,13 +79,27 @@ class FakeSlack:
         ws = web.WebSocketResponse(autoping=True)
         await ws.prepare(request)
         self.sockets.append(ws)
-        await ws.send_json({"type": "hello", "num_connections": len(self.sockets)})
+        await ws.send_json(
+            {
+                "type": "hello",
+                "num_connections": len(self.sockets),
+                "connection_info": {"app_id": self.app_id},
+            }
+        )
         self.connected.set()
         async for message in ws:
             if message.type == WSMsgType.TEXT:
                 await self.acks.put(json.loads(message.data)["envelope_id"])
         self.closed.set()
         return ws
+
+    def forget_connections(self) -> None:
+        """Clear what registration's own app-id check left behind."""
+        self.connections_opened = 0
+        self.tried_urls.clear()
+        self.sockets.clear()
+        self.connected.clear()
+        self.closed.clear()
 
     async def deliver(self, envelope_id: str, retry_attempt: int = 0) -> dict:
         payload = {"type": "event_callback", "api_app_id": SLACK_APP_ID}
@@ -136,12 +152,41 @@ async def fakes(monkeypatch) -> AsyncIterator[tuple[FakeSlack, FakeAgent]]:
             )
 
     monkeypatch.setattr(mod, "_TriggerSocketModeClient", ClientAgainstFakeSlack)
+    # Registration's app-id check builds its own client.
+    monkeypatch.setattr(
+        mod,
+        "AsyncWebClient",
+        lambda **kwargs: AsyncWebClient(base_url=f"{slack.base_url}/api/", **kwargs),
+    )
     credential_encryption.reset_cache()
     monkeypatch.setenv(credential_encryption.ENV_KEY, Fernet.generate_key().decode())
     yield slack, agent
     credential_encryption.reset_cache()
     await slack_runner.cleanup()
     await agent_runner.cleanup()
+
+
+async def _register(isolated_client, isolated_repositories, agent_url: str):
+    await isolated_repositories["agent_repository"].create(
+        AgentEntity(
+            id=orm_id(),
+            name="socket-agent",
+            description="Socket Mode end-to-end agent",
+            acp_url=agent_url,
+            acp_type=ACPType.SYNC,
+        )
+    )
+    return await isolated_client.post(
+        "/agent_api_keys/webhook-trigger",
+        json={
+            "agent_name": "socket-agent",
+            "source": "slack",
+            "name": SLACK_APP_ID,
+            "secret": SIGNING_SECRET,
+            "forward_path": "slack/events",
+            "app_token": "xapp-1-A123-fake",
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -151,29 +196,11 @@ class TestSlackSocketModeBridgeEndToEnd:
     async def bridge(
         self, isolated_client, isolated_repositories, fakes
     ) -> AsyncIterator[SlackSocketModeBridge]:
-        _, agent = fakes
-        await isolated_repositories["agent_repository"].create(
-            AgentEntity(
-                id=orm_id(),
-                name="socket-agent",
-                description="Socket Mode end-to-end agent",
-                acp_url=agent.url,
-                acp_type=ACPType.SYNC,
-            )
-        )
-        response = await isolated_client.post(
-            "/agent_api_keys/webhook-trigger",
-            json={
-                "agent_name": "socket-agent",
-                "source": "slack",
-                "name": SLACK_APP_ID,
-                "secret": SIGNING_SECRET,
-                "forward_path": "slack/events",
-                "app_token": "xapp-1-A123-fake",
-            },
-        )
+        slack, agent = fakes
+        response = await _register(isolated_client, isolated_repositories, agent.url)
         assert response.status_code == 200, response.text
         self.key_id = response.json()["key_id"]
+        slack.forget_connections()
 
         async with httpx.AsyncClient() as http_client:
             bridge = SlackSocketModeBridge(
@@ -259,3 +286,28 @@ class TestSlackSocketModeBridgeEndToEnd:
 
         await asyncio.wait_for(slack.connected.wait(), WAIT_SECONDS)
         assert slack.connections_opened == 2
+
+    async def test_registration_refuses_a_token_for_another_app(
+        self, isolated_client, isolated_repositories, fakes
+    ):
+        slack, agent = fakes
+        slack.app_id = "B999"
+
+        response = await _register(isolated_client, isolated_repositories, agent.url)
+
+        assert response.status_code == 400, response.text
+        assert "B999" in response.text
+        key_repo = isolated_repositories["agent_api_key_repository"]
+        assert await key_repo.list_slack_socket_mode_apps() == []
+
+    async def test_bridge_drops_a_token_that_names_another_app(self, bridge, fakes):
+        slack, agent = fakes
+        slack.app_id = "B999"
+
+        await bridge.refresh()
+        await asyncio.wait_for(slack.closed.wait(), WAIT_SECONDS)
+        await bridge.refresh()
+
+        assert bridge._connections == {}
+        assert slack.connections_opened == 1
+        assert agent.requests.empty()

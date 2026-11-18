@@ -180,7 +180,7 @@ curl -X POST $HOST/agent_api_keys \
 #### Slack over Socket Mode
 
 If Slack cannot reach agentex over HTTP (for example, when agentex runs in a private network), agentex can receive the app's events over [Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode) instead.
-Enable Socket Mode on the app and create an app-level token as that guide describes, then register the trigger with that token:
+Enable Socket Mode on the app and create an app-level token as that guide describes, then register the trigger with that token. Registration connects to Slack once to check that the token belongs to the app named in `name`, and returns 400 if it does not:
 
 ```bash
 curl -X POST $HOST/agent_api_keys/webhook-trigger \

@@ -26,11 +26,13 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 
+import aiohttp
 import httpx
 from slack_sdk.errors import SlackApiError
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
+from slack_sdk.web.async_client import AsyncWebClient
 
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
 from src.domain.entities.agent_api_keys import (
@@ -49,6 +51,7 @@ logger = make_logger(__name__)
 # Slack expects an ack within 3s; leave headroom for the ack frame itself.
 ACK_DEADLINE_SECONDS = 2.5
 REFRESH_INTERVAL_SECONDS = 60.0
+HELLO_TIMEOUT_SECONDS = 10.0
 
 # apps.connections.open errors that no retry can fix.
 REJECTED_TOKEN_ERRORS = frozenset(
@@ -64,7 +67,44 @@ REJECTED_TOKEN_ERRORS = frozenset(
 
 
 class AppTokenRejected(Exception):
-    """Slack refused the app token; the connection for it has been stopped."""
+    """Slack refused the app token."""
+
+
+class AppIdUnavailable(Exception):
+    """Slack's hello message did not name the app."""
+
+
+def _hello_app_id(message: dict) -> str | None:
+    return (message.get("connection_info") or {}).get("app_id")
+
+
+async def read_slack_app_id(app_token: str) -> str:
+    """The id of the Slack app an app-level token belongs to.
+
+    Slack names the app in the hello message that starts every Socket Mode
+    connection, so this opens one and closes it after that message. An event Slack
+    hands this connection in the meantime goes unacked, so Slack redelivers it.
+
+    Raises:
+        AppTokenRejected: Slack refused the token.
+        AppIdUnavailable: The hello message did not name the app.
+        SlackApiError, aiohttp.ClientError, TimeoutError: Slack could not be
+            reached or answered unexpectedly; a retry may succeed.
+    """
+    try:
+        response = await AsyncWebClient().apps_connections_open(app_token=app_token)
+    except SlackApiError as exc:
+        error = exc.response.get("error")
+        if error in REJECTED_TOKEN_ERRORS:
+            raise AppTokenRejected(error) from exc
+        raise
+    async with aiohttp.ClientSession() as session:
+        async with session.ws_connect(response["url"]) as ws:
+            hello = await ws.receive_json(timeout=HELLO_TIMEOUT_SECONDS)
+    app_id = _hello_app_id(hello)
+    if not app_id:
+        raise AppIdUnavailable(f"Slack sent {hello.get('type')!r} without an app id")
+    return app_id
 
 
 class _TriggerSocketModeClient(SocketModeClient):
@@ -222,6 +262,7 @@ class SlackSocketModeBridge:
             return
 
         client = _TriggerSocketModeClient(trigger=trigger, app_token=app_token)
+        client.message_listeners.append(partial(self._check_hello, trigger, app))
         client.socket_mode_request_listeners.append(
             partial(self._on_request, trigger, app)
         )
@@ -258,6 +299,34 @@ class SlackSocketModeBridge:
                 type(exc).__name__,
             )
         await client.connect()
+
+    async def _check_hello(
+        self,
+        trigger: AgentAPIKeyEntity,
+        app: SlackSocketModeAppEntity,
+        client: _TriggerSocketModeClient,
+        message: dict,
+        raw_message: str | None,
+    ) -> None:
+        """Close a connection whose token turns out to belong to a different app.
+
+        Registration checks this too; checking on every connect keeps a socket
+        from serving another app's events to this trigger's agent.
+        """
+        if message.get("type") != "hello":
+            return
+        app_id = _hello_app_id(message)
+        if app_id == app.slack_app_id:
+            return
+        logger.error(
+            "The app token for Slack Socket Mode trigger %s belongs to app %s, not "
+            "%s; closing the connection until the trigger is re-registered.",
+            trigger.id,
+            app_id,
+            app.slack_app_id,
+        )
+        client.rejected = True
+        await client.close()
 
     async def _close(self, trigger_id: str) -> None:
         connection = self._connections.pop(trigger_id)
