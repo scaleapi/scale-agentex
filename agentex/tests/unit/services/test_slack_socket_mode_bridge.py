@@ -239,6 +239,34 @@ class TestOneAppCannotStallTheOthers:
 
 
 @pytest.mark.unit
+class TestRateLimitWaitIsNotCutShort:
+    async def test_refresh_leaves_a_url_fetch_that_is_still_waiting(self, monkeypatch):
+        monkeypatch.setattr(mod.credential_encryption, "decrypt", lambda _: "xapp-1")
+        fetches = 0
+
+        async def connections_open(self, **kwargs):
+            nonlocal fetches
+            fetches += 1
+            # Stands in for waiting out a Retry-After longer than a refresh interval.
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(AsyncWebClient, "apps_connections_open", connections_open)
+        monkeypatch.setattr(mod._TriggerSocketModeClient, "connect", AsyncMock())
+        bridge, _ = _bridge(lambda request: httpx.Response(200))
+        await bridge.refresh()
+        while not fetches:
+            await asyncio.sleep(0)
+        waiting = bridge._connections[TRIGGER.id]
+
+        monkeypatch.setattr(mod, "REFRESH_INTERVAL_SECONDS", 0)
+        await bridge.refresh()
+
+        assert bridge._connections[TRIGGER.id] is waiting
+        assert fetches == 1
+        await bridge.stop()
+
+
+@pytest.mark.unit
 class TestRejectedToken:
     async def test_rejected_token_stops_without_retrying(self, monkeypatch):
         monkeypatch.setattr(mod.credential_encryption, "decrypt", lambda _: "xapp-1")

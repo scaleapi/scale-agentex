@@ -19,6 +19,7 @@ from aiohttp import WSMsgType, web
 from cryptography.fernet import Fernet
 from multidict import CIMultiDict
 from slack_sdk.web.async_client import AsyncWebClient
+from src.domain.entities.agent_api_keys import AgentAPIKeyType
 from src.domain.entities.agents import ACPType, AgentEntity
 from src.domain.services import slack_socket_mode_bridge as mod
 from src.domain.services.slack_socket_mode_bridge import SlackSocketModeBridge
@@ -180,7 +181,7 @@ async def _register(isolated_client, isolated_repositories, agent_url: str):
         "/agent_api_keys/webhook-trigger",
         json={
             "agent_name": "socket-agent",
-            "source": "slack",
+            "source": AgentAPIKeyType.SLACK.value,
             "name": SLACK_APP_ID,
             "secret": SIGNING_SECRET,
             "forward_path": "slack/events",

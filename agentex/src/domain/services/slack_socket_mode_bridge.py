@@ -112,6 +112,9 @@ class _TriggerSocketModeClient(SocketModeClient):
         super().__init__(**kwargs)
         self.trigger = trigger
         self.rejected = False
+        # When the last WebSocket URL arrived. None while the first fetch is still
+        # under way, which may mean waiting out Slack's Retry-After.
+        self.url_fetched_at: float | None = None
 
     async def issue_new_wss_url(self) -> str:
         # slack_sdk also calls this on every reconnect, and on a revoked token its
@@ -119,7 +122,7 @@ class _TriggerSocketModeClient(SocketModeClient):
         # forever. The base method still handles rate limiting (it waits out
         # Retry-After); only the errors no retry can fix stop the connection.
         try:
-            return await super().issue_new_wss_url()
+            url = await super().issue_new_wss_url()
         except SlackApiError as exc:
             error = exc.response.get("error")
             if error in REJECTED_TOKEN_ERRORS:
@@ -138,6 +141,8 @@ class _TriggerSocketModeClient(SocketModeClient):
                 )
                 raise AppTokenRejected(error) from exc
             raise
+        self.url_fetched_at = time.monotonic()
+        return url
 
 
 def _slack_signature_headers(
@@ -227,15 +232,18 @@ class SlackSocketModeBridge:
                 await self._close(trigger_id)
             elif await connection.client.is_connected():
                 connection.last_connected = time.monotonic()
-            elif (
-                time.monotonic() - connection.last_connected >= REFRESH_INTERVAL_SECONDS
+            elif connection.client.url_fetched_at is not None and (
+                time.monotonic()
+                - max(connection.last_connected, connection.client.url_fetched_at)
+                >= REFRESH_INTERVAL_SECONDS
             ):
                 # slack_sdk's connect() retries a failed first connection with the
                 # same WebSocket URL forever, and Slack issues those URLs as
-                # temporary. Reopening fetches a new one.
+                # temporary. Reopening fetches a new one. The clock starts when a
+                # URL arrives, so waiting out Retry-After never counts against it.
                 logger.warning(
-                    "Slack Socket Mode for trigger %s has not connected for %ss; "
-                    "reopening it",
+                    "Slack Socket Mode for trigger %s has not connected within %ss "
+                    "of getting its URL; reopening it",
                     trigger_id,
                     REFRESH_INTERVAL_SECONDS,
                 )
