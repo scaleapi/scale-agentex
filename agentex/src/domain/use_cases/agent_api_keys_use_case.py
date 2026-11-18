@@ -134,19 +134,26 @@ class AgentAPIKeysUseCase:
             api_key_type=api_key_type,
             api_key=api_key,
         )
-        if slack_socket_mode_app_token_encrypted is None:
-            return await self.agent_api_key_repo.create(item=agent_api_key)
-        return await self.agent_api_key_repo.create_with_slack_socket_mode_app(
-            item=agent_api_key,
-            app=SlackSocketModeAppEntity(
-                id=orm_id(),
-                agent_api_key_id=api_key_id,
-                agent_id=agent.id,
-                slack_app_id=name,
-                app_token_encrypted=slack_socket_mode_app_token_encrypted,
-                forward_path=slack_socket_mode_forward_path,
-            ),
-        )
+        try:
+            if slack_socket_mode_app_token_encrypted is None:
+                return await self.agent_api_key_repo.create(item=agent_api_key)
+            return await self.agent_api_key_repo.create_with_slack_socket_mode_app(
+                item=agent_api_key,
+                app=SlackSocketModeAppEntity(
+                    id=orm_id(),
+                    agent_api_key_id=api_key_id,
+                    agent_id=agent.id,
+                    slack_app_id=name,
+                    app_token_encrypted=slack_socket_mode_app_token_encrypted,
+                    forward_path=slack_socket_mode_forward_path,
+                ),
+            )
+        except Exception:
+            # The key was registered for authorization before the insert, and a
+            # failed insert leaves no row or id anyone could delete it by. A
+            # concurrent registration for the same Slack app ends here.
+            await self._deregister_api_key_from_auth(api_key_id=api_key_id)
+            raise
 
     async def _register_api_key_in_auth(
         self,
