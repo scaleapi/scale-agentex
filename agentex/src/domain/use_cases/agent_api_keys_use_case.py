@@ -244,13 +244,45 @@ class AgentAPIKeysUseCase:
             agent_id=agent_id, name=name, api_key_type=api_key_type
         )
 
-    async def has_slack_socket_mode_trigger(self, app_id: str) -> bool:
-        """Whether a live agent already serves this Slack app over Socket Mode."""
-        return bool(
-            await self.agent_api_key_repo.list_slack_socket_mode_apps(
-                slack_app_id=app_id
+    async def has_slack_socket_mode_trigger(
+        self, app_id: str, except_key_id: str | None = None
+    ) -> bool:
+        """Whether a live agent already serves this Slack app over Socket Mode.
+
+        Args:
+            app_id: The Slack app id.
+            except_key_id: A trigger to ignore, such as the one being updated.
+        """
+        served = await self.agent_api_key_repo.list_slack_socket_mode_apps(
+            slack_app_id=app_id
+        )
+        return any(trigger.id != except_key_id for trigger, _ in served)
+
+    async def set_slack_socket_mode(
+        self,
+        trigger: AgentAPIKeyEntity,
+        app_token_encrypted: str,
+        forward_path: str,
+    ) -> SlackSocketModeAppEntity:
+        """Serve a Slack trigger over Socket Mode, or replace its token and path.
+
+        Raises:
+            DuplicateItemError: Another live trigger serves the same Slack app.
+        """
+        return await self.agent_api_key_repo.upsert_slack_socket_mode_app(
+            SlackSocketModeAppEntity(
+                id=orm_id(),
+                agent_api_key_id=trigger.id,
+                agent_id=trigger.agent_id,
+                slack_app_id=trigger.name,
+                app_token_encrypted=app_token_encrypted,
+                forward_path=forward_path,
             )
         )
+
+    async def delete_slack_socket_mode(self, key_id: str) -> bool:
+        """Stop serving a trigger over Socket Mode; False if it was not."""
+        return await self.agent_api_key_repo.delete_slack_socket_mode_app(key_id)
 
     async def get_external_by_agent_id_and_key(
         self, agent_id: str, api_key: str

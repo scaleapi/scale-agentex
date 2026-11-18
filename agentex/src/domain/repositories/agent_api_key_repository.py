@@ -3,6 +3,8 @@ from typing import Annotated
 
 from fastapi import Depends
 from sqlalchemy import delete, insert, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from src.adapters.crud_store.adapter_postgres import (
     PostgresCRUDRepository,
     async_sql_exception_handler,
@@ -22,6 +24,23 @@ from src.domain.entities.agents import AgentStatus
 from src.utils.logging import make_logger
 
 logger = make_logger(__name__)
+
+
+async def _drop_deleted_agents_slack_app(
+    session: AsyncSession, slack_app_id: str
+) -> None:
+    """Remove a Socket Mode row a soft-deleted agent left for this Slack app.
+
+    Deleting an agent keeps its keys, and the app must stay registrable on another
+    agent despite the unique constraint on the app id.
+    """
+    deleted_agents = select(AgentORM.id).where(AgentORM.status == AgentStatus.DELETED)
+    await session.execute(
+        delete(SlackSocketModeAppORM).where(
+            SlackSocketModeAppORM.slack_app_id == slack_app_id,
+            SlackSocketModeAppORM.agent_id.in_(deleted_agents),
+        )
+    )
 
 
 class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEntity]):
@@ -182,9 +201,6 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
     ) -> AgentAPIKeyEntity:
         """Create a Slack trigger and its Socket Mode app row in one transaction.
 
-        A row left behind by a soft-deleted agent is removed first: deleting an agent
-        keeps its keys, and the app must stay registrable on another agent.
-
         Raises:
             DuplicateItemError: A live agent already serves this Slack app.
         """
@@ -192,15 +208,7 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
             self.start_async_db_session(True) as session,
             async_sql_exception_handler(),
         ):
-            deleted_agents = select(AgentORM.id).where(
-                AgentORM.status == AgentStatus.DELETED
-            )
-            await session.execute(
-                delete(SlackSocketModeAppORM).where(
-                    SlackSocketModeAppORM.slack_app_id == app.slack_app_id,
-                    SlackSocketModeAppORM.agent_id.in_(deleted_agents),
-                )
-            )
+            await _drop_deleted_agents_slack_app(session, app.slack_app_id)
             values = {k: v for k, v in item.to_dict().items() if v is not None}
             row = (
                 await session.execute(
@@ -216,6 +224,49 @@ class AgentAPIKeyRepository(PostgresCRUDRepository[AgentAPIKeyORM, AgentAPIKeyEn
             )
             await session.commit()
             return AgentAPIKeyEntity.model_validate(dict(row._mapping))
+
+    async def upsert_slack_socket_mode_app(
+        self, app: SlackSocketModeAppEntity
+    ) -> SlackSocketModeAppEntity:
+        """Serve an existing trigger over Socket Mode, or replace its token and path.
+
+        Raises:
+            DuplicateItemError: A live agent's other trigger serves this Slack app.
+        """
+        async with (
+            self.start_async_db_session(True) as session,
+            async_sql_exception_handler(),
+        ):
+            await _drop_deleted_agents_slack_app(session, app.slack_app_id)
+            values = {k: v for k, v in app.to_dict().items() if v is not None}
+            row = (
+                await session.execute(
+                    pg_insert(SlackSocketModeAppORM)
+                    .values(**values)
+                    .on_conflict_do_update(
+                        constraint="uq_slack_socket_mode_apps_agent_api_key",
+                        set_={
+                            "app_token_encrypted": app.app_token_encrypted,
+                            "forward_path": app.forward_path,
+                        },
+                    )
+                    .returning(*SlackSocketModeAppORM.__table__.columns)
+                )
+            ).one()
+            await session.commit()
+            return SlackSocketModeAppEntity.model_validate(dict(row._mapping))
+
+    async def delete_slack_socket_mode_app(self, agent_api_key_id: str) -> bool:
+        """Remove a trigger's Socket Mode row; False if it had none."""
+        async with self.start_async_db_session(True) as session:
+            result = await session.execute(
+                delete(SlackSocketModeAppORM)
+                .where(SlackSocketModeAppORM.agent_api_key_id == agent_api_key_id)
+                .returning(SlackSocketModeAppORM.id)
+            )
+            deleted = result.first() is not None
+            await session.commit()
+            return deleted
 
     async def list_slack_socket_mode_apps(
         self, slack_app_id: str | None = None

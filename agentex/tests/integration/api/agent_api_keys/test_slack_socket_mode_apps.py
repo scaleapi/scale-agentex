@@ -1,6 +1,10 @@
-"""The slack_socket_mode_apps table's guarantees, against a real Postgres."""
+"""The slack_socket_mode_apps table and its endpoints, against a real Postgres."""
+
+from unittest.mock import AsyncMock
 
 import pytest
+import pytest_asyncio
+from cryptography.fernet import Fernet
 from src.adapters.crud_store.exceptions import DuplicateItemError
 from src.domain.entities.agent_api_keys import (
     AgentAPIKeyEntity,
@@ -8,6 +12,8 @@ from src.domain.entities.agent_api_keys import (
     SlackSocketModeAppEntity,
 )
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
+from src.domain.services import slack_socket_mode_bridge
+from src.utils import credential_encryption
 from src.utils.ids import orm_id
 
 SLACK_APP_ID = "A123"
@@ -80,3 +86,100 @@ class TestSlackSocketModeApps:
         await key_repo.delete(trigger.id)
 
         assert await key_repo.list_slack_socket_mode_apps() == []
+
+
+@pytest_asyncio.fixture
+async def socket_mode_api(isolated_client, monkeypatch):
+    """The HTTP API, with an encryption key and Slack's app-id check answered locally."""
+    credential_encryption.reset_cache()
+    monkeypatch.setenv(credential_encryption.ENV_KEY, Fernet.generate_key().decode())
+    monkeypatch.setattr(
+        slack_socket_mode_bridge,
+        "read_slack_app_id",
+        AsyncMock(return_value=SLACK_APP_ID),
+    )
+    yield isolated_client
+    credential_encryption.reset_cache()
+
+
+async def _http_trigger(repos, agent: AgentEntity, source=AgentAPIKeyType.SLACK):
+    return await repos["agent_api_key_repository"].create(
+        AgentAPIKeyEntity(
+            id=orm_id(),
+            name=SLACK_APP_ID,
+            agent_id=agent.id,
+            api_key_type=source,
+            api_key="signing-secret",
+        )
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+class TestSlackSocketModeEndpoints:
+    async def test_put_turns_socket_mode_on_then_replaces_it(
+        self, socket_mode_api, isolated_repositories
+    ):
+        repos = isolated_repositories
+        trigger = await _http_trigger(repos, await _agent(repos, "socket-agent"))
+        url = f"/agent_api_keys/{trigger.id}/slack_socket_mode"
+
+        first = await socket_mode_api.put(
+            url, json={"app_token": "xapp-1", "forward_path": "slack/events"}
+        )
+        # The trigger already serving the app must not conflict with itself.
+        second = await socket_mode_api.put(
+            url, json={"app_token": "xapp-2", "forward_path": "/slack/v2"}
+        )
+
+        assert first.status_code == 200, first.text
+        assert second.status_code == 200, second.text
+        served = await repos["agent_api_key_repository"].list_slack_socket_mode_apps()
+        assert [(t.id, app.forward_path) for t, app in served] == [
+            (trigger.id, "slack/v2")
+        ]
+
+    async def test_put_conflicts_with_another_trigger_for_the_app(
+        self, socket_mode_api, isolated_repositories
+    ):
+        repos = isolated_repositories
+        await _register(repos, await _agent(repos, "first-agent"))
+        other = await _http_trigger(repos, await _agent(repos, "second-agent"))
+
+        response = await socket_mode_api.put(
+            f"/agent_api_keys/{other.id}/slack_socket_mode",
+            json={"app_token": "xapp-1", "forward_path": "slack/events"},
+        )
+
+        assert response.status_code == 409, response.text
+
+    async def test_put_refuses_a_trigger_that_is_not_slack(
+        self, socket_mode_api, isolated_repositories
+    ):
+        repos = isolated_repositories
+        trigger = await _http_trigger(
+            repos, await _agent(repos, "github-agent"), AgentAPIKeyType.GITHUB
+        )
+
+        response = await socket_mode_api.put(
+            f"/agent_api_keys/{trigger.id}/slack_socket_mode",
+            json={"app_token": "xapp-1", "forward_path": "slack/events"},
+        )
+
+        assert response.status_code == 400, response.text
+
+    async def test_delete_turns_socket_mode_off_and_keeps_the_trigger(
+        self, socket_mode_api, isolated_repositories
+    ):
+        repos = isolated_repositories
+        trigger = await _register(repos, await _agent(repos, "socket-agent"))
+        url = f"/agent_api_keys/{trigger.id}/slack_socket_mode"
+
+        assert (await socket_mode_api.delete(url)).status_code == 200
+        assert (await socket_mode_api.delete(url)).status_code == 404
+
+        key_repo = repos["agent_api_key_repository"]
+        assert await key_repo.list_slack_socket_mode_apps() == []
+        assert (
+            await socket_mode_api.get(f"/agent_api_keys/{trigger.id}")
+        ).status_code == 200

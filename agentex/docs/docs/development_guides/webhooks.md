@@ -202,6 +202,8 @@ An event is acknowledged only after the agent answers 2xx within 2.5 seconds, or
 Delivery is at least once: an event whose acknowledgement is lost, for example when a bridge replica stops mid-forward, reaches the agent again.
 Interactivity and slash-command payloads are not forwarded.
 
+To switch an existing Slack trigger to Socket Mode, or change its token or forward path, `PUT /agent_api_keys/<key_id>/slack_socket_mode` with `app_token` and `forward_path`; it runs the same token check as registration. `DELETE /agent_api_keys/<key_id>/slack_socket_mode` turns Socket Mode off and keeps the trigger. The bridge applies either change within a minute.
+
 Operator notes:
 
 - The bridge is its own process, not part of the API: run `python -m src.run_slack_socket_mode_bridge` (from `agentex/`, the same image as the API, like the Temporal worker's `python -m src.temporal.run_worker`) as a separate Deployment with 2 replicas, one process each. It needs only `DATABASE_URL` and `AGENTEX_CREDENTIAL_ENCRYPTION_KEY`, which encrypts the stored app token; without that key it logs one error and exits. It does not connect to Temporal, MongoDB or Redis.

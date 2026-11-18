@@ -160,6 +160,7 @@ services:
       - ENVIRONMENT=development
       - UVICORN_PORT=5003
       - DATABASE_URL=postgresql://postgres:postgres@agentex-postgres:5432/agentex
+      - AGENTEX_CREDENTIAL_ENCRYPTION_KEY=${AGENTEX_CREDENTIAL_ENCRYPTION_KEY:-}
       - TEMPORAL_ADDRESS=agentex-temporal:7233
       - REDIS_URL=redis://agentex-redis:6379
       - MONGODB_URI=mongodb://agentex-mongodb:27017
@@ -273,6 +274,34 @@ services:
         export MONGODB_URI=mongodb://agentex-mongodb:27017 &&
         python src/temporal/run_worker.py
       "
+    user: root
+    restart: unless-stopped
+
+  agentex-slack-socket-bridge:
+    container_name: agentex-slack-socket-bridge
+    profiles: ["slack"]
+    build:
+      context: ..
+      dockerfile: agentex/Dockerfile
+      target: dev
+      args:
+        SOURCE_DIR: agentex
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql://postgres:postgres@agentex-postgres:5432/agentex
+      - AGENTEX_CREDENTIAL_ENCRYPTION_KEY=${AGENTEX_CREDENTIAL_ENCRYPTION_KEY:-}
+    ports:
+      - "5004:5004"
+    volumes:
+      - .:/app:cached
+    depends_on:
+      agentex-postgres:
+        condition: service_healthy
+      agentex:
+        condition: service_started
+    networks:
+      - agentex-network
+    command: python -m src.run_slack_socket_mode_bridge
     user: root
     restart: unless-stopped
 

@@ -11,12 +11,14 @@ from src.api.schemas.agent_api_keys import (
     CreateAPIKeyResponse,
     CreateWebhookTriggerRequest,
     CreateWebhookTriggerResponse,
+    SetSlackSocketModeRequest,
+    SlackSocketMode,
 )
 from src.api.schemas.authorization_types import (
     AgentexResourceType,
     AuthorizedOperationType,
 )
-from src.domain.entities.agent_api_keys import AgentAPIKeyType
+from src.domain.entities.agent_api_keys import AgentAPIKeyEntity, AgentAPIKeyType
 from src.domain.services import slack_socket_mode_bridge
 from src.domain.services.authorization_service import DAuthorizationService
 from src.domain.use_cases.agent_api_keys_use_case import DAgentAPIKeysUseCase
@@ -134,6 +136,52 @@ def _slack_app_already_served(app_id: str) -> HTTPException:
     )
 
 
+def _clean_forward_path(forward_path: str) -> str:
+    cleaned = forward_path.lstrip("/")
+    if _has_control_chars(cleaned):
+        raise HTTPException(
+            status_code=400,
+            detail="forward_path must not contain control characters.",
+        )
+    return cleaned
+
+
+async def _encrypt_checked_app_token(
+    app_token: str,
+    app_id: str,
+    agent_api_key_use_case: DAgentAPIKeysUseCase,
+    *,
+    except_key_id: str | None = None,
+) -> str:
+    """Check an app token for the Slack app ``app_id`` and return it encrypted.
+
+    ``except_key_id`` is the trigger being updated, which may already serve the app.
+    """
+    if not app_token.startswith("xapp-"):
+        raise HTTPException(
+            status_code=400,
+            detail="app_token must be a Slack app-level token (xapp-...).",
+        )
+    if not credential_encryption.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="This deployment cannot store app tokens: credential "
+            "encryption is not configured.",
+        )
+    # The app id is the trigger's name and is unique across agents, so an
+    # unchecked one would let any caller reserve someone else's app.
+    await _check_app_token_belongs_to(app_token, app_id)
+    # Slack gives each event to one of an app's connections, so a second Socket
+    # Mode trigger for the same app would take part of the first one's events. The
+    # table's unique constraint enforces this; checking first keeps create()'s auth
+    # registration from running for a request that is bound to fail.
+    if await agent_api_key_use_case.has_slack_socket_mode_trigger(
+        app_id, except_key_id=except_key_id
+    ):
+        raise _slack_app_already_served(app_id)
+    return credential_encryption.encrypt(app_token)
+
+
 @router.post(
     "/webhook-trigger",
     response_model=CreateWebhookTriggerResponse,
@@ -209,12 +257,7 @@ async def create_webhook_trigger(
             ),
         )
 
-    forward_path = request.forward_path.lstrip("/")
-    if _has_control_chars(forward_path):
-        raise HTTPException(
-            status_code=400,
-            detail="forward_path must not contain control characters.",
-        )
+    forward_path = _clean_forward_path(request.forward_path)
 
     app_token_encrypted = None
     if request.app_token is not None:
@@ -223,28 +266,9 @@ async def create_webhook_trigger(
                 status_code=400,
                 detail="app_token is only supported for Slack triggers.",
             )
-        if not request.app_token.startswith("xapp-"):
-            raise HTTPException(
-                status_code=400,
-                detail="app_token must be a Slack app-level token (xapp-...).",
-            )
-        if not credential_encryption.is_configured():
-            raise HTTPException(
-                status_code=503,
-                detail="This deployment cannot store app tokens: credential "
-                "encryption is not configured.",
-            )
-        # The app id is the trigger's name and is unique across agents, so an
-        # unchecked one would let any caller reserve someone else's app.
-        await _check_app_token_belongs_to(request.app_token, request.name)
-        # Slack gives each event to one of an app's connections, so a second
-        # Socket Mode trigger for the same app would take part of the first
-        # one's events. The table's unique constraint enforces this; checking first
-        # keeps the auth registration in create() from running for a request that
-        # is bound to fail.
-        if await agent_api_key_use_case.has_slack_socket_mode_trigger(request.name):
-            raise _slack_app_already_served(request.name)
-        app_token_encrypted = credential_encryption.encrypt(request.app_token)
+        app_token_encrypted = await _encrypt_checked_app_token(
+            request.app_token, request.name, agent_api_key_use_case
+        )
 
     secret = request.secret if request.secret is not None else secrets.token_hex(32)
     try:
@@ -280,6 +304,86 @@ async def create_webhook_trigger(
         webhook_path=webhook_path,
         webhook_url=webhook_url,
     )
+
+
+async def _slack_trigger_for_update(
+    key_id: str,
+    agent_api_key_use_case: DAgentAPIKeysUseCase,
+    authorization_service: DAuthorizationService,
+) -> AgentAPIKeyEntity:
+    trigger = await agent_api_key_use_case.get(id=key_id)
+    await _check_api_key_or_collapse_to_404(
+        authorization_service, trigger.id, AuthorizedOperationType.read
+    )
+    # The same permission registering the trigger needed.
+    await _check_agent_or_collapse_to_404(
+        authorization_service, trigger.agent_id, AuthorizedOperationType.update
+    )
+    if not await agent_api_key_use_case.get_agent(agent_id=trigger.agent_id):
+        raise ItemDoesNotExist(API_KEY_NOT_FOUND_MESSAGE)
+    if trigger.api_key_type != AgentAPIKeyType.SLACK:
+        raise HTTPException(
+            status_code=400, detail="Socket Mode applies only to Slack triggers."
+        )
+    return trigger
+
+
+@router.put(
+    "/{id}/slack_socket_mode",
+    response_model=SlackSocketMode,
+    summary="Serve a Slack trigger over Socket Mode",
+    description="Turn Socket Mode on for an existing Slack trigger, or replace its "
+    "app token and forward path. The bridge picks the change up within a minute.",
+)
+async def set_slack_socket_mode(
+    id: str,
+    request: SetSlackSocketModeRequest,
+    agent_api_key_use_case: DAgentAPIKeysUseCase,
+    authorization_service: DAuthorizationService,
+) -> SlackSocketMode:
+    trigger = await _slack_trigger_for_update(
+        id, agent_api_key_use_case, authorization_service
+    )
+    forward_path = _clean_forward_path(request.forward_path)
+    app_token_encrypted = await _encrypt_checked_app_token(
+        request.app_token,
+        trigger.name,
+        agent_api_key_use_case,
+        except_key_id=trigger.id,
+    )
+    try:
+        app = await agent_api_key_use_case.set_slack_socket_mode(
+            trigger=trigger,
+            app_token_encrypted=app_token_encrypted,
+            forward_path=forward_path,
+        )
+    except DuplicateItemError:
+        raise _slack_app_already_served(trigger.name) from None
+    return SlackSocketMode(
+        key_id=trigger.id, slack_app_id=app.slack_app_id, forward_path=app.forward_path
+    )
+
+
+@router.delete(
+    "/{id}/slack_socket_mode",
+    response_model=str,
+    summary="Stop serving a Slack trigger over Socket Mode",
+    description="Remove the trigger's app token. The trigger itself stays, and the "
+    "bridge closes its connection within a minute.",
+)
+async def delete_slack_socket_mode(
+    id: str,
+    agent_api_key_use_case: DAgentAPIKeysUseCase,
+    authorization_service: DAuthorizationService,
+) -> str:
+    trigger = await _slack_trigger_for_update(
+        id, agent_api_key_use_case, authorization_service
+    )
+    if not await agent_api_key_use_case.delete_slack_socket_mode(trigger.id):
+        raise HTTPException(
+            status_code=404, detail="This trigger is not served over Socket Mode."
+        )
+    return f"Socket Mode turned off for agent API key {trigger.id}"
 
 
 @router.get(

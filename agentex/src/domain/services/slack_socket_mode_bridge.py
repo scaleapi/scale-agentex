@@ -163,7 +163,8 @@ def _slack_signature_headers(
 
 @dataclass
 class _Connection:
-    app_token_encrypted: str
+    # The row the connection was opened from; its listeners hold this copy.
+    app: SlackSocketModeAppEntity
     client: _TriggerSocketModeClient
     # Held so the task isn't garbage-collected while connect() is still retrying.
     connect_task: asyncio.Task
@@ -222,13 +223,15 @@ class SlackSocketModeBridge:
         self.ready = True
         for trigger_id, connection in list(self._connections.items()):
             current = served.get(trigger_id)
+            # A changed row (new token or forward path) reopens the connection, so
+            # its listeners pick the change up.
             if (
                 current is None
-                or current[1].app_token_encrypted != connection.app_token_encrypted
+                or current[1] != connection.app
                 or connection.client.closed
             ):
                 if connection.client.rejected:
-                    self._rejected.add((trigger_id, connection.app_token_encrypted))
+                    self._rejected.add((trigger_id, connection.app.app_token_encrypted))
                 await self._close(trigger_id)
             elif await connection.client.is_connected():
                 connection.last_connected = time.monotonic()
@@ -275,7 +278,7 @@ class SlackSocketModeBridge:
             partial(self._on_request, trigger, app)
         )
         self._connections[trigger.id] = _Connection(
-            app_token_encrypted=app.app_token_encrypted,
+            app=app,
             client=client,
             connect_task=asyncio.create_task(self._connect(trigger, client)),
         )

@@ -312,3 +312,25 @@ class TestSlackSocketModeBridgeEndToEnd:
         assert bridge._connections == {}
         assert slack.connections_opened == 1
         assert agent.requests.empty()
+
+    async def test_a_new_forward_path_takes_effect_after_refresh(
+        self, bridge, fakes, isolated_client
+    ):
+        slack, agent = fakes
+        await bridge.refresh()
+        await asyncio.wait_for(slack.connected.wait(), WAIT_SECONDS)
+
+        response = await isolated_client.put(
+            f"/agent_api_keys/{self.key_id}/slack_socket_mode",
+            json={"app_token": "xapp-1-A123-fake", "forward_path": "slack/v2"},
+        )
+        assert response.status_code == 200, response.text
+        slack.forget_connections()
+        await bridge.refresh()
+        await asyncio.wait_for(slack.connected.wait(), WAIT_SECONDS)
+
+        await slack.deliver("env-1")
+        path, _, _ = await asyncio.wait_for(agent.requests.get(), WAIT_SECONDS)
+
+        assert path == "/slack/v2"
+        assert await asyncio.wait_for(slack.acks.get(), WAIT_SECONDS) == "env-1"
