@@ -311,10 +311,15 @@ async def _slack_trigger_for_update(
     agent_api_key_use_case: DAgentAPIKeysUseCase,
     authorization_service: DAuthorizationService,
 ) -> AgentAPIKeyEntity:
-    trigger = await agent_api_key_use_case.get(id=key_id)
+    # Check before loading: a missing key and one the caller cannot read must both
+    # return the same 404, or the response reveals whether another account's key exists.
     await _check_api_key_or_collapse_to_404(
-        authorization_service, trigger.id, AuthorizedOperationType.read
+        authorization_service, key_id, AuthorizedOperationType.read
     )
+    try:
+        trigger = await agent_api_key_use_case.get(id=key_id)
+    except ItemDoesNotExist:
+        raise ItemDoesNotExist(API_KEY_NOT_FOUND_MESSAGE) from None
     # The same permission registering the trigger needed.
     await _check_agent_or_collapse_to_404(
         authorization_service, trigger.agent_id, AuthorizedOperationType.update
