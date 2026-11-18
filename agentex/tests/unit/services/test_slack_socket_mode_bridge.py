@@ -197,6 +197,48 @@ class TestRateLimited:
 
 
 @pytest.mark.unit
+class TestOneAppCannotStallTheOthers:
+    async def test_a_rate_limited_app_does_not_hold_up_refresh(self, monkeypatch):
+        other_trigger = TRIGGER.model_copy(update={"id": "key-2", "name": "B456"})
+        other_app = APP.model_copy(
+            update={
+                "id": "app-2",
+                "agent_api_key_id": "key-2",
+                "slack_app_id": "B456",
+                "app_token_encrypted": "ciphertext-2",
+            }
+        )
+        monkeypatch.setattr(
+            mod.credential_encryption,
+            "decrypt",
+            {"ciphertext": "xapp-waiting", "ciphertext-2": "xapp-ready"}.__getitem__,
+        )
+
+        async def connections_open(self, **kwargs):
+            if kwargs["app_token"] == "xapp-waiting":
+                # Stands in for waiting out a long Retry-After.
+                await asyncio.Event().wait()
+            return {"url": "wss://example.invalid"}
+
+        monkeypatch.setattr(AsyncWebClient, "apps_connections_open", connections_open)
+        connected = asyncio.Event()
+        monkeypatch.setattr(
+            mod._TriggerSocketModeClient,
+            "connect",
+            AsyncMock(side_effect=lambda: connected.set()),
+        )
+        bridge, _ = _bridge(
+            lambda request: httpx.Response(200),
+            [(TRIGGER, APP), (other_trigger, other_app)],
+        )
+
+        await asyncio.wait_for(bridge.refresh(), 1)
+        await asyncio.wait_for(connected.wait(), 1)
+
+        await bridge.stop()
+
+
+@pytest.mark.unit
 class TestRejectedToken:
     async def test_rejected_token_stops_without_retrying(self, monkeypatch):
         monkeypatch.setattr(mod.credential_encryption, "decrypt", lambda _: "xapp-1")
@@ -211,6 +253,7 @@ class TestRejectedToken:
         bridge, _ = _bridge(lambda request: httpx.Response(200))
 
         await bridge.refresh()
+        await bridge._connections[TRIGGER.id].connect_task
         # A later refresh with the same stored token must not try it again.
         await bridge.refresh()
 

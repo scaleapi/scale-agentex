@@ -24,11 +24,11 @@ import httpx
 from aiohttp import web
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from src.config.dependencies import database_async_read_write_session_maker
 from src.config.environment_variables import EnvironmentVariables
-from src.domain.services.slack_socket_mode_bridge import (
-    SlackSocketModeBridge,
-    create_slack_socket_mode_bridge,
-)
+from src.domain.repositories.agent_api_key_repository import AgentAPIKeyRepository
+from src.domain.repositories.agent_repository import AgentRepository
+from src.domain.services.slack_socket_mode_bridge import SlackSocketModeBridge
 from src.utils import credential_encryption
 from src.utils.database import async_db_engine_creator
 from src.utils.logging import make_logger
@@ -37,6 +37,10 @@ from src.utils.otel_metrics import shutdown_otel_metrics
 logger = make_logger(__name__)
 
 PROBE_PORT = 5004
+# The bridge reads triggers once a minute and one agent per forwarded event.
+DB_POOL_SIZE = 2
+DB_MAX_OVERFLOW = 3
+DB_POOL_RECYCLE_SECONDS = 3600
 
 
 def create_engine(database_url: str) -> AsyncEngine:
@@ -49,10 +53,25 @@ def create_engine(database_url: str) -> AsyncEngine:
     return create_async_engine(
         "postgresql+asyncpg://",
         async_creator=async_db_engine_creator(database_url),
-        pool_size=2,
-        max_overflow=3,
+        pool_size=DB_POOL_SIZE,
+        max_overflow=DB_MAX_OVERFLOW,
         pool_pre_ping=True,
-        pool_recycle=3600,
+        pool_recycle=DB_POOL_RECYCLE_SECONDS,
+    )
+
+
+def create_slack_socket_mode_bridge(
+    engine: AsyncEngine, http_client: httpx.AsyncClient
+) -> SlackSocketModeBridge:
+    """Build the bridge on one database engine and HTTP client.
+
+    The bridge only reads triggers and agents, so every session uses ``engine``.
+    """
+    session_maker = database_async_read_write_session_maker(engine)
+    return SlackSocketModeBridge(
+        agent_api_key_repository=AgentAPIKeyRepository(session_maker, session_maker),
+        agent_repository=AgentRepository(session_maker, session_maker),
+        http_client=http_client,
     )
 
 

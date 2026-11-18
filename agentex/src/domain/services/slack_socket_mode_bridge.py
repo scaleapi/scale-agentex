@@ -31,10 +31,8 @@ from slack_sdk.errors import SlackApiError
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.adapters.crud_store.exceptions import ItemDoesNotExist
-from src.config.dependencies import database_async_read_write_session_maker
 from src.domain.entities.agent_api_keys import (
     AgentAPIKeyEntity,
     SlackSocketModeAppEntity,
@@ -227,25 +225,10 @@ class SlackSocketModeBridge:
         client.socket_mode_request_listeners.append(
             partial(self._on_request, trigger, app)
         )
-        try:
-            # Called once up front so a rejected token stops here instead of
-            # inside connect()'s retry loop; connect() reuses the URL.
-            client.wss_uri = await client.issue_new_wss_url()
-        except AppTokenRejected:
-            self._rejected.add((trigger.id, app.app_token_encrypted))
-            await client.close()
-            return
-        except Exception as exc:
-            # Transient (network, rate limit): connect() fetches a URL and retries.
-            logger.warning(
-                "Opening Slack Socket Mode for trigger %s failed (%s); retrying",
-                trigger.id,
-                type(exc).__name__,
-            )
         self._connections[trigger.id] = _Connection(
             app_token_encrypted=app.app_token_encrypted,
             client=client,
-            connect_task=asyncio.create_task(client.connect()),
+            connect_task=asyncio.create_task(self._connect(trigger, client)),
         )
         logger.info(
             "Slack Socket Mode connecting for trigger %s (app %s, agent %s)",
@@ -253,6 +236,28 @@ class SlackSocketModeBridge:
             trigger.name,
             trigger.agent_id,
         )
+
+    async def _connect(
+        self, trigger: AgentAPIKeyEntity, client: _TriggerSocketModeClient
+    ) -> None:
+        # Runs in the app's own task: fetching the URL can wait out Slack's
+        # Retry-After, which must not hold up refresh() or the other apps.
+        try:
+            # Fetched before connect() so a rejected token stops here instead of
+            # inside connect()'s retry loop; connect() reuses the URL. The next
+            # refresh() finds the client closed and records the rejection.
+            client.wss_uri = await client.issue_new_wss_url()
+        except AppTokenRejected:
+            await client.close()
+            return
+        except Exception as exc:
+            # Transient (network): connect() fetches a URL and retries.
+            logger.warning(
+                "Opening Slack Socket Mode for trigger %s failed (%s); retrying",
+                trigger.id,
+                type(exc).__name__,
+            )
+        await client.connect()
 
     async def _close(self, trigger_id: str) -> None:
         connection = self._connections.pop(trigger_id)
@@ -359,18 +364,3 @@ class SlackSocketModeBridge:
             trigger.id,
         )
         return False
-
-
-def create_slack_socket_mode_bridge(
-    engine: AsyncEngine, http_client: httpx.AsyncClient
-) -> SlackSocketModeBridge:
-    """Build the bridge on one database engine and HTTP client.
-
-    The bridge only reads triggers and agents, so every session uses ``engine``.
-    """
-    session_maker = database_async_read_write_session_maker(engine)
-    return SlackSocketModeBridge(
-        agent_api_key_repository=AgentAPIKeyRepository(session_maker, session_maker),
-        agent_repository=AgentRepository(session_maker, session_maker),
-        http_client=http_client,
-    )
