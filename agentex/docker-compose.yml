@@ -279,7 +279,7 @@ services:
 
   agentex-slack-socket-bridge:
     container_name: agentex-slack-socket-bridge
-    profiles: ["slack"]
+    profiles: ["slack-socket-mode"]
     build:
       context: ..
       dockerfile: agentex/Dockerfile
