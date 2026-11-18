@@ -22,7 +22,7 @@ import hashlib
 import hmac
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 
@@ -124,6 +124,7 @@ class _Connection:
     client: _TriggerSocketModeClient
     # Held so the task isn't garbage-collected while connect() is still retrying.
     connect_task: asyncio.Task
+    last_connected: float = field(default_factory=time.monotonic)
 
 
 class SlackSocketModeBridge:
@@ -169,7 +170,8 @@ class SlackSocketModeBridge:
             await asyncio.sleep(REFRESH_INTERVAL_SECONDS)
 
     async def refresh(self) -> None:
-        """Open connections for new triggers and close them for removed ones."""
+        """Open connections for new triggers, close them for removed ones, and
+        reopen any that has not connected for a whole refresh interval."""
         served = {
             trigger.id: (trigger, app)
             for trigger, app in await self._agent_api_key_repo.list_slack_socket_mode_apps()
@@ -184,6 +186,21 @@ class SlackSocketModeBridge:
             ):
                 if connection.client.rejected:
                     self._rejected.add((trigger_id, connection.app_token_encrypted))
+                await self._close(trigger_id)
+            elif await connection.client.is_connected():
+                connection.last_connected = time.monotonic()
+            elif (
+                time.monotonic() - connection.last_connected >= REFRESH_INTERVAL_SECONDS
+            ):
+                # slack_sdk's connect() retries a failed first connection with the
+                # same WebSocket URL forever, and Slack issues those URLs as
+                # temporary. Reopening fetches a new one.
+                logger.warning(
+                    "Slack Socket Mode for trigger %s has not connected for %ss; "
+                    "reopening it",
+                    trigger_id,
+                    REFRESH_INTERVAL_SECONDS,
+                )
                 await self._close(trigger_id)
         for trigger, app in served.values():
             if trigger.id in self._connections:
