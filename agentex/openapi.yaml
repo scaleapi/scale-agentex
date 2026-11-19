@@ -2858,6 +2858,69 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /agent_api_keys/{id}/slack_socket_mode:
+    put:
+      tags:
+      - Agent APIKeys
+      summary: Serve a Slack trigger over Socket Mode
+      description: Turn Socket Mode on for an existing Slack trigger, or replace its
+        app token and forward path. The bridge picks the change up within a minute.
+      operationId: set_slack_socket_mode_agent_api_keys__id__slack_socket_mode_put
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetSlackSocketModeRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlackSocketMode'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Agent APIKeys
+      summary: Stop serving a Slack trigger over Socket Mode
+      description: Remove the trigger's app token. The trigger itself stays, and the
+        bridge closes its connection within a minute.
+      operationId: delete_slack_socket_mode_agent_api_keys__id__slack_socket_mode_delete
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: string
+                title: Response Delete Slack Socket Mode Agent Api Keys  Id  Slack
+                  Socket Mode Delete
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /agent_api_keys/name/{name}:
     get:
       tags:
@@ -5313,6 +5376,15 @@ components:
             an existing webhook secret. For Slack, this is required and must be the
             Slack app's Signing Secret. For Linear, this is required and must be the
             Linear OAuth app's webhook signing secret.
+        app_token:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: App Token
+          description: Slack only. The app's app-level token (xapp-..., scope connections:write).
+            When set, agentex receives the app's events over Socket Mode and forwards
+            them to forward_path, so the app needs no public Request URL. Stored encrypted
+            and never returned.
         base_url:
           anyOf:
           - type: string
@@ -6390,6 +6462,25 @@ components:
       required:
       - content
       title: SendMessageRequest
+    SetSlackSocketModeRequest:
+      properties:
+        app_token:
+          type: string
+          title: App Token
+          description: The Slack app's app-level token (xapp-..., scope connections:write).
+            It must belong to the app the trigger is named for. Stored encrypted and
+            never returned.
+        forward_path:
+          type: string
+          title: Forward Path
+          description: Subpath of the agent each event is POSTed to, e.g. 'slack/events'.
+      type: object
+      required:
+      - app_token
+      - forward_path
+      title: SetSlackSocketModeRequest
+      description: Turn Socket Mode on for an existing Slack trigger, or replace its
+        settings.
     SkipRunScheduleRequest:
       properties:
         scheduled_time:
@@ -6401,6 +6492,26 @@ components:
       required:
       - scheduled_time
       title: SkipRunScheduleRequest
+    SlackSocketMode:
+      properties:
+        key_id:
+          type: string
+          title: Key Id
+          description: The Slack trigger's agent API key id.
+        slack_app_id:
+          type: string
+          title: Slack App Id
+          description: The Slack app served over Socket Mode.
+        forward_path:
+          type: string
+          title: Forward Path
+          description: Subpath of the agent each event is POSTed to.
+      type: object
+      required:
+      - key_id
+      - slack_app_id
+      - forward_path
+      title: SlackSocketMode
     Span:
       properties:
         id:

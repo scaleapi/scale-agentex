@@ -1,0 +1,373 @@
+"""Ack and reconnect behaviour of the Slack Socket Mode bridge."""
+
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
+import httpx
+import pytest
+import slack_sdk.socket_mode.async_client as sdk_async_client
+import src.run_slack_socket_mode_bridge as entrypoint
+from cryptography.fernet import Fernet
+from slack_sdk.errors import SlackApiError
+from slack_sdk.socket_mode.request import SocketModeRequest
+from slack_sdk.web.async_client import AsyncWebClient
+from slack_sdk.web.slack_response import SlackResponse
+from src.domain.entities.agent_api_keys import (
+    AgentAPIKeyEntity,
+    AgentAPIKeyType,
+    SlackSocketModeAppEntity,
+)
+from src.domain.entities.agents import AgentStatus
+from src.domain.services import slack_socket_mode_bridge as mod
+from src.domain.services.slack_socket_mode_bridge import SlackSocketModeBridge
+from src.domain.use_cases.slack_gateway_use_case import verify_signature
+
+TRIGGER = AgentAPIKeyEntity(
+    id="key-1",
+    agent_id="agent-1",
+    name="A123",
+    api_key_type=AgentAPIKeyType.SLACK,
+    api_key="signing-secret",
+)
+APP = SlackSocketModeAppEntity(
+    id="app-1",
+    agent_api_key_id=TRIGGER.id,
+    agent_id=TRIGGER.agent_id,
+    slack_app_id="A123",
+    app_token_encrypted="ciphertext",
+    forward_path="slack/events",
+)
+
+
+def _bridge(
+    handler, served=((TRIGGER, APP),)
+) -> tuple[SlackSocketModeBridge, MagicMock]:
+    agent_repo = MagicMock()
+    agent_repo.get = AsyncMock(
+        return_value=MagicMock(status=AgentStatus.READY, acp_url="http://agent:8000")
+    )
+    key_repo = MagicMock()
+    key_repo.list_slack_socket_mode_apps = AsyncMock(return_value=list(served))
+    bridge = SlackSocketModeBridge(
+        agent_api_key_repository=key_repo,
+        agent_repository=agent_repo,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    return bridge, key_repo
+
+
+def _envelope(retry_attempt: int = 0, retry_reason: str = "") -> SocketModeRequest:
+    return SocketModeRequest(
+        type="events_api",
+        envelope_id="env-1",
+        payload={"type": "event_callback", "api_app_id": "A123"},
+        retry_attempt=retry_attempt,
+        retry_reason=retry_reason,
+    )
+
+
+@pytest.mark.unit
+class TestEnvelopeAck:
+    async def test_acks_after_agent_accepts(self):
+        seen: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(200)
+
+        bridge, _ = _bridge(handler)
+        client = MagicMock(send_socket_mode_response=AsyncMock())
+
+        await bridge._on_request(TRIGGER, APP, client, _envelope())
+
+        assert str(seen[0].url) == "http://agent:8000/slack/events"
+        assert "x-slack-retry-num" not in seen[0].headers
+        client.send_socket_mode_response.assert_awaited_once()
+        assert client.send_socket_mode_response.await_args.args[0].envelope_id == (
+            "env-1"
+        )
+
+    async def test_no_ack_when_agent_rejects(self):
+        bridge, _ = _bridge(lambda request: httpx.Response(503))
+        client = MagicMock(send_socket_mode_response=AsyncMock())
+
+        await bridge._on_request(TRIGGER, APP, client, _envelope())
+
+        client.send_socket_mode_response.assert_not_awaited()
+
+    async def test_no_ack_when_agent_misses_deadline(self, monkeypatch):
+        monkeypatch.setattr(mod, "ACK_DEADLINE_SECONDS", 0.05)
+
+        async def slow(request: httpx.Request) -> httpx.Response:
+            await asyncio.sleep(1)
+            return httpx.Response(200)
+
+        bridge, _ = _bridge(slow)
+        client = MagicMock(send_socket_mode_response=AsyncMock())
+
+        await bridge._on_request(TRIGGER, APP, client, _envelope())
+
+        client.send_socket_mode_response.assert_not_awaited()
+
+    async def test_retry_attempt_becomes_retry_headers(self):
+        seen: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(200)
+
+        bridge, _ = _bridge(handler)
+        client = MagicMock(send_socket_mode_response=AsyncMock())
+
+        await bridge._on_request(
+            TRIGGER, APP, client, _envelope(retry_attempt=2, retry_reason="timeout")
+        )
+
+        assert seen[0].headers["x-slack-retry-num"] == "2"
+        assert seen[0].headers["x-slack-retry-reason"] == "timeout"
+
+    async def test_forward_passes_slacks_own_signature_check(self):
+        seen: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(200)
+
+        bridge, _ = _bridge(handler)
+        client = MagicMock(send_socket_mode_response=AsyncMock())
+
+        await bridge._on_request(TRIGGER, APP, client, _envelope())
+
+        forwarded = seen[0]
+        assert verify_signature(
+            TRIGGER.api_key,
+            forwarded.headers["x-slack-request-timestamp"],
+            forwarded.headers["x-slack-signature"],
+            forwarded.content,
+        )
+        assert not verify_signature(
+            "another-secret",
+            forwarded.headers["x-slack-request-timestamp"],
+            forwarded.headers["x-slack-signature"],
+            forwarded.content,
+        )
+
+    async def test_acks_when_agent_declines_redelivery(self):
+        bridge, _ = _bridge(
+            lambda request: httpx.Response(400, headers={"X-Slack-No-Retry": "1"})
+        )
+        client = MagicMock(send_socket_mode_response=AsyncMock())
+
+        await bridge._on_request(TRIGGER, APP, client, _envelope())
+
+        client.send_socket_mode_response.assert_awaited_once()
+
+
+@pytest.mark.unit
+class TestRateLimited:
+    async def test_rate_limit_waits_and_retries_instead_of_rejecting(self, monkeypatch):
+        rate_limited = SlackApiError(
+            "ratelimited",
+            SlackResponse(
+                client=None,
+                http_verb="POST",
+                api_url="https://slack.com/api/apps.connections.open",
+                req_args={},
+                data={"ok": False, "error": "ratelimited"},
+                headers={"Retry-After": "7"},
+                status_code=429,
+            ),
+        )
+        monkeypatch.setattr(
+            AsyncWebClient,
+            "apps_connections_open",
+            AsyncMock(side_effect=[rate_limited, {"url": "wss://example.invalid"}]),
+        )
+        slept: list[float] = []
+
+        async def fake_sleep(delay: float) -> None:
+            slept.append(delay)
+
+        monkeypatch.setattr(sdk_async_client.asyncio, "sleep", fake_sleep)
+        client = mod._TriggerSocketModeClient(trigger=TRIGGER, app_token="xapp-1")
+
+        assert await client.issue_new_wss_url() == "wss://example.invalid"
+        assert slept == [7]
+        assert not client.rejected
+        await client.close()
+
+
+@pytest.mark.unit
+class TestOneAppCannotStallTheOthers:
+    async def test_a_rate_limited_app_does_not_hold_up_refresh(self, monkeypatch):
+        other_trigger = TRIGGER.model_copy(update={"id": "key-2", "name": "B456"})
+        other_app = APP.model_copy(
+            update={
+                "id": "app-2",
+                "agent_api_key_id": "key-2",
+                "slack_app_id": "B456",
+                "app_token_encrypted": "ciphertext-2",
+            }
+        )
+        monkeypatch.setattr(
+            mod.credential_encryption,
+            "decrypt",
+            {"ciphertext": "xapp-waiting", "ciphertext-2": "xapp-ready"}.__getitem__,
+        )
+
+        async def connections_open(self, **kwargs):
+            if kwargs["app_token"] == "xapp-waiting":
+                # Stands in for waiting out a long Retry-After.
+                await asyncio.Event().wait()
+            return {"url": "wss://example.invalid"}
+
+        monkeypatch.setattr(AsyncWebClient, "apps_connections_open", connections_open)
+        connected = asyncio.Event()
+        monkeypatch.setattr(
+            mod._TriggerSocketModeClient,
+            "connect",
+            AsyncMock(side_effect=lambda: connected.set()),
+        )
+        bridge, _ = _bridge(
+            lambda request: httpx.Response(200),
+            [(TRIGGER, APP), (other_trigger, other_app)],
+        )
+
+        await asyncio.wait_for(bridge.refresh(), 1)
+        await asyncio.wait_for(connected.wait(), 1)
+
+        await bridge.stop()
+
+
+@pytest.mark.unit
+class TestRateLimitWaitIsNotCutShort:
+    async def test_refresh_leaves_a_url_fetch_that_is_still_waiting(self, monkeypatch):
+        monkeypatch.setattr(mod.credential_encryption, "decrypt", lambda _: "xapp-1")
+        fetches = 0
+
+        async def connections_open(self, **kwargs):
+            nonlocal fetches
+            fetches += 1
+            # Stands in for waiting out a Retry-After longer than a refresh interval.
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(AsyncWebClient, "apps_connections_open", connections_open)
+        monkeypatch.setattr(mod._TriggerSocketModeClient, "connect", AsyncMock())
+        bridge, _ = _bridge(lambda request: httpx.Response(200))
+        await bridge.refresh()
+        while not fetches:
+            await asyncio.sleep(0)
+        waiting = bridge._connections[TRIGGER.id]
+
+        monkeypatch.setattr(mod, "REFRESH_INTERVAL_SECONDS", 0)
+        await bridge.refresh()
+
+        assert bridge._connections[TRIGGER.id] is waiting
+        assert fetches == 1
+        await bridge.stop()
+
+
+@pytest.mark.unit
+class TestRejectedToken:
+    async def test_rejected_token_stops_without_retrying(self, monkeypatch):
+        monkeypatch.setattr(mod.credential_encryption, "decrypt", lambda _: "xapp-1")
+        connections_open = AsyncMock(
+            side_effect=SlackApiError(
+                "rejected", {"ok": False, "error": "invalid_auth"}
+            )
+        )
+        monkeypatch.setattr(AsyncWebClient, "apps_connections_open", connections_open)
+        connect = AsyncMock()
+        monkeypatch.setattr(mod._TriggerSocketModeClient, "connect", connect)
+        bridge, _ = _bridge(lambda request: httpx.Response(200))
+
+        await bridge.refresh()
+        await bridge._connections[TRIGGER.id].connect_task
+        # A later refresh with the same stored token must not try it again.
+        await bridge.refresh()
+
+        connections_open.assert_awaited_once()
+        connect.assert_not_awaited()
+        assert bridge._connections == {}
+        # A dead token must not hold the bridge out of readiness.
+        assert bridge.ready
+
+
+@pytest.mark.unit
+class TestShutdown:
+    async def test_stop_closes_open_sockets(self, monkeypatch):
+        monkeypatch.setattr(mod.credential_encryption, "decrypt", lambda _: "xapp-1")
+        monkeypatch.setattr(
+            AsyncWebClient,
+            "apps_connections_open",
+            AsyncMock(return_value={"url": "wss://example.invalid"}),
+        )
+        monkeypatch.setattr(mod._TriggerSocketModeClient, "connect", AsyncMock())
+        bridge, _ = _bridge(lambda request: httpx.Response(200))
+        await bridge.refresh()
+        client = bridge._connections[TRIGGER.id].client
+
+        await bridge.stop()
+
+        assert client.closed
+        assert client.aiohttp_client_session.closed
+        assert bridge._connections == {}
+
+    async def test_cancelling_main_stops_bridge_and_disposes_engine(self, monkeypatch):
+        fake = MagicMock(start=AsyncMock(), stop=AsyncMock(), ready=True)
+        engine = MagicMock(dispose=AsyncMock())
+        monkeypatch.setattr(
+            entrypoint.credential_encryption, "is_configured", lambda: True
+        )
+        monkeypatch.setattr(entrypoint, "create_engine", lambda url: engine)
+        monkeypatch.setattr(
+            entrypoint, "create_slack_socket_mode_bridge", lambda engine, client: fake
+        )
+
+        task = asyncio.create_task(entrypoint.main(probe_port=0))
+        while not fake.start.await_count:
+            await asyncio.sleep(0)
+        # _run_cli turns SIGTERM into this cancellation.
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        fake.stop.assert_awaited_once()
+        engine.dispose.assert_awaited_once()
+
+    async def test_reads_the_key_from_the_environment_file(self, monkeypatch):
+        # In development the key may exist only in agentex/.env, which
+        # EnvironmentVariables.refresh() loads into the environment.
+        class Started(Exception):
+            pass
+
+        def refresh_loading_env_file():
+            monkeypatch.setenv(
+                entrypoint.credential_encryption.ENV_KEY,
+                Fernet.generate_key().decode(),
+            )
+            return MagicMock(DATABASE_URL="postgresql://example.invalid/agentex")
+
+        monkeypatch.delenv(entrypoint.credential_encryption.ENV_KEY, raising=False)
+        entrypoint.credential_encryption.reset_cache()
+        monkeypatch.setattr(
+            entrypoint.EnvironmentVariables, "refresh", refresh_loading_env_file
+        )
+        monkeypatch.setattr(entrypoint, "create_engine", MagicMock(side_effect=Started))
+
+        try:
+            with pytest.raises(Started):
+                await entrypoint.main(probe_port=0)
+        finally:
+            entrypoint.credential_encryption.reset_cache()
+
+    async def test_refuses_to_start_without_encryption_key(self, monkeypatch):
+        create_engine = MagicMock()
+        monkeypatch.setattr(entrypoint, "create_engine", create_engine)
+        monkeypatch.setattr(
+            entrypoint.credential_encryption, "is_configured", lambda: False
+        )
+
+        with pytest.raises(SystemExit):
+            await entrypoint.main(probe_port=0)
+        create_engine.assert_not_called()

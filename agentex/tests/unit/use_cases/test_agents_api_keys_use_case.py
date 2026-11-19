@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
-from src.adapters.crud_store.exceptions import ItemDoesNotExist
+from src.adapters.crud_store.exceptions import DuplicateItemError, ItemDoesNotExist
 from src.domain.entities.agent_api_keys import AgentAPIKeyType
 from src.domain.entities.agents import ACPType, AgentEntity, AgentStatus
 from src.domain.repositories.agent_api_key_repository import AgentAPIKeyRepository
@@ -161,6 +161,35 @@ class TestAgentAPIKeysUseCase:
                 api_key_type=AgentAPIKeyType.EXTERNAL,
             )
 
+    async def test_failed_insert_removes_the_auth_registration(
+        self, agent_api_keys_use_case, agent_repository, sample_agent
+    ):
+        # Two registrations for one Slack app can both pass the route's duplicate
+        # check; the loser's insert fails after its key was registered for auth.
+        auth = agent_api_keys_use_case.authorization_service
+        auth.principal_context = {"user_id": "user-1"}
+        first = await create_or_get_agent(agent_repository, sample_agent)
+        second = await agent_repository.create(
+            sample_agent.model_copy(update={"id": str(uuid4()), "name": "second"})
+        )
+        for agent in (first, second):
+            create = agent_api_keys_use_case.create(
+                name="A123",
+                agent_id=agent.id,
+                api_key_type=AgentAPIKeyType.SLACK,
+                api_key="signing-secret",
+                slack_socket_mode_app_token_encrypted="ciphertext",
+                slack_socket_mode_forward_path="slack/events",
+            )
+            if agent is first:
+                await create
+            else:
+                with pytest.raises(DuplicateItemError):
+                    await create
+
+        losing_key = auth.register_resource.await_args_list[-1].kwargs["resource"]
+        auth.deregister_resource.assert_awaited_once_with(resource=losing_key)
+
     async def test_create_external_api_key(
         self, agent_api_keys_use_case, agent_repository, sample_agent
     ):
@@ -268,9 +297,7 @@ class TestExtractAgentKeyFromAuthorization:
         assert extract_agent_key_from_authorization("AgentKey   ") is None
 
     def test_strips_surrounding_whitespace(self):
-        assert (
-            extract_agent_key_from_authorization("  AgentKey  abc123  ") == "abc123"
-        )
+        assert extract_agent_key_from_authorization("  AgentKey  abc123  ") == "abc123"
 
 
 @pytest.mark.asyncio

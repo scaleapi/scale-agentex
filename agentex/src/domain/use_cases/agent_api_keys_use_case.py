@@ -22,6 +22,7 @@ from src.config.environment_variables import EnvVarKeys
 from src.domain.entities.agent_api_keys import (
     AgentAPIKeyEntity,
     AgentAPIKeyType,
+    SlackSocketModeAppEntity,
 )
 from src.domain.entities.agents import AgentEntity, AgentStatus
 from src.domain.repositories.agent_api_key_repository import (
@@ -107,6 +108,8 @@ class AgentAPIKeysUseCase:
         agent_id: str,
         api_key_type: AgentAPIKeyType,
         api_key: str,
+        slack_socket_mode_app_token_encrypted: str | None = None,
+        slack_socket_mode_forward_path: str = "",
     ) -> AgentAPIKeyEntity:
         agent = await self.get_agent(agent_id=agent_id)
         if not agent:
@@ -131,7 +134,26 @@ class AgentAPIKeysUseCase:
             api_key_type=api_key_type,
             api_key=api_key,
         )
-        return await self.agent_api_key_repo.create(item=agent_api_key)
+        try:
+            if slack_socket_mode_app_token_encrypted is None:
+                return await self.agent_api_key_repo.create(item=agent_api_key)
+            return await self.agent_api_key_repo.create_with_slack_socket_mode_app(
+                item=agent_api_key,
+                app=SlackSocketModeAppEntity(
+                    id=orm_id(),
+                    agent_api_key_id=api_key_id,
+                    agent_id=agent.id,
+                    slack_app_id=name,
+                    app_token_encrypted=slack_socket_mode_app_token_encrypted,
+                    forward_path=slack_socket_mode_forward_path,
+                ),
+            )
+        except Exception:
+            # The key was registered for authorization before the insert, and a
+            # failed insert leaves no row or id anyone could delete it by. A
+            # concurrent registration for the same Slack app ends here.
+            await self._deregister_api_key_from_auth(api_key_id=api_key_id)
+            raise
 
     async def _register_api_key_in_auth(
         self,
@@ -221,6 +243,46 @@ class AgentAPIKeysUseCase:
         return await self.agent_api_key_repo.get_by_agent_id_and_name(
             agent_id=agent_id, name=name, api_key_type=api_key_type
         )
+
+    async def has_slack_socket_mode_trigger(
+        self, app_id: str, except_key_id: str | None = None
+    ) -> bool:
+        """Whether a live agent already serves this Slack app over Socket Mode.
+
+        Args:
+            app_id: The Slack app id.
+            except_key_id: A trigger to ignore, such as the one being updated.
+        """
+        served = await self.agent_api_key_repo.list_slack_socket_mode_apps(
+            slack_app_id=app_id
+        )
+        return any(trigger.id != except_key_id for trigger, _ in served)
+
+    async def set_slack_socket_mode(
+        self,
+        trigger: AgentAPIKeyEntity,
+        app_token_encrypted: str,
+        forward_path: str,
+    ) -> SlackSocketModeAppEntity:
+        """Serve a Slack trigger over Socket Mode, or replace its token and path.
+
+        Raises:
+            DuplicateItemError: Another live trigger serves the same Slack app.
+        """
+        return await self.agent_api_key_repo.upsert_slack_socket_mode_app(
+            SlackSocketModeAppEntity(
+                id=orm_id(),
+                agent_api_key_id=trigger.id,
+                agent_id=trigger.agent_id,
+                slack_app_id=trigger.name,
+                app_token_encrypted=app_token_encrypted,
+                forward_path=forward_path,
+            )
+        )
+
+    async def delete_slack_socket_mode(self, key_id: str) -> bool:
+        """Stop serving a trigger over Socket Mode; False if it was not."""
+        return await self.agent_api_key_repo.delete_slack_socket_mode_app(key_id)
 
     async def get_external_by_agent_id_and_key(
         self, agent_id: str, api_key: str

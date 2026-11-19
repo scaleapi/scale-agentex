@@ -177,6 +177,37 @@ curl -X POST $HOST/agent_api_keys \
   }'
 ```
 
+#### Slack over Socket Mode
+
+If Slack cannot reach agentex over HTTP (for example, when agentex runs in a private network), agentex can receive the app's events over [Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode) instead.
+Enable Socket Mode on the app and create an app-level token as that guide describes, then register the trigger with that token. Registration connects to Slack once to check that the token belongs to the app named in `name`, and returns 400 if it does not:
+
+```bash
+curl -X POST $HOST/agent_api_keys/webhook-trigger \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_name": "<AGENT_NAME>",
+    "source": "slack",
+    "name": "A123ABC456",
+    "secret": "abcdefg12345",
+    "forward_path": "slack/events",
+    "app_token": "xapp-..."
+  }'
+```
+
+The Slack Socket Mode bridge then holds one connection for the app and POSTs every Events API payload to `forward_path` on the agent, the same route and body an HTTP delivery would reach (`url_verification` never happens over a socket).
+Each POST carries `X-Slack-Signature` and `X-Slack-Request-Timestamp` computed with the trigger's signing secret, so an agent that verifies Slack signatures itself accepts it as it would an HTTP delivery.
+Slack's `retry_attempt` arrives as the usual `X-Slack-Retry-Num` and `X-Slack-Retry-Reason` headers.
+An event is acknowledged only after the agent answers 2xx within 2.5 seconds, or answers with `X-Slack-No-Retry: 1` as it can over HTTP; otherwise Slack redelivers it.
+Delivery is at least once: an event whose acknowledgement is lost, for example when a bridge replica stops mid-forward, reaches the agent again.
+Interactivity and slash-command payloads are not forwarded.
+
+To switch an existing Slack trigger to Socket Mode, or change its token or forward path, `PUT /agent_api_keys/<key_id>/slack_socket_mode` with `app_token` and `forward_path`; it runs the same token check as registration. `DELETE /agent_api_keys/<key_id>/slack_socket_mode` turns Socket Mode off and keeps the trigger. The bridge applies either change within a minute.
+
+Operator notes:
+
+- The bridge is its own process, not part of the API: run `python -m src.run_slack_socket_mode_bridge` (from `agentex/`, the same image as the API, like the Temporal worker's `python -m src.temporal.run_worker`) as a separate Deployment with 2 replicas, one process each. It needs only `DATABASE_URL` and `AGENTEX_CREDENTIAL_ENCRYPTION_KEY`, which encrypts the stored app token; without that key it logs one error and exits. It does not connect to Temporal, MongoDB or Redis.
+
 ### Deleting API Keys
 
 If you'd like to remove an existing API key for whatever reason, first grab its ID by listing the keys for the appropriate agent as above.

@@ -42,6 +42,10 @@ dependencies = [
     # (vulnerable OpenSSL bundled in the wheels). Floor kept at the patched minimum
     # so a re-resolve can't regress below it.
     "cryptography>=50.0.0",
+    # Socket Mode client for Slack webhook triggers. Its aiohttp backend reuses the
+    # aiohttp already pinned above; the [optional] extra is not wanted (it would pull
+    # websockets>=16, which conflicts with websockets~=14.2).
+    "slack-sdk>=3.44.1,<4",
 ]
 
 [dependency-groups]

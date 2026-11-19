@@ -7,17 +7,37 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import src.api.routes.agent_api_keys as mod
 from fastapi import HTTPException
+from src.adapters.crud_store.exceptions import DuplicateItemError
 from src.api.routes.agent_api_keys import create_webhook_trigger
 from src.api.schemas.agent_api_keys import CreateWebhookTriggerRequest
 from src.domain.entities.agent_api_keys import AgentAPIKeyType
+from src.domain.services.slack_socket_mode_bridge import AppTokenRejected
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestCreateWebhookTrigger:
-    async def _call(self, monkeypatch, request, *, existing=None, base_env=None):
+    async def _call(
+        self,
+        monkeypatch,
+        request,
+        *,
+        existing=None,
+        base_env=None,
+        app_served_over_socket=False,
+        create_error=None,
+        token_app_id="A123",
+    ):
         # The agent-authorization helper does real authz work; stub it to a no-op.
         monkeypatch.setattr(mod, "_check_agent_or_collapse_to_404", AsyncMock())
+        read_app_id = (
+            AsyncMock(side_effect=token_app_id)
+            if isinstance(token_app_id, Exception)
+            else AsyncMock(return_value=token_app_id)
+        )
+        monkeypatch.setattr(
+            mod.slack_socket_mode_bridge, "read_slack_app_id", read_app_id
+        )
         if base_env is not None:
             monkeypatch.setenv("AGENTEX_PUBLIC_URL", base_env)
         else:
@@ -28,8 +48,12 @@ class TestCreateWebhookTrigger:
 
         akuc = MagicMock()
         akuc.get_by_agent_id_and_name = AsyncMock(return_value=existing)
+        akuc.has_slack_socket_mode_trigger = AsyncMock(
+            return_value=app_served_over_socket
+        )
         akuc.create = AsyncMock(
-            return_value=MagicMock(id="key-1", api_key_type=request.source)
+            return_value=MagicMock(id="key-1", api_key_type=request.source),
+            side_effect=create_error,
         )
 
         resp = await create_webhook_trigger(
@@ -95,7 +119,9 @@ class TestCreateWebhookTrigger:
             name="o/r",
             forward_path="github-pr/cfg-9?mode=review#frag ment",
         )
-        resp, _ = await self._call(monkeypatch, req, base_env="https://sgp.example.com/")
+        resp, _ = await self._call(
+            monkeypatch, req, base_env="https://sgp.example.com/"
+        )
 
         assert (
             resp.webhook_path
@@ -154,7 +180,10 @@ class TestCreateWebhookTrigger:
         # Slack signs with the app's existing Signing Secret — we can't generate one,
         # so omitting it must 400 rather than store a random value that never matches.
         req = CreateWebhookTriggerRequest(
-            agent_name="a", source=AgentAPIKeyType.SLACK, name="my-app", forward_path="slack"
+            agent_name="a",
+            source=AgentAPIKeyType.SLACK,
+            name="my-app",
+            forward_path="slack",
         )
         with pytest.raises(HTTPException) as exc:
             await self._call(monkeypatch, req)
@@ -172,10 +201,73 @@ class TestCreateWebhookTrigger:
         assert resp.secret == "slack-signing-secret"
         assert akuc.create.await_args.kwargs["api_key"] == "slack-signing-secret"
 
+    @pytest.mark.parametrize(
+        ("served", "create_error"),
+        [
+            pytest.param(True, None, id="already-registered"),
+            # A concurrent registration passed the same check and inserted first;
+            # the table's unique constraint is what catches it.
+            pytest.param(False, DuplicateItemError("dup"), id="concurrent-insert"),
+        ],
+    )
+    async def test_second_socket_trigger_for_a_slack_app_conflicts(
+        self, monkeypatch, served, create_error
+    ):
+        # Slack splits an app's events across its connections, so a second
+        # Socket Mode trigger would silently take part of the first one's events.
+        monkeypatch.setattr(mod.credential_encryption, "is_configured", lambda: True)
+        monkeypatch.setattr(mod.credential_encryption, "encrypt", lambda _: "ct")
+        req = CreateWebhookTriggerRequest(
+            agent_name="b",
+            source=AgentAPIKeyType.SLACK,
+            name="A123",
+            forward_path="slack/events",
+            secret="slack-signing-secret",
+            app_token="xapp-1-A123-example",
+        )
+        with pytest.raises(HTTPException) as exc:
+            await self._call(
+                monkeypatch,
+                req,
+                app_served_over_socket=served,
+                create_error=create_error,
+            )
+        assert exc.value.status_code == 409
+
+    @pytest.mark.parametrize(
+        ("token_app_id", "status"),
+        [
+            # Without this check any caller could reserve another team's app id.
+            pytest.param("B999", 400, id="token-for-another-app"),
+            pytest.param(
+                AppTokenRejected("invalid_auth"), 400, id="token-rejected-by-slack"
+            ),
+            pytest.param(TimeoutError(), 502, id="slack-unreachable"),
+        ],
+    )
+    async def test_app_token_must_belong_to_the_named_app(
+        self, monkeypatch, token_app_id, status
+    ):
+        monkeypatch.setattr(mod.credential_encryption, "is_configured", lambda: True)
+        req = CreateWebhookTriggerRequest(
+            agent_name="b",
+            source=AgentAPIKeyType.SLACK,
+            name="A123",
+            forward_path="slack/events",
+            secret="slack-signing-secret",
+            app_token="xapp-1-A123-example",
+        )
+        with pytest.raises(HTTPException) as exc:
+            await self._call(monkeypatch, req, token_app_id=token_app_id)
+        assert exc.value.status_code == status
+
     async def test_linear_without_secret_rejected(self, monkeypatch):
         # Linear signs with the OAuth app's webhook signing secret, like Slack.
         req = CreateWebhookTriggerRequest(
-            agent_name="a", source=AgentAPIKeyType.LINEAR, name="client-id", forward_path="linear/webhook"
+            agent_name="a",
+            source=AgentAPIKeyType.LINEAR,
+            name="client-id",
+            forward_path="linear/webhook",
         )
         with pytest.raises(HTTPException) as exc:
             await self._call(monkeypatch, req)

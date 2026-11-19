@@ -5,11 +5,13 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     LargeBinary,
     String,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -198,6 +200,32 @@ class AgentAPIKeyORM(BaseORM):
         Index(
             "ix_agent_api_keys_api_key",
             "api_key",
+        ),
+    )
+
+
+class SlackSocketModeAppORM(BaseORM):
+    __tablename__ = "slack_socket_mode_apps"
+    id = Column(String, primary_key=True, default=orm_id)
+    agent_api_key_id = Column(String, nullable=False)
+    agent_id = Column(String(64), nullable=False)
+    slack_app_id = Column(String(256), nullable=False)
+    app_token_encrypted = Column(String, nullable=False)
+    forward_path = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("slack_app_id", name="uq_slack_socket_mode_apps_slack_app_id"),
+        UniqueConstraint(
+            "agent_api_key_id",
+            "agent_id",
+            name="uq_slack_socket_mode_apps_agent_api_key",
+        ),
+        ForeignKeyConstraint(
+            ["agent_api_key_id", "agent_id"],
+            ["agent_api_keys.id", "agent_api_keys.agent_id"],
+            ondelete="CASCADE",
+            name="fk_slack_socket_mode_apps_agent_api_key",
         ),
     )
 

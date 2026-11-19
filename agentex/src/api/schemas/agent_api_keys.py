@@ -84,6 +84,15 @@ class CreateWebhookTriggerRequest(BaseModel):
             "app's webhook signing secret."
         ),
     )
+    app_token: str | None = Field(
+        None,
+        description=(
+            "Slack only. The app's app-level token (xapp-..., scope connections:write). "
+            "When set, agentex receives the app's events over Socket Mode and forwards "
+            "them to forward_path, so the app needs no public Request URL. Stored "
+            "encrypted and never returned."
+        ),
+    )
     base_url: str | None = Field(
         None,
         description="Optional public agentex base URL for the returned webhook_url; "
@@ -108,4 +117,27 @@ class CreateWebhookTriggerResponse(BaseModel):
     webhook_url: str | None = Field(
         None,
         description="Full webhook URL to paste into the source (None if no base URL configured).",
+    )
+
+
+class SetSlackSocketModeRequest(BaseModel):
+    """Turn Socket Mode on for an existing Slack trigger, or replace its settings."""
+
+    app_token: str = Field(
+        ...,
+        description="The Slack app's app-level token (xapp-..., scope "
+        "connections:write). It must belong to the app the trigger is named for. "
+        "Stored encrypted and never returned.",
+    )
+    forward_path: str = Field(
+        ...,
+        description="Subpath of the agent each event is POSTed to, e.g. 'slack/events'.",
+    )
+
+
+class SlackSocketMode(BaseModel):
+    key_id: str = Field(..., description="The Slack trigger's agent API key id.")
+    slack_app_id: str = Field(..., description="The Slack app served over Socket Mode.")
+    forward_path: str = Field(
+        ..., description="Subpath of the agent each event is POSTed to."
     )
