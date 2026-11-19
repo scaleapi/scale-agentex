@@ -7,6 +7,7 @@ import httpx
 import pytest
 import slack_sdk.socket_mode.async_client as sdk_async_client
 import src.run_slack_socket_mode_bridge as entrypoint
+from cryptography.fernet import Fernet
 from slack_sdk.errors import SlackApiError
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.web.async_client import AsyncWebClient
@@ -333,6 +334,32 @@ class TestShutdown:
 
         fake.stop.assert_awaited_once()
         engine.dispose.assert_awaited_once()
+
+    async def test_reads_the_key_from_the_environment_file(self, monkeypatch):
+        # In development the key may exist only in agentex/.env, which
+        # EnvironmentVariables.refresh() loads into the environment.
+        class Started(Exception):
+            pass
+
+        def refresh_loading_env_file():
+            monkeypatch.setenv(
+                entrypoint.credential_encryption.ENV_KEY,
+                Fernet.generate_key().decode(),
+            )
+            return MagicMock(DATABASE_URL="postgresql://example.invalid/agentex")
+
+        monkeypatch.delenv(entrypoint.credential_encryption.ENV_KEY, raising=False)
+        entrypoint.credential_encryption.reset_cache()
+        monkeypatch.setattr(
+            entrypoint.EnvironmentVariables, "refresh", refresh_loading_env_file
+        )
+        monkeypatch.setattr(entrypoint, "create_engine", MagicMock(side_effect=Started))
+
+        try:
+            with pytest.raises(Started):
+                await entrypoint.main(probe_port=0)
+        finally:
+            entrypoint.credential_encryption.reset_cache()
 
     async def test_refuses_to_start_without_encryption_key(self, monkeypatch):
         create_engine = MagicMock()

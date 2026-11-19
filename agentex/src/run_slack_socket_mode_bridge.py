@@ -97,6 +97,8 @@ async def main(probe_port: int = PROBE_PORT) -> None:
         else:
             cleanup.callback(shutdown_otel_metrics)
 
+        # Loads agentex/.env in development, which may be where the key is.
+        env = EnvironmentVariables.refresh()
         # App tokens are stored encrypted, so without the key no trigger can be
         # served; refuse once here rather than failing per trigger.
         if not credential_encryption.is_configured():
@@ -107,7 +109,7 @@ async def main(probe_port: int = PROBE_PORT) -> None:
             )
             raise SystemExit(1)
 
-        engine = create_engine(EnvironmentVariables.refresh().DATABASE_URL)
+        engine = create_engine(env.DATABASE_URL)
         cleanup.push_async_callback(engine.dispose)
         http_client = httpx.AsyncClient()
         cleanup.push_async_callback(http_client.aclose)
