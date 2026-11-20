@@ -595,7 +595,7 @@ class TestTaskEventStream:
             for _ in range(10):
                 try:
                     evt = await asyncio.wait_for(gen.__anext__(), timeout=4)
-                except (TimeoutError, asyncio.TimeoutError):
+                except TimeoutError:
                     break  # stream went silent — sentinel was dropped
                 if evt.startswith("data: ") and sentinel in evt:
                     received = True

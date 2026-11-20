@@ -23,9 +23,9 @@ class TestHealthAPI:
 
         for endpoint in health_endpoints:
             response = await isolated_client.get(endpoint)
-            assert (
-                response.status_code == 200
-            ), f"Health endpoint {endpoint} should return 200"
+            assert response.status_code == 200, (
+                f"Health endpoint {endpoint} should return 200"
+            )
 
     @pytest.mark.asyncio
     async def test_health_endpoint_http_methods(self, isolated_client):
