@@ -110,6 +110,11 @@ async def test_main_cleanup_follows_worker_and_dependencies(
         monkeypatch.setattr(run_worker, name, Mock())
     monkeypatch.setattr(
         run_worker,
+        "bootstrap_healthcheck_reconciliation",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        run_worker,
         "create_agentex_server_worker",
         lambda **kwargs: asyncio.create_task(worker()),
     )

@@ -97,27 +97,51 @@ class HealthCheckActivities:
         return False
 
     @activity.defn(name=UPDATE_AGENT_STATUS_ACTIVITY)
-    async def update_agent_status_activity(self, agent_id: str, status: str) -> None:
-        """
-        Update the status of an agent in the database.
-        """
+    async def update_agent_status_activity(
+        self, agent_id: str, status: str
+    ) -> dict[str, str | bool]:
+        """Apply an allowed health transition and report the persisted outcome."""
         try:
-            # Get agent
             agent = await self.agent_repo.get(id=agent_id)
             if not agent:
                 raise ValueError(f"Agent {agent_id} not found")
             new_status = AgentStatus(status)
-            if agent.status == new_status:
-                return
-            if (
-                new_status == AgentStatus.READY
-                and agent.status != AgentStatus.UNHEALTHY
-            ):
-                return
+            prior_status = agent.status
+            monitor = prior_status in {AgentStatus.READY, AgentStatus.UNHEALTHY}
+
+            if prior_status == new_status or not monitor:
+                return {
+                    "changed": False,
+                    "prior_status": prior_status.value,
+                    "current_status": prior_status.value,
+                    "should_continue": monitor,
+                }
+
+            valid_transition = (
+                prior_status == AgentStatus.READY
+                and new_status == AgentStatus.UNHEALTHY
+            ) or (
+                prior_status == AgentStatus.UNHEALTHY
+                and new_status == AgentStatus.READY
+            )
+            if not valid_transition:
+                return {
+                    "changed": False,
+                    "prior_status": prior_status.value,
+                    "current_status": prior_status.value,
+                    "should_continue": monitor,
+                }
+
             agent.status = new_status
             agent.status_reason = "Agent health check reported " + status
             await self.agent_repo.update(item=agent)
             logger.info(f"Updated agent {agent_id} status to {status}")
+            return {
+                "changed": True,
+                "prior_status": prior_status.value,
+                "current_status": new_status.value,
+                "should_continue": True,
+            }
         except Exception as e:
             detail = type(e).__name__ if uses_observability_adapter() else str(e)
             logger.error(f"Failed to update agent {agent_id} status: {detail}")
