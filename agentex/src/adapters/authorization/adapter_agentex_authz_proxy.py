@@ -2,6 +2,7 @@ from collections.abc import Iterable
 from typing import Annotated
 
 from fastapi import Depends
+from src.adapters.authentication.service_account_token import agentex_auth_headers
 from src.adapters.authorization.port import (
     AuthorizationGateway,
 )
@@ -35,7 +36,10 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
             "operation": operation,
         }
         await HttpRequestHandler.post_with_error_handling(
-            self.agentex_auth_url, "/v1/authz/grant", json=payload
+            self.agentex_auth_url,
+            "/v1/authz/grant",
+            json=payload,
+            headers=await agentex_auth_headers(),
         )
 
     async def revoke(
@@ -50,7 +54,10 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
             "operation": operation,
         }
         await HttpRequestHandler.post_with_error_handling(
-            self.agentex_auth_url, "/v1/authz/revoke", json=payload
+            self.agentex_auth_url,
+            "/v1/authz/revoke",
+            json=payload,
+            headers=await agentex_auth_headers(),
         )
 
     async def check(
@@ -65,7 +72,10 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
             "operation": operation,
         }
         await HttpRequestHandler.post_with_error_handling(
-            self.agentex_auth_url, "/v1/authz/check", json=payload
+            self.agentex_auth_url,
+            "/v1/authz/check",
+            json=payload,
+            headers=await agentex_auth_headers(),
         )
         return True  # request was successful
 
@@ -81,7 +91,10 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
             "filter_operation": filter_operation,
         }
         response = await HttpRequestHandler.post_with_error_handling(
-            self.agentex_auth_url, "/v1/authz/search", json=payload
+            self.agentex_auth_url,
+            "/v1/authz/search",
+            json=payload,
+            headers=await agentex_auth_headers(),
         )
         # Wildcard sentinel: a provider signals "all resources of this type" with
         # {"unscoped": true} rather than enumerating ids. Map only the exact JSON
@@ -105,7 +118,10 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
             "parent": parent.model_dump() if parent is not None else None,
         }
         await HttpRequestHandler.post_with_error_handling(
-            self.agentex_auth_url, "/v1/authz/register", json=payload
+            self.agentex_auth_url,
+            "/v1/authz/register",
+            json=payload,
+            headers=await agentex_auth_headers(),
         )
 
     async def deregister_resource(
@@ -118,7 +134,10 @@ class AgentexAuthorizationProxy(AuthorizationGateway[AgentexAuthPrincipalContext
             "resource": resource.model_dump(),
         }
         await HttpRequestHandler.post_with_error_handling(
-            self.agentex_auth_url, "/v1/authz/deregister", json=payload
+            self.agentex_auth_url,
+            "/v1/authz/deregister",
+            json=payload,
+            headers=await agentex_auth_headers(),
         )
 
 
