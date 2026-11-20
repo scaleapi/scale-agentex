@@ -217,6 +217,15 @@ class TaskMessage(BaseModel):
 
     id: str | None = Field(None, description="The task message's unique id")
     task_id: str = Field(..., description="ID of the task this message belongs to")
+    agent_path: str | list[str] | None = Field(
+        None,
+        description=(
+            "Identifier of the agent that emitted this message: a single agent id, "
+            'or a root-to-emitter path (e.g. ["researcher", "subagent-abc"]) when '
+            "nested agents share one task stream. Lets consumers attribute and group "
+            "streamed events by agent."
+        ),
+    )
     content: TaskMessageContent = Field(
         ...,
         description="The content of the message. This content is not OpenAI compatible. These are messages that are meant to be displayed to the user.",
