@@ -117,7 +117,7 @@ services:
 
   agentex-mongodb:
     container_name: agentex-mongodb
-    image: mongo:6.0
+    image: mongo:6.0.27
     ports:
       - "27017:27017"
     networks:
