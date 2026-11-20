@@ -27,9 +27,9 @@ Choosing an agent type is only the **first** prompt in `agentex init`. After you
 
 | `agentex init` prompt | Framework options |
 |---|---|
-| **Sync ACP** | Basic · OpenAI Agents SDK (Recommended) · OpenAI Agents SDK + Local Sandbox · LangGraph · Pydantic AI · Claude Code · Codex |
-| **Async - ACP Only** | Basic · OpenAI Agents SDK · LangGraph · Pydantic AI · Claude Code · Codex |
-| **Async - Temporal** | Basic · OpenAI Agents SDK (Recommended) · Pydantic AI · LangGraph · Claude Code · Codex |
+| **Sync ACP** | Basic · OpenAI Agents SDK (Recommended) · OpenAI Agents SDK + Local Sandbox · LangGraph · Pydantic AI · Claude Code · Codex · Gemini CLI |
+| **Async - ACP Only** | Basic · OpenAI Agents SDK · LangGraph · Pydantic AI · Claude Code · Codex · Gemini CLI |
+| **Async - Temporal** | Basic · OpenAI Agents SDK (Recommended) · Pydantic AI · LangGraph · Claude Code · Codex · Gemini CLI |
 
 !!! note "OpenAI Agents SDK + Local Sandbox"
     The **Local Sandbox** variant is the OpenAI Agents SDK starter wired to run tools inside a local sandbox. It shares the same harness wiring and tutorial base as the plain [OpenAI Agents SDK](../development_guides/tutorials.md#sync-acp-simple-agents) starter — there is no separate tutorial for it.
@@ -42,7 +42,7 @@ How to choose:
 
 - **Writing the loop yourself / LiteLLM only** → Basic.
 - **Already standardized on a framework** → pick it directly (LangGraph, Pydantic AI, OpenAI Agents SDK).
-- **Wrapping a coding CLI** → Claude Code (spawns the `claude` CLI) or Codex (spawns the `codex` CLI) as a local subprocess, streamed through the harness.
+- **Wrapping a coding CLI** → Claude Code (spawns the `claude` CLI), Codex (spawns the `codex` CLI), or Gemini CLI (spawns the `gemini` CLI) as a local subprocess, streamed through the harness.
 - **Want tools + good defaults and unsure** → OpenAI Agents SDK (the Recommended option for Sync and Temporal).
 
 To add a framework that isn't in the list, see the `agentex-add-agent-framework` workflow.
