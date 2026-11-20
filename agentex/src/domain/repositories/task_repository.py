@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
 from fastapi import Depends
-from sqlalchemy import cast, distinct, func, select, update
+from sqlalchemy import cast, distinct, exc, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import selectinload
 from src.adapters.crud_store.adapter_postgres import (
@@ -167,15 +167,35 @@ class TaskRepository(PostgresCRUDRepository[TaskORM, TaskEntity, TaskRelationshi
     async def create(self, agent_id: str, task: TaskEntity) -> TaskEntity:
         """Create task and establish agent relationships"""
 
-        async with (
-            self.start_async_db_session(True) as session,
-            async_sql_exception_handler(),
-        ):
+        async with self.start_async_db_session(True) as session:
             task_data = task.to_dict()
 
             orm = self.orm(**task_data)
             session.add(orm)
-            await session.flush()  # Get the task ID
+            try:
+                await session.flush()  # Get the task ID
+            except exc.IntegrityError as e:
+                if DUPLICATE_KEY_VAL_ERR in str(e) and task.name:
+                    # Another request created the task with the same name concurrently.
+                    # Look up the existing task and return it, applying the losing
+                    # request's params to the winner's task (the winner already
+                    # holds the task, so we merge the losing request's params in).
+                    existing = (
+                        await session.execute(select(TaskORM).where(TaskORM.name == task.name))
+                    ).scalar_one()
+                    # Apply the losing request's params to the winner's task
+                    if existing.params != task.params:
+                        existing.params = {
+                            **(existing.params or {}),
+                            **(task.params or {}),
+                        }
+                    await session.merge(existing)
+                    await session.commit()
+                    await session.refresh(existing)
+                    # Do NOT re-add agent relationships — the winner keeps the task.
+                    return TaskEntity.model_validate(existing)
+                else:
+                    raise
 
             # Add agent relationships
             task_agent = TaskAgentORM(task_id=orm.id, agent_id=agent_id)
