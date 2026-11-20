@@ -212,9 +212,12 @@ class PostgresCRUDRepository(CRUDRepository[T], Generic[M, T, Relationships]):
         id: str | None = None,
         name: str | None = None,
         relationships: list[Relationships] | None = None,
+        use_primary: bool = False,
     ) -> T:
+        # use_primary reads from the read-write engine, for callers that must see
+        # a just-committed write that a lagging read replica may not have yet.
         async with (
-            self.start_async_db_session(allow_writes=False) as session,
+            self.start_async_db_session(allow_writes=use_primary) as session,
             async_sql_exception_handler(),
         ):
             result = await self._get(session, id, name, relationships=relationships)
